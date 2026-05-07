@@ -363,6 +363,49 @@ See: [GitHub Issue #3107](https://github.com/anthropics/claude-code/issues/3107)
 
 > **If Codex is unavailable**, the workflow still works — Claude will present designs to you for manual review. But Codex is faster and provides an independent perspective.
 
+## /codex or /council returns empty output, hangs for ~17 min, or exits 0 with nothing
+
+This is [openai/codex#19945](https://github.com/openai/codex/issues/19945) — a `codex exec` regression on 0.124.0+ where it silently exits with empty stdout when stdio is detached from a TTY AND the prompt is non-trivial. Both conditions fire whenever Claude Code's Bash tool spawns codex. The bug is intermittent (~30% rate on 0.125.0), so a single working call doesn't prove anything.
+
+The Forge ships a PTY shim (since v5.22) that works around this. If you're hitting the symptom anyway:
+
+1. **Confirm the shim is installed:**
+
+   ```bash
+   ls .claude/hooks/lib/codex-pty.sh        # Unix
+   ls .claude/hooks/lib/codex-pty.ps1       # Windows
+   ls .claude/hooks/lib/codex-pty-helper.py # required on Unix
+   ```
+
+   If any are missing: re-run `setup.sh -f` (or `setup.ps1 -Force`) from your local Forge checkout to install them.
+
+2. **Confirm the runtime dependency:**
+
+   ```bash
+   python3 --version   # Unix — required for the helper
+   winpty --help       # Windows Git Bash — recommended
+   ```
+
+3. **Confirm the templates were migrated** (they should reference the shim, not bare `codex exec`):
+
+   ```bash
+   grep "codex-pty.sh exec" .claude/commands/codex.md           # Should match
+   grep "codex-pty.sh exec" .claude/skills/council/references/peer-review-protocol.md  # Should match
+   ```
+
+4. **Diagnose with the bypass env var:** if you suspect upstream has fixed the bug or want to compare behavior:
+
+   ```bash
+   CLAUDE_FORGE_CODEX_PTY_BYPASS=1 /codex review
+   ```
+
+   - If this now WORKS reliably across multiple runs, upstream has fixed it for your codex version. Mention this on issue #19945 and watch for the Forge's retirement canary (scheduled to run periodically and open a Stage 1 retirement PR when the bug is empirically clean).
+   - If this STILL hangs/exits-empty, the shim is required — leave the env var unset.
+
+5. **Cancellation note:** Ctrl-C should terminate `/codex` or `/council` cleanly within ~1 second (no orphan processes). If you see codex processes lingering after a cancel, check `ps -axo pid,command | grep codex-pty-helper` and report the version + reproducer. The shim's signal-handling path is regression-tested but cancellation under unusual stdio configurations could surface new edge cases.
+
+> **Don't "rephrase the prompt"** to work around this. Prompt length is one of the bug's two triggers, not the trigger; rephrasing changes timing, not cause. Trust the shim.
+
 ## /simplify not working?
 
 `/simplify` is a built-in Claude Code command (v2.1.63+). If unavailable, update Claude Code or use the `code-simplifier` agent from `pr-review-toolkit` as a fallback.

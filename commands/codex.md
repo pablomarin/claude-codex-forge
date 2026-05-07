@@ -172,7 +172,11 @@ Display Codex's output verbatim to the user. Do not summarize or edit it.
 - **Codex not installed**: Tell the user to run `npm i -g @openai/codex` (or `brew install --cask codex` on macOS) and `codex login`
 - **Authentication error**: Tell the user to run `codex login`
 - **Timeout**: Inform the user that Codex took too long and suggest simplifying the request
-- **Empty output**: Report that Codex returned no output and suggest rephrasing
+- **Empty output / silent exit / 17-min hang**: This is almost certainly [openai/codex#19945](https://github.com/openai/codex/issues/19945) — a shim malfunction, not a model error. Recovery (in order):
+  1. Verify the shim is present: `ls .claude/hooks/lib/codex-pty.sh` (or `.ps1` on Windows). If missing, run `./setup.sh -f` (or `setup.ps1 -Force`) from the Forge to (re)install.
+  2. Verify the shim's runtime dependency: `python3 --version` on Unix, or `winpty.exe` on Windows Git Bash.
+  3. As a last resort to confirm whether upstream has shipped a fix, set `CLAUDE_FORGE_CODEX_PTY_BYPASS=1` and retry. If that ALSO fails, the bug is still present — keep the shim. If it now succeeds, file a comment on #19945 with your codex version and consider the retirement canary's findings.
+  4. **Do NOT** "rephrase the prompt" — prompt length is one of #19945's triggers, not the trigger; rephrasing changes the symptom timing but not the cause.
 
 ---
 

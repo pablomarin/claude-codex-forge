@@ -34,7 +34,9 @@ your-project/
 │   │   └── state.md                   # Workflow + Done/Now/Next (NOT auto-loaded)
 │   ├── hooks/
 │   │   ├── lib/
-│   │   │   └── default-branch.sh      # Shared helper: detect repo's default branch (.ps1 on Windows)
+│   │   │   ├── default-branch.sh      # Shared helper: detect repo's default branch (.ps1 on Windows)
+│   │   │   ├── codex-pty.sh           # PTY shim wrapping `codex exec` (workaround for openai/codex#19945; .ps1 on Windows)
+│   │   │   └── codex-pty-helper.py    # Python pty.fork + waitpid helper invoked by codex-pty.sh
 │   │   ├── session-start.sh           # SessionStart: branch context + drift warning (.ps1 on Windows)
 │   │   ├── check-state-updated.sh     # Stop: enforce state updates (.ps1 on Windows)
 │   │   ├── check-bash-safety.sh       # PreToolUse: audit log + block dangerous patterns (.ps1 on Windows)
