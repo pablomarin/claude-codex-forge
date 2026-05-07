@@ -73,7 +73,7 @@ For tech-specific scenarios (new project, existing project with/without Claude C
 
 ## Step 4: Install the Superpowers plugin (once per machine)
 
-Start Claude Code and install the only third-party plugin you need:
+Start Claude Code and install Superpowers from Anthropic's official marketplace:
 
 ```bash
 claude
@@ -82,13 +82,14 @@ claude
 Then inside Claude Code:
 
 ```
-/plugin marketplace add obra/superpowers-marketplace
-/plugin install superpowers@superpowers-marketplace
+/plugin install superpowers@claude-plugins-official
 ```
 
 Restart Claude Code.
 
 > **Note:** `pr-review-toolkit` and `frontend-design` are built-in Claude Code plugins pre-enabled in `.claude/settings.json`. `/simplify` is a built-in Claude Code command (no plugin needed). `superpowers` requires a separate install (step above).
+>
+> **Why the official marketplace?** Same plugin, but `superpowers@claude-plugins-official` (Anthropic-curated since 2026-01-15) installs in one step with no `marketplace add` prerequisite. The community `superpowers@superpowers-marketplace` works too, but [obra/superpowers-marketplace#11](https://github.com/obra/superpowers-marketplace/issues/11) documents an upstream Claude Code plugin-name-conflict bug that surfaces when both identities exist on the same machine.
 
 ## Step 5: Install Codex CLI (required)
 

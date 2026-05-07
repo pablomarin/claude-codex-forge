@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
-  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.22-blue?style=flat-square"></a>
+  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.23-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
   <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-required-orange?style=flat-square"></a>
@@ -63,8 +63,7 @@ cd /path/to/your/project
 
 # 5. Start Claude Code, install the Superpowers plugin, restart
 claude
-> /plugin marketplace add obra/superpowers-marketplace
-> /plugin install superpowers@superpowers-marketplace
+> /plugin install superpowers@claude-plugins-official
 
 # 6. Restart Claude Code, then kick off your first workflow
 > /new-feature my-feature
@@ -143,6 +142,7 @@ Recent releases:
 
 | Version | Date       | Highlights                                                                                                                                                                                                                                 |
 | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 5.23    | 2026-05-07 | Switch superpowers identity to `superpowers@claude-plugins-official` (Anthropic's marketplace, since 2026-01-15) — one-step install, avoids the `obra/superpowers-marketplace#11` name-conflict bug                                        |
 | 5.22    | 2026-05-07 | Codex PTY shim — `.claude/hooks/lib/codex-pty.{sh,ps1}` works around [openai/codex#19945](https://github.com/openai/codex/issues/19945) (silent empty exit when `codex exec` runs without a TTY); migrated `/codex` + `/council` callsites |
 | 5.21    | 2026-04-30 | PermissionRequest hook auto-approves writes to `.claude/local/**` (workaround for CC v2.1.80+ regression on path-scoped rules)                                                                                                             |
 | 5.20    | 2026-04-29 | Bump Codex CLI model `gpt-5.4` → `gpt-5.5` in `/codex` and `/council` (OpenAI released GPT-5.5 on 2026-04-23)                                                                                                                              |

@@ -301,7 +301,7 @@ See: [GitHub Issue #3107](https://github.com/anthropics/claude-code/issues/3107)
    ```json
    {
      "enabledPlugins": {
-       "superpowers@superpowers-marketplace": true,
+       "superpowers@claude-plugins-official": true,
        "pr-review-toolkit@claude-plugins-official": true,
        "frontend-design@claude-plugins-official": true
      }
@@ -312,8 +312,8 @@ See: [GitHub Issue #3107](https://github.com/anthropics/claude-code/issues/3107)
 
 4. **Try reinstalling:**
    ```
-   /plugin uninstall superpowers@superpowers-marketplace
-   /plugin install superpowers@superpowers-marketplace
+   /plugin uninstall superpowers@claude-plugins-official
+   /plugin install superpowers@claude-plugins-official
    ```
 
 ## Codex CLI not working?

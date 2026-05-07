@@ -2,6 +2,25 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.23 — 2026-05-07 · Switch superpowers identity to `@claude-plugins-official`
+
+Forge had been pinning `superpowers@superpowers-marketplace` (the community marketplace by [obra](https://github.com/obra/superpowers-marketplace)). It works, but it requires `/plugin marketplace add obra/superpowers-marketplace` as a prerequisite — a step that wasn't documented in `commands/new-feature.md`'s Required Plugins section. As of 2026-01-15 ([anthropics/claude-plugins-official PR #148](https://github.com/anthropics/claude-plugins-official/pull/148)) the same plugin is published in Anthropic's official marketplace as `superpowers@claude-plugins-official` — installable in one step.
+
+**Operational reason for the switch**: [obra/superpowers-marketplace#11](https://github.com/obra/superpowers-marketplace/issues/11) documents an upstream Claude Code installer bug — when the same plugin name lives in both marketplaces, Claude Code's matcher uses name only, ignoring the marketplace qualifier. Field-confirmed in `msai-v2`: settings.json had `enabledPlugins: { "superpowers@superpowers-marketplace": true }` while user-scope `installed_plugins.json` had `superpowers@claude-plugins-official`. Settings flag points at one identity, install record has the other — the `Skill` tool can't bridge them, so `/superpowers:writing-plans` returns "Unknown skill" despite settings appearing correct.
+
+**What changed (9 files, mechanical)**:
+
+- `settings/settings.template.json` + `settings-windows.template.json` — `enabledPlugins` flag flipped to the official identity
+- `commands/new-feature.md` + `commands/fix-bug.md` — Required Plugins tables and JSON examples updated
+- `docs/troubleshooting.md` — 3 references in the plugin-loading section
+- `docs/getting-started.md` — install instruction simplified to one line; added explainer about why we picked official over community
+- `setup.sh` + `setup.ps1` — final-summary install instruction now drops the `marketplace add` prerequisite line
+- `README.md` — Quick Start step 5 same simplification
+
+**No functional loss** — same Superpowers framework, same skills, same maintainer (obra). Just a different marketplace registration.
+
+**Existing installs running `./setup.sh --upgrade`**: `merge-settings.py` is add-only, so both `superpowers@claude-plugins-official: true` and any pre-existing `superpowers@superpowers-marketplace: true` will coexist in `enabledPlugins`. Harmless — Claude Code will resolve whichever identity is installed. Users can manually drop the old flag after they confirm the new identity works.
+
 ## 5.22 — 2026-05-07 · Codex PTY shim — work around openai/codex#19945
 
 `codex exec` silently exits with empty stdout (exit 0, zero bytes) when run with stdio detached from a controlling TTY AND a non-trivial prompt — exactly the conditions Claude Code's Bash tool creates every time the Forge invokes `/codex` or `/council`. The bug was [introduced in codex 0.124.0](https://github.com/openai/codex/issues/19945) (last unaffected: 0.123.0), still present in 0.125.0 / 0.128.0, and has no upstream fix as of 2026-05-07. The intermittent rate is ~30% on 0.125.0 — single-shot reproducers are unreliable, but the cumulative effect is that virtually every `/council` fan-out (3–5 parallel codex calls) hits the bug at least once.
