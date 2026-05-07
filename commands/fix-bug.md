@@ -9,7 +9,7 @@ This workflow requires the following plugins to be **installed AND enabled**:
 
 | Plugin                                      | Skills/Commands Used                                                                                                                                                                                           |
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `superpowers@superpowers-marketplace`       | `/superpowers:systematic-debugging`, `/superpowers:brainstorming`, `/superpowers:writing-plans`, `/superpowers:subagent-driven-development` (default executor), `/superpowers:executing-plans` (headless mode) |
+| `superpowers@claude-plugins-official`       | `/superpowers:systematic-debugging`, `/superpowers:brainstorming`, `/superpowers:writing-plans`, `/superpowers:subagent-driven-development` (default executor), `/superpowers:executing-plans` (headless mode) |
 | `pr-review-toolkit@claude-plugins-official` | `code-simplifier` agent, `code-reviewer` agent, `/pr-review-toolkit:review-pr`                                                                                                                                 |
 
 **To enable plugins**, add to `~/.claude/settings.json`:
@@ -17,7 +17,7 @@ This workflow requires the following plugins to be **installed AND enabled**:
 ```json
 {
   "enabledPlugins": {
-    "superpowers@superpowers-marketplace": true,
+    "superpowers@claude-plugins-official": true,
     "pr-review-toolkit@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true
   }
