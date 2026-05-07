@@ -278,6 +278,30 @@ cleanup_scratch "$SCRATCH"; rm -f "$RESULT"
 # pty.fork liveness gap)
 # ===========================================================================
 
+start_test "stdin EOF doesn't busy-loop (CPU regression test — iter-3 council P1 fix)"
+# Contrarian + Maintainer empirically reproduced: before fix, wrapping sleep 2
+# with </dev/null caused the helper to consume ~2 CPU-seconds (1.80 sys + 0.20
+# user) versus near-zero CPU for plain sleep. Root cause: dup2(/dev/null, 0)
+# kept fd 0 in select set; /dev/null is always selectable → busy-loop.
+# Fixed by tracking stdin_open and dropping fd 0 from the select set after EOF.
+HELPER="$REPO_ROOT/hooks/lib/codex-pty-helper.py"
+# Use /usr/bin/time -p with portable POSIX output. Capture user+sys via awk.
+# Wall: 1s. Allowed CPU budget: 0.50s (10x buffer over fixed-cost ~0.05s).
+# Pre-fix observed: ~1 CPU-second for 1s wall, FAILS this assertion.
+TIMING=$(/usr/bin/time -p python3 "$HELPER" /bin/sleep 1 </dev/null >/dev/null 2>&1; \
+         /usr/bin/time -p python3 "$HELPER" /bin/sleep 1 </dev/null >/dev/null 2>/tmp/cputest.$$.txt
+         cat /tmp/cputest.$$.txt)
+rm -f /tmp/cputest.$$.txt
+# Sum user + sys
+CPU_TIME=$(awk '/^(user|sys) / {sum+=$2} END {print sum}' <<<"$TIMING")
+# Compare as float — bash can't, but awk can
+WITHIN_BUDGET=$(awk -v c="$CPU_TIME" 'BEGIN { print (c < 0.5) ? 1 : 0 }')
+if [[ "$WITHIN_BUDGET" == "1" ]]; then
+    pass "stdin-EOF wrap of sleep 1 used ${CPU_TIME}s CPU (well under 0.5s budget)"
+else
+    fail "stdin-EOF busy-loop regression: ${CPU_TIME}s CPU for 1s wall (was: ~1.0s before iter-3 fix)"
+fi
+
 start_test "stdin from /dev/null does not block shim (timeout-bounded)"
 RESULT=$(mktemp)
 SCRATCH=$(mktemp -d -t codex-pty-sleep-XXXXXX)

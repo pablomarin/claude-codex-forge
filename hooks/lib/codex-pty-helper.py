@@ -94,8 +94,15 @@ def main() -> int:
             pass
 
     # I/O multiplex until child exits.
+    # `stdin_open` tracks whether we should still poll fd 0. After EOF we drop
+    # it from the select set entirely. (iter-3 council P1 fix — Contrarian
+    # and Maintainer empirically reproduced a CPU busy-loop here: the previous
+    # `dup2(/dev/null, 0)` trick did not stop select() from waking, because
+    # /dev/null on macOS/Linux is always selectable. Result: ~2 CPU-seconds
+    # per 2 wall-seconds wrapping `/bin/sleep 2 </dev/null`. Fix is the flag.)
     exit_status = None
     select_error_streak = 0
+    stdin_open = True
     try:
         while True:
             # Poll for child exit — non-blocking.
@@ -109,9 +116,12 @@ def main() -> int:
                 # Drain remaining buffered output before returning.
                 _drain(master_fd)
                 break
-            # Multiplex parent stdin → pty master, pty master → parent stdout.
+            # Build select set dynamically; drop fd 0 once stdin EOFs.
+            select_fds: list[int] = [master_fd]
+            if stdin_open:
+                select_fds.append(0)
             try:
-                rfds, _, _ = select.select([master_fd, 0], [], [], 0.1)
+                rfds, _, _ = select.select(select_fds, [], [], 0.1)
                 select_error_streak = 0
             except (OSError, ValueError) as e:
                 # Either master_fd was closed under us, or stdin is closed.
@@ -159,7 +169,7 @@ def main() -> int:
                         break
                 # If empty, don't break — let waitpid confirm the exit.
 
-            if 0 in rfds:
+            if stdin_open and 0 in rfds:
                 try:
                     data = os.read(0, 4096)
                 except OSError:
@@ -172,23 +182,11 @@ def main() -> int:
                             sys.stderr.write(
                                 f"codex-pty-helper: pty write failed: {e}\n"
                             )
-                        # Stop forwarding stdin — child has hung up its end.
-                        try:
-                            devnull = os.open(os.devnull, os.O_RDONLY)
-                            os.dup2(devnull, 0)
-                            os.close(devnull)
-                        except OSError:
-                            pass
+                        # Child hung up its end — stop forwarding stdin.
+                        stdin_open = False
                 else:
-                    # Stdin EOF — dup /dev/null over fd 0 so select() never
-                    # wakes for fd 0 again. (iter-2 doc fix: was previously
-                    # described as "bool flag" which never existed.)
-                    try:
-                        devnull = os.open(os.devnull, os.O_RDONLY)
-                        os.dup2(devnull, 0)
-                        os.close(devnull)
-                    except OSError:
-                        pass
+                    # Stdin EOF — drop fd 0 from the select set.
+                    stdin_open = False
     finally:
         try:
             os.close(master_fd)
@@ -204,10 +202,14 @@ def main() -> int:
     return 1
 
 
-def _drain(master_fd: int, max_bytes: int = 1 << 20) -> None:
+def _drain(master_fd: int, max_bytes: int = 16 << 20) -> None:
     """Read everything buffered on master_fd and write to stdout.
 
-    Bounded by max_bytes (1 MiB) to avoid infinite loops if upstream is weird.
+    Bounded by max_bytes (16 MiB) to avoid infinite loops if upstream is weird.
+    The cap is sized for council-chairman synthesis output (multi-advisor raw
+    outputs at xhigh effort can plausibly exceed 1 MiB; 16 MiB is comfortably
+    above any realistic single codex turn). Truncation emits an unconditional
+    stderr warning so silent half-output is impossible (iter-3 council P2 fix).
     """
     total = 0
     while total < max_bytes:
@@ -228,6 +230,13 @@ def _drain(master_fd: int, max_bytes: int = 1 << 20) -> None:
         except OSError:
             return
         total += len(data)
+    # Reached cap without seeing EOF — surface the truncation loudly so the
+    # user knows the response was clipped.
+    sys.stderr.write(
+        f"codex-pty-helper: drain cap reached ({max_bytes} bytes); "
+        f"output truncated. File a bug if reproducible.\n"
+    )
+    sys.stderr.flush()
 
 
 if __name__ == "__main__":
