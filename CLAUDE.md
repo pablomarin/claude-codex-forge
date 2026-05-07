@@ -56,7 +56,9 @@ claude-codex-forge/
 │
 ├── hooks/                      # Hook scripts (copied to .claude/hooks/)
 │   ├── lib/                         # Shared helpers sourced/called by other hooks
-│   │   └── default-branch.sh/.ps1   # Detect repo's default branch (origin/HEAD → main → master)
+│   │   ├── default-branch.sh/.ps1   # Detect repo's default branch (origin/HEAD → main → master)
+│   │   ├── codex-pty.sh/.ps1        # PTY shim for `codex exec` — works around openai/codex#19945 (silent empty exit when stdio detached from TTY)
+│   │   └── codex-pty-helper.py      # Python helper: pty.fork + waitpid loop (avoids 3.9 pty.spawn macOS hang)
 │   ├── session-start.sh/.ps1        # SessionStart: silent context injection (branch + drift warning)
 │   ├── check-state-updated.sh/.ps1  # Stop: advisory state reminder + CHANGELOG threshold gate
 │   ├── check-bash-safety.sh/.ps1    # PreToolUse: audit log + block dangerous patterns
@@ -163,6 +165,9 @@ Templates in the root are **source of truth**. `setup.sh` copies them to target 
 | `hooks/*`                                 | `.claude/hooks/*` in target project                                                                                         |
 | `hooks/lib/default-branch.sh`             | `.claude/hooks/lib/default-branch.sh` in target project                                                                     |
 | `hooks/lib/default-branch.ps1`            | `.claude/hooks/lib/default-branch.ps1` in target project                                                                    |
+| `hooks/lib/codex-pty.sh`                  | `.claude/hooks/lib/codex-pty.sh` in target project                                                                          |
+| `hooks/lib/codex-pty.ps1`                 | `.claude/hooks/lib/codex-pty.ps1` in target project                                                                         |
+| `hooks/lib/codex-pty-helper.py`           | `.claude/hooks/lib/codex-pty-helper.py` in target project                                                                   |
 | `skills/ui-design/SKILL.template.md`      | `.claude/skills/ui-design/SKILL.md` in target                                                                               |
 | `skills/ui-design/references/*.md`        | `.claude/skills/ui-design/references/*.md`                                                                                  |
 | `skills/generate-image/SKILL.template.md` | `.claude/skills/generate-image/SKILL.md`                                                                                    |

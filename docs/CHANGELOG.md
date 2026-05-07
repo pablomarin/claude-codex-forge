@@ -2,6 +2,26 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.22 — 2026-05-01 · Codex PTY shim — work around openai/codex#19945
+
+`codex exec` silently exits with empty stdout (exit 0, zero bytes) when run with stdio detached from a controlling TTY AND a non-trivial prompt — exactly the conditions Claude Code's Bash tool creates every time the Forge invokes `/codex` or `/council`. The bug was [introduced in codex 0.124.0](https://github.com/openai/codex/issues/19945) (last unaffected: 0.123.0), still present in 0.125.0 / 0.128.0, and has no upstream fix as of 2026-05-01.
+
+Field reports describe 10–17 minute hangs on long audit prompts, ending in `kill` exit-144. The Forge memory previously attributed the symptom to "long prompt overload"; that was incomplete — prompt length is one of two triggers, not the trigger.
+
+**The fix: a cross-platform PTY shim** at `.claude/hooks/lib/codex-pty.sh` (Unix) and `codex-pty.ps1` (Windows). All `codex exec` invocations across `/codex` and `/council` now route through the shim, which allocates a pseudo-terminal so codex sees `isatty(stdin/out) == true` and produces real output.
+
+**Unix path:** `python3` + a lightweight helper script (`codex-pty-helper.py`) using `pty.fork()` + `waitpid(WNOHANG)` polling. We can't use BSD `script(1)` because it requires a parent TTY (`tcgetattr` on parent stdin) which Claude Code's Bash tool — running with stdin connected to a Unix domain socket — does not have. We can't use Python's `pty.spawn()` either: the 3.9 stdlib version hangs on macOS after the child exits because the parent's `select()` loop blocks on a `master_fd` that never reports EOF. The explicit waitpid-based helper sidesteps both problems.
+
+**Windows path:** detect-then-bypass. PS 7+ with non-redirected stdio uses ConPTY natively (no shim needed). Redirected stdio probes `winpty.exe` (PATH first, then Git for Windows install paths). WSL is opt-in via `CLAUDE_FORGE_CODEX_PTY_VIA_WSL=1`. Last resort: direct invoke with stderr warning. Per the research brief, #19945 has zero confirmed Windows reproductions — the .ps1 shim exists primarily for ADR 0005 platform parity.
+
+**Opt-out** via `CLAUDE_FORGE_CODEX_PTY_BYPASS=1` (mirrors the v5.21 PR #592 pattern). Useful when upstream is confirmed fixed, or when an EDR / corporate sandbox blocks PTY allocation.
+
+**Test coverage:** 20 unit tests for the Unix shim (mocked codex + isatty assertions + real-pty integration via `/bin/echo` + stdin-from-/dev/null liveness). 9 cross-file contract assertions in `test-contracts.sh` enforce env-var name parity, header references to issue #19945, callsite migration completeness, and setup-script wiring on both platforms.
+
+**Retest criterion:** drop the shim once codex 0.128+ is empirically confirmed clean by re-running issue #19945's repro: `setsid codex exec "$LARGE_PROMPT" < /dev/null` producing non-empty output. Until then, leave it in place.
+
+**Existing installs need `./setup.sh -f`** to pick up the shim files, then any new `/new-feature` or `/fix-bug` invocation in a downstream project will use the migrated callsites.
+
 ## 5.21 — 2026-04-30 · PermissionRequest hook auto-approves writes to .claude/local/\*\*
 
 Field-confirmed bug from msai-v2 (Claude Code v2.1.123): `/new-feature` invoked from inside a `.worktrees/<name>/` directory prompted the user for permission to use `Edit(.claude/local/state.md)` despite **all four path-scoped allow rules** (v5.19 `./.claude/local/**` pair plus v5.21 `**/.claude/local/**` pair) being loaded into the session — confirmed via `/permissions`. The settings.json fix didn't actually fix the user-visible problem.

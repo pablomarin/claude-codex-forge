@@ -577,6 +577,12 @@ $libDir = ".claude\hooks\lib"
 if (-not (Test-Path $libDir)) { New-Item -ItemType Directory -Path $libDir -Force | Out-Null }
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "default-branch.ps1") "$libDir\default-branch.ps1" "$libDir\default-branch.ps1 (default-branch detection helper, PowerShell)"
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "default-branch.sh") "$libDir\default-branch.sh" "$libDir\default-branch.sh (default-branch detection helper, bash — used by commands/*.md preflight)"
+# codex-pty shim — work around openai/codex#19945 (silent empty exit when codex
+# exec runs without a controlling TTY). Both .ps1 + .sh + helper.py ship for
+# cross-platform parity (ADR 0005).
+Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.ps1") "$libDir\codex-pty.ps1" "$libDir\codex-pty.ps1 (codex PTY shim, openai/codex#19945)"
+Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.sh") "$libDir\codex-pty.sh" "$libDir\codex-pty.sh (codex PTY shim, bash — used by commands/codex.md callsites)"
+Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty-helper.py") "$libDir\codex-pty-helper.py" "$libDir\codex-pty-helper.py (Python pty.fork helper for the shim)"
 
 # ADRs -- ship template + README + seed ADRs (existing-file-skip semantics).
 if (-not (Test-Path "docs\adr")) { New-Item -ItemType Directory -Path "docs\adr" -Force | Out-Null }

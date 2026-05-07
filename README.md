@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
-  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.21-blue?style=flat-square"></a>
+  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.22-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
   <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-required-orange?style=flat-square"></a>
@@ -141,30 +141,31 @@ The pillars above cash out in specific, repo-verifiable behavior:
 
 Recent releases:
 
-| Version | Date       | Highlights                                                                                                                     |
-| ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 5.21    | 2026-04-30 | PermissionRequest hook auto-approves writes to `.claude/local/**` (workaround for CC v2.1.80+ regression on path-scoped rules) |
-| 5.20    | 2026-04-29 | Bump Codex CLI model `gpt-5.4` → `gpt-5.5` in `/codex` and `/council` (OpenAI released GPT-5.5 on 2026-04-23)                  |
-| 5.19    | 2026-04-29 | Allow `Write`/`Edit` on `.claude/local/**` without prompting (workaround for Claude Code v2.1.80+ bare-tool regression)        |
-| 5.18    | 2026-04-28 | Tighten reconcile prompt — enumerate all CONTINUITY reference types (tree diagrams, prose pointers, labels)                    |
-| 5.17    | 2026-04-28 | Drop per-file template-drift cry-wolf hint; soft "ask Claude to reconcile" tip                                                 |
-| 5.16    | 2026-04-28 | Migration UX — consolidated "ask Claude" reconcile message; dropped cry-wolf drift hint                                        |
-| 5.15    | 2026-04-28 | CONTINUITY split — durable facts to CLAUDE.md, decisions to `docs/adr/`, volatile state to gitignored `.claude/local/state.md` |
-| 5.14    | 2026-04-27 | Drift hygiene — SessionStart `git fetch` warning + worktree from `origin/<default>`                                            |
-| 5.13    | 2026-04-21 | Phase 4 task-DAG dispatch with file-conflict constraints                                                                       |
-| 5.12    | 2026-04-21 | Template-drift notice on `setup.sh -f` / `--upgrade`                                                                           |
-| 5.11    | 2026-04-20 | ARRANGE rule — close the E2E actor-boundary gap via text layer                                                                 |
-| 5.10    | 2026-04-18 | Evidence-based E2E gate — checkbox claims bound to `tests/e2e/reports/` artifact                                               |
-| 5.9     | 2026-04-18 | `E2E verified` gate — close the silent-skip loophole                                                                           |
-| 5.8     | 2026-04-18 | Multi-project interpreter preflight + isolation guide                                                                          |
-| 5.7     | 2026-04-18 | Template self-test suite (4 bash suites, ~5s)                                                                                  |
-| 5.6     | 2026-04-17 | Template monorepo support + Playwright security fixes                                                                          |
-| 5.5     | 2026-04-17 | `verify-e2e` agent (#449) · Playwright CI bridge (#450) · `research-first` (#472) · repo rename                                |
-| 5.4     | 2026-03-31 | Engineering Council — 5 advisors with Codex chairman                                                                           |
-| 5.3     | 2026-03-01 | Silent SessionStart context injection via JSON `hookSpecificOutput`                                                            |
-| 5.2     | 2026-02-20 | Frontend design plugin + `rules/frontend-design.md`                                                                            |
-| 5.1     | 2026-02-19 | CLAUDE.md split — slim file + auto-loaded `.claude/rules/`                                                                     |
-| 5.0     | 2026-02-19 | Removed Compound Engineering, replaced with built-in quality gates                                                             |
+| Version | Date       | Highlights                                                                                                                                                                                                                                 |
+| ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 5.22    | 2026-05-01 | Codex PTY shim — `.claude/hooks/lib/codex-pty.{sh,ps1}` works around [openai/codex#19945](https://github.com/openai/codex/issues/19945) (silent empty exit when `codex exec` runs without a TTY); migrated `/codex` + `/council` callsites |
+| 5.21    | 2026-04-30 | PermissionRequest hook auto-approves writes to `.claude/local/**` (workaround for CC v2.1.80+ regression on path-scoped rules)                                                                                                             |
+| 5.20    | 2026-04-29 | Bump Codex CLI model `gpt-5.4` → `gpt-5.5` in `/codex` and `/council` (OpenAI released GPT-5.5 on 2026-04-23)                                                                                                                              |
+| 5.19    | 2026-04-29 | Allow `Write`/`Edit` on `.claude/local/**` without prompting (workaround for Claude Code v2.1.80+ bare-tool regression)                                                                                                                    |
+| 5.18    | 2026-04-28 | Tighten reconcile prompt — enumerate all CONTINUITY reference types (tree diagrams, prose pointers, labels)                                                                                                                                |
+| 5.17    | 2026-04-28 | Drop per-file template-drift cry-wolf hint; soft "ask Claude to reconcile" tip                                                                                                                                                             |
+| 5.16    | 2026-04-28 | Migration UX — consolidated "ask Claude" reconcile message; dropped cry-wolf drift hint                                                                                                                                                    |
+| 5.15    | 2026-04-28 | CONTINUITY split — durable facts to CLAUDE.md, decisions to `docs/adr/`, volatile state to gitignored `.claude/local/state.md`                                                                                                             |
+| 5.14    | 2026-04-27 | Drift hygiene — SessionStart `git fetch` warning + worktree from `origin/<default>`                                                                                                                                                        |
+| 5.13    | 2026-04-21 | Phase 4 task-DAG dispatch with file-conflict constraints                                                                                                                                                                                   |
+| 5.12    | 2026-04-21 | Template-drift notice on `setup.sh -f` / `--upgrade`                                                                                                                                                                                       |
+| 5.11    | 2026-04-20 | ARRANGE rule — close the E2E actor-boundary gap via text layer                                                                                                                                                                             |
+| 5.10    | 2026-04-18 | Evidence-based E2E gate — checkbox claims bound to `tests/e2e/reports/` artifact                                                                                                                                                           |
+| 5.9     | 2026-04-18 | `E2E verified` gate — close the silent-skip loophole                                                                                                                                                                                       |
+| 5.8     | 2026-04-18 | Multi-project interpreter preflight + isolation guide                                                                                                                                                                                      |
+| 5.7     | 2026-04-18 | Template self-test suite (4 bash suites, ~5s)                                                                                                                                                                                              |
+| 5.6     | 2026-04-17 | Template monorepo support + Playwright security fixes                                                                                                                                                                                      |
+| 5.5     | 2026-04-17 | `verify-e2e` agent (#449) · Playwright CI bridge (#450) · `research-first` (#472) · repo rename                                                                                                                                            |
+| 5.4     | 2026-03-31 | Engineering Council — 5 advisors with Codex chairman                                                                                                                                                                                       |
+| 5.3     | 2026-03-01 | Silent SessionStart context injection via JSON `hookSpecificOutput`                                                                                                                                                                        |
+| 5.2     | 2026-02-20 | Frontend design plugin + `rules/frontend-design.md`                                                                                                                                                                                        |
+| 5.1     | 2026-02-19 | CLAUDE.md split — slim file + auto-loaded `.claude/rules/`                                                                                                                                                                                 |
+| 5.0     | 2026-02-19 | Removed Compound Engineering, replaced with built-in quality gates                                                                                                                                                                         |
 
 Full history: **[docs/CHANGELOG.md](docs/CHANGELOG.md)**
 

@@ -706,6 +706,82 @@ else fail "STATE-INIT block diverges between new-feature.md and fix-bug.md"
 fi
 
 # ---------------------------------------------------------------------------
+# Contract: codex-pty shim — env vars + issue refs + helper present
+# Mirrors the cross-shim contract for openai/codex#19945 workaround.
+# ---------------------------------------------------------------------------
+start_test "codex-pty-shim contract: both .sh and .ps1 reference shared env vars + issue"
+PTY_SH="$REPO_ROOT/hooks/lib/codex-pty.sh"
+PTY_PS="$REPO_ROOT/hooks/lib/codex-pty.ps1"
+PTY_HELPER="$REPO_ROOT/hooks/lib/codex-pty-helper.py"
+
+for f in "$PTY_SH" "$PTY_PS" "$PTY_HELPER"; do
+    assert_file_exists "$f" "shim file exists: $(basename "$f")"
+done
+
+# Both shim files must reference the env var contract by exact name
+for f in "$PTY_SH" "$PTY_PS"; do
+    name=$(basename "$f")
+    assert_contains "$f" "CLAUDE_FORGE_CODEX_PTY_BYPASS" "$name references CLAUDE_FORGE_CODEX_PTY_BYPASS"
+    assert_contains "$f" "CLAUDE_FORGE_CODEX_PTY_VIA_WSL" "$name references CLAUDE_FORGE_CODEX_PTY_VIA_WSL"
+    assert_contains "$f" "openai/codex#19945" "$name header references openai/codex#19945"
+done
+
+# ---------------------------------------------------------------------------
+# Contract: codex-pty callsite migration — no bare `codex exec` lines (start
+# of line + whitespace) outside the shim files themselves and out-of-scope
+# /research /plans dirs (which document codex usage as artifacts).
+# ---------------------------------------------------------------------------
+start_test "codex-pty-callsite contract: no bare 'codex exec' in fenced code blocks across templates"
+
+violations=$(grep -REn '^[[:space:]]*codex exec\b' \
+    "$REPO_ROOT/commands/" \
+    "$REPO_ROOT/skills/" \
+    "$REPO_ROOT/agents/" \
+    "$REPO_ROOT/hooks/" 2>/dev/null \
+    | grep -vE '(hooks/lib/codex-pty\.|hooks/lib/codex-pty-helper)' \
+    | grep -vE '/research/|/plans/' \
+    || true)
+
+if [[ -z "$violations" ]]; then
+    pass "no bare 'codex exec' in templates (all callsites migrated to shim)"
+else
+    fail "bare 'codex exec' found in templates (callsites must use the shim)"
+    while IFS= read -r line; do
+        echo "    $line" >&2
+    done <<<"$violations"
+fi
+
+# ---------------------------------------------------------------------------
+# Contract: codex-pty council references — both council files must reference
+# the shim path at least once (proves the migration was applied).
+# ---------------------------------------------------------------------------
+start_test "codex-pty-council contract: SKILL.template.md and peer-review-protocol.md reference the shim"
+
+COUNCIL_SKILL="$REPO_ROOT/skills/council/SKILL.template.md"
+COUNCIL_PROTOCOL="$REPO_ROOT/skills/council/references/peer-review-protocol.md"
+
+for f in "$COUNCIL_SKILL" "$COUNCIL_PROTOCOL"; do
+    assert_file_exists "$f" "council file exists: $(basename "$f")"
+    assert_contains "$f" "codex-pty.sh" "$(basename "$f") references codex-pty.sh shim"
+done
+
+# ---------------------------------------------------------------------------
+# Contract: setup.sh + setup.ps1 install the shim files via explicit copy_file
+# calls (per plan §2.5 — no auto-traversal).
+# ---------------------------------------------------------------------------
+start_test "codex-pty-setup contract: setup.sh and setup.ps1 install the shim files"
+
+SETUP_SH="$REPO_ROOT/setup.sh"
+SETUP_PS="$REPO_ROOT/setup.ps1"
+
+assert_contains "$SETUP_SH" "codex-pty.sh" "setup.sh installs codex-pty.sh"
+assert_contains "$SETUP_SH" "codex-pty-helper.py" "setup.sh installs codex-pty-helper.py"
+assert_contains "$SETUP_SH" "codex-pty.ps1" "setup.sh installs codex-pty.ps1 (cross-platform parity)"
+assert_contains "$SETUP_PS" "codex-pty.ps1" "setup.ps1 installs codex-pty.ps1"
+assert_contains "$SETUP_PS" "codex-pty.sh" "setup.ps1 installs codex-pty.sh (cross-platform parity)"
+assert_contains "$SETUP_PS" "codex-pty-helper.py" "setup.ps1 installs codex-pty-helper.py"
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 report "test-contracts.sh"

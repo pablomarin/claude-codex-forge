@@ -12,6 +12,13 @@
 - **Codex authenticated**: `codex login` (requires ChatGPT Plus/Pro/Business or API key)
 - Verify: `codex --version` (requires v0.114.0+)
 
+> **PTY shim — work around openai/codex#19945.** All `codex exec` invocations below
+> go through `.claude/hooks/lib/codex-pty.sh exec ...` (or `.ps1` on Windows). The
+> shim allocates a pseudo-terminal so `codex exec` produces real output — without it,
+> codex 0.124–0.12X.0 silently exits 0 with empty stdout under Claude Code's no-TTY
+> Bash tool. To bypass the shim (e.g., to confirm upstream fix), set
+> `CLAUDE_FORGE_CODEX_PTY_BYPASS=1`.
+
 ---
 
 ## Mode Detection
@@ -45,7 +52,7 @@ Use `AskUserQuestion` with these options:
 > **NOTE:** The `exec review` subcommand does NOT accept `--sandbox` or `--color` flags (reviews are inherently read-only). These flags are only valid on `codex exec` (general mode).
 
 ```bash
-codex exec review \
+.claude/hooks/lib/codex-pty.sh exec review \
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
@@ -57,7 +64,7 @@ codex exec review \
 **If reviewing a branch**, add `--title` for context:
 
 ```bash
-codex exec review \
+.claude/hooks/lib/codex-pty.sh exec review \
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
@@ -94,7 +101,7 @@ Also check if there's a plan in the current conversation context. If the user sp
 ### Step 2: Run Codex exec with the plan
 
 ```bash
-codex exec \
+.claude/hooks/lib/codex-pty.sh exec \
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
@@ -142,7 +149,7 @@ If the user's instruction references a specific file, read that file to include 
 Construct the prompt by combining the user's instruction with the gathered context.
 
 ```bash
-codex exec \
+.claude/hooks/lib/codex-pty.sh exec \
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
@@ -171,13 +178,13 @@ Display Codex's output verbatim to the user. Do not summarize or edit it.
 
 ## Quick Reference
 
-| Use case                   | Command pattern                                                   |
-| -------------------------- | ----------------------------------------------------------------- |
-| Review uncommitted changes | `codex exec review --ephemeral --uncommitted`                     |
-| Review branch vs main      | `codex exec review --ephemeral --base main --title "description"` |
-| Review a specific commit   | `codex exec review --ephemeral --commit SHA`                      |
-| Review a design plan       | `codex exec --sandbox read-only --ephemeral "Review the plan..."` |
-| General second opinion     | `codex exec --sandbox read-only --ephemeral "Your question..."`   |
+| Use case                   | Command pattern                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| Review uncommitted changes | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --uncommitted`                     |
+| Review branch vs main      | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --base main --title "description"` |
+| Review a specific commit   | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --commit SHA`                      |
+| Review a design plan       | `.claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral "Review the plan..."` |
+| General second opinion     | `.claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral "Your question..."`   |
 
 ---
 

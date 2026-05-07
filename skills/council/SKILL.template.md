@@ -64,7 +64,7 @@ Read `references/advisors.md` to get the 5 advisor personas and their engine ass
 2. The question/decision + context
 3. Instruction to follow the output schema from `references/output-schema.md`
 
-**Codex advisors:** Use `codex exec` via the Bash tool with `run_in_background: true`. Each call includes:
+**Codex advisors:** Use `.claude/hooks/lib/codex-pty.sh exec` (the PTY shim — works around openai/codex#19945) via the Bash tool with `run_in_background: true`. On Windows, use `.claude/hooks/lib/codex-pty.ps1` instead. Each call includes:
 
 1. The persona text
 2. The question/decision + context
@@ -97,7 +97,7 @@ Construct the chairman prompt with:
 - Instruction to produce the Chairman Output Format from `references/output-schema.md`
 - Explicit instruction: "You MUST include a Minority Report section if any advisor OBJECTed"
 
-Run via `codex exec` with `reasoning_effort=xhigh`. Timeout: 1200000ms.
+Run via `.claude/hooks/lib/codex-pty.sh exec` with `reasoning_effort=xhigh`. Timeout: 1200000ms.
 
 See `references/peer-review-protocol.md` for the exact chairman command.
 

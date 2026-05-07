@@ -548,6 +548,15 @@ copy_file "$SCRIPT_DIR/hooks/auto-approve-local-writes.sh" ".claude/hooks/auto-a
 mkdir -p .claude/hooks/lib
 copy_file "$SCRIPT_DIR/hooks/lib/default-branch.sh" ".claude/hooks/lib/default-branch.sh" ".claude/hooks/lib/default-branch.sh (default-branch detection helper)"
 chmod +x .claude/hooks/lib/default-branch.sh 2>/dev/null || true
+copy_file "$SCRIPT_DIR/hooks/lib/default-branch.ps1" ".claude/hooks/lib/default-branch.ps1" ".claude/hooks/lib/default-branch.ps1 (PowerShell mirror)"
+# codex-pty shim — work around openai/codex#19945 (silent empty exit when codex
+# exec runs without a controlling TTY). Both .sh + .ps1 + helper.py ship for
+# cross-platform parity (ADR 0005).
+copy_file "$SCRIPT_DIR/hooks/lib/codex-pty.sh" ".claude/hooks/lib/codex-pty.sh" ".claude/hooks/lib/codex-pty.sh (codex PTY shim, openai/codex#19945)"
+chmod +x .claude/hooks/lib/codex-pty.sh 2>/dev/null || true
+copy_file "$SCRIPT_DIR/hooks/lib/codex-pty-helper.py" ".claude/hooks/lib/codex-pty-helper.py" ".claude/hooks/lib/codex-pty-helper.py (Python pty.fork helper for the shim)"
+chmod +x .claude/hooks/lib/codex-pty-helper.py 2>/dev/null || true
+copy_file "$SCRIPT_DIR/hooks/lib/codex-pty.ps1" ".claude/hooks/lib/codex-pty.ps1" ".claude/hooks/lib/codex-pty.ps1 (Windows PowerShell shim)"
 
 chmod +x .claude/hooks/session-start.sh 2>/dev/null || true
 chmod +x .claude/hooks/check-state-updated.sh 2>/dev/null || true
