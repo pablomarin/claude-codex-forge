@@ -377,7 +377,7 @@ The Forge ships a PTY shim (since v5.22) that works around this. If you're hitti
    ls .claude/hooks/lib/codex-pty-helper.py # required on Unix
    ```
 
-   If any are missing: re-run `setup.sh -f` (or `setup.ps1 -Force`) from your local Forge checkout to install them.
+   If any are missing: re-run `setup.sh --upgrade` (or `setup.ps1 -Upgrade`) from your local Forge checkout to install them. `--upgrade` preserves your existing settings.json + .mcp.json customizations while merging in new entries; `-f` would overwrite them.
 
 2. **Confirm the runtime dependency:**
 

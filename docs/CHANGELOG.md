@@ -29,7 +29,7 @@ Field reports describe 10–17 minute hangs on long audit prompts, ending in `ki
 
 **Retest criterion + retirement plan:** drop the shim once codex `0.128+` (or whatever stable version closes #19945) is empirically confirmed clean on Linux + macOS + Windows. The canonical reproducer is `setsid codex exec "$LARGE_PROMPT" < /dev/null` returning non-empty output (intermittent, so multi-trial). A retirement canary is scheduled as a Claude cloud routine for **2026-05-21 09:00 CDT** ([routine `trig_019fwhiNbxkcUdAcNJ9Eiex3`](https://claude.ai/code/routines/trig_019fwhiNbxkcUdAcNJ9Eiex3)) — it runs a 10-trial sentinel-based canary against the latest installed codex CLI and opens a draft Stage 1 retirement PR if 10/10 PASS on a stable codex version. The full council-recommended staged retirement is: bypass-by-version → noop the shim → revert callsites → delete files, with multi-week cooldowns between stages.
 
-**Existing installs need `./setup.sh -f`** to pick up the shim files, then any new `/new-feature` or `/fix-bug` invocation in a downstream project will use the migrated callsites.
+**Existing installs need `./setup.sh --upgrade`** to pick up the shim files (preserves your existing `.claude/settings.json` + `.mcp.json` customizations while merging in new entries). Then any new `/new-feature` or `/fix-bug` invocation in a downstream project will use the migrated callsites.
 
 ## 5.21 — 2026-04-30 · PermissionRequest hook auto-approves writes to .claude/local/\*\*
 

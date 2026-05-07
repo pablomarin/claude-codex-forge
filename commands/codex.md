@@ -12,12 +12,7 @@
 - **Codex authenticated**: `codex login` (requires ChatGPT Plus/Pro/Business or API key)
 - Verify: `codex --version` (requires v0.114.0+)
 
-> **PTY shim — work around openai/codex#19945.** All `codex exec` invocations below
-> go through `.claude/hooks/lib/codex-pty.sh exec ...` (or `.ps1` on Windows). The
-> shim allocates a pseudo-terminal so `codex exec` produces real output — without it,
-> codex 0.124–0.12X.0 silently exits 0 with empty stdout under Claude Code's no-TTY
-> Bash tool. To bypass the shim (e.g., to confirm upstream fix), set
-> `CLAUDE_FORGE_CODEX_PTY_BYPASS=1`.
+> **Use `.claude/hooks/lib/codex-pty.sh exec` for all Codex invocations** (Windows: `.claude/hooks/lib/codex-pty.ps1 exec`). Do not call bare `codex exec` from Claude Code.
 
 ---
 
@@ -56,6 +51,7 @@ Use `AskUserQuestion` with these options:
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
+  -c web_search="live" \
   -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production." \
   --ephemeral \
   [--uncommitted | --base main | --commit SHA]
@@ -68,6 +64,7 @@ Use `AskUserQuestion` with these options:
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
+  -c web_search="live" \
   -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production." \
   --ephemeral \
   --base main \
@@ -105,6 +102,7 @@ Also check if there's a plan in the current conversation context. If the user sp
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
+  -c web_search="live" \
   --sandbox read-only \
   --ephemeral \
   --color never \
@@ -153,6 +151,7 @@ Construct the prompt by combining the user's instruction with the gathered conte
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
+  -c web_search="live" \
   --sandbox read-only \
   --ephemeral \
   --color never \
@@ -172,11 +171,7 @@ Display Codex's output verbatim to the user. Do not summarize or edit it.
 - **Codex not installed**: Tell the user to run `npm i -g @openai/codex` (or `brew install --cask codex` on macOS) and `codex login`
 - **Authentication error**: Tell the user to run `codex login`
 - **Timeout**: Inform the user that Codex took too long and suggest simplifying the request
-- **Empty output / silent exit / 17-min hang**: This is almost certainly [openai/codex#19945](https://github.com/openai/codex/issues/19945) — a shim malfunction, not a model error. Recovery (in order):
-  1. Verify the shim is present: `ls .claude/hooks/lib/codex-pty.sh` (or `.ps1` on Windows). If missing, run `./setup.sh -f` (or `setup.ps1 -Force`) from the Forge to (re)install.
-  2. Verify the shim's runtime dependency: `python3 --version` on Unix, or `winpty.exe` on Windows Git Bash.
-  3. As a last resort to confirm whether upstream has shipped a fix, set `CLAUDE_FORGE_CODEX_PTY_BYPASS=1` and retry. If that ALSO fails, the bug is still present — keep the shim. If it now succeeds, file a comment on #19945 with your codex version and consider the retirement canary's findings.
-  4. **Do NOT** "rephrase the prompt" — prompt length is one of #19945's triggers, not the trigger; rephrasing changes the symptom timing but not the cause.
+- **Empty output / silent exit**: Treat as a Codex invocation failure, not a useful model response. Do not rephrase the prompt as a workaround. Tell the user Codex returned no output and that the local Codex/PTY wrapper setup needs repair outside this `/codex` run.
 
 ---
 
@@ -205,29 +200,20 @@ Display Codex's output verbatim to the user. Do not summarize or edit it.
 - **Preset scope + focus via config**: `codex exec review --uncommitted -c developer_instructions="Focus on auth flows"`
 - **Custom prompt only** (reviewer picks scope from your wording): `codex exec review "Audit the recent auth middleware changes for token leakage"`
 
-## Powerful `-c` Config Overrides
+## `-c` config overrides used in this command
 
-These work on **both** `codex exec` and `codex exec review`:
+These are the only `-c` overrides used by the canonical examples above:
 
-| Config key                | Purpose                                                    | Example                                                                 |
-| ------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `model`                   | Override the session model                                 | `-c model="gpt-5.5"`                                                    |
-| `model_reasoning_effort`  | Depth of reasoning                                         | `-c model_reasoning_effort="xhigh"` (minimal\|low\|medium\|high\|xhigh) |
-| `model_reasoning_summary` | Reasoning output detail                                    | `-c model_reasoning_summary="detailed"` (auto\|concise\|detailed\|none) |
-| `developer_instructions`  | Inject guidance (works WITH preset review flags)           | `-c developer_instructions="Focus on SQL injection"`                    |
-| `review_model`            | Model override just for `/review`                          | `-c review_model="gpt-5.5"`                                             |
-| `web_search`              | Allow live docs lookup during review                       | `-c web_search=live` (disabled\|cached\|live)                           |
-| `service_tier`            | Processing tier                                            | `-c service_tier="fast"` (flex\|fast)                                   |
-| `approval_policy`         | When to pause for confirmation (plain `exec` only)         | `-c approval_policy="on-request"` (untrusted\|on-request\|never)        |
-| `sandbox_mode`            | Sandbox policy as config (alternative to `--sandbox` flag) | `-c sandbox_mode="read-only"`                                           |
+| Config key               | Why this command uses it                                                                                                                                                                                                                            |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`                  | Pin the session to gpt-5.5 (overrides whatever the user has as default in `~/.codex`)                                                                                                                                                               |
+| `model_reasoning_effort` | `xhigh` — Codex is being used as a serious second opinion, not a quick autocomplete                                                                                                                                                                 |
+| `service_tier`           | `fast` — prioritise latency for the review/feedback loop                                                                                                                                                                                            |
+| `web_search`             | `live` — make the live web-search tool available to the model when it decides it needs current docs/issue status. Not "always search." Codex's default is documented inconsistently (some sources say `disabled`, others `cached`); set explicitly. |
+| `developer_instructions` | Inject focus areas for code-review mode (compatible with `--uncommitted`/`--base` etc.)                                                                                                                                                             |
 
-## Other Useful Flags
+For other `-c` overrides not listed here, consult `codex --help` rather than improvising.
 
-| Flag                              | Purpose                                                        |
-| --------------------------------- | -------------------------------------------------------------- |
-| `--ephemeral`                     | Don't persist session files (use for one-shot reviews)         |
-| `-o/--output-last-message <FILE>` | Write just the final message to a file — great for scripting   |
-| `--json`                          | Emit JSONL events for downstream automation                    |
-| `--full-auto`                     | Low-friction preset: `-a on-request --sandbox workspace-write` |
-| `--title "description"`           | Label the review in the summary (review subcommand only)       |
-| `--skip-git-repo-check`           | Allow running outside a Git repository                         |
+## Flags used by this command
+
+`--ephemeral`, `--sandbox read-only`, `--color never`, `--skip-git-repo-check`, `--uncommitted` / `--base <BRANCH>` / `--commit <SHA>` / `--title <STR>` (review-mode only). Do not introduce other flags inside `/codex` — they're not part of this command's contract.
