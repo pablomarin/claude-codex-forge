@@ -2,9 +2,9 @@
 
 All notable changes to claude-codex-forge.
 
-## 5.22 — 2026-05-01 · Codex PTY shim — work around openai/codex#19945
+## 5.22 — 2026-05-07 · Codex PTY shim — work around openai/codex#19945
 
-`codex exec` silently exits with empty stdout (exit 0, zero bytes) when run with stdio detached from a controlling TTY AND a non-trivial prompt — exactly the conditions Claude Code's Bash tool creates every time the Forge invokes `/codex` or `/council`. The bug was [introduced in codex 0.124.0](https://github.com/openai/codex/issues/19945) (last unaffected: 0.123.0), still present in 0.125.0 / 0.128.0, and has no upstream fix as of 2026-05-01.
+`codex exec` silently exits with empty stdout (exit 0, zero bytes) when run with stdio detached from a controlling TTY AND a non-trivial prompt — exactly the conditions Claude Code's Bash tool creates every time the Forge invokes `/codex` or `/council`. The bug was [introduced in codex 0.124.0](https://github.com/openai/codex/issues/19945) (last unaffected: 0.123.0), still present in 0.125.0 / 0.128.0, and has no upstream fix as of 2026-05-07. The intermittent rate is ~30% on 0.125.0 — single-shot reproducers are unreliable, but the cumulative effect is that virtually every `/council` fan-out (3–5 parallel codex calls) hits the bug at least once.
 
 Field reports describe 10–17 minute hangs on long audit prompts, ending in `kill` exit-144. The Forge memory previously attributed the symptom to "long prompt overload"; that was incomplete — prompt length is one of two triggers, not the trigger.
 
@@ -16,9 +16,18 @@ Field reports describe 10–17 minute hangs on long audit prompts, ending in `ki
 
 **Opt-out** via `CLAUDE_FORGE_CODEX_PTY_BYPASS=1` (mirrors the v5.21 PR #592 pattern). Useful when upstream is confirmed fixed, or when an EDR / corporate sandbox blocks PTY allocation.
 
-**Test coverage:** 20 unit tests for the Unix shim (mocked codex + isatty assertions + real-pty integration via `/bin/echo` + stdin-from-/dev/null liveness). 9 cross-file contract assertions in `test-contracts.sh` enforce env-var name parity, header references to issue #19945, callsite migration completeness, and setup-script wiring on both platforms.
+**Iterations during review (4 commits squashed at merge):**
 
-**Retest criterion:** drop the shim once codex 0.128+ is empirically confirmed clean by re-running issue #19945's repro: `setsid codex exec "$LARGE_PROMPT" < /dev/null` producing non-empty output. Until then, leave it in place.
+- **iter-1** (`6443abb`): main shim + tests + callsite migration in `commands/codex.md` and `skills/council/*`
+- **iter-2** (`ff4489c`): cancellation signal forwarding. Without explicit handlers, parent SIGINT was silently absorbed by the helper's `except OSError: continue` clause (which catches `InterruptedError`), and codex would run to natural completion instead of canceling. Fixed: parent installs `_forward_signal` handler for SIGINT/SIGTERM/SIGHUP that does `os.kill(child_pid, signum)`; child resets these signals to `SIG_DFL` before `execvp` so they aren't inherited as `SIG_IGN` from bash's POSIX-mandated backgrounded-process behavior.
+- **iter-3** (`9859abb`): busy-loop fix. The iter-2 stdin-EOF handling did `dup2(/dev/null, 0)` expecting `select()` to stop waking on fd 0. Empirically reproduced by the Engineering Council's Contrarian and Maintainer (independently): `python3 helper /bin/sleep 2 </dev/null` consumed ~2 CPU-seconds because `/dev/null` is always selectable. Fixed: track `stdin_open` flag, drop fd 0 from the select set after EOF.
+- **iter-3+1** (`17a3a97`): EOT propagation. The iter-3 fix stopped the parent from polling fd 0, but never told the child the input had ended — children that read stdin (e.g., `/bin/cat` with piped input) hung forever. **Caught by codex itself** reviewing the helper through the shim during the live mcpgateway smoke test. Fixed: write `\x04` (EOT) to the pty master on stdin EOF; disable TTY ECHO at startup so the EOT doesn't echo back as `^D\b\b` and contaminate output.
+
+**Test coverage:** 33 unit tests for the Unix shim (mocked codex + isatty assertions + real-pty integration via `/bin/echo` + stdin-from-/dev/null liveness + CPU regression for the busy-loop + signal-killed-child + piped-stdin EOF propagation). 115 cross-file contract assertions in `test-contracts.sh` (the suite total; 9 of them codex-pty specific) enforce env-var name parity, header references to issue #19945, callsite migration completeness, and setup-script wiring on both platforms.
+
+**Drain cap raised to 16 MiB** (was 1 MiB in iter-1). Council's Scalability Hawk flagged that council-chairman synthesis at xhigh effort can plausibly exceed 1 MiB; a silent half-output is a more dangerous failure mode than a slightly-larger-than-needed buffer. The cap also now emits an unconditional stderr warning if reached so silent truncation is impossible.
+
+**Retest criterion + retirement plan:** drop the shim once codex `0.128+` (or whatever stable version closes #19945) is empirically confirmed clean on Linux + macOS + Windows. The canonical reproducer is `setsid codex exec "$LARGE_PROMPT" < /dev/null` returning non-empty output (intermittent, so multi-trial). A retirement canary is scheduled as a Claude cloud routine for **2026-05-21 09:00 CDT** ([routine `trig_019fwhiNbxkcUdAcNJ9Eiex3`](https://claude.ai/code/routines/trig_019fwhiNbxkcUdAcNJ9Eiex3)) — it runs a 10-trial sentinel-based canary against the latest installed codex CLI and opens a draft Stage 1 retirement PR if 10/10 PASS on a stable codex version. The full council-recommended staged retirement is: bypass-by-version → noop the shim → revert callsites → delete files, with multi-week cooldowns between stages.
 
 **Existing installs need `./setup.sh -f`** to pick up the shim files, then any new `/new-feature` or `/fix-bug` invocation in a downstream project will use the migrated callsites.
 
