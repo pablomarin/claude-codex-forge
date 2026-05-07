@@ -24,6 +24,7 @@ import pty
 import select
 import signal
 import sys
+import termios
 
 
 def main() -> int:
@@ -72,7 +73,19 @@ def main() -> int:
             sys.stderr.flush()
             os._exit(126)
 
-    # Parent: forward SIGINT/SIGTERM/SIGHUP to the child so cancellation
+    # Parent: disable TTY echo on the pty so when we forward parent stdin to
+    # master the line discipline doesn't echo it back into our output stream.
+    # Without this, writing EOT (^D) to signal stdin EOF to the child causes
+    # `^D\b\b` to appear in codex's output. Echo is only meaningful for
+    # interactive terminals; the shim is always non-interactive.
+    try:
+        attrs = termios.tcgetattr(master_fd)
+        attrs[3] &= ~termios.ECHO  # lflag &= ~ECHO
+        termios.tcsetattr(master_fd, termios.TCSANOW, attrs)
+    except (termios.error, OSError):
+        pass  # not all platforms support tcsetattr on a pty master
+
+    # Forward SIGINT/SIGTERM/SIGHUP to the child so cancellation
     # actually cancels codex (verified gap in iter-2: without these handlers,
     # Python's default SIGINT handler raises KeyboardInterrupt which our
     # `except OSError` clause inadvertently caught via InterruptedError, and
@@ -185,8 +198,19 @@ def main() -> int:
                         # Child hung up its end — stop forwarding stdin.
                         stdin_open = False
                 else:
-                    # Stdin EOF — drop fd 0 from the select set.
+                    # Stdin EOF: stop polling fd 0 AND signal EOF to the child
+                    # by writing EOT (^D, 0x04) to the pty master. In canonical
+                    # mode (the default after pty.fork on macOS/Linux), the
+                    # line discipline interprets ^D at line-start as EOF, so
+                    # the child's next read() returns 0 bytes. Without this,
+                    # children that read stdin (like /bin/cat with piped
+                    # input) hang forever waiting for more data — found by
+                    # the iter-3 smoke /codex review against ../mcpgateway.
                     stdin_open = False
+                    try:
+                        os.write(master_fd, b'\x04')
+                    except OSError:
+                        pass
     finally:
         try:
             os.close(master_fd)

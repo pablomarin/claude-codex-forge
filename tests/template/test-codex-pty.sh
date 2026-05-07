@@ -278,6 +278,34 @@ cleanup_scratch "$SCRATCH"; rm -f "$RESULT"
 # pty.fork liveness gap)
 # ===========================================================================
 
+start_test "piped stdin EOF propagates to child (iter-3 smoke P1 fix — codex found this)"
+# When parent's stdin is a pipe that closes, the child needs to see EOF on
+# its end of the pty too. Without writing EOT to master, children that read
+# stdin (e.g., /bin/cat with piped input) hang forever waiting for more data.
+# Bug found by codex review of the v5.22 PR (iter-3 mcpgateway smoke).
+HELPER="$REPO_ROOT/hooks/lib/codex-pty-helper.py"
+RESULT=$(mktemp)
+(
+    printf 'hello-from-stdin\n' | python3 "$HELPER" /bin/cat > "$RESULT" 2>&1 &
+    inner=$!
+    ( sleep 5 && kill -9 $inner 2>/dev/null ) &
+    watchdog=$!
+    wait $inner 2>/dev/null
+    rc=$?
+    kill $watchdog 2>/dev/null
+    exit $rc
+)
+piped_exit=$?
+output_clean=$(tr -d '\r' < "$RESULT")
+if [[ "$piped_exit" -eq 0 ]] && grep -q "^hello-from-stdin$" <<<"$output_clean"; then
+    pass "piped stdin EOF cleanly propagated; child saw 'hello-from-stdin' and exited"
+elif [[ "$piped_exit" -eq 137 ]]; then
+    fail "shim hung on stdin EOF (regression — child never saw EOF). watchdog SIGKILL'd."
+else
+    fail "unexpected: exit=$piped_exit output=$(printf '%q' "$output_clean")"
+fi
+rm -f "$RESULT"
+
 start_test "stdin EOF doesn't busy-loop (CPU regression test — iter-3 council P1 fix)"
 # Contrarian + Maintainer empirically reproduced: before fix, wrapping sleep 2
 # with </dev/null caused the helper to consume ~2 CPU-seconds (1.80 sys + 0.20
