@@ -37,7 +37,20 @@ def main() -> int:
     pid, master_fd = pty.fork()
     if pid == 0:
         # Child: pty.fork() already dup'd slave to fd 0/1/2 and made us the
-        # session leader. Just exec.
+        # session leader.
+        # Reset signal dispositions to SIG_DFL before exec. Without this, the
+        # child inherits whatever the parent had — and bash sets SIGINT to
+        # SIG_IGN for any process it backgrounds in a non-interactive shell
+        # (POSIX). That inherited SIG_IGN would prevent the child from
+        # responding to our forwarded SIGINT during cancellation. Real codex
+        # (Rust) reinstalls its own handlers in main(), so this is mostly
+        # defense-in-depth, but it makes the shim behave correctly with any
+        # POSIX child including /bin/sleep, /usr/bin/cat, etc.
+        for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGPIPE, signal.SIGQUIT):
+            try:
+                signal.signal(_sig, signal.SIG_DFL)
+            except (ValueError, OSError):
+                pass
         # On exec failure, emit a diagnostic to stderr (which goes through the
         # pty back to the user) so the user can distinguish "codex ran and
         # exited N" from "execvp failed and we couldn't run codex" — without
@@ -59,7 +72,28 @@ def main() -> int:
             sys.stderr.flush()
             os._exit(126)
 
-    # Parent: I/O multiplex until child exits.
+    # Parent: forward SIGINT/SIGTERM/SIGHUP to the child so cancellation
+    # actually cancels codex (verified gap in iter-2: without these handlers,
+    # Python's default SIGINT handler raises KeyboardInterrupt which our
+    # `except OSError` clause inadvertently caught via InterruptedError, and
+    # the parent silently kept reading the pty until codex finished naturally).
+    # The handlers forward; the main loop notices child exit via waitpid and
+    # returns 128+signum per WIFSIGNALED handling at the bottom of main().
+    def _forward_signal(signum: int, _frame: object) -> None:
+        try:
+            os.kill(pid, signum)
+        except OSError:
+            pass
+
+    for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(_sig, _forward_signal)
+        except (ValueError, OSError):
+            # SIGHUP not available on Windows; signal.signal in non-main
+            # threads also raises ValueError. Fall through silently.
+            pass
+
+    # I/O multiplex until child exits.
     exit_status = None
     select_error_streak = 0
     try:
