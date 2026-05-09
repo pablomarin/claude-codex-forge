@@ -15,10 +15,10 @@ All slash commands and subagents available after setup.
 
 ## Decision Analysis
 
-| Command                | Purpose                       | Notes                                            |
-| ---------------------- | ----------------------------- | ------------------------------------------------ |
-| `/council <question>`  | Multi-perspective analysis    | 5 advisors (3 Claude + 2 Codex) + Codex chairman |
-| `/codex <instruction>` | Second opinion from Codex CLI | Code review, design review, or general           |
+| Command                | Purpose                       | Notes                                                                                                                                                                             |
+| ---------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/council <question>`  | Multi-perspective analysis    | 5 advisors (3 Claude + 2 Codex) + Codex chairman. See [The Engineering Council](../explanation/engineering-council.md) for personas, when it fires, and the minority-report rule. |
+| `/codex <instruction>` | Second opinion from Codex CLI | Code review, design review, or general                                                                                                                                            |
 
 ## PRD Commands (Requirements)
 
