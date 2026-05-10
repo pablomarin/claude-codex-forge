@@ -200,24 +200,37 @@ done
 
 `.claude/local/state.md` is per-developer and gitignored — it may not exist yet on a fresh checkout. Initialize it from the installed template if missing, then read it.
 
+**Step 2a: locate template + decide whether init is needed.** This block is **read-only** — no filesystem writes; it just emits a sentinel line for step 2b to act on.
+
 ```bash
 # STATE-INIT-BEGIN (byte-identical between commands/new-feature.md and commands/fix-bug.md - enforced by test-contracts.sh)
-# Initialize workflow tracking (PR #2: state lives in .claude/local/state.md, gitignored).
+# Read-only: locate state template + check whether state.md needs initialization.
+# All writes are deferred to step 2b's Read+Write tool calls (auto-approved by the
+# v5.21 PermissionRequest hook on .claude/local/**). The Write tool creates missing
+# parent dirs in one call — verified empirically against Claude Code 2.1.138.
 ROOT="$(git rev-parse --show-toplevel)"
 TEMPLATE="$ROOT/.claude/state.template.md"
 [ ! -f "$TEMPLATE" ] && TEMPLATE="$ROOT/state.template.md"  # Forge-internal fallback
-if [ ! -f "$ROOT/.claude/local/state.md" ]; then
-    mkdir -p "$ROOT/.claude/local"
-    if [ -f "$TEMPLATE" ]; then
-        cp "$TEMPLATE" "$ROOT/.claude/local/state.md"
-    else
-        echo "  ⚠ state template not found at $TEMPLATE — workflow tracking may be incomplete." >&2
-    fi
+if [ -f "$ROOT/.claude/local/state.md" ]; then
+    echo "STATE_EXISTS"
+elif [ -f "$TEMPLATE" ]; then
+    echo "STATE_NEEDS_INIT_FROM:$TEMPLATE"
+else
+    echo "STATE_TEMPLATE_NOT_FOUND_AT:$TEMPLATE"
+    echo "  ⚠ state template not found — workflow tracking cannot proceed without it." >&2
 fi
 # STATE-INIT-END
-
-cat .claude/local/state.md
 ```
+
+**Step 2b: act on step 2a's sentinel.**
+
+- `STATE_EXISTS` → skip to step 2c.
+- `STATE_NEEDS_INIT_FROM:<path>` →
+  1. Use the **Read** tool on `<path>` (the template path from the sentinel line)
+  2. Use the **Write** tool to create `.claude/local/state.md` with the template's content. Write creates the missing `.claude/local/` parent directory in the same call. The v5.21 PermissionRequest hook auto-approves writes to `.claude/local/**`, so this won't prompt.
+- `STATE_TEMPLATE_NOT_FOUND_AT:<path>` → STOP and tell the user that the Forge state template is missing — their checkout looks incomplete. Tell them to re-run `setup.sh --upgrade` from their Forge clone (typically `~/claude-codex-forge`; on Windows: `setup.ps1 -Upgrade`). Don't synthesize a state.md; the workflow tracking gates depend on the template's structure.
+
+**Step 2c: read state.md** via the Read tool.
 
 ### 3. Initialize Workflow Tracking
 

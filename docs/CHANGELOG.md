@@ -2,6 +2,33 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.24 — 2026-05-09 · State-init via Write tool — zero prompts on `/new-feature` & `/fix-bug`
+
+`/new-feature` and `/fix-bug` were prompting users for permission on `cp` commands writing to `.claude/local/state.md` — both the script-level `cp` on first init AND agent-improvised `cp main_state worktree_state` on every state write. Field-confirmed in `msai-v2`.
+
+**Root cause:** Claude Code's built-in heuristic prompts on **any Bash command** writing under `.claude/`, regardless of `permissions.allow`. The v5.21 PermissionRequest hook only matches `Write|Edit` (structured tools), not `Bash`. So `cp template .claude/local/state.md` always asks; the structured `Write` tool to the same path doesn't.
+
+**The fix:** workflow text only — no hook changes, no settings changes, no `.ps1` parity work. The STATE-INIT bash block in `commands/new-feature.md` and `commands/fix-bug.md` is now **truly read-only**: it locates the template and emits one of three sentinels (`STATE_EXISTS`, `STATE_NEEDS_INIT_FROM:<path>`, `STATE_TEMPLATE_NOT_FOUND_AT:<path>`). The agent then uses the **Read** tool on the template + the **Write** tool on `.claude/local/state.md`. Write creates the missing `.claude/local/` parent directory in the same call — empirically verified ([ADR 0006](adr/0006-write-tool-creates-missing-parents.md)) — and is auto-approved by the v5.21 hook on `.claude/local/**`. Net: from "every cp prompts on every state write" to **zero prompts on the state-init path**.
+
+**Codex-validated approach (against [Anthropic permissions docs](https://code.claude.com/docs/en/permissions)):**
+
+- Anthropic's docs warn that Bash patterns trying to constrain command arguments are fragile. Their recommended mitigation for `.claude/`-write scenarios is the structured Write/Edit tool path, not Bash.
+- Adding a Bash auto-approve hook for `.claude/local/**` would walk into the parsing pitfalls Anthropic flags (compound commands, redirects, variables, command substitution, symlinks). Out of scope for this fix.
+- The workflow-text fix has no security trade-off: failure mode is "extra prompt", not a bypass.
+
+**Engineering Council process:** the branch went through 5 Codex review iterations + a 5-advisor council to land the final shape. Earlier iterations retained a defensive `mkdir -p .claude/local` based on the assumption that the Write tool wouldn't reliably create parent directories — Codex Contrarian objected that this premise was unproven and was being locked in by tests. The council voted to ship a partial fix; before merging, ran the spike Codex Hawk requested ([ADR 0006](adr/0006-write-tool-creates-missing-parents.md) — fresh-worktree Write to `.claude/local/state.md` with no parent present, on Claude Code 2.1.138 / macOS 26.2). The Write tool created both parent directories and the file in one call. Result: dropped `mkdir`, simplified the contract tests, and shipped a true zero-prompt fix instead of the partial one. The Contrarian was right.
+
+**Locked in by contract test:** `tests/template/test-contracts.sh` now asserts the STATE-INIT block contains **zero** Bash writes under `.claude/` (cp/mv/ln/install/dd/touch/tee/rm/rmdir/mkdir/sed-i/redirects, all banned). Re-introducing any of them resurrects the permission prompt this fix was added to remove. Self-test (AC-2c) feeds 16 synthetic violations to the detector and asserts each matches.
+
+**Files:**
+
+- `commands/new-feature.md`, `commands/fix-bug.md` — STATE-INIT block restructured (truly read-only steps 2a / 2b / 2c). Block remains byte-identical between the two files (existing AC-2 contract).
+- `tests/template/test-contracts.sh` — AC-2b (no Bash writes under .claude/), AC-2c (16-violation self-test), AC-2e (Step 2b prose contract). Joins shell line continuations before grep'ing.
+- `docs/adr/0006-write-tool-creates-missing-parents.md` (new) — captured spike evidence with version anchor.
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.23 → 5.24.
+
+**Existing installs:** run `./setup.sh --upgrade` from your Forge checkout to pick up the updated commands. Restart Claude Code afterward — slash-command definitions reload at session start.
+
 ## 5.23 — 2026-05-07 · Switch superpowers identity to `@claude-plugins-official`
 
 Forge had been pinning `superpowers@superpowers-marketplace` (the community marketplace by [obra](https://github.com/obra/superpowers-marketplace)). It works, but it requires `/plugin marketplace add obra/superpowers-marketplace` as a prerequisite — a step that wasn't documented in `commands/new-feature.md`'s Required Plugins section. As of 2026-01-15 ([anthropics/claude-plugins-official PR #148](https://github.com/anthropics/claude-plugins-official/pull/148)) the same plugin is published in Anthropic's official marketplace as `superpowers@claude-plugins-official` — installable in one step.
