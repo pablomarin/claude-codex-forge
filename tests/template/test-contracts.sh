@@ -705,6 +705,140 @@ elif [ "$nf_block" = "$fb_block" ]; then pass "STATE-INIT block byte-identical a
 else fail "STATE-INIT block diverges between new-feature.md and fix-bug.md"
 fi
 
+# AC-2b STATE-INIT block must NOT contain Bash writes under .claude/. The state.md
+# init was moved off `cp`/`mkdir` to Read+Write tool calls because Bash writes under
+# .claude/ unconditionally prompt (Claude Code built-in heuristic, regardless of
+# permissions.allow). The Write tool is auto-approved by the v5.21 PermissionRequest
+# hook on .claude/local/**. Re-introducing ANY Bash write under .claude/ would
+# resurrect the permission prompt that this contract was added to prevent.
+#
+# This test enumerates all common write patterns. If a future regression invents
+# a new way to write files (e.g., `dd of=...`, `python -c 'open(...)'`), we'll
+# add it here when we see it.
+start_test "state-init-block-has-no-bash-writes-under-dot-claude"
+for cmd_file in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md"; do
+    block=$(extract_state_init "$cmd_file")
+    name=$(basename "$cmd_file")
+    # Strip comment lines (which may legitimately mention `cp` to explain the
+    # policy) and string-literal lines (e.g., `echo "STATE_TEMPLATE_NOT_FOUND_AT:..."`)
+    # before grep'ing for actual command invocations.
+    # ALSO join shell line continuations (trailing `\` then newline) so a wrapped
+    # `cp "$T" \\\n  .claude/local/state.md` doesn't slip past the line-oriented regex.
+    code=$(echo "$block" | grep -v '^[[:space:]]*#' | awk 'BEGIN{p=""} /\\$/{p=p substr($0,1,length($0)-1) " "; next} {print p $0; p=""}')
+    found_violation=""
+    # ALL Bash writes under .claude/ are banned. The Write tool creates missing
+    # parent directories in one call (verified — see docs/adr/0006-write-tool-creates-missing-parents.md),
+    # so step 2b's Read+Write path doesn't need a defensive mkdir.
+    #
+    # 1. File-creating/modifying commands (cp/mv/ln/install/dd/touch/tee/rm/rmdir/mkdir)
+    #    followed by a path containing .claude/. The [^|&]* prevents matching
+    #    across pipes and chains.
+    if echo "$code" | grep -qE '(^|[[:space:]])(cp|mv|ln|install|dd|touch|tee|rm|rmdir|mkdir)[[:space:]][^|&]*\.claude/'; then
+        found_violation="filesystem write command (cp/mv/ln/install/dd/touch/tee/rm/rmdir/mkdir) into .claude/"
+    # 2. sed -i targeting .claude/ (in-place edit).
+    elif echo "$code" | grep -qE '(^|[[:space:]])sed[[:space:]]+-i[^|&]*\.claude/'; then
+        found_violation="sed -i targeting .claude/"
+    # 3. Stdout/stderr redirect (>, >>, 2>) followed by ANY path containing
+    #    .claude/. Permissive on what comes between the operator and .claude/
+    #    so it covers all quoting forms: `> .claude/x`, `> "$VAR/.claude/x"`,
+    #    and `> "$VAR"/.claude/x` (the close-quote-then-unquoted-path form).
+    #    [^|&]* still stops at pipes/chains. Note: 2>&1 doesn't match (no .claude/).
+    elif echo "$code" | grep -qE '[12]?>>?[[:space:]]*[^|&]*\.claude/'; then
+        found_violation="stdout/stderr redirect to .claude/"
+    fi
+    if [ -n "$found_violation" ]; then
+        fail "$name STATE-INIT block has Bash write under .claude/: $found_violation (would prompt — use Read+Write tools instead)"
+    else
+        pass "$name STATE-INIT block has no Bash writes under .claude/"
+    fi
+done
+
+# AC-2c Self-test: the AC-2b regex catches the patterns it claims to. Without this,
+# a typo in the regex would silently let regressions through. We feed the regex
+# block synthetic violation lines and assert each matches.
+start_test "state-init-write-detector-catches-known-bad-patterns"
+synthetic_violations=(
+    # File-creating/modifying commands (mkdir included — banned per ADR 0006)
+    'cp $TEMPLATE .claude/local/state.md'
+    'mv $TEMPLATE .claude/local/state.md'
+    'ln -s $TEMPLATE .claude/local/state.md'
+    'install -D $TEMPLATE .claude/local/state.md'
+    'mkdir -p .claude/local'
+    'touch .claude/local/state.md'
+    'tee .claude/local/state.md < $TEMPLATE'
+    'rm .claude/local/state.md'
+    'rmdir .claude/local'
+    'dd if=$TEMPLATE of=.claude/local/state.md'
+    # sed -i in-place edit
+    'sed -i "s/foo/bar/" .claude/local/state.md'
+    # Redirect forms (each quoting variant the codex iter-2 review flagged)
+    'cat $TEMPLATE > .claude/local/state.md'
+    'cat $TEMPLATE >> .claude/local/state.md'
+    'echo something > "$ROOT/.claude/local/state.md"'
+    'echo something > "$ROOT"/.claude/local/state.md'
+    'cmd 2> .claude/local/error.log'
+)
+detector_failures=0
+for line in "${synthetic_violations[@]}"; do
+    matched=""
+    if echo "$line" | grep -qE '(^|[[:space:]])(cp|mv|ln|install|dd|touch|tee|rm|rmdir|mkdir)[[:space:]][^|&]*\.claude/'; then matched=1
+    elif echo "$line" | grep -qE '(^|[[:space:]])sed[[:space:]]+-i[^|&]*\.claude/'; then matched=1
+    elif echo "$line" | grep -qE '[12]?>>?[[:space:]]*[^|&]*\.claude/'; then matched=1
+    fi
+    if [ -z "$matched" ]; then
+        fail "AC-2b detector missed known-bad pattern: $line"
+        detector_failures=$((detector_failures+1))
+    fi
+done
+[ $detector_failures -eq 0 ] && pass "AC-2b detector catches all ${#synthetic_violations[@]} synthetic violations"
+
+# AC-2e: the Step 2b prose section (after STATE-INIT-END through the next "###"
+# subsection or "**Step 2c") must instruct the agent to use Read+Write tools and
+# must NOT contain banned Bash write patterns targeting .claude/. Without this,
+# someone could revert Step 2b to "cp template state.md" prose without tripping
+# AC-2b (which only scans the fenced shell block).
+start_test "state-init-step-2b-prose-uses-read-write-tools"
+extract_step_2b() {
+    # From STATE-INIT-END to the "Step 2c" line (exclusive on Step 2c)
+    awk '
+        /^# STATE-INIT-END/{flag=1; next}
+        /^\*\*Step 2c/{flag=0}
+        flag{print}
+    ' "$1"
+}
+for cmd_file in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md"; do
+    name=$(basename "$cmd_file")
+    step2b=$(extract_step_2b "$cmd_file")
+    if [ -z "$step2b" ]; then
+        fail "$name: Step 2b region not found between STATE-INIT-END and Step 2c"
+        continue
+    fi
+    # Positive: must mention Read + Write tools
+    if ! echo "$step2b" | grep -q "\*\*Read\*\*"; then
+        fail "$name Step 2b doesn't reference the Read tool"
+        continue
+    fi
+    if ! echo "$step2b" | grep -q "\*\*Write\*\*"; then
+        fail "$name Step 2b doesn't reference the Write tool"
+        continue
+    fi
+    # Negative: must NOT contain banned write patterns near .claude/.
+    # Join line continuations same as AC-2b. Use the SAME regexes as AC-2b
+    # (without the backtick wrapper) so that plain-text Bash like
+    # `1. Use cp "$TEMPLATE" .claude/local/state.md` is caught — backtick-only
+    # matching missed those (codex iter-7 P2 fix).
+    step2b_code=$(echo "$step2b" | awk 'BEGIN{p=""} /\\$/{p=p substr($0,1,length($0)-1) " "; next} {print p $0; p=""}')
+    if echo "$step2b_code" | grep -qE '(^|[[:space:]])(cp|mv|ln|install|dd|touch|tee|rm|rmdir|mkdir)[[:space:]][^|&]*\.claude/'; then
+        fail "$name Step 2b prose contains a banned write command targeting .claude/"
+    elif echo "$step2b_code" | grep -qE '(^|[[:space:]])sed[[:space:]]+-i[^|&]*\.claude/'; then
+        fail "$name Step 2b prose contains sed -i targeting .claude/"
+    elif echo "$step2b_code" | grep -qE '[12]?>>?[[:space:]]*[^|&]*\.claude/'; then
+        fail "$name Step 2b prose contains a redirect to .claude/"
+    else
+        pass "$name Step 2b prose uses Read+Write tools, no banned writes"
+    fi
+done
+
 # ---------------------------------------------------------------------------
 # Contract: codex-pty shim — env vars + issue refs + helper present
 # Mirrors the cross-shim contract for openai/codex#19945 workaround.
