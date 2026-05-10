@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
-  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.25-blue?style=flat-square"></a>
+  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.26-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
   <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-required-orange?style=flat-square"></a>
@@ -142,6 +142,7 @@ Recent releases:
 
 | Version | Date       | Highlights                                                                                                                                                                                                                                                                                      |
 | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 5.26    | 2026-05-10 | `rules/database.md` gains a "Migrations — additive-only discipline" section: ✅/❌ patterns matrix + 3-release expand-contract pattern for destructive changes + escape-hatch language. Closes a real gap (forge previously had zero migration guidance for teams running rolling deploys).     |
 | 5.25    | 2026-05-10 | STATE-INIT diagnoses downstream-gitignored `.claude/` — emits new `STATE_TEMPLATE_DOWNSTREAM_GITIGNORED` sentinel pointing at the actual fix (edit `.gitignore`, commit `.claude/`) instead of misleading "re-run setup". Bonus: anchors AC-2 redirect regex to fix prose-scan false positives. |
 | 5.24    | 2026-05-09 | State-init via Write tool — `/new-feature` & `/fix-bug` zero prompts on the state-init path. STATE-INIT block now truly read-only; agent uses Read+Write tools (auto-approved by v5.21 hook, Write creates missing parents per [ADR 0006](docs/adr/0006-write-tool-creates-missing-parents.md)) |
 | 5.23    | 2026-05-07 | Switch superpowers identity to `superpowers@claude-plugins-official` (Anthropic's marketplace, since 2026-01-15) — one-step install, avoids the `obra/superpowers-marketplace#11` name-conflict bug                                                                                             |
