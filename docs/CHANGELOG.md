@@ -2,6 +2,24 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.26 — 2026-05-10 · Database migration discipline rule (additive-only + expand-contract)
+
+`rules/database.md` had no migration guidance — a real gap for any team running rolling deploys with image rollback. Surfaced when `msai-v2` codified its own deploy-pipeline-specific version and the question came up: "is this generally applicable?" Yes — it's the standard production-hygiene pattern (any team whose deploy pipeline rolls back image SHAs but not DB schema wants additive-only migrations so old code can talk to the newer schema after a rollback).
+
+**What's new in `rules/database.md`:**
+
+- "Migrations — additive-only discipline" section with the ✅/❌ patterns matrix (ADD column/table/index/nullable FK = safe; DROP/RENAME/NOT-NULL-without-backfill/type-narrowing = unsafe).
+- The 3-release expand-contract pattern for destructive changes (Expand → Backfill+cutover → Contract).
+- Escape hatch language for genuine emergencies: coordinate with team, disable auto-rollback for that deploy, treat as one-way with a maintenance window.
+- Rule #5 added to the numbered rules list: `ALWAYS write additive-only migrations — use expand-contract for destructive changes`.
+
+**Files:**
+
+- `rules/database.md` — new "Migrations" section + new rule #5; existing rules renumbered 6→9.
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.25 → 5.26.
+
+**Existing installs:** run `./setup.sh --upgrade` from your Forge clone to pick up the updated rule. No code changes; no behavior changes; just guidance Claude (and humans) will read when designing migrations.
+
 ## 5.25 — 2026-05-10 · Diagnose downstream-gitignored `.claude/` in STATE-INIT
 
 When a downstream project gitignores `.claude/` wholesale (instead of only `.claude/local/` per Forge convention), `/new-feature` and `/fix-bug` create worktrees based on `origin/<default-branch>` that don't have any Forge files (no template, no hooks, no rules in the worktree's tracked tree). The STATE-INIT block emitted `STATE_TEMPLATE_NOT_FOUND_AT:<path>` with remediation "re-run `setup.sh --upgrade`" — but setup writes to the parent's working tree, which still won't propagate to the worktree branch under the same gitignore rule. Field-confirmed in `msai-v2` (`.gitignore:2` had `.claude/` from initial commit, pre-Forge adoption); the agent improvised an off-script `cp -R .claude/` from the parent into the worktree to recover.
