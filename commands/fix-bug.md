@@ -209,12 +209,24 @@ done
 # v5.21 PermissionRequest hook on .claude/local/**). The Write tool creates missing
 # parent dirs in one call — verified empirically against Claude Code 2.1.138.
 ROOT="$(git rev-parse --show-toplevel)"
+# Resolve parent working tree (== ROOT in main repo; == main repo working tree from
+# a worktree). git rev-parse --git-common-dir returns ".git" (relative) in main repo,
+# and absolute path to main repo's .git dir from inside a worktree. Strip trailing
+# /.git only when the path is absolute — relative ".git" means we're already in main.
+COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+case "$COMMON_DIR" in
+    /*) PARENT_ROOT="${COMMON_DIR%/.git}" ;;
+    *)  PARENT_ROOT="$ROOT" ;;
+esac
 TEMPLATE="$ROOT/.claude/state.template.md"
 [ ! -f "$TEMPLATE" ] && TEMPLATE="$ROOT/state.template.md"  # Forge-internal fallback
 if [ -f "$ROOT/.claude/local/state.md" ]; then
     echo "STATE_EXISTS"
 elif [ -f "$TEMPLATE" ]; then
     echo "STATE_NEEDS_INIT_FROM:$TEMPLATE"
+elif [ -f "$PARENT_ROOT/.gitignore" ] && grep -qE '^[[:space:]]*/?\.claude/?[[:space:]]*$' "$PARENT_ROOT/.gitignore"; then
+    echo "STATE_TEMPLATE_DOWNSTREAM_GITIGNORED:$PARENT_ROOT"
+    echo "  ⚠ .claude/ is gitignored in $PARENT_ROOT/.gitignore — Forge files never reach worktrees." >&2
 else
     echo "STATE_TEMPLATE_NOT_FOUND_AT:$TEMPLATE"
     echo "  ⚠ state template not found — workflow tracking cannot proceed without it." >&2
@@ -228,6 +240,12 @@ fi
 - `STATE_NEEDS_INIT_FROM:<path>` →
   1. Use the **Read** tool on `<path>` (the template path from the sentinel line)
   2. Use the **Write** tool to create `.claude/local/state.md` with the template's content. Write creates the missing `.claude/local/` parent directory in the same call. The v5.21 PermissionRequest hook auto-approves writes to `.claude/local/**`, so this won't prompt.
+- `STATE_TEMPLATE_DOWNSTREAM_GITIGNORED:<parent_root>` → STOP. The downstream repo at `<parent_root>` gitignores `.claude/` (the entire directory). The Forge convention gitignores only `.claude/local/`, so worktrees based on `origin/<default-branch>` reach a tree without any Forge files. Tell the user to fix the gitignore and commit `.claude/`:
+  1. Edit `<parent_root>/.gitignore` — remove the bare `.claude/` line. Keep `.claude/local/` (it should already be there from setup; if not, add it).
+  2. `cd <parent_root> && git add .gitignore .claude/ && git commit -m "chore: track .claude/ per Forge convention" && git push origin <default-branch>`
+  3. From inside the active worktree: `git fetch origin && git rebase origin/<default-branch>` to pick up the new commit.
+  4. Retry `/new-feature` (or `/fix-bug`).
+     Don't synthesize a state.md, and don't copy `.claude/` from the parent into the worktree — that's a band-aid that masks the misconfiguration; future worktrees will need the same workaround AND other Forge surfaces (hooks, settings) still won't reach the worktree's tracked tree.
 - `STATE_TEMPLATE_NOT_FOUND_AT:<path>` → STOP and tell the user that the Forge state template is missing — their checkout looks incomplete. Tell them to re-run `setup.sh --upgrade` from their Forge clone (typically `~/claude-codex-forge`; on Windows: `setup.ps1 -Upgrade`). Don't synthesize a state.md; the workflow tracking gates depend on the template's structure.
 
 **Step 2c: read state.md** via the Read tool.

@@ -2,6 +2,26 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.25 — 2026-05-10 · Diagnose downstream-gitignored `.claude/` in STATE-INIT
+
+When a downstream project gitignores `.claude/` wholesale (instead of only `.claude/local/` per Forge convention), `/new-feature` and `/fix-bug` create worktrees based on `origin/<default-branch>` that don't have any Forge files (no template, no hooks, no rules in the worktree's tracked tree). The STATE-INIT block emitted `STATE_TEMPLATE_NOT_FOUND_AT:<path>` with remediation "re-run `setup.sh --upgrade`" — but setup writes to the parent's working tree, which still won't propagate to the worktree branch under the same gitignore rule. Field-confirmed in `msai-v2` (`.gitignore:2` had `.claude/` from initial commit, pre-Forge adoption); the agent improvised an off-script `cp -R .claude/` from the parent into the worktree to recover.
+
+**Root cause:** STATE-INIT only checked the worktree path for the template, then fell through to a generic "missing template" message that pointed at the wrong fix.
+
+**The fix:** STATE-INIT now resolves the parent working tree via `git rev-parse --git-common-dir` (relative `.git` in main repo, absolute path to main's `.git` from a worktree — strip `/.git` only when absolute) and inspects the parent's `.gitignore`. If a bare `.claude/` line is present, it emits a new sentinel `STATE_TEMPLATE_DOWNSTREAM_GITIGNORED:<parent_root>` with the correct remediation: edit `.gitignore` to keep only `.claude/local/`, then `git add .gitignore .claude/ && git commit && git push`, then `git fetch && git rebase` from inside the worktree, then retry. Don't `cp -R` from the parent — that masks the misconfiguration and other Forge surfaces (hooks paths in `settings.json`, `default-branch.sh` lookup, workflow-gate hook reading `.claude/local/state.md`) still won't reach the worktree's tracked tree.
+
+**Codex independent investigation** confirmed the diagnosis and recommended option C (loud preflight with correct remediation message) over option B (auto-mirror the parent's `.claude/` into the worktree): auto-mirror would silently paper over the contract violation while leaving ~6 other surfaces silently broken at downstream-PR-review time.
+
+**Bonus fix — AC-2e false positive:** the Step 2b prose-scanning regex (`tests/template/test-contracts.sh`) for "redirect to .claude/" was missing the `(^|[[:space:]])` anchor that its sibling cp/mv and sed regexes have. As a result, any literal `>` in prose (e.g. inside `<placeholder>` syntax) followed eventually by `.claude/` on the same line falsely matched. Tightened all three call sites (AC-2b shell-block scan, AC-2c self-test, AC-2e prose scan) to use the anchored form, and added AC-2d — a negative self-test that asserts known-good `<placeholder>` prose patterns are NOT matched. AC-2c still passes its 16 synthetic positives.
+
+**Files:**
+
+- `commands/new-feature.md`, `commands/fix-bug.md` — STATE-INIT block adds parent-root resolution + `.gitignore` detection + new sentinel branch (block remains byte-identical between the two files); Step 2b prose adds bullet for the new sentinel with the structural fix.
+- `tests/template/test-contracts.sh` — three redirect regexes anchored consistently; AC-2d negative-test added with 2 false-positive fixtures.
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.24 → 5.25.
+
+**Existing installs:** run `./setup.sh --upgrade` from your Forge checkout to pick up the updated commands. Restart Claude Code afterward — slash-command definitions reload at session start. **If your downstream `.gitignore` has a bare `.claude/` line** (deviating from Forge convention), fix that next: replace with `.claude/local/`, `git add .claude/ .mcp.json`, commit, push.
+
 ## 5.24 — 2026-05-09 · State-init via Write tool — zero prompts on `/new-feature` & `/fix-bug`
 
 `/new-feature` and `/fix-bug` were prompting users for permission on `cp` commands writing to `.claude/local/state.md` — both the script-level `cp` on first init AND agent-improvised `cp main_state worktree_state` on every state write. Field-confirmed in `msai-v2`.

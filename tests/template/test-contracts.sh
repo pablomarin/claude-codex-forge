@@ -743,7 +743,10 @@ for cmd_file in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
     #    so it covers all quoting forms: `> .claude/x`, `> "$VAR/.claude/x"`,
     #    and `> "$VAR"/.claude/x` (the close-quote-then-unquoted-path form).
     #    [^|&]* still stops at pipes/chains. Note: 2>&1 doesn't match (no .claude/).
-    elif echo "$code" | grep -qE '[12]?>>?[[:space:]]*[^|&]*\.claude/'; then
+    #    Anchor: (^|[[:space:]]) before [12]? — same as the cp/mv and sed regexes
+    #    above. Without it, any literal `>` (e.g. inside `<placeholder>` syntax in
+    #    prose) followed eventually by `.claude/` on the same line falsely matches.
+    elif echo "$code" | grep -qE '(^|[[:space:]])[12]?>>?[[:space:]]*[^|&]*\.claude/'; then
         found_violation="stdout/stderr redirect to .claude/"
     fi
     if [ -n "$found_violation" ]; then
@@ -783,7 +786,7 @@ for line in "${synthetic_violations[@]}"; do
     matched=""
     if echo "$line" | grep -qE '(^|[[:space:]])(cp|mv|ln|install|dd|touch|tee|rm|rmdir|mkdir)[[:space:]][^|&]*\.claude/'; then matched=1
     elif echo "$line" | grep -qE '(^|[[:space:]])sed[[:space:]]+-i[^|&]*\.claude/'; then matched=1
-    elif echo "$line" | grep -qE '[12]?>>?[[:space:]]*[^|&]*\.claude/'; then matched=1
+    elif echo "$line" | grep -qE '(^|[[:space:]])[12]?>>?[[:space:]]*[^|&]*\.claude/'; then matched=1
     fi
     if [ -z "$matched" ]; then
         fail "AC-2b detector missed known-bad pattern: $line"
@@ -791,6 +794,29 @@ for line in "${synthetic_violations[@]}"; do
     fi
 done
 [ $detector_failures -eq 0 ] && pass "AC-2b detector catches all ${#synthetic_violations[@]} synthetic violations"
+
+# AC-2d Negative self-test: prose patterns that LOOK like they could trip the
+# redirect regex (e.g. `<placeholder>` syntax with `.claude/` later in the line)
+# must NOT match. Without the (^|[[:space:]]) anchor on the redirect regex,
+# these false positives broke AC-2e. Locked in here so a future regex change
+# that drops the anchor surfaces immediately.
+start_test "state-init-write-detector-rejects-known-false-positives"
+false_positives=(
+    # Markdown placeholder syntax where `>` is preceded by alphanumerics,
+    # not whitespace — appears legitimately in prose like Step 2b bullets.
+    '`STATE_TEMPLATE_DOWNSTREAM_GITIGNORED:<parent_root>` → STOP. Edit `.claude/local/state.md`'
+    'worktrees based on `origin/<default-branch>` reach a tree without any Forge files; commit `.claude/`'
+)
+fp_failures=0
+for line in "${false_positives[@]}"; do
+    if echo "$line" | grep -qE '(^|[[:space:]])(cp|mv|ln|install|dd|touch|tee|rm|rmdir|mkdir)[[:space:]][^|&]*\.claude/' \
+       || echo "$line" | grep -qE '(^|[[:space:]])sed[[:space:]]+-i[^|&]*\.claude/' \
+       || echo "$line" | grep -qE '(^|[[:space:]])[12]?>>?[[:space:]]*[^|&]*\.claude/'; then
+        fail "AC-2d detector falsely matched non-violation: $line"
+        fp_failures=$((fp_failures+1))
+    fi
+done
+[ $fp_failures -eq 0 ] && pass "AC-2d detector rejects all ${#false_positives[@]} known false positives"
 
 # AC-2e: the Step 2b prose section (after STATE-INIT-END through the next "###"
 # subsection or "**Step 2c") must instruct the agent to use Read+Write tools and
@@ -832,7 +858,7 @@ for cmd_file in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
         fail "$name Step 2b prose contains a banned write command targeting .claude/"
     elif echo "$step2b_code" | grep -qE '(^|[[:space:]])sed[[:space:]]+-i[^|&]*\.claude/'; then
         fail "$name Step 2b prose contains sed -i targeting .claude/"
-    elif echo "$step2b_code" | grep -qE '[12]?>>?[[:space:]]*[^|&]*\.claude/'; then
+    elif echo "$step2b_code" | grep -qE '(^|[[:space:]])[12]?>>?[[:space:]]*[^|&]*\.claude/'; then
         fail "$name Step 2b prose contains a redirect to .claude/"
     else
         pass "$name Step 2b prose uses Read+Write tools, no banned writes"
