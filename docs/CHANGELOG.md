@@ -2,6 +2,35 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.27 — 2026-05-12 · `/council` chairman output reliability (`--output-last-message`)
+
+**Bug:** When `/council` ran the chairman call, `codex exec` dumped everything to stdout — the CLI banner, the entire 16KB+ prompt echoed back, the `codex` marker, the response, and a `tokens used` footer. The skill said "Display the chairman's output VERBATIM" but never told Claude HOW to extract the response from that verbose capture. Claude improvised with ad-hoc `tail`/`grep`/`sed` patterns. When extraction failed it reported "Codex chairman exited without producing analysis on both attempts" — even when the verdict was sitting cleanly in the file, fully structured. Field-confirmed today: a single `/council` session in `actbl-he` produced 21KB and 4.3KB chairman responses (both with complete `## Council Verdict` / `### Minority Report` sections) and both were narrated as failures.
+
+**Root cause:** parsing fragility, not a codex bug. The codex CLI has shipped `--output-last-message <FILE>` since [PR #4644](https://github.com/openai/codex/pull/4644) (2025-10-03, stable in 0.124+). The flag writes ONLY the assistant's final message — no banner, no prompt echo, no markers, no footer. The skill simply wasn't using it.
+
+**The fix:** add `--output-last-message /tmp/council_<role>_response.txt` to all four codex invocations in `skills/council/references/peer-review-protocol.md` (Codex advisor, Chairman, Contrarian gate). Keep the existing `> /tmp/council_<role>.txt 2>&1` redirect as a forensic full-log capture. `SKILL.template.md` Step 5 now instructs Claude to read the verdict from the OLM file first, with the full log as a diagnostic fallback when the OLM file is missing or empty.
+
+**Two-file pattern (per codex call):**
+
+- `<role>_response.txt` — written only at clean shutdown by `--output-last-message`; contains JUST the assistant text. Read this for the verdict.
+- `<role>.txt` — full stdout+stderr capture; contains banner + prompt echo + everything codex printed + any shim/error diagnostics before exit. Read this when the response file is missing or 0-byte to distinguish "codex failed mid-stream" from "codex succeeded but my parser was wrong" — the exact misread that motivated this PR.
+
+**Empirically verified:** ran the patched dispatch through the PTY shim against codex 0.125.0. Prompt: "Say only the word HELLO and nothing else." Response file = 5 bytes containing `HELLO`. Full log = 513 bytes containing banner + prompt echo + response + `tokens used` footer. Direct codex (no shim) hung forever on no-TTY (`"Reading additional input from stdin..."`), confirming the PTY shim is still load-bearing — this fix is additive, not a shim replacement. Retirement canary for codex 0.129+ unchanged (2026-05-21).
+
+**Failure-mode contract** (encoded in `peer-review-protocol.md` "Output Capture" section):
+
+- Response file non-empty → codex succeeded; use the text verbatim.
+- Response file missing or empty → codex did NOT reach clean shutdown. Quote the relevant excerpt from the full log (look for the `codex` marker, partial response sections, or `codex-pty:`-prefixed shim errors) and surface it to the user. Do NOT silently fall back to chairman-less mode without showing them what codex actually said.
+
+**Files:**
+
+- `skills/council/references/peer-review-protocol.md` — new "Output Capture" section explaining the two-file pattern once; `--output-last-message` + stdout redirect added to all 3 code blocks (Codex advisor, chairman, contrarian gate).
+- `skills/council/SKILL.template.md` — Step 5 instructs Claude to read response from OLM file with full-log fallback for forensics; documents the new failure-mode messaging.
+- `tests/template/test-contracts.sh` — new contract assert: `peer-review-protocol.md` must reference `--output-last-message`.
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.26 → 5.27.
+
+**Existing installs:** run `./setup.sh --upgrade` from your Forge clone to pick up the updated council skill. No code changes; the user-visible behavior change is that `/council` failure narration becomes accurate — no more false "exited without producing analysis" when codex actually succeeded.
+
 ## 5.26 — 2026-05-10 · Database migration discipline rule (additive-only + expand-contract)
 
 `rules/database.md` had no migration guidance — a real gap for any team running rolling deploys with image rollback. Surfaced when `msai-v2` codified its own deploy-pipeline-specific version and the question came up: "is this generally applicable?" Yes — it's the standard production-hygiene pattern (any team whose deploy pipeline rolls back image SHAs but not DB schema wants additive-only migrations so old code can talk to the newer schema after a rollback).

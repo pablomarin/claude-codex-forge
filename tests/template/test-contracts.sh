@@ -926,6 +926,18 @@ for f in "$COUNCIL_SKILL" "$COUNCIL_PROTOCOL"; do
 done
 
 # ---------------------------------------------------------------------------
+# Contract: --output-last-message flag — peer-review-protocol.md must use the
+# flag in its codex exec invocations so the chairman/advisor response is
+# captured to a clean file (avoids the prior misread where Claude couldn't
+# extract the response from the verbose stdout capture and falsely reported
+# "exited without producing analysis"). v5.27.
+# ---------------------------------------------------------------------------
+start_test "codex-pty-olm contract: peer-review-protocol.md uses --output-last-message"
+
+assert_contains "$COUNCIL_PROTOCOL" "output-last-message" \
+    "peer-review-protocol.md uses --output-last-message flag"
+
+# ---------------------------------------------------------------------------
 # Contract: setup.sh + setup.ps1 install the shim files via explicit copy_file
 # calls (per plan §2.5 — no auto-traversal).
 # ---------------------------------------------------------------------------
