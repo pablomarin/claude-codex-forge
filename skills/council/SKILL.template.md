@@ -97,9 +97,16 @@ Construct the chairman prompt with:
 - Instruction to produce the Chairman Output Format from `references/output-schema.md`
 - Explicit instruction: "You MUST include a Minority Report section if any advisor OBJECTed"
 
-Run via `.claude/hooks/lib/codex-pty.sh exec` with `reasoning_effort=xhigh`. Timeout: 1200000ms.
+Run via `.claude/hooks/lib/codex-pty.sh exec` with `reasoning_effort=xhigh` AND `--output-last-message /tmp/council_chairman_response.txt`. Redirect stdout+stderr to `/tmp/council_chairman.txt`. Timeout: 1200000ms.
 
-See `references/peer-review-protocol.md` for the exact chairman command.
+See `references/peer-review-protocol.md` for the exact chairman command and the two-file Output Capture pattern.
+
+**Reading the chairman's response:**
+
+After the call completes, read `/tmp/council_chairman_response.txt`:
+
+- **Non-empty** → that's the chairman's verdict. Use it verbatim in Step 6.
+- **Empty or missing** → codex did NOT produce a final agent message. Inspect `/tmp/council_chairman.txt` (full stdout capture) for partial response sections, shim diagnostics (lines prefixed `codex-pty:`), or error excerpts. Surface the diagnosis to the user — quote the relevant excerpt rather than reporting a generic "exited without producing analysis." Then offer the user-as-chairman fallback so they can decide whether to retry, accept the partial output, or proceed manually.
 
 **If Codex unavailable:**
 
