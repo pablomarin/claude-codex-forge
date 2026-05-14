@@ -227,26 +227,99 @@ See above ("EXP 2 result (absence test — proposed by Codex, run same session)"
 
 ### EXP 3 result
 
-Skipped — Option A off the table per EXP 1 FAIL; AskUserQuestion-pause question moot for Option B (forge controls its own Stop-hook release semantics).
+Originally skipped (Option A off the table per EXP 1 FAIL). However, after Pablo's strategic pivot toward using NATIVE `/goal` instead of building Option B, this question became newly-critical and was run as a refined EXP 4 (AskUserQuestion pause/resume). EXP 5 (subagent dispatch) and EXP 6 (multi-action turn) were added.
 
-### Final decision (2026-05-13 EOD)
+### EXP 4 result (AskUserQuestion pause/resume — added during pivot)
 
-- **Option chosen:** **B** — forge-native loop using existing Stop hook + system-reminder primitives.
+**Date run:** 2026-05-13 (late session, after pivot)
+
+**Setup:** Pablo typed `/goal complete only after Pablo answers any question I ask via AskUserQuestion. Call AskUserQuestion once with a simple yes/no.` Claude called AskUserQuestion with a yes/no about overlay visibility. Pablo answered "No — overlay gone" via the AskUserQuestion UI.
+
+**Observed:**
+
+- Goal paused while AskUserQuestion modal was up (loop blocked on user input — expected)
+- During the modal, the `◎ /goal active` overlay was **hidden** (Pablo confirmed)
+- After Pablo answered, the loop **did not auto-clear** — kept producing Stop hook feedback
+- First verifier pass: flagged ambiguity (`stop_hook_active: false` in metadata despite hook clearly firing)
+- Second verifier pass: returned "Condition status: SATISFIED" — but goal still did not auto-clear cleanly
+- Pablo had to manually type `/goal clear` to escape
+
+**Verdict:** **WEAK PASS / PARTIAL FAIL** — AskUserQuestion works mechanically inside `/goal` but does NOT reliably trigger goal completion.
+
+**Critical implication for the forge:**
+
+**Do NOT make AskUserQuestion answers the direct `/goal` completion condition.** They don't reliably auto-clear. Instead, use the pattern: **AskUserQuestion is the TRIGGER; a side-effect file or Bash output is the GATE.** The agent asks the user (via AskUserQuestion), then on a YES answer runs a Bash command that produces transcript evidence (e.g., `touch .claude/state/pr-authorized`) which the verifier matches.
+
+### EXP 5 result (subagent dispatch — added during pivot)
+
+**Date run:** 2026-05-13 (late session)
+
+**Setup:** Pablo typed `/goal complete only after Claude has dispatched an Explore subagent (Agent tool with subagent_type=Explore) and the subagent's results appear in this transcript.` Claude called `Agent(subagent_type="Explore", prompt="find any 3 .md files in this repo")`. Subagent returned 3 file paths.
+
+**Observed:**
+
+- Subagent dispatch worked cleanly via Agent tool
+- Subagent results (3 markdown file paths) appeared in transcript
+- First verifier pass: SAME `stop_hook_active: false` transient state bug as EXP 4 (this time on the very first Stop hook fire, before any AskUserQuestion involvement — so the bug is general, not AskUserQuestion-specific)
+- Second verifier pass: **self-corrected** (`stop_hook_active: true` restored), recognized the condition as satisfied
+- Goal **auto-cleared cleanly** — overlay stopped (Pablo confirmed)
+
+**Verdict:** **PASS** with state-instability caveat — auto-clear works for transcript-evidence completion; the lifecycle state bug is real but transient (self-resolves within 1-2 verifier passes).
+
+### EXP 6 — deferred
+
+Multi-action-turn test (Bash + Read + assistant output in one turn). Not run; EXP 4 + EXP 5 already produced the critical lessons. Marked optional for future curiosity.
+
+### Combined picture (EXP 4 + EXP 5)
+
+The contrast between EXP 4 and EXP 5 is decisive:
+
+| Completion trigger | Auto-clear? |
+|---|---|
+| **AskUserQuestion answer** | ❌ Does NOT auto-clear; required manual `/goal clear` |
+| **Subagent dispatch + transcript evidence** | ✅ Auto-clears cleanly |
+| **Bash output in transcript** (proto-EXP-2) | ✅ Auto-clears cleanly |
+| **User types literal token in message** (EXP 2 absence) | ✅ Auto-clears cleanly |
+
+**Rule for the forge:** `/goal` reliably auto-clears on **transcript evidence**. It does NOT reliably auto-clear on **AskUserQuestion answers alone**.
+
+The `stop_hook_active: false` transient bug appears after **any lifecycle event** (after `/goal clear`, after AskUserQuestion modal closes). Self-resolves within 1-2 verifier passes. Forge hooks need to tolerate this.
+
+### Final decision (2026-05-13 EOD, REVISED post-pivot)
+
+- **Option chosen:** **HYBRID** — supersedes pure Option B.
+  - **Loop driver:** Anthropic's native `/goal` (not a forge-built loop).
+  - **Evidence-bundle:** Forge ships `build-evidence.sh` + Stop-hook integration that emits JSON into the transcript each turn. The `/goal` verifier (Haiku) reads it.
+  - **Human-input pattern:** AskUserQuestion → on user YES, agent produces concrete file/Bash evidence in the same turn (so the verifier sees both the answer AND deterministic state).
+  - **One-shot rule:** ONE `/goal` per session (set after PRD, runs to PR-ready). Resetting mid-session triggers the lifecycle state bug.
 - **Rationale:**
-  - EXP 1 FAIL ruled out Option A architecturally (nested `/goal` in a slash command body does not dispatch).
-  - EXP 2 STRICT WAIT removed the verifier-rubber-stamp risk concern, validating that transcript-based verification CAN be made robust — but Option B's deterministic-bash primary path was already preferred for stability reasons (Anthropic could change `/goal` semantics; the forge owns its own loop).
-  - Bonus mechanic discovery: `/goal` is architecturally Stop-hook + system-reminder + verifier — the forge already owns the first two primitives. Option B isn't a reimplementation; it's the SAME pattern with a deterministic verifier instead of an LLM-class one.
-- **Next workstream:**
-  1. Build `build-evidence.sh` (+ PowerShell parity) — JSON evidence bundle as the deterministic verifier.
-  2. Extend `check-state-updated.sh` to inject a system reminder + block stop when `/forge-goal` is active and `all_gates_green=false`.
-  3. Define `/forge-goal` as a tiny launcher (flips an "active" flag in state.md; records budget).
-  4. Define structured reviewer output schema with `PLAN_REVISION_REQUIRED` flag (needed regardless to close the "agent rationalizes broken plan" risk).
-- **Open lifecycle/UX concerns (raised by Codex):**
-  - State cleanup on completion / abort
-  - Budget exhaustion messaging (must fail loudly, not silently)
-  - Duplicate reminder suppression (one reminder per turn, not stacked)
-  - Failure messaging — what does "stuck" look like vs `/goal`'s overlay?
-  These need explicit treatment in the Option B PRD/plan.
+  - EXP 1 FAIL: `/forge-goal` can't be auto-invoked from a slash command. Forge must INSTRUCT the user to type `/goal` manually with the right condition. Acceptable UX.
+  - EXP 2 STRICT WAIT: native verifier is robust enough to read transcript evidence reliably.
+  - EXP 4 WEAK PASS: AskUserQuestion answers ≠ auto-clear. Use file-evidence pattern.
+  - EXP 5 PASS: subagent dispatch works fine inside `/goal`. Council and verify-e2e fan-out is viable.
+  - Anthropic's docs explicitly position `/goal` and Stop-hook as peer choices ("Pick based on what should start the next turn"). Using `/goal` as the driver is the endorsed path.
+  - Forge code surface DRAMATICALLY smaller than pure Option B.
+- **Next workstream (revised):**
+  1. Build `build-evidence.sh` (+ PowerShell parity) — JSON evidence bundle, runs in Stop hook each turn.
+  2. Define the `/goal` condition template the forge prints at end of PRD phase (e.g., *"complete when build-evidence.sh JSON shows all_gates_green=true AND PR is open AND .claude/state/pr-authorized exists"*).
+  3. Update the workflow phases to produce concrete transcript evidence at each gate transition (file writes, Bash command outputs, state.md updates).
+  4. Define structured reviewer output schema with `PLAN_REVISION_REQUIRED` flag.
+  5. `/prd:discuss forge-goal` to formalize the user-facing flow.
+- **Lifecycle / UX concerns:**
+  - **No reset:** ONE `/goal` per session — don't reset mid-flow (lifecycle state bug)
+  - **AskUserQuestion pattern:** never use answer-alone as completion gate; always pair with file/Bash evidence
+  - **Transient verifier state bug:** hooks must tolerate 1-2 weird passes after lifecycle events
+  - **Budget exhaustion messaging:** native `/goal` handles this; forge inherits Anthropic's UX
+  - **Compaction:** not tested; per docs, condition survives `--resume` with counters reset; needs real-world validation
+  - **Stale evidence poisoning (Codex, post-EXP-5 review):** Every `build-evidence.sh` JSON blob MUST include a goal-session nonce or timestamp. The verifier (via the condition phrasing) must require evidence produced AFTER the current `/goal` was set, AND after any AskUserQuestion answer. Without this, the verifier could rubber-stamp on stale JSON from before a reviewer raised a P1 finding or before the human-input gate. Concrete pattern: the Stop hook injects `{"session_nonce": "<uuid>", "produced_at": "<unix-ts>", ...}` and the `/goal` condition references both — *"complete when the most recent evidence JSON in transcript has session_nonce=<X> and all_gates_green=true and produced_at > <goal-set-time>"*.
+
+### Codex's review track (chronological)
+
+1. **Initial design exploration:** AMBER verdict with 3 constraints (artifact verifier, human-gate boundary, plan-revision escape valve) + 3 unnamed risks (budget evasion, state.md corruption, reviewer collusion).
+2. **3-experiment plan stress-test:** APPROVE-WITH-REFINEMENT (split EXP 2 outcomes, reorder so EXP 1 runs first).
+3. **Post-EXP-1 sanity check:** Agreed EXP 1 FAIL solid; flagged the absence-test as Codex's contribution.
+4. **Post-pivot strategic re-evaluation (after Pablo proposed native `/goal`):** PIVOT-NOW. Better product fit, worse control fit. Named 9 newly-critical unknowns.
+5. **Post-EXP-4+5 sanity check (this entry):** REFINE. Agreed with HYBRID superseding pure Option B. Critical addition: stale-evidence-poisoning safeguard via session nonce + produced-at timestamp.
 
 ---
 
