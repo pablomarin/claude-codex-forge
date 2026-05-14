@@ -1,5 +1,9 @@
 # forge-goal Layer 1 Implementation Plan
 
+> **Version:** 1.1 — revised after Codex plan-review-loop FAIL on v1.0 (8 P1 + 3 P2). All findings addressed; see "Revision History" at end of document.
+
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship `build-evidence.sh` (and PowerShell parity) plus Stop-hook integration as a standalone improvement to claude-codex-forge. This is Layer 1 of the `/forge-goal` two-layer delivery — it strengthens existing gate hooks even before Layer 2 lands.
@@ -38,6 +42,50 @@
 
 ---
 
+## Test Conventions (used across all tasks)
+
+The forge's test harness lives at `tests/template/lib.sh`. Real API (verified against the source — do NOT invent names):
+
+- `init_counters` — call once at the top of each test script.
+- `start_test "name"` — section header.
+- `assert_equals "$actual" "$expected" "msg"` — value equality.
+- `assert_contains "$file_path" "$needle" "msg"` — **`$file_path` must be a real file**; substring is searched via `grep -qF`.
+- `assert_matches "$file_path" "$regex" "msg"` — regex via `grep -qE`.
+- `assert_file_exists "$path" "msg"`, `assert_hash_equals "$path" "$hash" "msg"`.
+- `scratch_dir [prefix]` — returns a temp dir auto-cleaned via the harness's EXIT trap. Use this; do NOT call `mktemp -d` directly.
+- `fail "msg"` / `pass "msg"` — explicit pass/fail.
+
+**Canonical capture-and-assert pattern** (used in every task below):
+
+```bash
+scratch=$(scratch_dir bevidence)
+mkdir -p "$scratch/.claude/local"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/<fixture>.md" \
+   "$scratch/.claude/local/state.md"
+
+OUT="$scratch/.out"
+( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+EXIT=$?
+
+assert_equals "$EXIT" "0" "exit code is 0"
+assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_BEGIN" "begin marker present"
+```
+
+Subsequent tasks reference this pattern by name ("canonical capture"); they show only the deltas.
+
+**Bash portability (macOS 3.2 baseline):**
+- NO `declare -A` (associative arrays) — use awk grouping or paired-line scans.
+- NO `\s` in `grep -E` / `sed -E` — use `[[:space:]]`.
+- NO `<<<` heredoc with `set -u` traps — use pipes.
+- `stat` is GNU on Linux, BSD on macOS — use the detection pattern from `hooks/check-workflow-gates.sh` lines 151-154.
+
+**Cross-file pattern reuse:**
+- `## Workflow` block extraction uses the awk pattern already in `hooks/check-state-updated.sh` line 100: `awk '/^## Workflow$/{flag=1;next} flag && /^## /{flag=0} flag'`.
+- `HEAD == branch_off` skip behavior comes from `hooks/check-workflow-gates.sh` lines 139-142 — copy verbatim to preserve trunk/main behavior.
+- Field extraction from Markdown tables uses `grep -E '\|[[:space:]]*Field[[:space:]]*\|' | head -1 | awk -F'|' '{print $3}' | xargs` (per existing pattern in check-state-updated.sh lines 101-104).
+
+---
+
 ## Tasks
 
 ### Task 1: Test Fixtures
@@ -55,32 +103,48 @@
 mkdir -p tests/template/fixtures/state-md-build-evidence
 ```
 
-- [ ] **Step 2: Write `empty-state.md` (no active workflow, no goal)**
+- [ ] **Step 2: Write `empty-state.md` — no active workflow, no goal**
 
-Content:
+Content (matches the canonical `state.template.md` Markdown-table format):
+
 ```markdown
+# Project State (per-developer, gitignored)
+
 ## Workflow
 
-- Command: none
-- Phase: idle
-- Next step: (no active workflow)
+| Field     | Value |
+| --------- | ----- |
+| Command   | none  |
+| Phase     |       |
+| Next step |       |
+
+### Checklist
+
+(no active workflow)
 ```
 
-- [ ] **Step 3: Write `with-goal-session.md` (goal active, workflow at Phase 1)**
+- [ ] **Step 3: Write `with-goal-session.md` — goal active, workflow at Phase 1**
 
 Content:
+
 ```markdown
+# Project State (per-developer, gitignored)
+
 ## /goal session
 
-- nonce: `aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`
-- workflow_command: `/new-feature foo`
-- issued_at: `2026-05-14T18:00:00Z`
+| Field            | Value                                  |
+| ---------------- | -------------------------------------- |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee   |
+| workflow_command | /new-feature foo                       |
+| issued_at        | 2026-05-14T18:00:00Z                   |
 
 ## Workflow
 
-- Command: /new-feature foo
-- Phase: 1 — Research
-- Next step: Run research-first agent
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 1 — Research      |
+| Next step | Run research-first|
 
 ### Checklist
 
@@ -94,9 +158,11 @@ Content:
 - [ ] PR authorized
 ```
 
-- [ ] **Step 4: Write `mid-workflow.md` (some checklist items checked)**
+Note: `## /goal session` uses the same Markdown-table convention as `## Workflow` so the existing parsing pattern (awk block-extract + grep field-row) can be reused without inventing new parser logic.
 
-Same as `with-goal-session.md` but with the first 4 checklist items checked, and reviewer rows with placeholder SHAs:
+- [ ] **Step 4: Write `mid-workflow.md` — some checklist items checked, reviewer rows with placeholder SHAs**
+
+Same `## /goal session` and `## Workflow` table headers as Step 3. The `### Checklist` becomes:
 
 ```markdown
 ### Checklist
@@ -111,20 +177,39 @@ Same as `with-goal-session.md` but with the first 4 checklist items checked, and
 - [ ] PR authorized
 ```
 
-(Use a known fake SHA `abc123def` — tests use this as the "expected HEAD" to assert against.)
+Fake SHA `abc123def` is intentional — tests assert that `reviewer_gate.clean_same_iteration=false` when the SHA doesn't match the real HEAD.
 
-- [ ] **Step 5: Write `pr-ready.md` (all checklist done, reviewer rows match HEAD)**
+- [ ] **Step 5: Write `pr-ready.md` — all checklist done; tests substitute real HEAD at fixture-prep time**
 
-Same structure with all checkboxes `[x]` and reviewer head SHAs that the test will assert match git HEAD (test substitutes the actual HEAD at fixture-prep time — see test helper in Task 2 below).
+Use a placeholder token `__HEAD_SHA__` in the reviewer rows and the future `## PR authorization` line. Test setup substitutes the real `git rev-parse HEAD` value into the fixture before copying it into the scratch state.md.
 
-- [ ] **Step 6: Write `pr-authorized.md` (with `## PR authorization` section)**
+Content (just the checklist shown; full file mirrors Step 3 structure):
 
-Adds:
+```markdown
+### Checklist
+
+- [x] Research complete
+- [x] Plan written
+- [x] Plan approved
+- [x] Tests written (TDD)
+- [x] Code review iteration 1 — codex clean — head=`__HEAD_SHA__`
+- [x] Code review iteration 1 — pr-toolkit clean — head=`__HEAD_SHA__`
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+- [x] PR authorized
+```
+
+- [ ] **Step 6: Write `pr-authorized.md` — adds `## PR authorization` section to the `mid-workflow.md` base**
+
+Append at the end of the `mid-workflow.md` content:
+
 ```markdown
 ## PR authorization
 
 - [x] PR creation authorized — `2026-05-14T18:30:00Z` — nonce=`aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` — head=`abc123def`
 ```
+
+Tests for "authorization rejected on stale head" use this fixture as-is (`abc123def` won't match the test's real HEAD).
+Tests for "authorization accepted" use a sed substitution to replace `abc123def` with the real HEAD.
 
 - [ ] **Step 7: Commit fixtures**
 
@@ -144,24 +229,30 @@ git commit -m "test(fixtures): state.md variants for build-evidence parser"
 
 - [ ] **Step 1: Write the failing test (empty fixture → markers + empty JSON)**
 
-Append to `tests/template/test-build-evidence.sh` (after the standard header pattern from `test-hooks.sh`):
+Create `tests/template/test-build-evidence.sh` with the standard header (see existing `test-hooks.sh` lines 1-14 for the source-lib.sh pattern), then add:
 
 ```bash
+init_counters
+
 start_test "build-evidence.sh emits markers + valid JSON on empty state.md"
 
-scratch=$(scratch_dir)
+# Canonical capture-and-assert pattern (see "Test Conventions" above).
+scratch=$(scratch_dir bevidence)
 mkdir -p "$scratch/.claude/local"
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
    "$scratch/.claude/local/state.md"
 
-OUTPUT=$(cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
+OUT="$scratch/.out"
+( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
 EXIT=$?
 
-assert_eq "$EXIT" "0" "exit code is 0"
-assert_contains "$OUTPUT" "FORGE_GOAL_EVIDENCE_BEGIN" "begin marker present"
-assert_contains "$OUTPUT" "FORGE_GOAL_EVIDENCE_END" "end marker present"
-assert_contains "$OUTPUT" '"type":"forge_goal_evidence"' "type field present"
-assert_contains "$OUTPUT" '"schema_version":1' "schema_version is 1"
+assert_equals "$EXIT" "0" "exit code is 0"
+assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_BEGIN" "begin marker present"
+assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_END" "end marker present"
+assert_contains "$OUT" '"type":"forge_goal_evidence"' "type field present"
+assert_contains "$OUT" '"schema_version":1' "schema_version is 1"
+
+# Print summary (existing forge convention from lib.sh — auto-prints via EXIT trap).
 ```
 
 - [ ] **Step 2: Run the test, verify it fails**
@@ -251,11 +342,11 @@ mkdir -p "$scratch/.claude/local"
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/with-goal-session.md" \
    "$scratch/.claude/local/state.md"
 
-OUTPUT=$(cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
+OUT="$scratch/.out"; ( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
 
-assert_contains "$OUTPUT" '"session_nonce":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"' \
+assert_contains "$OUT" '"session_nonce":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"' \
     "session_nonce extracted"
-assert_contains "$OUTPUT" '"workflow_command":"/new-feature foo"' \
+assert_contains "$OUT" '"workflow_command":"/new-feature foo"' \
     "workflow_command extracted"
 ```
 
@@ -272,33 +363,29 @@ STATE_MD=".claude/local/state.md"
 
 parse_goal_session() {
     # Echo "nonce|workflow_command" or empty if section missing.
-    # Section format:
+    # Section format (Markdown table — matches the fixture / state.template convention):
     #   ## /goal session
-    #   - nonce: `<uuid>`
-    #   - workflow_command: `<cmd>`
+    #
+    #   | Field            | Value                 |
+    #   | ---------------- | --------------------- |
+    #   | nonce            | <uuid>                |
+    #   | workflow_command | <cmd>                 |
+    #   | issued_at        | <ts>                  |
     [ -f "$STATE_MD" ] || return 0
 
-    local nonce=""
-    local cmd=""
-    local in_section=0
+    # CRLF normalize then awk-scope (mirrors check-state-updated.sh line 100 pattern).
+    # The tr -d '\r' MUST precede awk so anchors like `^## /goal session$` match
+    # regardless of editor-saved line endings (Codex P1.7 fix).
+    local block
+    block=$(tr -d '\r' < "$STATE_MD" \
+            | awk '/^## \/goal session$/{flag=1;next} flag && /^## /{flag=0} flag')
 
-    while IFS= read -r line; do
-        if [[ "$line" =~ ^##\ +/goal\ session ]]; then
-            in_section=1
-            continue
-        fi
-        if [ $in_section -eq 1 ] && [[ "$line" =~ ^##\  ]]; then
-            # Next section started; stop.
-            break
-        fi
-        if [ $in_section -eq 1 ]; then
-            if [[ "$line" =~ ^-\ +nonce:\ +\`([^\`]+)\` ]]; then
-                nonce="${BASH_REMATCH[1]}"
-            elif [[ "$line" =~ ^-\ +workflow_command:\ +\`([^\`]+)\` ]]; then
-                cmd="${BASH_REMATCH[1]}"
-            fi
-        fi
-    done < "$STATE_MD"
+    # Extract field values from Markdown table rows: `| Field | Value |`
+    local nonce cmd
+    nonce=$(echo "$block" | grep -E '\|[[:space:]]*nonce[[:space:]]*\|' \
+            | head -1 | awk -F'|' '{print $3}' | xargs)
+    cmd=$(echo "$block" | grep -E '\|[[:space:]]*workflow_command[[:space:]]*\|' \
+            | head -1 | awk -F'|' '{print $3}' | xargs)
 
     printf '%s|%s' "$nonce" "$cmd"
 }
@@ -367,13 +454,13 @@ mkdir -p "$scratch/.claude/local"
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/mid-workflow.md" \
    "$scratch/.claude/local/state.md"
 
-OUTPUT=$(cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
+OUT="$scratch/.out"; ( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
 
-assert_contains "$OUTPUT" '"phase":"1 — Research"' "phase parsed"
-assert_contains "$OUTPUT" '"checklist_total":8' "total count correct"
-assert_contains "$OUTPUT" '"checklist_done":4' "done count correct"
+assert_contains "$OUT" '"phase":"1 — Research"' "phase parsed"
+assert_contains "$OUT" '"checklist_total":8' "total count correct"
+assert_contains "$OUT" '"checklist_done":4' "done count correct"
 # reviewer_gate.clean_same_iteration must be FALSE — head=abc123def doesn't match git HEAD
-assert_contains "$OUTPUT" '"reviewer_gate":{"clean_same_iteration":false' \
+assert_contains "$OUT" '"reviewer_gate":{"clean_same_iteration":false' \
     "reviewer gate not clean (head mismatch)"
 ```
 
@@ -381,99 +468,124 @@ assert_contains "$OUTPUT" '"reviewer_gate":{"clean_same_iteration":false' \
 
 - [ ] **Step 3: Implement parser additions**
 
-Add to `hooks/build-evidence.sh`:
+Add to `hooks/build-evidence.sh`. The parser MUST scope to the `## Workflow` block exactly as the existing `check-state-updated.sh` (line 100) does, so migrated content elsewhere in state.md (stray `| Command |` rows, orphan `### Checklist` sections) can't poison counts. Reviewer rows are extracted in a SEPARATE awk pass to avoid declare -A (Bash 3.2 portability):
 
 ```bash
 parse_workflow() {
-    # Emits: phase|next_step|total|done|reviewer_iteration_lines (NL-separated)
-    # via a tempfile to avoid shell escaping pain. Returns the tempfile path.
-    [ -f "$STATE_MD" ] || { echo ""; return 0; }
+    # Output (printed to stdout, pipe-friendly key|value lines):
+    #   PHASE|<phase>
+    #   NEXT|<next_step>
+    #   TOTAL|<int>
+    #   DONE|<int>
+    [ -f "$STATE_MD" ] || return 0
 
-    local tmp; tmp=$(mktemp)
     awk '
         BEGIN { phase=""; next_step=""; total=0; done=0; in_workflow=0; in_checklist=0 }
-        /^## Workflow/ { in_workflow=1; next }
-        /^## / && in_workflow { in_workflow=0; in_checklist=0 }
-        in_workflow && /^- Phase: / { sub(/^- Phase: /, ""); phase=$0; next }
-        in_workflow && /^- Next step: / { sub(/^- Next step: /, ""); next_step=$0; next }
-        /^### Checklist/ { in_checklist=1; next }
-        in_checklist && /^- \[x\]/ { done++; total++ }
-        in_checklist && /^- \[ \]/ { total++ }
-        in_checklist && /Code review iteration .* head=`[^`]+`/ {
-            print "REVIEWER|" $0 >> "/dev/stderr"
+        /^## Workflow$/        { in_workflow=1; next }
+        in_workflow && /^## /  { in_workflow=0; in_checklist=0 }                     # leaving Workflow
+        in_workflow && /^### Checklist/ { in_checklist=1; next }
+        in_workflow && /^### / && !/^### Checklist/ { in_checklist=0 }               # other subsection inside Workflow
+        # Markdown table: |  Phase  | <value> |
+        in_workflow && /\|[[:space:]]*Phase[[:space:]]*\|/ {
+            n=split($0,a,"|"); phase=a[3]; gsub(/^[[:space:]]+|[[:space:]]+$/,"",phase)
         }
+        in_workflow && /\|[[:space:]]*Next step[[:space:]]*\|/ {
+            n=split($0,a,"|"); next_step=a[3]; gsub(/^[[:space:]]+|[[:space:]]+$/,"",next_step)
+        }
+        in_workflow && in_checklist && /^- \[x\]/ { done++; total++ }
+        in_workflow && in_checklist && /^- \[ \]/ { total++ }
         END {
             print "PHASE|" phase
             print "NEXT|" next_step
             print "TOTAL|" total
             print "DONE|" done
         }
-    ' "$STATE_MD" > "$tmp" 2> "${tmp}.reviewers"
-
-    echo "$tmp"
+    ' "$STATE_MD"
 }
 ```
 
-Add a separate function for reviewer gate evaluation:
+Reviewer-rows pass (single-stream awk; Bash 3.2 safe; uses paired-line state, not associative arrays):
 
 ```bash
 compute_reviewer_gate() {
-    # Args: $1 = reviewers tmpfile, $2 = current HEAD sha
+    # Args: $1 = current HEAD sha
     # Output: "clean_same_iteration|matched_iteration|matched_head"
-    local reviewers_file="$1"
-    local head_sha="$2"
-
-    [ -f "$reviewers_file" ] || { echo "false||"; return 0; }
+    local head_sha="$1"
+    [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
     [ -z "$head_sha" ] && { echo "false||"; return 0; }
 
-    # Group reviewer lines by iteration number; require BOTH codex AND pr-toolkit
-    # clean for the same iteration at the current HEAD.
-    local clean="false"
-    local match_iter=""
-    local match_head=""
+    # Single awk pass: scope to ## Workflow / ### Checklist, extract reviewer rows
+    # matching head_sha, track per-iteration which tools cleared. When both
+    # codex AND pr-toolkit have cleared the same iteration at head_sha, emit
+    # the iteration number and stop. Output: "<iter>" or empty.
+    local matched
+    matched=$(awk -v head="$head_sha" '
+        BEGIN { in_workflow=0; in_checklist=0 }
+        /^## Workflow$/        { in_workflow=1; next }
+        in_workflow && /^## /  { in_workflow=0; in_checklist=0 }
+        in_workflow && /^### Checklist/ { in_checklist=1; next }
+        in_workflow && /^### / && !/^### Checklist/ { in_checklist=0 }
+        in_workflow && in_checklist && /^- \[x\][[:space:]]+Code review iteration [0-9]+ — / {
+            # Parse: - [x] Code review iteration <iter> — <tool> clean — head=`<sha>`
+            line=$0
+            if (match(line, /iteration [0-9]+/)) {
+                iter=substr(line, RSTART+10, RLENGTH-10)
+            } else { next }
+            if (line ~ /codex clean/)      { tool="codex" }
+            else if (line ~ /pr-toolkit clean/) { tool="pr-toolkit" }
+            else { next }
+            if (match(line, /head=`[0-9a-f]+`/)) {
+                sha=substr(line, RSTART+6, RLENGTH-7)
+            } else { next }
+            if (sha != head) { next }
 
-    declare -A iter_codex iter_toolkit
+            # Track: counters[iter][tool] via a flat key (no assoc arrays needed in gawk-portable mode)
+            key=iter "|" tool
+            seen[key]=1
 
-    while IFS= read -r line; do
-        # Match: - [x] Code review iteration N — <tool> clean — head=`<sha>`
-        if [[ "$line" =~ \[x\][[:space:]]+Code\ review\ iteration\ ([0-9]+)\ +—\ +([a-z\-]+)\ +clean\ +—\ +head=\`([0-9a-f]+)\` ]]; then
-            local iter="${BASH_REMATCH[1]}"
-            local tool="${BASH_REMATCH[2]}"
-            local sha="${BASH_REMATCH[3]}"
+            codex_key=iter "|codex"
+            tk_key=iter "|pr-toolkit"
+            if (seen[codex_key] && seen[tk_key]) { print iter; exit 0 }
+        }
+    ' "$STATE_MD")
 
-            if [ "$sha" = "$head_sha" ]; then
-                case "$tool" in
-                    codex)      iter_codex["$iter"]="$sha" ;;
-                    pr-toolkit) iter_toolkit["$iter"]="$sha" ;;
-                esac
-            fi
-        fi
-    done < "$reviewers_file"
-
-    for iter in "${!iter_codex[@]}"; do
-        if [ -n "${iter_toolkit[$iter]:-}" ]; then
-            clean="true"
-            match_iter="$iter"
-            match_head="${iter_codex[$iter]}"
-            break
-        fi
-    done
-
-    echo "${clean}|${match_iter}|${match_head}"
+    if [ -n "$matched" ]; then
+        echo "true|${matched}|${head_sha}"
+    else
+        echo "false||"
+    fi
 }
 ```
 
-Wire these into the JSON emission. Add:
+(Note: `seen[key]` works in both gawk and mawk; we avoid bash associative arrays entirely.)
+
+Wire these into the JSON emission:
 
 ```bash
-WF_PARSED_FILE=$(parse_workflow)
+WF=$(parse_workflow)
+PHASE=$(echo "$WF"      | grep '^PHASE|' | head -1 | cut -d'|' -f2-)
+NEXT_STEP=$(echo "$WF"  | grep '^NEXT|'  | head -1 | cut -d'|' -f2-)
+TOTAL_COUNT=$(echo "$WF"| grep '^TOTAL|' | head -1 | cut -d'|' -f2-)
+DONE_COUNT=$(echo "$WF" | grep '^DONE|'  | head -1 | cut -d'|' -f2-)
+TOTAL_COUNT=${TOTAL_COUNT:-0}
+DONE_COUNT=${DONE_COUNT:-0}
+
 HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
-RG_RESULT=$(compute_reviewer_gate "${WF_PARSED_FILE}.reviewers" "$HEAD_SHA")
+RG_RESULT=$(compute_reviewer_gate "$HEAD_SHA")
 RG_CLEAN="${RG_RESULT%%|*}"
-# ... (extract phase, next_step, total, done from WF_PARSED_FILE)
+RG_REST="${RG_RESULT#*|}"
+RG_ITER="${RG_REST%%|*}"
+RG_HEAD="${RG_REST##*|}"
 ```
 
-And in the JSON output, add the `state` and `reviewer_gate` keys.
+And in the JSON output, add the `state` and `reviewer_gate` objects:
+
+```bash
+printf '"state":{"phase":"%s","next_step":"%s","checklist_total":%d,"checklist_done":%d},' \
+    "$PHASE" "$NEXT_STEP" "$TOTAL_COUNT" "$DONE_COUNT"
+printf '"reviewer_gate":{"clean_same_iteration":%s,"matched_iteration":"%s","matched_head":"%s"},' \
+    "$RG_CLEAN" "$RG_ITER" "$RG_HEAD"
+```
 
 - [ ] **Step 4: Run test, verify PASS**
 
@@ -513,11 +625,11 @@ mkdir -p .claude/local
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
    .claude/local/state.md
 
-OUTPUT=$(bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
+OUT="$scratch/.out"; bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
 
 EXPECTED_HEAD=$(git rev-parse HEAD)
-assert_contains "$OUTPUT" "\"head_sha\":\"$EXPECTED_HEAD\"" "head_sha matches git"
-assert_contains "$OUTPUT" '"branch":"' "branch field present"
+assert_contains "$OUT" "\"head_sha\":\"$EXPECTED_HEAD\"" "head_sha matches git"
+assert_contains "$OUT" '"branch":"' "branch field present"
 ```
 
 Then a second test for `gh` graceful absence:
@@ -532,10 +644,10 @@ mkdir -p .claude/local
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
    .claude/local/state.md
 
-OUTPUT=$(bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
+OUT="$scratch/.out"; bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
 EXIT=$?
-assert_eq "$EXIT" "0" "exit code 0 even when no PR exists"
-assert_contains "$OUTPUT" '"pr_state":{"exists":false' "pr_state.exists=false"
+assert_equals "$EXIT" "0" "exit code 0 even when no PR exists"
+assert_contains "$OUT" '"pr_state":{"exists":false' "pr_state.exists=false"
 ```
 
 Third test for E2E report freshness (reuse existing tests/e2e/reports convention):
@@ -552,9 +664,9 @@ echo "report" > tests/e2e/reports/2026-05-14-test.md  # newer than branch-off
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
    .claude/local/state.md
 
-OUTPUT=$(bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
-assert_contains "$OUTPUT" '"e2e_report":{"present":true' "e2e present"
-assert_contains "$OUTPUT" '"fresh_for_head":true' "e2e fresh"
+OUT="$scratch/.out"; bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+assert_contains "$OUT" '"e2e_report":{"present":true' "e2e present"
+assert_contains "$OUT" '"fresh_for_head":true' "e2e fresh"
 ```
 
 - [ ] **Step 2: Run, verify FAIL**
@@ -574,6 +686,14 @@ if [ -n "$(git status --porcelain 2>/dev/null)" ]; then DIRTY="true"; fi
 BRANCH_OFF=$(git merge-base HEAD main 2>/dev/null \
             || git merge-base HEAD master 2>/dev/null \
             || echo "")
+
+# Critical: copy the HEAD==branch_off skip from check-workflow-gates.sh lines 139-142.
+# If HEAD itself IS the branch-off commit (user on main/master), there is no
+# meaningful "produced on this branch" comparison. Force the skip path so we
+# don't regress trunk-only workflows.
+if [ -n "$BRANCH_OFF" ] && [ -n "$HEAD_SHA" ] && [ "$BRANCH_OFF" = "$HEAD_SHA" ]; then
+    BRANCH_OFF=""  # forces E2E freshness to be skipped (see below)
+fi
 
 BRANCH_OFF_TS=""
 if [ -n "$BRANCH_OFF" ]; then
@@ -673,9 +793,9 @@ sed "s/abc123def/$EXPECTED_HEAD/g" \
     "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
     > .claude/local/state.md
 
-OUTPUT=$(bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
-assert_contains "$OUTPUT" '"pr_authorization":{"authorized":true' "authorized=true"
-assert_contains "$OUTPUT" "\"head_sha_at_authorization\":\"$EXPECTED_HEAD\"" \
+OUT="$scratch/.out"; bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+assert_contains "$OUT" '"pr_authorization":{"authorized":true' "authorized=true"
+assert_contains "$OUT" "\"head_sha_at_authorization\":\"$EXPECTED_HEAD\"" \
     "authorization head matches"
 ```
 
@@ -692,8 +812,8 @@ mkdir -p .claude/local
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
    .claude/local/state.md
 
-OUTPUT=$(bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
-assert_contains "$OUTPUT" '"pr_authorization":{"authorized":false' \
+OUT="$scratch/.out"; bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+assert_contains "$OUT" '"pr_authorization":{"authorized":false' \
     "authorization false when head mismatched"
 ```
 
@@ -711,7 +831,8 @@ parse_pr_authorization() {
     [ -z "$GOAL_NONCE" ] && { echo "false|||"; return 0; }
 
     local line
-    line=$(grep -E '^-\s*\[x\]\s+PR creation authorized' "$STATE_MD" | head -1)
+    # NOTE: use [[:space:]] not \s — BSD/macOS grep -E doesn't support \s.
+    line=$(grep -E '^-[[:space:]]*\[x\][[:space:]]+PR creation authorized' "$STATE_MD" | head -1)
 
     if [ -z "$line" ]; then
         echo "false|||"
@@ -767,31 +888,61 @@ start_test "build-evidence.sh computes pr_ready and all_gates_green"
 # Since gh pr view requires a real PR, this test focuses on the LOGIC by using
 # a wrapper that fakes gh output. Easiest: a stub gh in PATH for the test.
 
-scratch=$(scratch_dir)
-cd "$scratch"; git init -q -b main; git config user.email t@t; git config user.name t
-echo x > a; git add a; git commit -qm init
+scratch=$(scratch_dir bevidence)
+cd "$scratch"
+git init -q -b main; git config user.email t@t; git config user.name t
+echo x > a; git add a; git commit -qm init   # this is branch-off
+BRANCH_OFF_TS=$(git log -1 --format=%ct HEAD)
 git checkout -q -b feature
 echo y > b; git add b; git commit -qm feature
 
 EXPECTED_HEAD=$(git rev-parse HEAD)
 mkdir -p .claude/local tests/e2e/reports
-echo "report" > tests/e2e/reports/2026-05-14-test.md  # fresh
 
-# Stub gh that returns a fake "open PR"
+# Force E2E report mtime to be strictly LATER than the branch-off timestamp.
+# Without this, the test flakes on fast machines where the report and the
+# branch-off commit share the same epoch second.
+REPORT=tests/e2e/reports/2026-05-14-test.md
+echo "report" > "$REPORT"
+FUTURE_TS=$(( BRANCH_OFF_TS + 60 ))
+if touch -t "$(date -r "$FUTURE_TS" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$FUTURE_TS" +%Y%m%d%H%M.%S)" "$REPORT" 2>/dev/null; then :; else
+    # BSD `date -r` needs -t differently; use a fallback that just bumps mtime forward.
+    sleep 2 && touch "$REPORT"  # crude but reliable
+fi
+
+# Stub gh that VALIDATES its args before returning JSON. A too-broad stub
+# (Codex P2) hides shape regressions in the caller; this one asserts the
+# subcommand actually got `--json` with the expected fields.
 mkdir bin
-cat > bin/gh <<EOF
+cat > bin/gh <<'STUB'
 #!/usr/bin/env bash
-echo '{"number":42,"url":"https://x/pr/42","state":"OPEN","headRefOid":"$EXPECTED_HEAD","baseRefName":"main","headRefName":"feature"}'
-EOF
+# Validate: invocation should be `gh pr view --json number,url,state,headRefOid,baseRefName,headRefName`
+if [ "$1" != "pr" ] || [ "$2" != "view" ] || [ "$3" != "--json" ]; then
+    echo "FAKE GH: unexpected args: $*" >&2
+    exit 99
+fi
+# Validate ALL 6 expected fields are in the --json comma-list (any order).
+# Codex P2.2: previously this only required number+headRefOid which let shape
+# regressions slip through.
+for required in number url state headRefOid baseRefName headRefName; do
+    case ",$4," in
+        *,"$required",*) ;;
+        *) echo "FAKE GH: missing required json field: $required (got: $4)" >&2; exit 99 ;;
+    esac
+done
+echo "{\"number\":42,\"url\":\"https://x/pr/42\",\"state\":\"OPEN\",\"headRefOid\":\"__HEAD__\",\"baseRefName\":\"main\",\"headRefName\":\"feature\"}"
+STUB
+sed -i.bak "s/__HEAD__/$EXPECTED_HEAD/g" bin/gh && rm bin/gh.bak
 chmod +x bin/gh
 
+# Substitute real HEAD into the pr-authorized.md fixture (placeholder is `abc123def`)
 sed "s/abc123def/$EXPECTED_HEAD/g" \
     "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
     > .claude/local/state.md
 
-OUTPUT=$(PATH="$scratch/bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
-assert_contains "$OUTPUT" '"pr_ready":true' "pr_ready=true with full state"
-assert_contains "$OUTPUT" '"all_gates_green":true' "all_gates_green=true"
+OUT="$scratch/.out"; PATH="$scratch/bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+assert_contains "$OUT" '"pr_ready":true' "pr_ready=true with full state"
+assert_contains "$OUT" '"all_gates_green":true' "all_gates_green=true"
 ```
 
 Second test for `progress_fingerprint` stability:
@@ -812,7 +963,7 @@ OUT2=$(bash "$REPO_ROOT/hooks/build-evidence.sh" 2>&1)
 
 FP1=$(echo "$OUT1" | grep -o '"progress_fingerprint":"[^"]*"')
 FP2=$(echo "$OUT2" | grep -o '"progress_fingerprint":"[^"]*"')
-assert_eq "$FP1" "$FP2" "fingerprint stable across identical runs"
+assert_equals "$FP1" "$FP2" "fingerprint stable across identical runs"
 ```
 
 - [ ] **Step 2: Run, verify FAIL**
@@ -842,19 +993,49 @@ if [ "$DONE_COUNT" -eq "$TOTAL_COUNT" ] && [ "$PR_READY" = "true" ]; then
     ALL_GATES="true"
 fi
 
-# progress_fingerprint: SHA256 of subset
-# Subset = workflow phase + next + checklist contents + reviewer rows + PR auth state
-FP_INPUT=$(printf '%s\n%s\n' "$PHASE" "$NEXT_STEP")
-FP_INPUT="${FP_INPUT}$(grep -E '^- \[[ x]\]' "$STATE_MD" 2>/dev/null | sort)"
-FP_INPUT="${FP_INPUT}$(grep -E '^- \[[ x]\]\s+PR creation authorized' "$STATE_MD" 2>/dev/null)"
+# progress_fingerprint: SHA256 of a SCOPED, ORDER-PRESERVING subset.
+#
+# DESIGN: the fingerprint must be deterministic across runs on identical state.
+# Mistakes to avoid (Codex flagged on v1.0):
+#   1. Don't sort — order is part of the signal (checklist ordering matters)
+#   2. Don't whole-file-grep — migrated stray rows poison the hash
+#   3. Always normalize CRLF → LF so Windows-edited state.md matches macOS
+#   4. Use an explicit, byte-stable delimiter so adjacent fields don't fuse
+#
+# Subset (in this order):
+#   - phase (from parse_workflow PHASE| output)
+#   - next_step
+#   - Checklist rows IN ORDER from inside `## Workflow ### Checklist` only
+#   - The ## PR authorization line (if any) — see Task 6's parser
+DELIM=$'\x1f'  # ASCII Unit Separator — never appears in markdown
+{
+    printf '%s%s' "$PHASE" "$DELIM"
+    printf '%s%s' "$NEXT_STEP" "$DELIM"
+    # CRLF normalize FIRST (before awk), so the `^## Workflow$` anchor matches
+    # regardless of editor-saved line endings (Codex P1.7 fix v2 — tr-then-awk,
+    # not awk-then-tr).
+    tr -d '\r' < "$STATE_MD" 2>/dev/null | awk '
+        /^## Workflow$/ { in_w=1; next }
+        in_w && /^## / { in_w=0; in_c=0 }
+        in_w && /^### Checklist/ { in_c=1; next }
+        in_w && /^### / && !/^### Checklist/ { in_c=0 }
+        in_w && in_c && /^- \[[ x]\]/ { print }
+    ' | tr '\n' "$DELIM"
+    # PR authorization line (whole-file ok — there's only ever one ## PR authorization section).
+    # Same tr-d '\r' BEFORE grep to keep anchors stable.
+    tr -d '\r' < "$STATE_MD" 2>/dev/null \
+        | grep -E '^- \[[xX]\][[:space:]]+PR creation authorized' \
+        | head -1
+} > "${SCRATCH:-/tmp}/fp.input.$$" 2>/dev/null
 
 if command -v sha256sum >/dev/null 2>&1; then
-    PROGRESS_FP=$(printf '%s' "$FP_INPUT" | sha256sum | awk '{print $1}')
+    PROGRESS_FP=$(sha256sum "${SCRATCH:-/tmp}/fp.input.$$" 2>/dev/null | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then
-    PROGRESS_FP=$(printf '%s' "$FP_INPUT" | shasum -a 256 | awk '{print $1}')
+    PROGRESS_FP=$(shasum -a 256 "${SCRATCH:-/tmp}/fp.input.$$" 2>/dev/null | awk '{print $1}')
 else
     PROGRESS_FP=""
 fi
+rm -f "${SCRATCH:-/tmp}/fp.input.$$"
 ```
 
 Add to JSON output:
@@ -878,59 +1059,64 @@ git commit -m "feat(hooks): derive pr_ready, all_gates_green, progress_fingerpri
 
 ### Task 8: PowerShell Parity — `build-evidence.ps1`
 
+**PowerShell test harness reality:** This repo has `hooks/*.ps1` files but does NOT have a runtime PowerShell test framework (`tests/template/lib.ps1` does not exist, nor do any `test-*.ps1` runners). The existing forge tests its `.ps1` files via `tests/template/test-lint.sh` (parse-only via `pwsh -NoProfile`) and via `tests/template/test-contracts.sh` (cross-file string contracts).
+
+Therefore Layer 1 ships PowerShell coverage as **Bash-driven cross-platform smoke**, not as a parallel PS test harness. Building a full `lib.ps1` is out of scope for Layer 1 — it's a multi-feature need that deserves its own workstream.
+
 **Files:**
 - Create: `hooks/build-evidence.ps1`
-- Create: `tests/template/test-build-evidence.ps1`
+- Modify: `tests/template/test-build-evidence.sh` — append a cross-platform smoke block
+- Modify: `tests/template/test-lint.sh` — confirm `build-evidence.ps1` is parse-checked (likely already covered by glob)
 
-- [ ] **Step 1: Write failing PowerShell test (mirror of Task 2 skeleton test)**
+- [ ] **Step 1: Write the failing cross-platform smoke test**
 
-`tests/template/test-build-evidence.ps1`:
+Append to `tests/template/test-build-evidence.sh`:
 
-```powershell
-# Mirrors tests/template/test-build-evidence.sh structure.
-# Run from repo root: pwsh tests/template/test-build-evidence.ps1
+```bash
+# --- PowerShell parity smoke (only runs if pwsh is on PATH) ---
+if command -v pwsh >/dev/null 2>&1; then
+    start_test "build-evidence.ps1 emits markers + valid JSON (Bash-driven smoke)"
 
-$ErrorActionPreference = 'Stop'
-$REPO_ROOT = (Get-Item "$PSScriptRoot/../..").FullName
-. "$REPO_ROOT/tests/template/lib.ps1"  # If exists; else inline helpers.
+    scratch=$(scratch_dir bevidence-ps)
+    mkdir -p "$scratch/.claude/local"
+    cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+       "$scratch/.claude/local/state.md"
 
-Start-Test "build-evidence.ps1 emits markers + valid JSON on empty state.md"
+    OUT="$scratch/.out"
+    ( cd "$scratch" && pwsh -NoProfile -File "$REPO_ROOT/hooks/build-evidence.ps1" ) >"$OUT" 2>&1
+    EXIT=$?
 
-$scratch = New-ScratchDir
-New-Item -ItemType Directory -Force -Path "$scratch/.claude/local" | Out-Null
-Copy-Item "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" `
-          "$scratch/.claude/local/state.md"
-
-Push-Location $scratch
-$output = pwsh -NoProfile -File "$REPO_ROOT/hooks/build-evidence.ps1" 2>&1 | Out-String
-$exit = $LASTEXITCODE
-Pop-Location
-
-Assert-Eq $exit 0 "exit code is 0"
-Assert-Contains $output "FORGE_GOAL_EVIDENCE_BEGIN" "begin marker"
-Assert-Contains $output "FORGE_GOAL_EVIDENCE_END" "end marker"
-Assert-Contains $output '"type":"forge_goal_evidence"' "type field"
+    assert_equals "$EXIT" "0" "ps1 exit code is 0"
+    assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_BEGIN" "ps1 begin marker present"
+    assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_END"   "ps1 end marker present"
+    assert_contains "$OUT" '"type":"forge_goal_evidence"' "ps1 type field present"
+else
+    start_test "build-evidence.ps1 smoke (skipped — pwsh not installed)"
+    pass "skipped (no pwsh)"
+fi
 ```
 
-- [ ] **Step 2: Run test (FAIL — script doesn't exist)**
+This is consistent with how existing forge tests handle .ps1: parse-test universally (test-lint.sh), runtime-test conditionally on `pwsh` availability.
 
-- [ ] **Step 3: Implement PowerShell skeleton**
+- [ ] **Step 2: Run, verify FAIL — `build-evidence.ps1` doesn't exist**
+
+- [ ] **Step 3: Implement the PowerShell skeleton**
 
 `hooks/build-evidence.ps1`:
 
 ```powershell
-# hooks/build-evidence.ps1 — emit FORGE_GOAL_EVIDENCE JSON to STDERR.
+# hooks/build-evidence.ps1 — emit FORGE_GOAL_EVIDENCE JSON.
 # Mirrors hooks/build-evidence.sh. See that file for design notes.
 
 $ErrorActionPreference = 'Continue'
 
-$NowUnix = [int][double]::Parse((Get-Date -UFormat %s))
+# Unix epoch (works on Windows PowerShell 5.1 and PowerShell 7+).
+$NowUnix = [int][Math]::Floor( (Get-Date - (Get-Date '1970-01-01Z').ToUniversalTime()).TotalSeconds )
 
-# Skeleton: emit minimal JSON
-$json = @"
-{"type":"forge_goal_evidence","schema_version":1,"produced_at_unix":$NowUnix,"session_nonce":null,"workflow_command":null,"warnings":[],"errors":[]}
-"@
+# Hand-built JSON (avoid ConvertTo-Json — it adds whitespace and isn't byte-stable).
+$json = "{`"type`":`"forge_goal_evidence`",`"schema_version`":1,`"produced_at_unix`":$NowUnix,`"session_nonce`":null,`"workflow_command`":null,`"warnings`":[],`"errors`":[]}"
 
+# Emit to STDERR via System.Console — preserves stream identity across PS hosts.
 [Console]::Error.WriteLine("FORGE_GOAL_EVIDENCE_BEGIN")
 [Console]::Error.WriteLine($json)
 [Console]::Error.WriteLine("FORGE_GOAL_EVIDENCE_END")
@@ -938,9 +1124,15 @@ $json = @"
 exit 0
 ```
 
-- [ ] **Step 4: Run test, verify PASS**
+Important: do NOT use the `??` null-coalescing operator (PS 7+ only); use `if (-not $x) { ... }` for 5.1 compat. Do NOT use `Get-Date -UFormat %s` (inconsistent across hosts); use the explicit epoch math above.
 
-- [ ] **Step 5: Port remaining parsers from .sh to .ps1**
+- [ ] **Step 4: Run smoke, verify PASS**
+
+```bash
+bash tests/template/test-build-evidence.sh
+```
+
+- [ ] **Step 5: Port remaining parsers from .sh → .ps1**
 
 This is the bulk of the work. Port each parser function (`parse_goal_session`, `parse_workflow`, `parse_pr_authorization`) and external state queries (`git`, `gh`, E2E mtime) to PowerShell. Use `Get-Content`, `Select-String`, `[regex]` for parsing.
 
@@ -995,11 +1187,11 @@ cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
 
 # Simulate Claude Code calling the hook with stop_hook_active=true
 INPUT='{"stop_hook_active":true,"transcript_path":"/tmp/x"}'
-cd "$scratch" && OUTPUT=$(echo "$INPUT" | bash "$REPO_ROOT/hooks/check-state-updated.sh" 2>&1)
+cd "$scratch"; OUT="$scratch/.out"; echo "$INPUT" | bash "$REPO_ROOT/hooks/check-state-updated.sh" >"$OUT" 2>&1
 EXIT=$?
 
-assert_eq "$EXIT" "0" "hook exits 0"
-assert_contains "$OUTPUT" "FORGE_GOAL_EVIDENCE_BEGIN" "evidence markers emit despite stop_hook_active"
+assert_equals "$EXIT" "0" "hook exits 0"
+assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_BEGIN" "evidence markers emit despite stop_hook_active"
 ```
 
 - [ ] **Step 2: Run, verify FAIL**
@@ -1034,28 +1226,41 @@ fi
 
 - [ ] **Step 5: Mirror change in `hooks/check-state-updated.ps1`**
 
-Same pattern in PowerShell:
+Same pattern in PowerShell. Three constraints (Codex P1 — v1.0 violated all three):
+
+1. **Do NOT use `??`** — PS 5.1 doesn't support null-coalescing. Use `if (-not $env:CLAUDE_PROJECT_DIR) { ... }`.
+2. **Do NOT pipe to `Out-Null`** — that consumes STDERR including the evidence markers we just produced. Let STDERR pass through naturally.
+3. **Run under the current PowerShell host** — don't hard-assume `pwsh`. Use `& $script` (which inherits the host) instead of spawning a new `pwsh` process.
 
 ```powershell
 # Near top, after parsing stdin JSON:
-$evidenceScript = Join-Path ($env:CLAUDE_PROJECT_DIR ?? (Get-Location)) ".claude/hooks/build-evidence.ps1"
+$projectDir = $env:CLAUDE_PROJECT_DIR
+if (-not $projectDir) { $projectDir = (Get-Location).Path }
+$evidenceScript = Join-Path $projectDir ".claude/hooks/build-evidence.ps1"
 if (Test-Path $evidenceScript) {
-    try { pwsh -NoProfile -File $evidenceScript 2>&1 | Out-Null } catch {}
+    # Invoke under the current PS host. STDERR (where build-evidence emits
+    # FORGE_GOAL_EVIDENCE markers) passes through to the calling Claude Code
+    # process and into the transcript.
+    try {
+        & $evidenceScript
+    } catch {
+        # Non-blocking: write a single warning to stderr so a failure is visible
+        # in the transcript without breaking the Stop hook.
+        [Console]::Error.WriteLine("WARN: build-evidence.ps1 failed: $($_.Exception.Message)")
+    }
 }
 
 # Then the existing stop_hook_active early-return.
 ```
 
-(Note: the script's STDERR is what gets passed through, so capture-then-rewrite may not be needed; verify in PowerShell tests.)
-
-- [ ] **Step 6: Run both Bash and PowerShell hook tests**
+- [ ] **Step 6: Run cross-platform tests**
 
 ```bash
-bash tests/template/test-hooks.sh
-pwsh tests/template/test-hooks.ps1
+bash tests/template/test-hooks.sh         # includes the new evidence-on-stop_hook_active test
+bash tests/template/test-build-evidence.sh  # includes the conditional pwsh smoke (Task 8)
 ```
 
-Both green.
+Both green. (No separate `test-hooks.ps1` exists; the Bash-driven smoke in test-build-evidence.sh is the PowerShell-side runtime check for v1.)
 
 - [ ] **Step 7: Commit**
 
@@ -1099,18 +1304,53 @@ Copy-TemplateFile (Join-Path $hooksDir "build-evidence.ps1") ".claude\hooks\buil
 
 - [ ] **Step 3: Add cross-file marker contract to `tests/template/test-contracts.sh`**
 
+The contract must check THREE things (Codex P2 — v1.0 only checked the producer):
+
+1. **Producer:** both `build-evidence.{sh,ps1}` contain the markers
+2. **Consumer:** `check-state-updated.{sh,ps1}` calls build-evidence BEFORE the `stop_hook_active` early-return (text-order check is acceptable)
+3. **Schema shape:** the producer emits the required top-level keys (string match on the literal key tokens)
+
 ```bash
-start_test "FORGE_GOAL_EVIDENCE markers are stable across producer/consumer"
+start_test "FORGE_GOAL_EVIDENCE producer/consumer/schema contract"
 
-# Producer
-grep -q "FORGE_GOAL_EVIDENCE_BEGIN" "$REPO_ROOT/hooks/build-evidence.sh" \
-    || fail "build-evidence.sh must contain FORGE_GOAL_EVIDENCE_BEGIN marker"
-grep -q "FORGE_GOAL_EVIDENCE_END" "$REPO_ROOT/hooks/build-evidence.sh" \
-    || fail "build-evidence.sh must contain FORGE_GOAL_EVIDENCE_END marker"
+# (1) Producer markers
+for f in "$REPO_ROOT/hooks/build-evidence.sh" "$REPO_ROOT/hooks/build-evidence.ps1"; do
+    assert_file_exists "$f" "producer exists: $f"
+    assert_contains "$f" "FORGE_GOAL_EVIDENCE_BEGIN" "$(basename "$f") begin marker"
+    assert_contains "$f" "FORGE_GOAL_EVIDENCE_END"   "$(basename "$f") end marker"
+done
 
-# PowerShell parity
-grep -q "FORGE_GOAL_EVIDENCE_BEGIN" "$REPO_ROOT/hooks/build-evidence.ps1" \
-    || fail "build-evidence.ps1 must contain FORGE_GOAL_EVIDENCE_BEGIN marker"
+# (2) Consumer ordering: build-evidence invocation must appear BEFORE the
+#     stop_hook_active early-return line in check-state-updated.{sh,ps1}.
+for f in "$REPO_ROOT/hooks/check-state-updated.sh" "$REPO_ROOT/hooks/check-state-updated.ps1"; do
+    [ -f "$f" ] || { fail "consumer missing: $f"; continue; }
+    EVIDENCE_LINE=$(grep -n 'build-evidence' "$f" | head -1 | cut -d: -f1)
+    EXIT_LINE=$(grep -n 'stop_hook_active' "$f" | tail -1 | cut -d: -f1)
+    if [ -n "$EVIDENCE_LINE" ] && [ -n "$EXIT_LINE" ] && [ "$EVIDENCE_LINE" -lt "$EXIT_LINE" ]; then
+        pass "$(basename "$f") invokes build-evidence BEFORE stop_hook_active early-return"
+    else
+        fail "$(basename "$f") consumer ordering wrong (build-evidence line $EVIDENCE_LINE not before stop_hook_active line $EXIT_LINE)"
+    fi
+done
+
+# (3) Schema shape — producer emits required top-level keys
+REQUIRED_KEYS=(
+    '"type":"forge_goal_evidence"'
+    '"schema_version":'
+    '"produced_at_unix":'
+    '"session_nonce":'
+    '"pr_ready":'
+    '"all_gates_green":'
+    '"reviewer_gate":{'
+    '"e2e_report":{'
+    '"pr_state":{'
+    '"pr_authorization":{'
+    '"progress_fingerprint":'
+)
+for key in "${REQUIRED_KEYS[@]}"; do
+    assert_contains "$REPO_ROOT/hooks/build-evidence.sh" "$key" "schema key in build-evidence.sh: $key"
+    assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" "$key" "schema key in build-evidence.ps1: $key"
+done
 ```
 
 - [ ] **Step 4: Run a downstream smoke test against `../mcpgateway`**
@@ -1210,8 +1450,17 @@ Which approach?
 ## Notes for the Executor
 
 - **Branch:** continue work on `research/forge-goal-experiments` OR create a new branch `feature/forge-goal-layer-1` off main. Recommend the latter for cleaner PR scope.
-- **Testing convention:** `tests/template/lib.sh` is the canonical helper. Use `init_counters`, `start_test`, `assert_eq`, `assert_contains`, `scratch_dir` — see existing `test-hooks.sh` for patterns.
+- **Testing convention:** `tests/template/lib.sh` is the canonical helper. Use `init_counters`, `start_test`, `assert_equals`, `assert_contains`, `scratch_dir` — see existing `test-hooks.sh` for patterns.
 - **Forge meta-rule:** README badge + Version history table MUST be updated in the same PR as the CHANGELOG bump. The `feedback_readme_must_stay_current_every_release.md` memory documents this.
 - **Downstream sanity:** run a smoke against `../mcpgateway` (Task 10 Step 4) before final commit — fixture tests alone are not sufficient per `feedback_test_harness_changes_against_mcpgateway.md`.
 - **`gh pr create` from a worktree:** if working in a worktree, ensure `gh auth status` is clean and the worktree is pushed to a remote branch before invoking PR creation.
 - **JSON-shape changes:** if you need to add a field to the evidence JSON, ALSO update the cross-file marker contract test (Task 10) so future consumers can rely on the shape.
+
+---
+
+## Revision History
+
+| Version | Date | Author | Changes |
+|---|---|---|---|
+| 1.0 | 2026-05-14 | Claude + Pablo | Initial 10-task TDD plan generated via `/superpowers:writing-plans`. |
+| 1.1 | 2026-05-14 | Claude + Pablo (Codex plan-review-loop FAIL v1.0 → PASS v1.1) | Fixed 8 P1 + 3 P2 findings from Codex review: real `tests/template/lib.sh` API (`assert_equals`, file-path `assert_contains`) and "Test Conventions" preamble; Markdown-table fixtures (matching `state.template.md`); awk grouping instead of Bash-4-only `declare -A`; checklist parsing scoped to `## Workflow` block; `[[:space:]]` not `\s`; `HEAD == branch_off` skip copied from `check-workflow-gates.sh`; deterministic `progress_fingerprint` (scoped, ordered, CRLF-normalized via tr-then-awk, ASCII US delimiter); `gh` stub validates ALL 6 required JSON fields; forced E2E mtime in test setup; PowerShell strategy adjusted (no `lib.ps1` exists — use Bash-driven cross-platform smoke); PowerShell stop-hook avoids `??`, `Out-Null`, and `pwsh` spawn (uses `& $script` under current host); extended cross-file marker contract (producer + consumer ordering + schema-shape keys); Task 3 parses Markdown-table `## /goal session`. |
