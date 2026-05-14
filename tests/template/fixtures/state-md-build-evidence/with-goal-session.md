@@ -4,7 +4,7 @@
 
 | Field            | Value                                |
 | ---------------- | ------------------------------------ |
-| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| nonce            | 00000000-0000-0000-0000-000000000001 |
 | workflow_command | /new-feature foo                     |
 | issued_at        | 2026-05-14T18:00:00Z                 |
 
@@ -22,7 +22,7 @@
 - [ ] Plan written
 - [ ] Plan approved
 - [ ] Tests written (TDD)
-- [ ] Code review iteration 1 — codex clean — head=`<TBD>`
-- [ ] Code review iteration 1 — pr-toolkit clean — head=`<TBD>`
+- [ ] Code review iteration 1 — codex clean — head=`__TBD_SHA__`
+- [ ] Code review iteration 1 — pr-toolkit clean — head=`__TBD_SHA__`
 - [ ] E2E verified via verify-e2e agent (Phase 5.4)
 - [ ] PR authorized

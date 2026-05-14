@@ -134,7 +134,7 @@ Content:
 
 | Field            | Value                                  |
 | ---------------- | -------------------------------------- |
-| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee   |
+| nonce            | 00000000-0000-0000-0000-000000000001   |
 | workflow_command | /new-feature foo                       |
 | issued_at        | 2026-05-14T18:00:00Z                   |
 
@@ -152,17 +152,17 @@ Content:
 - [ ] Plan written
 - [ ] Plan approved
 - [ ] Tests written (TDD)
-- [ ] Code review iteration 1 — codex clean — head=`<TBD>`
-- [ ] Code review iteration 1 — pr-toolkit clean — head=`<TBD>`
+- [ ] Code review iteration 1 — codex clean — head=`__TBD_SHA__`
+- [ ] Code review iteration 1 — pr-toolkit clean — head=`__TBD_SHA__`
 - [ ] E2E verified via verify-e2e agent (Phase 5.4)
 - [ ] PR authorized
 ```
 
-Note: `## /goal session` uses the same Markdown-table convention as `## Workflow` so the existing parsing pattern (awk block-extract + grep field-row) can be reused without inventing new parser logic.
+Note: `## /goal session` uses the same Markdown-table convention as `## Workflow` so the existing parsing pattern (awk block-extract + grep field-row) can be reused without inventing new parser logic. The `__TBD_SHA__` token (angle-bracket-free) avoids shell quoting fragility in tests that grep fixture content.
 
 - [ ] **Step 4: Write `mid-workflow.md` — some checklist items checked, reviewer rows with placeholder SHAs**
 
-Same `## /goal session` and `## Workflow` table headers as Step 3. The `### Checklist` becomes:
+Same `## /goal session` and `## Workflow` table headers as Step 3, with nonce `00000000-0000-0000-0000-000000000002` (distinct per fixture). The `### Checklist` becomes:
 
 ```markdown
 ### Checklist
@@ -171,17 +171,17 @@ Same `## /goal session` and `## Workflow` table headers as Step 3. The `### Chec
 - [x] Plan written
 - [x] Plan approved
 - [x] Tests written (TDD)
-- [ ] Code review iteration 1 — codex clean — head=`abc123def`
-- [ ] Code review iteration 1 — pr-toolkit clean — head=`abc123def`
+- [ ] Code review iteration 1 — codex clean — head=`deadbeef`
+- [ ] Code review iteration 1 — pr-toolkit clean — head=`deadbeef`
 - [ ] E2E verified via verify-e2e agent (Phase 5.4)
 - [ ] PR authorized
 ```
 
-Fake SHA `abc123def` is intentional — tests assert that `reviewer_gate.clean_same_iteration=false` when the SHA doesn't match the real HEAD.
+Fake SHA `deadbeef` is intentional — tests assert that `reviewer_gate.clean_same_iteration=false` when the SHA doesn't match the real HEAD. Using `deadbeef` (not `abc123def`) keeps reviewer-row SHAs distinct from the PR auth line SHA (`abc123def`), enabling independent substitution in tests.
 
 - [ ] **Step 5: Write `pr-ready.md` — all checklist done; tests substitute real HEAD at fixture-prep time**
 
-Use a placeholder token `__HEAD_SHA__` in the reviewer rows and the future `## PR authorization` line. Test setup substitutes the real `git rev-parse HEAD` value into the fixture before copying it into the scratch state.md.
+Use a placeholder token `__HEAD_SHA__` in the reviewer rows and the future `## PR authorization` line. Test setup substitutes the real `git rev-parse HEAD` value into the fixture before copying it into the scratch state.md. The `/goal session` nonce is `00000000-0000-0000-0000-000000000003` (distinct per fixture).
 
 Content (just the checklist shown; full file mirrors Step 3 structure):
 
@@ -200,16 +200,19 @@ Content (just the checklist shown; full file mirrors Step 3 structure):
 
 - [ ] **Step 6: Write `pr-authorized.md` — adds `## PR authorization` section to the `mid-workflow.md` base**
 
-Append at the end of the `mid-workflow.md` content:
+The `/goal session` nonce is `00000000-0000-0000-0000-000000000004` (distinct per fixture). The reviewer rows use `deadbeef` (a separate stale fake SHA, decoupled from the PR auth line). Append at the end of the `mid-workflow.md` content:
 
 ```markdown
 ## PR authorization
 
-- [x] PR creation authorized — `2026-05-14T18:30:00Z` — nonce=`aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` — head=`abc123def`
+- [x] PR creation authorized — `2026-05-14T18:30:00Z` — nonce=`00000000-0000-0000-0000-000000000004` — head=`abc123def`
 ```
 
-Tests for "authorization rejected on stale head" use this fixture as-is (`abc123def` won't match the test's real HEAD).
-Tests for "authorization accepted" use a sed substitution to replace `abc123def` with the real HEAD.
+The PR auth line nonce (`00000000-0000-0000-0000-000000000004`) MUST match the `/goal session` nonce — required for the accepted-path test to succeed.
+The PR auth line `head=abc123def` is a separate stale fake SHA from the reviewer rows (`deadbeef`), enabling each to be independently substituted by tests.
+
+Tests for "authorization rejected on stale head" use this fixture as-is (both `deadbeef` reviewer SHAs and `abc123def` auth line SHA are intentionally stale — neither matches the test's real HEAD).
+Tests for "authorization accepted" use two targeted sed substitutions — one for reviewer rows (`deadbeef`), one for the PR auth line (`abc123def`).
 
 - [ ] **Step 7: Commit fixtures**
 
@@ -459,7 +462,7 @@ OUT="$scratch/.out"; ( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh
 assert_contains "$OUT" '"phase":"1 — Research"' "phase parsed"
 assert_contains "$OUT" '"checklist_total":8' "total count correct"
 assert_contains "$OUT" '"checklist_done":4' "done count correct"
-# reviewer_gate.clean_same_iteration must be FALSE — head=abc123def doesn't match git HEAD
+# reviewer_gate.clean_same_iteration must be FALSE — head=deadbeef doesn't match git HEAD
 assert_contains "$OUT" '"reviewer_gate":{"clean_same_iteration":false' \
     "reviewer gate not clean (head mismatch)"
 ```
@@ -786,10 +789,13 @@ start_test "build-evidence.sh parses ## PR authorization line"
 scratch=$(scratch_dir)
 cd "$scratch"; git init -q; git config user.email t@t; git config user.name t
 echo x > a; git add a; git commit -qm init
-# Match the fixture's expected head: rewrite the fixture's `abc123def` to actual HEAD
+# Match the fixture's expected head: two targeted seds —
+#   1) reviewer rows use `deadbeef` (decoupled from PR auth line)
+#   2) PR auth line uses `abc123def`
+# Both must resolve to the real HEAD for authorized=true.
 mkdir -p .claude/local
 EXPECTED_HEAD=$(git rev-parse HEAD)
-sed "s/abc123def/$EXPECTED_HEAD/g" \
+sed -e "s/deadbeef/$EXPECTED_HEAD/g" -e "s/abc123def/$EXPECTED_HEAD/g" \
     "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
     > .claude/local/state.md
 
@@ -808,7 +814,8 @@ scratch=$(scratch_dir)
 cd "$scratch"; git init -q; git config user.email t@t; git config user.name t
 echo x > a; git add a; git commit -qm init
 mkdir -p .claude/local
-# Use fixture as-is (abc123def doesn't match git HEAD)
+# Use fixture as-is: both reviewer rows (deadbeef) and PR auth line (abc123def)
+# are intentionally stale — neither matches git HEAD, so authorized=false.
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
    .claude/local/state.md
 
@@ -935,8 +942,9 @@ STUB
 sed -i.bak "s/__HEAD__/$EXPECTED_HEAD/g" bin/gh && rm bin/gh.bak
 chmod +x bin/gh
 
-# Substitute real HEAD into the pr-authorized.md fixture (placeholder is `abc123def`)
-sed "s/abc123def/$EXPECTED_HEAD/g" \
+# Substitute real HEAD into the pr-authorized.md fixture.
+# Two targeted seds: reviewer rows use `deadbeef`, PR auth line uses `abc123def`.
+sed -e "s/deadbeef/$EXPECTED_HEAD/g" -e "s/abc123def/$EXPECTED_HEAD/g" \
     "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
     > .claude/local/state.md
 

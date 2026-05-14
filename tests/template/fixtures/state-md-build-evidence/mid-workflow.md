@@ -4,7 +4,7 @@
 
 | Field            | Value                                |
 | ---------------- | ------------------------------------ |
-| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| nonce            | 00000000-0000-0000-0000-000000000002 |
 | workflow_command | /new-feature foo                     |
 | issued_at        | 2026-05-14T18:00:00Z                 |
 
@@ -22,7 +22,7 @@
 - [x] Plan written
 - [x] Plan approved
 - [x] Tests written (TDD)
-- [ ] Code review iteration 1 — codex clean — head=`abc123def`
-- [ ] Code review iteration 1 — pr-toolkit clean — head=`abc123def`
+- [ ] Code review iteration 1 — codex clean — head=`deadbeef`
+- [ ] Code review iteration 1 — pr-toolkit clean — head=`deadbeef`
 - [ ] E2E verified via verify-e2e agent (Phase 5.4)
 - [ ] PR authorized

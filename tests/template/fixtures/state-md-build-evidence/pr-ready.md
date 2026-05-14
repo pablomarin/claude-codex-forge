@@ -4,7 +4,7 @@
 
 | Field            | Value                                |
 | ---------------- | ------------------------------------ |
-| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| nonce            | 00000000-0000-0000-0000-000000000003 |
 | workflow_command | /new-feature foo                     |
 | issued_at        | 2026-05-14T18:00:00Z                 |
 
