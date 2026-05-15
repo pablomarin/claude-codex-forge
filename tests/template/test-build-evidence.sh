@@ -69,11 +69,31 @@ OUT="$scratch/.out"
 ( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
 
 assert_contains "$OUT" '"phase":"1 — Research"' "phase parsed from Workflow table"
+assert_contains "$OUT" '"next_step":"Run research-first"' "next_step parsed from Workflow table"
 assert_contains "$OUT" '"checklist_total":8' "total count = 8 (8 items in fixture)"
 assert_contains "$OUT" '"checklist_done":4' "done count = 4 (first 4 checked)"
 # reviewer rows in mid-workflow.md use head=`deadbeef` which won't match real git HEAD
 assert_contains "$OUT" '"reviewer_gate":{"clean_same_iteration":false' \
     "reviewer gate not clean (head mismatch — deadbeef ≠ real HEAD)"
+
+start_test "build-evidence.sh handles CRLF line endings in state.md (Codex P1.7 regression guard)"
+
+scratch=$(scratch_dir bevidence-crlf)
+mkdir -p "$scratch/.claude/local"
+# Convert the fixture to CRLF line endings using sed (POSIX-portable).
+sed 's/$/\r/' \
+    "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/with-goal-session.md" \
+    > "$scratch/.claude/local/state.md"
+
+OUT="$scratch/.out"
+( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+
+# Without CRLF normalization, ## /goal session anchor fails and session_nonce stays null.
+# With the fix, parsing succeeds even on CRLF input.
+assert_contains "$OUT" '"session_nonce":"00000000-0000-0000-0000-000000000001"' \
+    "session_nonce parsed despite CRLF (Codex P1.7 regression guard)"
+assert_contains "$OUT" '"phase":"1 — Research"' \
+    "phase parsed despite CRLF (Codex P1.7 regression guard)"
 
 # lib.sh's EXIT trap prints the summary; no explicit call needed.
 report "build-evidence.sh" >&2

@@ -39,7 +39,8 @@ parse_workflow() {
     #   DONE|<int>
     [ -f "$STATE_MD" ] || return 0
 
-    awk '
+    # CRLF normalize BEFORE awk anchors (Codex P1.7 from plan-review).
+    tr -d '\r' < "$STATE_MD" | awk '
         BEGIN { phase=""; next_step=""; total=0; done=0; in_workflow=0; in_checklist=0 }
         /^## Workflow$/        { in_workflow=1; next }
         in_workflow && /^## /  { in_workflow=0; in_checklist=0 }
@@ -47,10 +48,10 @@ parse_workflow() {
         in_workflow && /^### / && !/^### Checklist/ { in_checklist=0 }
         # Markdown table: |  Phase  | <value> |
         in_workflow && /\|[[:space:]]*Phase[[:space:]]*\|/ {
-            n=split($0,a,"|"); phase=a[3]; gsub(/^[[:space:]]+|[[:space:]]+$/,"",phase)
+            split($0,a,"|"); phase=a[3]; gsub(/^[[:space:]]+|[[:space:]]+$/,"",phase)
         }
         in_workflow && /\|[[:space:]]*Next step[[:space:]]*\|/ {
-            n=split($0,a,"|"); next_step=a[3]; gsub(/^[[:space:]]+|[[:space:]]+$/,"",next_step)
+            split($0,a,"|"); next_step=a[3]; gsub(/^[[:space:]]+|[[:space:]]+$/,"",next_step)
         }
         in_workflow && in_checklist && /^- \[x\]/ { done++; total++ }
         in_workflow && in_checklist && /^- \[ \]/ { total++ }
@@ -60,7 +61,7 @@ parse_workflow() {
             print "TOTAL|" total
             print "DONE|" done
         }
-    ' "$STATE_MD"
+    '
 }
 
 compute_reviewer_gate() {
@@ -75,7 +76,8 @@ compute_reviewer_gate() {
     # codex AND pr-toolkit have cleared the same iteration at head_sha, emit
     # the iteration number and stop. Output: "<iter>" or empty.
     local matched
-    matched=$(awk -v head="$head_sha" '
+    # CRLF normalize BEFORE awk anchors (Codex P1.7 from plan-review).
+    matched=$(tr -d '\r' < "$STATE_MD" | awk -v head="$head_sha" '
         BEGIN { in_workflow=0; in_checklist=0 }
         /^## Workflow$/        { in_workflow=1; next }
         in_workflow && /^## /  { in_workflow=0; in_checklist=0 }
@@ -103,7 +105,7 @@ compute_reviewer_gate() {
             tk_key=iter "|pr-toolkit"
             if (seen[codex_key] && seen[tk_key]) { print iter; exit 0 }
         }
-    ' "$STATE_MD")
+    ')
 
     if [ -n "$matched" ]; then
         echo "true|${matched}|${head_sha}"
@@ -152,6 +154,12 @@ RG_REST="${RG_RESULT#*|}"
 RG_ITER="${RG_REST%%|*}"
 RG_HEAD="${RG_REST##*|}"
 
+# Build JSON-safe field values for string fields that need escaping/null handling.
+PHASE_JSON=$(json_str_field "phase" "$PHASE")
+NEXT_STEP_JSON=$(json_str_field "next_step" "$NEXT_STEP")
+RG_ITER_JSON=$(json_str_field "matched_iteration" "$RG_ITER")
+RG_HEAD_JSON=$(json_str_field "matched_head" "$RG_HEAD")
+
 # Emit evidence JSON. Tasks 5-7 add more fields.
 {
     echo "FORGE_GOAL_EVIDENCE_BEGIN"
@@ -161,10 +169,10 @@ RG_HEAD="${RG_REST##*|}"
     printf '"produced_at_unix":%d,' "$NOW_UNIX"
     printf '%s,' "$SESSION_NONCE_JSON"
     printf '%s,' "$WORKFLOW_CMD_JSON"
-    printf '"state":{"phase":"%s","next_step":"%s","checklist_total":%d,"checklist_done":%d},' \
-        "$PHASE" "$NEXT_STEP" "$TOTAL_COUNT" "$DONE_COUNT"
-    printf '"reviewer_gate":{"clean_same_iteration":%s,"matched_iteration":"%s","matched_head":"%s"},' \
-        "$RG_CLEAN" "$RG_ITER" "$RG_HEAD"
+    printf '"state":{%s,%s,"checklist_total":%d,"checklist_done":%d},' \
+        "$PHASE_JSON" "$NEXT_STEP_JSON" "$TOTAL_COUNT" "$DONE_COUNT"
+    printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s},' \
+        "$RG_CLEAN" "$RG_ITER_JSON" "$RG_HEAD_JSON"
     printf '"warnings":[],'
     printf '"errors":[]'
     printf '}\n'
