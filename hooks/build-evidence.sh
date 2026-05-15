@@ -324,7 +324,7 @@ fi
 # all_gates_green: every checklist item checked (DONE == TOTAL > 0) AND pr_ready=true.
 # Guard against TOTAL=0 to avoid a false positive on empty checklists.
 ALL_GATES="false"
-if [ "${DONE_COUNT:-0}" -eq "${TOTAL_COUNT:-0}" ] && [ "${TOTAL_COUNT:-0}" -gt 0 ] && \
+if [ "$DONE_COUNT" -eq "$TOTAL_COUNT" ] && [ "$TOTAL_COUNT" -gt 0 ] && \
    [ "$PR_READY" = "true" ]; then
     ALL_GATES="true"
 fi
@@ -340,7 +340,8 @@ fi
 #   4. Use ASCII Unit Separator (0x1f) as delimiter — never appears in Markdown.
 #   5. Include PR authorization line (whole-file OK — there's only ever one).
 DELIM=$'\x1f'  # ASCII Unit Separator
-FP_TMP="${SCRATCH:-/tmp}/fp.input.$$"
+FP_TMP="${TMPDIR:-/tmp}/fp.input.$$"
+trap 'rm -f "$FP_TMP"' EXIT
 {
     printf '%s%s' "$PHASE" "$DELIM"
     printf '%s%s' "$NEXT_STEP" "$DELIM"

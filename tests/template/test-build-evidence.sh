@@ -356,6 +356,7 @@ mkdir -p "$scratch/.claude/local"
 
 OUT="$scratch/.out"
 assert_contains "$OUT" '"pr_ready":false' "pr_ready=false when E2E missing + no PR open"
+assert_contains "$OUT" '"all_gates_green":false' "all_gates_green=false when pr_ready=false"
 
 start_test "build-evidence.sh emits stable progress_fingerprint across identical runs"
 
@@ -379,13 +380,16 @@ mkdir -p "$scratch/.claude/local"
     bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out2" 2>&1
 )
 
+# Assert fingerprint is 64-char SHA256 (strict pattern check)
+assert_matches "$scratch/.out1" '"progress_fingerprint":"[a-f0-9]{64}"' \
+    "fingerprint is 64-char SHA256 (run 1)"
+assert_matches "$scratch/.out2" '"progress_fingerprint":"[a-f0-9]{64}"' \
+    "fingerprint is 64-char SHA256 (run 2)"
+
 # Extract fingerprint from each run, expect identical
 FP1=$(grep -o '"progress_fingerprint":"[a-f0-9]*"' "$scratch/.out1" | head -1)
 FP2=$(grep -o '"progress_fingerprint":"[a-f0-9]*"' "$scratch/.out2" | head -1)
-assert_equals "$FP1" "$FP2" "progress_fingerprint stable across identical runs"
-
-# Also assert fingerprint is non-empty SHA256-shaped (64 hex chars)
-assert_contains "$scratch/.out1" '"progress_fingerprint":"' "fingerprint field present"
+assert_equals "$FP1" "$FP2" "fingerprint stable across identical runs"
 
 # lib.sh's EXIT trap prints the summary; no explicit call needed.
 report "build-evidence.sh" >&2
