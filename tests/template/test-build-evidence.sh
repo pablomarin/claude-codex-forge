@@ -95,5 +95,111 @@ assert_contains "$OUT" '"session_nonce":"00000000-0000-0000-0000-000000000001"' 
 assert_contains "$OUT" '"phase":"1 — Research"' \
     "phase parsed despite CRLF (Codex P1.7 regression guard)"
 
+start_test "build-evidence.sh extracts git head_sha + branch"
+
+scratch=$(scratch_dir bevidence-git)
+mkdir -p "$scratch/.claude/local"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+   "$scratch/.claude/local/state.md"
+
+OUT="$scratch/.out"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "test@test"
+    git config user.name "Test"
+    echo x > a.txt
+    git add a.txt
+    git commit -q -m "init"
+    EXPECTED_HEAD=$(git rev-parse HEAD)
+    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+    echo "$EXPECTED_HEAD" > "$scratch/.expected_head"
+    exit $?
+)
+EXIT=$?
+EXPECTED_HEAD=$(cat "$scratch/.expected_head" 2>/dev/null || echo "")
+
+assert_equals "$EXIT" "0" "exit 0 even in a fresh repo"
+assert_contains "$OUT" "\"head_sha\":\"$EXPECTED_HEAD\"" "head_sha matches git"
+assert_contains "$OUT" '"branch":"main"' "branch is main"
+
+start_test "build-evidence.sh handles gh pr view absence gracefully (pr_state.exists=false)"
+
+scratch=$(scratch_dir bevidence-nopr)
+mkdir -p "$scratch/.claude/local" "$scratch/fake-bin"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+   "$scratch/.claude/local/state.md"
+# Create a fake gh that always exits 1 (simulates "gh not installed / no PR").
+# This approach is more portable than stripping PATH (which would also remove git).
+printf '#!/bin/sh\nexit 1\n' > "$scratch/fake-bin/gh"
+chmod +x "$scratch/fake-bin/gh"
+
+OUT="$scratch/.out"
+(
+    cd "$scratch"
+    git init -q >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a
+    git add a
+    git commit -qm "init"
+    # Prepend fake-bin so the stub gh takes priority over the real one
+    PATH="$scratch/fake-bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+)
+EXIT=$?
+
+assert_equals "$EXIT" "0" "exit 0 when gh is missing"
+assert_contains "$OUT" '"pr_state":{"exists":false' "pr_state.exists=false when no PR/gh"
+
+start_test "build-evidence.sh detects fresh E2E report on feature branch"
+
+scratch=$(scratch_dir bevidence-e2e)
+mkdir -p "$scratch/.claude/local" "$scratch/fake-bin"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+   "$scratch/.claude/local/state.md"
+# Stub gh (same pattern as the no-pr test above)
+printf '#!/bin/sh\nexit 1\n' > "$scratch/fake-bin/gh"
+chmod +x "$scratch/fake-bin/gh"
+
+OUT="$scratch/.out"
+BRANCH_OFF_TS_FILE="$scratch/.branch_off_ts"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a
+    git add a
+    git commit -qm "init"  # this becomes branch-off
+    BRANCH_OFF_TS=$(git log -1 --format=%ct HEAD)
+    echo "$BRANCH_OFF_TS" > "$BRANCH_OFF_TS_FILE"
+
+    git checkout -q -b feature
+    echo y > b
+    git add b
+    git commit -qm "feature"
+
+    mkdir -p tests/e2e/reports
+    REPORT=tests/e2e/reports/2026-05-15-test.md
+    echo "report content" > "$REPORT"
+    # Force mtime to be strictly LATER than branch-off (avoids same-second flakes).
+    FUTURE_TS=$(( BRANCH_OFF_TS + 60 ))
+    # Try GNU date first, then BSD date, then crude sleep fallback
+    if touch -t "$(date -d "@$FUTURE_TS" +%Y%m%d%H%M.%S 2>/dev/null)" "$REPORT" 2>/dev/null; then
+        :  # GNU date succeeded
+    elif touch -t "$(date -r "$FUTURE_TS" +%Y%m%d%H%M.%S 2>/dev/null)" "$REPORT" 2>/dev/null; then
+        :  # BSD date succeeded
+    else
+        sleep 2 && touch "$REPORT"  # crude but reliable fallback
+    fi
+
+    PATH="$scratch/fake-bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+)
+EXIT=$?
+
+assert_equals "$EXIT" "0" "exit 0 with e2e report present"
+assert_contains "$OUT" '"e2e_report":{"present":true' "e2e present"
+assert_contains "$OUT" '"fresh_for_head":true' "e2e fresh for head"
+
 # lib.sh's EXIT trap prints the summary; no explicit call needed.
 report "build-evidence.sh" >&2

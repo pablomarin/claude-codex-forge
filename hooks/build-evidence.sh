@@ -12,6 +12,96 @@ NOW_UNIX=$(date +%s)
 
 STATE_MD=".claude/local/state.md"
 
+# ---------------------------------------------------------------------------
+# Git state queries (read-only, best-effort — failures produce empty strings)
+# ---------------------------------------------------------------------------
+HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+TREE_SHA=$(git rev-parse HEAD^{tree} 2>/dev/null || echo "")
+DIRTY="false"
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then DIRTY="true"; fi
+
+BRANCH_OFF=$(git merge-base HEAD main 2>/dev/null \
+             || git merge-base HEAD master 2>/dev/null \
+             || echo "")
+
+# If HEAD itself IS the branch-off point (user is on main/master directly,
+# not a feature branch), there is no meaningful "produced on this branch"
+# comparison. Force the skip path so E2E freshness is not wrongly evaluated.
+# Mirrors check-workflow-gates.sh lines 139-142 exactly.
+if [ -n "$BRANCH_OFF" ] && [ -n "$HEAD_SHA" ] && [ "$BRANCH_OFF" = "$HEAD_SHA" ]; then
+    BRANCH_OFF=""
+fi
+
+BRANCH_OFF_TS=""
+if [ -n "$BRANCH_OFF" ]; then
+    BRANCH_OFF_TS=$(git log -1 --format=%ct "$BRANCH_OFF" 2>/dev/null || echo "")
+fi
+
+# ---------------------------------------------------------------------------
+# gh pr view — best-effort; skipped silently if gh not installed or no PR
+# ---------------------------------------------------------------------------
+PR_EXISTS="false"
+PR_NUMBER="null"
+PR_URL=""
+PR_STATE_VAL=""
+PR_HEAD_OID=""
+PR_BASE_REF=""
+PR_HEAD_REF=""
+
+if command -v gh >/dev/null 2>&1; then
+    PR_JSON=$(gh pr view --json number,url,state,headRefOid,baseRefName,headRefName 2>/dev/null || echo "")
+    if [ -n "$PR_JSON" ]; then
+        PR_EXISTS="true"
+        # jq-free field extraction using grep + sed (no extra deps)
+        PR_NUMBER=$(echo "$PR_JSON" | grep -o '"number":[0-9]*' | sed 's/.*://')
+        PR_URL=$(echo "$PR_JSON" | grep -o '"url":"[^"]*"' | sed 's/.*"url":"//;s/"$//')
+        PR_STATE_VAL=$(echo "$PR_JSON" | grep -o '"state":"[^"]*"' | sed 's/.*"state":"//;s/"$//')
+        PR_HEAD_OID=$(echo "$PR_JSON" | grep -o '"headRefOid":"[^"]*"' | sed 's/.*"headRefOid":"//;s/"$//')
+        PR_BASE_REF=$(echo "$PR_JSON" | grep -o '"baseRefName":"[^"]*"' | sed 's/.*"baseRefName":"//;s/"$//')
+        PR_HEAD_REF=$(echo "$PR_JSON" | grep -o '"headRefName":"[^"]*"' | sed 's/.*"headRefName":"//;s/"$//')
+        # Guard: empty PR_NUMBER means parsing failed — fall back to null
+        [ -z "$PR_NUMBER" ] && PR_NUMBER="null"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# E2E report freshness — mirrors the mtime logic in check-workflow-gates.sh
+# ---------------------------------------------------------------------------
+E2E_PRESENT="false"
+E2E_FRESH="false"
+E2E_PATH=""
+E2E_MTIME=""
+
+if [ -d "tests/e2e/reports" ]; then
+    # stat format: GNU uses -c %Y; BSD uses -f %m
+    if stat -c %Y /dev/null >/dev/null 2>&1; then
+        STAT_CMD='stat -c %Y'
+    else
+        STAT_CMD='stat -f %m'
+    fi
+
+    NEWEST_PATH=""
+    NEWEST_MTIME=0
+    for r in tests/e2e/reports/*.md; do
+        [ -f "$r" ] || continue
+        m=$($STAT_CMD "$r" 2>/dev/null || echo 0)
+        if [ "$m" -gt "$NEWEST_MTIME" ]; then
+            NEWEST_MTIME="$m"
+            NEWEST_PATH="$r"
+        fi
+    done
+
+    if [ -n "$NEWEST_PATH" ]; then
+        E2E_PRESENT="true"
+        E2E_PATH="$NEWEST_PATH"
+        E2E_MTIME="$NEWEST_MTIME"
+        if [ -n "$BRANCH_OFF_TS" ] && [ "$NEWEST_MTIME" -gt "$BRANCH_OFF_TS" ]; then
+            E2E_FRESH="true"
+        fi
+    fi
+fi
+
 parse_goal_session() {
     # Echo "nonce|workflow_command" or empty if section missing.
     # Section format: Markdown table under `## /goal session` heading.
@@ -147,7 +237,7 @@ TOTAL_COUNT=${TOTAL_COUNT:-0}
 DONE_COUNT=${DONE_COUNT:-0}
 
 # Parse reviewer gate (code-review iteration rows in Checklist).
-HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+# HEAD_SHA is already set above in the git-state block; reuse it.
 RG_RESULT=$(compute_reviewer_gate "$HEAD_SHA")
 RG_CLEAN="${RG_RESULT%%|*}"
 RG_REST="${RG_RESULT#*|}"
@@ -160,7 +250,19 @@ NEXT_STEP_JSON=$(json_str_field "next_step" "$NEXT_STEP")
 RG_ITER_JSON=$(json_str_field "matched_iteration" "$RG_ITER")
 RG_HEAD_JSON=$(json_str_field "matched_head" "$RG_HEAD")
 
-# Emit evidence JSON. Tasks 5-7 add more fields.
+# Task 5: git + PR + E2E field strings
+BRANCH_JSON=$(json_str_field "branch" "$BRANCH")
+HEAD_SHA_JSON=$(json_str_field "head_sha" "$HEAD_SHA")
+TREE_SHA_JSON=$(json_str_field "tree_sha" "$TREE_SHA")
+BRANCH_OFF_JSON=$(json_str_field "branch_off_commit" "$BRANCH_OFF")
+PR_URL_JSON=$(json_str_field "url" "$PR_URL")
+PR_STATE_JSON=$(json_str_field "state" "$PR_STATE_VAL")
+PR_HEAD_OID_JSON=$(json_str_field "head_oid" "$PR_HEAD_OID")
+PR_BASE_REF_JSON=$(json_str_field "base_ref" "$PR_BASE_REF")
+PR_HEAD_REF_JSON=$(json_str_field "head_ref" "$PR_HEAD_REF")
+E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
+
+# Emit evidence JSON.
 {
     echo "FORGE_GOAL_EVIDENCE_BEGIN"
     printf '{'
@@ -173,6 +275,24 @@ RG_HEAD_JSON=$(json_str_field "matched_head" "$RG_HEAD")
         "$PHASE_JSON" "$NEXT_STEP_JSON" "$TOTAL_COUNT" "$DONE_COUNT"
     printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s},' \
         "$RG_CLEAN" "$RG_ITER_JSON" "$RG_HEAD_JSON"
+    printf '%s,' "$BRANCH_JSON"
+    printf '%s,' "$HEAD_SHA_JSON"
+    printf '%s,' "$TREE_SHA_JSON"
+    printf '%s,' "$BRANCH_OFF_JSON"
+    printf '"working_tree_dirty":%s,' "$DIRTY"
+    if [ "$PR_EXISTS" = "true" ]; then
+        printf '"pr_state":{"exists":true,"number":%s,%s,%s,%s,%s,%s},' \
+            "$PR_NUMBER" "$PR_URL_JSON" "$PR_STATE_JSON" "$PR_HEAD_OID_JSON" \
+            "$PR_BASE_REF_JSON" "$PR_HEAD_REF_JSON"
+    else
+        printf '"pr_state":{"exists":false,"number":null,"url":null,"state":null,"head_oid":null,"base_ref":null,"head_ref":null},'
+    fi
+    if [ "$E2E_PRESENT" = "true" ]; then
+        printf '"e2e_report":{"present":true,%s,"mtime_unix":%d,"fresh_for_head":%s},' \
+            "$E2E_PATH_JSON" "$E2E_MTIME" "$E2E_FRESH"
+    else
+        printf '"e2e_report":{"present":false,"path":null,"mtime_unix":null,"fresh_for_head":false},'
+    fi
     printf '"warnings":[],'
     printf '"errors":[]'
     printf '}\n'
