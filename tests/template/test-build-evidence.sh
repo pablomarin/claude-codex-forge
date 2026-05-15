@@ -58,5 +58,22 @@ OUT="$scratch/.out"
 assert_contains "$OUT" '"session_nonce":null' "session_nonce null when section missing"
 assert_contains "$OUT" '"workflow_command":null' "workflow_command null when section missing"
 
+start_test "build-evidence.sh parses workflow checklist counts and reviewer rows"
+
+scratch=$(scratch_dir bevidence-workflow)
+mkdir -p "$scratch/.claude/local"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/mid-workflow.md" \
+   "$scratch/.claude/local/state.md"
+
+OUT="$scratch/.out"
+( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+
+assert_contains "$OUT" '"phase":"1 — Research"' "phase parsed from Workflow table"
+assert_contains "$OUT" '"checklist_total":8' "total count = 8 (8 items in fixture)"
+assert_contains "$OUT" '"checklist_done":4' "done count = 4 (first 4 checked)"
+# reviewer rows in mid-workflow.md use head=`deadbeef` which won't match real git HEAD
+assert_contains "$OUT" '"reviewer_gate":{"clean_same_iteration":false' \
+    "reviewer gate not clean (head mismatch — deadbeef ≠ real HEAD)"
+
 # lib.sh's EXIT trap prints the summary; no explicit call needed.
 report "build-evidence.sh" >&2
