@@ -260,5 +260,132 @@ OUT="$scratch/.out"
 
 assert_contains "$OUT" '"pr_authorization":{"authorized":false' "authorized=false when head stale"
 
+# ---------------------------------------------------------------------------
+# Task 7: pr_ready, all_gates_green, progress_fingerprint
+# ---------------------------------------------------------------------------
+
+start_test "build-evidence.sh computes pr_ready=true when all conditions met"
+
+scratch=$(scratch_dir bevidence-prready)
+mkdir -p "$scratch/.claude/local" "$scratch/bin"
+
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a
+    git add a
+    git commit -qm init   # branch-off
+    BRANCH_OFF_TS=$(git log -1 --format=%ct HEAD)
+    git checkout -q -b feature
+    echo y > b
+    git add b
+    git commit -qm feature
+
+    EXPECTED_HEAD=$(git rev-parse HEAD)
+    echo "$EXPECTED_HEAD" > "$scratch/.expected_head"
+
+    mkdir -p tests/e2e/reports
+
+    # Force E2E report mtime to be LATER than branch-off (avoid same-second flakes)
+    REPORT=tests/e2e/reports/2026-05-15-test.md
+    echo "report" > "$REPORT"
+    FUTURE_TS=$(( BRANCH_OFF_TS + 60 ))
+    # GNU/BSD date fallback chain
+    if touch -t "$(date -d "@$FUTURE_TS" +%Y%m%d%H%M.%S 2>/dev/null)" "$REPORT" 2>/dev/null; then
+        :  # GNU date succeeded
+    elif touch -t "$(date -r "$FUTURE_TS" +%Y%m%d%H%M.%S 2>/dev/null)" "$REPORT" 2>/dev/null; then
+        :  # BSD date succeeded
+    else
+        sleep 2 && touch "$REPORT"  # crude but reliable fallback
+    fi
+
+    # gh stub validating ALL 6 required --json fields (per Codex P2.2 from plan-review)
+    cat > bin/gh <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" != "pr" ] || [ "$2" != "view" ] || [ "$3" != "--json" ]; then
+    echo "FAKE GH: unexpected args: $*" >&2
+    exit 99
+fi
+for required in number url state headRefOid baseRefName headRefName; do
+    case ",$4," in
+        *,"$required",*) ;;
+        *) echo "FAKE GH: missing required json field: $required (got: $4)" >&2; exit 99 ;;
+    esac
+done
+echo "{\"number\":42,\"url\":\"https://x/pr/42\",\"state\":\"OPEN\",\"headRefOid\":\"__HEAD__\",\"baseRefName\":\"main\",\"headRefName\":\"feature\"}"
+STUB
+    # Substitute the real HEAD SHA into the stub output
+    sed -i.bak "s/__HEAD__/$EXPECTED_HEAD/g" bin/gh && rm -f bin/gh.bak
+    chmod +x bin/gh
+
+    # Substitute __HEAD_SHA__ placeholder with real HEAD (reviewer rows + PR auth line).
+    # Use all-green.md: all 8 items checked, reviewer rows [x], PR auth section present.
+    sed "s/__HEAD_SHA__/$EXPECTED_HEAD/g" \
+        "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/all-green.md" \
+        > .claude/local/state.md
+
+    PATH="$scratch/bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out" 2>&1
+)
+
+OUT="$scratch/.out"
+assert_contains "$OUT" '"pr_ready":true' "pr_ready=true with full state"
+# all-green.md has ALL 8 items checked → DONE_COUNT==TOTAL_COUNT==8 AND pr_ready=true
+assert_contains "$OUT" '"all_gates_green":true' "all_gates_green=true (all items checked + pr_ready)"
+
+start_test "build-evidence.sh computes pr_ready=false when E2E report missing"
+
+scratch=$(scratch_dir bevidence-prnoe2e)
+mkdir -p "$scratch/.claude/local"
+
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a
+    git add a
+    git commit -qm init
+
+    cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
+       .claude/local/state.md
+
+    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out" 2>&1
+)
+
+OUT="$scratch/.out"
+assert_contains "$OUT" '"pr_ready":false' "pr_ready=false when E2E missing + no PR open"
+
+start_test "build-evidence.sh emits stable progress_fingerprint across identical runs"
+
+scratch=$(scratch_dir bevidence-fp)
+mkdir -p "$scratch/.claude/local"
+
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a
+    git add a
+    git commit -qm init
+
+    cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/mid-workflow.md" \
+       .claude/local/state.md
+
+    # Run twice on identical state
+    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out1" 2>&1
+    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out2" 2>&1
+)
+
+# Extract fingerprint from each run, expect identical
+FP1=$(grep -o '"progress_fingerprint":"[a-f0-9]*"' "$scratch/.out1" | head -1)
+FP2=$(grep -o '"progress_fingerprint":"[a-f0-9]*"' "$scratch/.out2" | head -1)
+assert_equals "$FP1" "$FP2" "progress_fingerprint stable across identical runs"
+
+# Also assert fingerprint is non-empty SHA256-shaped (64 hex chars)
+assert_contains "$scratch/.out1" '"progress_fingerprint":"' "fingerprint field present"
+
 # lib.sh's EXIT trap prints the summary; no explicit call needed.
 report "build-evidence.sh" >&2

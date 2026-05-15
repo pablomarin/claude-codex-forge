@@ -302,6 +302,72 @@ PA_AT_JSON=$(json_str_field "authorized_at" "$PA_AT")
 PA_HEAD_JSON=$(json_str_field "head_sha_at_authorization" "$PA_HEAD")
 PA_NONCE_JSON=$(json_str_field "nonce_at_authorization" "$PA_NONCE")
 
+# ---------------------------------------------------------------------------
+# Task 7: Derived fields — pr_ready, all_gates_green, progress_fingerprint
+# ---------------------------------------------------------------------------
+
+# pr_ready: PR open AND PR head matches HEAD_SHA AND reviewer gate clean
+#           AND E2E fresh AND PR auth accepted.
+PR_OPEN="false"
+[ "$PR_STATE_VAL" = "OPEN" ] && PR_OPEN="true"
+
+PR_HEAD_MATCH="false"
+[ -n "$HEAD_SHA" ] && [ "$PR_HEAD_OID" = "$HEAD_SHA" ] && PR_HEAD_MATCH="true"
+
+PR_READY="false"
+if [ "$PR_OPEN" = "true" ] && [ "$PR_HEAD_MATCH" = "true" ] && \
+   [ "$RG_CLEAN" = "true" ] && [ "$E2E_FRESH" = "true" ] && \
+   [ "$PA_AUTH" = "true" ]; then
+    PR_READY="true"
+fi
+
+# all_gates_green: every checklist item checked (DONE == TOTAL > 0) AND pr_ready=true.
+# Guard against TOTAL=0 to avoid a false positive on empty checklists.
+ALL_GATES="false"
+if [ "${DONE_COUNT:-0}" -eq "${TOTAL_COUNT:-0}" ] && [ "${TOTAL_COUNT:-0}" -gt 0 ] && \
+   [ "$PR_READY" = "true" ]; then
+    ALL_GATES="true"
+fi
+
+# progress_fingerprint: deterministic SHA256 of a SCOPED, ORDER-PRESERVING subset.
+#
+# Design notes (from plan Task 7):
+#   1. CRLF normalize BEFORE awk — anchors like /^## Workflow$/ must match even
+#      on Windows-edited files. (Codex P1.7 fix — tr-then-awk, not awk-then-tr)
+#   2. Scope to ## Workflow / ### Checklist only — stray rows outside the section
+#      must NOT pollute the hash.
+#   3. Preserve document ORDER — sorting would hide checklist reordering changes.
+#   4. Use ASCII Unit Separator (0x1f) as delimiter — never appears in Markdown.
+#   5. Include PR authorization line (whole-file OK — there's only ever one).
+DELIM=$'\x1f'  # ASCII Unit Separator
+FP_TMP="${SCRATCH:-/tmp}/fp.input.$$"
+{
+    printf '%s%s' "$PHASE" "$DELIM"
+    printf '%s%s' "$NEXT_STEP" "$DELIM"
+    # CRLF normalize FIRST, then Workflow-scoped awk to extract checklist rows
+    # in document order.
+    tr -d '\r' < "$STATE_MD" 2>/dev/null | awk '
+        /^## Workflow$/ { in_w=1; next }
+        in_w && /^## / { in_w=0; in_c=0 }
+        in_w && /^### Checklist/ { in_c=1; next }
+        in_w && /^### / && !/^### Checklist/ { in_c=0 }
+        in_w && in_c && /^- \[[ x]\]/ { print }
+    ' | tr '\n' "$DELIM"
+    # PR authorization line (whole-file OK — singleton). CRLF normalize BEFORE grep.
+    tr -d '\r' < "$STATE_MD" 2>/dev/null \
+        | grep -E '^- \[[xX]\][[:space:]]+PR creation authorized' \
+        | head -1
+} > "$FP_TMP" 2>/dev/null
+
+if command -v sha256sum >/dev/null 2>&1; then
+    PROGRESS_FP=$(sha256sum "$FP_TMP" 2>/dev/null | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+    PROGRESS_FP=$(shasum -a 256 "$FP_TMP" 2>/dev/null | awk '{print $1}')
+else
+    PROGRESS_FP=""
+fi
+rm -f "$FP_TMP"
+
 # Task 5: git + PR + E2E field strings
 BRANCH_JSON=$(json_str_field "branch" "$BRANCH")
 HEAD_SHA_JSON=$(json_str_field "head_sha" "$HEAD_SHA")
@@ -347,6 +413,9 @@ E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
     fi
     printf '"pr_authorization":{"authorized":%s,%s,%s,%s},' \
         "$PA_AUTH" "$PA_AT_JSON" "$PA_HEAD_JSON" "$PA_NONCE_JSON"
+    printf '"pr_ready":%s,' "$PR_READY"
+    printf '"all_gates_green":%s,' "$ALL_GATES"
+    printf '"progress_fingerprint":"%s",' "$PROGRESS_FP"
     printf '"warnings":[],'
     printf '"errors":[]'
     printf '}\n'
