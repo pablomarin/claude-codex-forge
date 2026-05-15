@@ -391,5 +391,27 @@ FP1=$(grep -o '"progress_fingerprint":"[a-f0-9]*"' "$scratch/.out1" | head -1)
 FP2=$(grep -o '"progress_fingerprint":"[a-f0-9]*"' "$scratch/.out2" | head -1)
 assert_equals "$FP1" "$FP2" "fingerprint stable across identical runs"
 
+# --- PowerShell parity smoke (only runs if pwsh is on PATH) ---
+if command -v pwsh >/dev/null 2>&1; then
+    start_test "build-evidence.ps1 emits markers + valid JSON (Bash-driven smoke)"
+
+    scratch=$(scratch_dir bevidence-ps)
+    mkdir -p "$scratch/.claude/local"
+    cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+       "$scratch/.claude/local/state.md"
+
+    OUT="$scratch/.out"
+    ( cd "$scratch" && pwsh -NoProfile -File "$REPO_ROOT/hooks/build-evidence.ps1" ) >"$OUT" 2>&1
+    EXIT=$?
+
+    assert_equals "$EXIT" "0" "ps1 exit code is 0"
+    assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_BEGIN" "ps1 begin marker present"
+    assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_END"   "ps1 end marker present"
+    assert_contains "$OUT" '"type":"forge_goal_evidence"' "ps1 type field present"
+else
+    start_test "build-evidence.ps1 smoke (skipped — pwsh not installed)"
+    pass "skipped (no pwsh)"
+fi
+
 # lib.sh's EXIT trap prints the summary; no explicit call needed.
 report "build-evidence.sh" >&2
