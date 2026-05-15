@@ -543,6 +543,9 @@ copy_file "$SCRIPT_DIR/hooks/check-config-change.sh" ".claude/hooks/check-config
 copy_file "$SCRIPT_DIR/hooks/check-bash-safety.sh" ".claude/hooks/check-bash-safety.sh" ".claude/hooks/check-bash-safety.sh"
 copy_file "$SCRIPT_DIR/hooks/check-workflow-gates.sh" ".claude/hooks/check-workflow-gates.sh" ".claude/hooks/check-workflow-gates.sh"
 copy_file "$SCRIPT_DIR/hooks/auto-approve-local-writes.sh" ".claude/hooks/auto-approve-local-writes.sh" ".claude/hooks/auto-approve-local-writes.sh"
+# build-evidence.sh — read-only evidence emitter for the /forge-goal autonomous loop
+copy_file "$SCRIPT_DIR/hooks/build-evidence.sh" ".claude/hooks/build-evidence.sh" ".claude/hooks/build-evidence.sh"
+chmod +x ".claude/hooks/build-evidence.sh" 2>/dev/null || true
 
 # Hook lib helpers (shared across hooks and command Pre-Flight blocks)
 mkdir -p .claude/hooks/lib
@@ -566,6 +569,7 @@ chmod +x .claude/hooks/check-config-change.sh 2>/dev/null || true
 chmod +x .claude/hooks/check-bash-safety.sh 2>/dev/null || true
 chmod +x .claude/hooks/check-workflow-gates.sh 2>/dev/null || true
 chmod +x .claude/hooks/auto-approve-local-writes.sh 2>/dev/null || true
+chmod +x .claude/hooks/build-evidence.sh 2>/dev/null || true
 
 # ADRs — ship template + README + seed ADRs (existing-file-skip semantics).
 mkdir -p docs/adr

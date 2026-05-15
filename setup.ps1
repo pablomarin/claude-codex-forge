@@ -565,6 +565,8 @@ Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "check-config-change
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "check-bash-safety.ps1") ".claude\hooks\check-bash-safety.ps1" ".claude\hooks\check-bash-safety.ps1"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "check-workflow-gates.ps1") ".claude\hooks\check-workflow-gates.ps1" ".claude\hooks\check-workflow-gates.ps1"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "auto-approve-local-writes.ps1") ".claude\hooks\auto-approve-local-writes.ps1" ".claude\hooks\auto-approve-local-writes.ps1"
+# build-evidence.ps1 — read-only evidence emitter for the /forge-goal autonomous loop
+Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "build-evidence.ps1") ".claude\hooks\build-evidence.ps1" ".claude\hooks\build-evidence.ps1"
 
 # Hook lib helpers
 # Install BOTH the .ps1 and .sh helpers on Windows because:

@@ -954,6 +954,77 @@ assert_contains "$SETUP_PS" "codex-pty.sh" "setup.ps1 installs codex-pty.sh (cro
 assert_contains "$SETUP_PS" "codex-pty-helper.py" "setup.ps1 installs codex-pty-helper.py"
 
 # ---------------------------------------------------------------------------
+# Contract: FORGE_GOAL_EVIDENCE producer/consumer/schema
+#
+# (1) Producer markers: both build-evidence.{sh,ps1} contain BEGIN/END markers.
+# (2) Consumer ordering: check-state-updated.{sh,ps1} calls build-evidence
+#     BEFORE the stop_hook_active early-return (text-order check).
+# (3) Schema shape: the producer emits all required top-level JSON keys.
+#     Using a string-match on the literal token as it appears in source
+#     (same form for both .sh printf strings and .ps1 quoted literals).
+# ---------------------------------------------------------------------------
+start_test "FORGE_GOAL_EVIDENCE producer/consumer/schema contract"
+
+# (1) Producer markers
+for f in "$REPO_ROOT/hooks/build-evidence.sh" "$REPO_ROOT/hooks/build-evidence.ps1"; do
+    assert_file_exists "$f" "producer exists: $(basename "$f")"
+    assert_contains "$f" "FORGE_GOAL_EVIDENCE_BEGIN" "$(basename "$f") begin marker"
+    assert_contains "$f" "FORGE_GOAL_EVIDENCE_END"   "$(basename "$f") end marker"
+done
+
+# (2) Consumer ordering: build-evidence invocation must appear BEFORE the
+#     stop_hook_active early-return in check-state-updated.{sh,ps1}.
+#
+#     The early-return takes different forms in each file:
+#       .sh  — `[ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0` (uppercase var, after parsing)
+#       .ps1 — `if ($data.stop_hook_active -eq $true) {`
+#     We match on those exact guard patterns (not the comment that mentions
+#     stop_hook_active in lowercase, which appears in the parsing block and
+#     would give a false earlier line number via tail -1).
+#     Note: bash 3.2 (macOS) has no associative arrays — use explicit if/else.
+for f in "$REPO_ROOT/hooks/check-state-updated.sh" "$REPO_ROOT/hooks/check-state-updated.ps1"; do
+    [ -f "$f" ] || { fail "consumer missing: $f"; continue; }
+    case "$(basename "$f")" in
+        check-state-updated.sh)  guard_pattern='STOP_HOOK_ACTIVE.*exit 0' ;;
+        check-state-updated.ps1) guard_pattern='data\.stop_hook_active' ;;
+        *) fail "unexpected consumer file: $(basename "$f")"; continue ;;
+    esac
+    EVIDENCE_LINE=$(grep -n 'build-evidence' "$f" | head -1 | cut -d: -f1)
+    EXIT_LINE=$(grep -En "$guard_pattern" "$f" | tail -1 | cut -d: -f1)
+    if [ -n "$EVIDENCE_LINE" ] && [ -n "$EXIT_LINE" ] && [ "$EVIDENCE_LINE" -lt "$EXIT_LINE" ]; then
+        pass "$(basename "$f") invokes build-evidence BEFORE stop_hook_active early-return"
+    else
+        fail "$(basename "$f") consumer ordering wrong (build-evidence line $EVIDENCE_LINE not before early-return line $EXIT_LINE)"
+    fi
+done
+
+# (3) Schema shape — producer emits required top-level JSON keys.
+#     Each key appears as a literal substring in both .sh (printf format string)
+#     and .ps1 (PowerShell string concatenation literal). The grep is
+#     straightforward because the source uses the exact key token in both files.
+REQUIRED_KEYS=(
+    '"type":"forge_goal_evidence"'
+    '"schema_version":'
+    '"produced_at_unix":'
+    '"session_nonce"'
+    '"pr_ready":'
+    '"all_gates_green":'
+    '"reviewer_gate":{'
+    '"e2e_report":{'
+    '"pr_state":{'
+    '"pr_authorization":{'
+    '"progress_fingerprint":'
+)
+# Note: "session_nonce" uses the string token without a colon because both
+# producers construct it via a helper function (json_str_field / Build-JsonStringField)
+# that never appears as the literal "session_nonce": in source. The shorter form
+# is sufficient to assert the field exists in the schema.
+for key in "${REQUIRED_KEYS[@]}"; do
+    assert_contains "$REPO_ROOT/hooks/build-evidence.sh"  "$key" "schema key in build-evidence.sh: $key"
+    assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" "$key" "schema key in build-evidence.ps1: $key"
+done
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 report "test-contracts.sh"

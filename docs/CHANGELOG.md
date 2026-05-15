@@ -2,6 +2,54 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.28 — 2026-05-15 · forge-goal Layer 1: unified evidence primitive
+
+**New:** `hooks/build-evidence.{sh,ps1}` — read-only script that parses
+`state.md` (Markdown table format, all sections), queries `git` + `gh pr view`
+
+- E2E report mtime, and emits a unified JSON evidence blob between
+  `FORGE_GOAL_EVIDENCE_BEGIN` / `FORGE_GOAL_EVIDENCE_END` markers on STDERR.
+  Computes `pr_ready`, `all_gates_green`, and a deterministic
+  `progress_fingerprint` (SHA256 of a scoped subset, CRLF-normalized).
+
+**Fixed:** `hooks/check-state-updated.{sh,ps1}` now invokes `build-evidence`
+BEFORE the `stop_hook_active` early-return. Previously the early-return
+suppressed evidence emission inside an active `/goal` loop — would have made
+the loop's Haiku verifier blind. Load-bearing for Layer 2 (the autonomous
+`/forge-goal` workflow).
+
+**New tests:**
+
+- `tests/template/test-build-evidence.sh` — 35 assertions covering parsers
+  (goal section, workflow checklist, reviewer rows, PR auth), git + gh + E2E
+  external queries, derived fields (`pr_ready`, `all_gates_green`,
+  `progress_fingerprint`), CRLF guard, and fingerprint stability.
+- Cross-file contract in `tests/template/test-contracts.sh` — three checks:
+  (1) producer markers present in both `.sh` and `.ps1`, (2) consumer invokes
+  `build-evidence` BEFORE the `stop_hook_active` early-return in both
+  `check-state-updated` files, (3) all required top-level JSON schema keys
+  present in both producers.
+
+**Notes:**
+
+- Layer 1 is independently useful: the evidence JSON centralizes what existing
+  gate hooks already compute ad-hoc, and exposes it uniformly to any consumer
+  (human transcript, future autonomous loop, external tooling).
+- Layer 2 (the autonomous `/forge-goal` workflow) is a separate workstream;
+  see `docs/plans/2026-05-14-forge-goal-design.md` and
+  `docs/plans/2026-05-14-forge-goal-experiments.md` for the full design.
+
+**Files:**
+
+- `hooks/build-evidence.sh` + `hooks/build-evidence.ps1` — new (Layer 1 evidence primitive)
+- `hooks/check-state-updated.sh` + `hooks/check-state-updated.ps1` — ordering fix
+- `tests/template/test-build-evidence.sh` — 35 new assertions
+- `tests/template/test-contracts.sh` — FORGE_GOAL_EVIDENCE producer/consumer/schema contract
+- `setup.sh` + `setup.ps1` — install `build-evidence.{sh,ps1}` to downstream `.claude/hooks/`
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.27 → 5.28
+
+**Existing installs:** run `./setup.sh --upgrade` from your Forge clone to pick up the new script.
+
 ## 5.27 — 2026-05-12 · `/council` chairman output reliability (`--output-last-message`)
 
 **Bug:** When `/council` ran the chairman call, `codex exec` dumped everything to stdout — the CLI banner, the entire 16KB+ prompt echoed back, the `codex` marker, the response, and a `tokens used` footer. The skill said "Display the chairman's output VERBATIM" but never told Claude HOW to extract the response from that verbose capture. Claude improvised with ad-hoc `tail`/`grep`/`sed` patterns. When extraction failed it reported "Codex chairman exited without producing analysis on both attempts" — even when the verdict was sitting cleanly in the file, fully structured. Field-confirmed today: a single `/council` session in `actbl-he` produced 21KB and 4.3KB chairman responses (both with complete `## Council Verdict` / `### Minority Report` sections) and both were narrated as failures.
