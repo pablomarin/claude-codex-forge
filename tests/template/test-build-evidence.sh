@@ -201,5 +201,53 @@ assert_equals "$EXIT" "0" "exit 0 with e2e report present"
 assert_contains "$OUT" '"e2e_report":{"present":true' "e2e present"
 assert_contains "$OUT" '"fresh_for_head":true' "e2e fresh for head"
 
+start_test "build-evidence.sh accepts PR authorization when nonce + head match"
+
+scratch=$(scratch_dir bevidence-pa-accepted)
+cd "$scratch"
+git init -q -b main >/dev/null 2>&1
+git config user.email "t@t"
+git config user.name "t"
+echo x > a
+git add a
+git commit -qm init
+
+EXPECTED_HEAD=$(git rev-parse HEAD)
+mkdir -p .claude/local
+# Replace the placeholder abc123def in pr-authorized.md with the real HEAD.
+# Fixture has nonce 00000000-0000-0000-0000-000000000004 in BOTH /goal session
+# and PR authorization line — they already match.
+sed "s/abc123def/$EXPECTED_HEAD/g" \
+    "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
+    > .claude/local/state.md
+
+OUT="$scratch/.out"
+bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+
+assert_contains "$OUT" '"pr_authorization":{"authorized":true' "authorized=true when nonce + head match"
+assert_contains "$OUT" "\"head_sha_at_authorization\":\"$EXPECTED_HEAD\"" "head matches real HEAD"
+
+start_test "build-evidence.sh rejects PR authorization when head is stale"
+
+scratch=$(scratch_dir bevidence-pa-stale)
+cd "$scratch"
+git init -q -b main >/dev/null 2>&1
+git config user.email "t@t"
+git config user.name "t"
+echo x > a
+git add a
+git commit -qm init
+
+mkdir -p .claude/local
+# Use pr-authorized.md as-is: PR authorization line has head=abc123def which
+# won't match the real HEAD (since we just committed an unrelated commit).
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
+   .claude/local/state.md
+
+OUT="$scratch/.out"
+bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+
+assert_contains "$OUT" '"pr_authorization":{"authorized":false' "authorized=false when head stale"
+
 # lib.sh's EXIT trap prints the summary; no explicit call needed.
 report "build-evidence.sh" >&2

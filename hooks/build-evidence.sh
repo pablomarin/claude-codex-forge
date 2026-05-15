@@ -204,6 +204,46 @@ compute_reviewer_gate() {
     fi
 }
 
+parse_pr_authorization() {
+    # Echo "authorized_bool|authorized_at|head_sha_at_auth|nonce_at_auth" or "false|||" if
+    # section missing, HEAD_SHA empty, or GOAL_NONCE empty.
+    # Section format (single line, one per state.md):
+    #   - [x] PR creation authorized — `<timestamp>` — nonce=`<nonce>` — head=`<sha>`
+    # Return authorized=true ONLY if extracted nonce matches GOAL_NONCE AND
+    # extracted head matches HEAD_SHA. Otherwise authorized=false (but emit values for debugging).
+
+    [ -f "$STATE_MD" ] || { echo "false|||"; return 0; }
+    [ -z "$HEAD_SHA" ] && { echo "false|||"; return 0; }
+    [ -z "$GOAL_NONCE" ] && { echo "false|||"; return 0; }
+
+    # CRLF normalize BEFORE grep anchors (Codex P1.7 fix).
+    local line
+    line=$(tr -d '\r' < "$STATE_MD" \
+           | grep -E '^-[[:space:]]*\[x\][[:space:]]+PR creation authorized' \
+           | head -1)
+
+    if [ -z "$line" ]; then
+        echo "false|||"
+        return 0
+    fi
+
+    # Extract timestamp, nonce, and head from the line via Bash regex.
+    # Pattern: - [x] PR creation authorized — `<timestamp>` — nonce=`<nonce>` — head=`<sha>`
+    if [[ "$line" =~ \[x\][[:space:]]+PR\ creation\ authorized\ +—\ +\`([^\`]+)\`\ +—\ +nonce=\`([^\`]+)\`\ +—\ +head=\`([^\`]+)\` ]]; then
+        local at="${BASH_REMATCH[1]}"
+        local nonce="${BASH_REMATCH[2]}"
+        local head="${BASH_REMATCH[3]}"
+
+        if [ "$nonce" = "$GOAL_NONCE" ] && [ "$head" = "$HEAD_SHA" ]; then
+            echo "true|${at}|${head}|${nonce}"
+        else
+            echo "false|${at}|${head}|${nonce}"
+        fi
+    else
+        echo "false|||"
+    fi
+}
+
 json_str_field() {
     # Usage: json_str_field "key" "value" — value can be empty (becomes null).
     local key="$1"
@@ -244,11 +284,23 @@ RG_REST="${RG_RESULT#*|}"
 RG_ITER="${RG_REST%%|*}"
 RG_HEAD="${RG_REST##*|}"
 
+# Parse ## PR authorization section.
+PA_PARSED=$(parse_pr_authorization)
+PA_AUTH="${PA_PARSED%%|*}"
+PA_REST="${PA_PARSED#*|}"
+PA_AT="${PA_REST%%|*}"
+PA_REST2="${PA_REST#*|}"
+PA_HEAD="${PA_REST2%%|*}"
+PA_NONCE="${PA_REST2#*|}"
+
 # Build JSON-safe field values for string fields that need escaping/null handling.
 PHASE_JSON=$(json_str_field "phase" "$PHASE")
 NEXT_STEP_JSON=$(json_str_field "next_step" "$NEXT_STEP")
 RG_ITER_JSON=$(json_str_field "matched_iteration" "$RG_ITER")
 RG_HEAD_JSON=$(json_str_field "matched_head" "$RG_HEAD")
+PA_AT_JSON=$(json_str_field "authorized_at" "$PA_AT")
+PA_HEAD_JSON=$(json_str_field "head_sha_at_authorization" "$PA_HEAD")
+PA_NONCE_JSON=$(json_str_field "nonce_at_authorization" "$PA_NONCE")
 
 # Task 5: git + PR + E2E field strings
 BRANCH_JSON=$(json_str_field "branch" "$BRANCH")
@@ -293,6 +345,8 @@ E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
     else
         printf '"e2e_report":{"present":false,"path":null,"mtime_unix":null,"fresh_for_head":false},'
     fi
+    printf '"pr_authorization":{"authorized":%s,%s,%s,%s},' \
+        "$PA_AUTH" "$PA_AT_JSON" "$PA_HEAD_JSON" "$PA_NONCE_JSON"
     printf '"warnings":[],'
     printf '"errors":[]'
     printf '}\n'
