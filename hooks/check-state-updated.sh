@@ -40,6 +40,14 @@ else
     STOP_HOOK_ACTIVE=$(echo "$INPUT" | grep -o '"stop_hook_active"[[:space:]]*:[[:space:]]*true' | head -1)
     [ -n "$STOP_HOOK_ACTIVE" ] && STOP_HOOK_ACTIVE="true" || STOP_HOOK_ACTIVE="false"
 fi
+# Emit FORGE_GOAL evidence FIRST — must run on every Stop call,
+# including those with stop_hook_active=true (active /goal loop),
+# so the /goal verifier sees the current evidence in transcript.
+EVIDENCE_SCRIPT="${CLAUDE_PROJECT_DIR:-$(pwd)}/.claude/hooks/build-evidence.sh"
+if [ -x "$EVIDENCE_SCRIPT" ]; then
+    bash "$EVIDENCE_SCRIPT" || true   # non-blocking; stderr passes through naturally
+fi
+
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 
 # All git commands run in current directory (Claude cd's into worktrees)

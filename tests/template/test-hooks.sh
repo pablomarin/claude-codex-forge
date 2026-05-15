@@ -742,6 +742,36 @@ else
 fi
 
 # ===========================================================================
+# Test N: check-state-updated emits FORGE_GOAL_EVIDENCE markers even when
+# stop_hook_active=true.
+#
+# Regression guard for the bug where the early-return path (active /goal loop)
+# suppressed evidence emission entirely, defeating Layer 1 of /forge-goal.
+# ===========================================================================
+start_test "check-state-updated emits FORGE_GOAL_EVIDENCE markers even when stop_hook_active=true"
+
+HOOK_STATE_SH="$REPO_ROOT/hooks/check-state-updated.sh"
+
+SN=$(scratch_dir checkstateupd-evidence)
+mkdir -p "$SN/.claude/local" "$SN/.claude/hooks"
+cp "$REPO_ROOT/hooks/build-evidence.sh" "$SN/.claude/hooks/build-evidence.sh"
+chmod +x "$SN/.claude/hooks/build-evidence.sh"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+   "$SN/.claude/local/state.md"
+
+OUT_N="$SN/.out"
+(
+    cd "$SN" || exit 1
+    INPUT='{"stop_hook_active":true,"transcript_path":"/tmp/x"}'
+    echo "$INPUT" | bash "$HOOK_STATE_SH" > "$OUT_N" 2>&1
+)
+
+assert_contains "$OUT_N" "FORGE_GOAL_EVIDENCE_BEGIN" \
+    "evidence begin marker emits despite stop_hook_active=true"
+assert_contains "$OUT_N" "FORGE_GOAL_EVIDENCE_END" \
+    "evidence end marker emits despite stop_hook_active=true"
+
+# ===========================================================================
 # Report
 # ===========================================================================
 report "test-hooks.sh"

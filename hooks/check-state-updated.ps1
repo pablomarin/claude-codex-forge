@@ -33,6 +33,21 @@ try {
     exit 0
 }
 
+# Emit FORGE_GOAL evidence FIRST — must run on every Stop call,
+# including those with stop_hook_active=true (active /goal loop),
+# so the /goal verifier sees the current evidence in transcript.
+$projectDir = $env:CLAUDE_PROJECT_DIR
+if (-not $projectDir) { $projectDir = (Get-Location).Path }
+$evidenceScript = Join-Path $projectDir ".claude/hooks/build-evidence.ps1"
+if (Test-Path $evidenceScript) {
+    try {
+        & $evidenceScript
+    } catch {
+        # Non-blocking: write one warning to stderr; don't break the Stop hook.
+        [Console]::Error.WriteLine("WARN: build-evidence.ps1 failed: $($_.Exception.Message)")
+    }
+}
+
 # Check if stop_hook_active to prevent infinite loops
 if ($data.stop_hook_active -eq $true) {
     exit 0
