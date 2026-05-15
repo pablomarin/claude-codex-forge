@@ -30,7 +30,7 @@ function Build-JsonStringField {
     if ([string]::IsNullOrEmpty($Value)) {
         return '"' + $Key + '":null'
     }
-    $esc = $Value -replace '\\', '\\' -replace '"', '\"'
+    $esc = $Value -replace '\\', '\\\\' -replace '"', '\"'
     return '"' + $Key + '":"' + $esc + '"'
 }
 
@@ -209,13 +209,13 @@ function Parse-PRAuthorization {
 # ---------------------------------------------------------------------------
 # Git state queries (read-only, best-effort — failures produce empty strings)
 # ---------------------------------------------------------------------------
-$HeadSha = (git rev-parse HEAD 2>$null) -join ""
+$HeadSha = ((git rev-parse HEAD 2>$null) -join "").Trim()
 if ($LASTEXITCODE -ne 0) { $HeadSha = "" }
 
-$Branch = (git rev-parse --abbrev-ref HEAD 2>$null) -join ""
+$Branch = ((git rev-parse --abbrev-ref HEAD 2>$null) -join "").Trim()
 if ($LASTEXITCODE -ne 0) { $Branch = "" }
 
-$TreeSha = (git rev-parse "HEAD^{tree}" 2>$null) -join ""
+$TreeSha = ((git rev-parse "HEAD^{tree}" 2>$null) -join "").Trim()
 if ($LASTEXITCODE -ne 0) { $TreeSha = "" }
 
 $DirtyOutput = git status --porcelain 2>$null
@@ -320,7 +320,7 @@ if (Test-Path "tests/e2e/reports") {
         $E2ePath = $newestItem.FullName -replace '\\', '/'
         # Make path relative if it starts with current directory
         $pwd = (Get-Location).Path -replace '\\', '/'
-        if ($E2ePath.StartsWith($pwd + "/")) {
+        if ($E2ePath.StartsWith($pwd + "/", [System.StringComparison]::OrdinalIgnoreCase)) {
             $E2ePath = $E2ePath.Substring($pwd.Length + 1)
         }
         $E2eMtimeInt = $newestMtime
@@ -418,6 +418,7 @@ foreach ($line in $lines) {
 foreach ($line in $lines) {
     if ($line -match '^- \[[xX]\]\s+PR creation authorized') {
         $null = $fpParts.Append($line)
+        $null = $fpParts.Append("`n")   # match Bash grep's trailing newline
         break
     }
 }
