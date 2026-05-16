@@ -393,7 +393,7 @@ When Phase 1 (PRD) completes (PRD file exists in `docs/prds/<feature>.md` and th
 
 - **DO NOT** call `gh pr create` until you have run `AskUserQuestion` asking the user to authorize, and they answered YES, and you have REPLACED the `## PR authorization` section in state.md with the new authorization line (matching nonce + current HEAD SHA at the moment of authorization).
 - **DO NOT** call `/goal clear` after success — `/goal` auto-clears when the verifier confirms the condition.
-- **DO** track each code-review iteration by appending `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``AND`- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``to`### Checklist`(state.md). The`reviewer_gate.clean_same_iteration` evidence only fires when BOTH appear for the same iteration AND at the current HEAD.
+- **DO** track each code-review iteration by appending `- [x] Code review iteration <N> — codex clean — head=`<sha>` AND `- [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>` to `### Checklist` (state.md). The `reviewer_gate.clean_same_iteration` evidence only fires when BOTH appear for the same iteration AND at the current HEAD.
 - **DO** invoke `/council` whenever you would otherwise pause for the user (except PR creation). Apply the chairman's verdict; do not second-guess it.
 - **REPLACE, never append** when writing `/goal session` or `## PR authorization`. Appending creates stale duplicate entries that confuse Layer 1's parsers.
 
