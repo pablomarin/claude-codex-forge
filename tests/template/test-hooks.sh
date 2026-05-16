@@ -772,6 +772,288 @@ assert_contains "$OUT_N" "FORGE_GOAL_EVIDENCE_END" \
     "evidence end marker emits despite stop_hook_active=true"
 
 # ===========================================================================
+# Layer 2: PR-create authorization guard (Task 3)
+# These tests exercise the new /forge-goal guard in check-workflow-gates.sh.
+# Each test runs inside a subshell to prevent pwd leakage.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Test L2-1: /goal session active + no ## PR authorization → blocked (exit 2)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates blocks gh pr create when ## PR authorization missing during active /forge-goal"
+
+scratch=$(scratch_dir wgates-prauth-missing)
+mkdir -p "$scratch/.claude/local"
+# state.md has /goal session populated with non-empty nonce (forge-goal active)
+# but NO PR authorization line.
+cat > "$scratch/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+- [ ] PR authorized
+
+EOF
+
+(
+    cd "$scratch"
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "2" "gh pr create BLOCKED when no ## PR authorization line (exit 2)"
+assert_contains "$scratch/.out" "PR creation authorized" "hook output mentions the missing authorization"
+
+# ---------------------------------------------------------------------------
+# Test L2-2: /goal session active + ## PR authorization with matching nonce + HEAD → allowed (exit 0)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates allows gh pr create when ## PR authorization matches nonce + HEAD"
+
+scratch=$(scratch_dir wgates-prauth-match)
+mkdir -p "$scratch/.claude/local"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a; git add a; git commit -qm init
+    HEAD_SHA=$(git rev-parse HEAD)
+
+    cat > .claude/local/state.md <<EOF
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+- [x] PR authorized
+
+## PR authorization
+
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\` — head=\`$HEAD_SHA\`
+EOF
+
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "0" "gh pr create ALLOWED when nonce + HEAD match (exit 0)"
+
+# ---------------------------------------------------------------------------
+# Test L2-3: /goal session active + ## PR authorization with stale HEAD → blocked (exit 2)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates blocks gh pr create when ## PR authorization head mismatched"
+
+scratch=$(scratch_dir wgates-prauth-stalehead)
+mkdir -p "$scratch/.claude/local"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a; git add a; git commit -qm init
+    echo y > a; git add a; git commit -qm second  # advance HEAD past authorization point
+
+    cat > .claude/local/state.md <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] PR authorized
+
+## PR authorization
+
+- [x] PR creation authorized — `2026-05-16T10:15:00Z` — nonce=`aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` — head=`abc123def_stale_head`
+EOF
+
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "2" "gh pr create BLOCKED when authorization head doesn't match current HEAD (exit 2)"
+assert_contains "$scratch/.out" "PR creation authorized" "hook output references the stale authorization"
+
+# ---------------------------------------------------------------------------
+# Test L2-4: NO /goal session (no non-empty nonce) → guard is a no-op (existing checklist guard runs)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates skips PR-auth guard when no non-empty nonce in /goal session (legacy workflow path)"
+
+scratch=$(scratch_dir wgates-prauth-noforgegoal)
+mkdir -p "$scratch/.claude/local"
+# state.md WITHOUT ## /goal session — the existing checklist guard runs unchanged.
+cat > "$scratch/.claude/local/state.md" <<'EOF'
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — Ship          |
+| Next step | gh pr create      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+(
+    cd "$scratch"
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "0" "PR-auth guard skipped when no /forge-goal session active"
+
+# ---------------------------------------------------------------------------
+# Test L2-5 (P1.2 fix): empty /goal session nonce row → treated as INACTIVE
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates treats /goal session with empty nonce row as INACTIVE (no block)"
+
+scratch=$(scratch_dir wgates-prauth-emptynonce)
+mkdir -p "$scratch/.claude/local"
+# state.md has ## /goal session heading but nonce row has no value — should be INACTIVE.
+cat > "$scratch/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            |       |
+| workflow_command |       |
+| issued_at        |       |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — Ship          |
+| Next step | gh pr create      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+(
+    cd "$scratch"
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "0" "PR-auth guard INACTIVE when /goal session nonce is empty (exit 0)"
+
+# ---------------------------------------------------------------------------
+# Test L2-6 (P1.4 fix): stale-duplicate auth lines → guard uses LAST one
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates uses LAST PR authorization line when multiple present (stale-duplicate defense)"
+
+scratch=$(scratch_dir wgates-prauth-duplicate)
+mkdir -p "$scratch/.claude/local"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a; git add a; git commit -qm init
+    HEAD_SHA=$(git rev-parse HEAD)
+
+    cat > .claude/local/state.md <<EOF
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## PR authorization
+
+- [x] PR creation authorized — \`2026-05-16T09:00:00Z\` — nonce=\`stale-nonce-old-session\` — head=\`staleshastale\`
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\` — head=\`$HEAD_SHA\`
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "0" "guard uses LAST auth line (matching nonce+HEAD) and ALLOWS when last line is valid"
+
+# ===========================================================================
 # Report
 # ===========================================================================
 report "test-hooks.sh"
