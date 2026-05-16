@@ -1053,6 +1053,58 @@ EOF
 EXIT=$(cat "$scratch/.exit")
 assert_equals "$EXIT" "0" "guard uses LAST auth line (matching nonce+HEAD) and ALLOWS when last line is valid"
 
+# ---------------------------------------------------------------------------
+# Test L2-7 (P2 fix): nonce mismatch in auth line → guard blocks (exit 2)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates blocks gh pr create when ## PR authorization nonce mismatches /goal session nonce (stale-session defense)"
+
+scratch=$(scratch_dir wgates-prauth-noncemis)
+mkdir -p "$scratch/.claude/local"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a; git add a; git commit -qm init
+    HEAD_SHA=$(git rev-parse HEAD)
+
+    cat > .claude/local/state.md <<EOF
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | session-A-uuid |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+
+## PR authorization
+
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`session-B-different\` — head=\`$HEAD_SHA\`
+EOF
+
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "2" "gh pr create BLOCKED when auth-line nonce doesn't match /goal session nonce (exit 2)"
+assert_contains "$scratch/.out" "nonce" "hook output mentions nonce mismatch"
+
 # ===========================================================================
 # Report
 # ===========================================================================
