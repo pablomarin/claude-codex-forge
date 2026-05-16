@@ -61,6 +61,14 @@ You don't normally edit this file by hand — `/new-feature`, `/fix-bug`, and `/
 
 Project goal lives in `CLAUDE.md` under the `## Project Overview` → `### Goal` subsection. Architecture decisions live as per-file ADRs in `docs/adr/NNNN-*.md` (one file per decision; `docs/adr/template.md` is the starter).
 
+**When a `/forge-goal`-driven workflow is active**, additional sections appear in `.claude/local/state.md`:
+
+- `## /goal session` — table with the autonomous-loop session nonce, originating workflow command, and issued-at timestamp. Absent when no loop is active; written by the workflow command checkpoint and REPLACED (not appended) on each new kickoff.
+- `## PR authorization` — single authorization line written when the user authorizes PR creation via the `AskUserQuestion` modal at the PR-create gate. Contains the timestamp, session nonce, and HEAD SHA at the moment of authorization. REPLACED (not appended) on each re-authorization.
+- `### Checklist` rows for reviewer iterations include `head=`<sha>`` so the evidence script can verify both reviewers cleared at the same iteration AND at the same HEAD.
+
+**REPLACE semantics are critical:** both `/goal session` and `## PR authorization` are managed as singletons. The workflow commands always overwrite existing content, never append. Appending would cause Layer 1's parsers (which use `head -1` on matching lines) to pick up stale data from previous sessions.
+
 ## 3. Release PR Skill (All Tech Stacks)
 
 The `/release` skill creates structured release PRs between environment branches:
