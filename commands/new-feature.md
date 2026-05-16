@@ -338,6 +338,98 @@ Then create the PRD:
 
 ---
 
+## PRD-Complete Checkpoint — Print `/goal` for Autonomous Loop
+
+When Phase 1 (PRD) completes (PRD file exists in `docs/prds/<feature>.md` and the user is ready to advance), if you (the agent) judge `/forge-goal` would help here (the feature is substantial enough to warrant autonomous execution), you may offer the user the option to kick off the autonomous loop.
+
+### Steps
+
+1. **Generate a session nonce.** Run:
+
+   ```bash
+   uuidgen | tr 'A-Z' 'a-z'
+   ```
+
+   Capture the output (e.g. `5f1a2b3c-9d8e-4f6a-b7c8-1e2d3f4a5b6c`).
+
+2. **REPLACE any existing `## /goal session` and `## PR authorization` sections in `.claude/local/state.md`.** Use the Edit tool to find the existing `## /goal session` heading (if any) and replace the entire block — heading + table + any trailing blank lines up to the next `## ` heading — with the new session. Likewise, if `## PR authorization` has any existing content, clear it now (stale auth from a prior run must not persist). Then write the new `/goal session` block immediately AFTER `## Workflow` and BEFORE `## State`:
+
+   ```markdown
+   ## /goal session
+
+   | Field            | Value                    |
+   | ---------------- | ------------------------ |
+   | nonce            | <UUID-from-step-1>       |
+   | workflow_command | /new-feature <name>      |
+   | issued_at        | <ISO-8601-UTC-timestamp> |
+   ```
+
+   Use `date -u +%Y-%m-%dT%H:%M:%SZ` for the timestamp.
+
+   **If `## /goal session` does not exist yet**, insert the section (heading + table) in the correct position using the Edit tool's insert-before capability on the `## State` heading.
+
+3. **Print the `/goal` command for the user to copy-paste.** Format the message EXACTLY:
+
+   ```
+   ────────────────────────────────────────
+    PRD approved. Type this to begin the autonomous loop:
+   ────────────────────────────────────────
+
+   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through research, plan, plan review, implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
+
+   ────────────────────────────────────────
+    Or type "no" to continue manually phase-by-phase.
+   ```
+
+   Substitute `<NONCE>` with the value from step 1.
+
+   **Note:** `all_gates_green` is intentionally excluded from the condition. The `/new-feature` checklist includes post-PR items like "PR reviews addressed" and "Branch finished" — those cannot be checked while the PR is still open, making `all_gates_green` unsatisfiable at stop time. The condition above instead uses `pr_ready=true` (which captures the key quality gates: reviewer clean, E2E fresh, PR auth) plus explicit `pr_state.state="OPEN"` and `pr_authorization.authorized=true` checks.
+
+4. **If the user types the `/goal` command**, you (the agent) enter autonomous mode per `rules/workflow.md` "Council During `/forge-goal` Autonomous Run" — pause for the PR-creation gate only, route all other doubts to `/council`.
+
+5. **If the user declines** (types "no" or anything other than the `/goal` command), continue the standard `/new-feature` workflow phase-by-phase.
+
+### Critical reminders during the autonomous loop
+
+- **DO NOT** call `gh pr create` until you have run `AskUserQuestion` asking the user to authorize, and they answered YES, and you have REPLACED the `## PR authorization` section in state.md with the new authorization line (matching nonce + current HEAD SHA at the moment of authorization).
+- **DO NOT** call `/goal clear` after success — `/goal` auto-clears when the verifier confirms the condition.
+- **DO** track each code-review iteration by appending `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``AND`- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``to`### Checklist`(state.md). The`reviewer_gate.clean_same_iteration` evidence only fires when BOTH appear for the same iteration AND at the current HEAD.
+- **DO** invoke `/council` whenever you would otherwise pause for the user (except PR creation). Apply the chairman's verdict; do not second-guess it.
+- **REPLACE, never append** when writing `/goal session` or `## PR authorization`. Appending creates stale duplicate entries that confuse Layer 1's parsers.
+
+### PR-create gate — AskUserQuestion modal text
+
+When you (the agent) are ready to run `gh pr create` during a `/forge-goal`-driven run, FIRST call `AskUserQuestion` with this exact modal:
+
+```
+Authorize PR creation?
+
+Branch <branch> is pushed and Forge gates are green. Summary of work:
+- Files changed: <count> (<top-3-by-line-count>)
+- Tests added/modified: <count>
+- Reviewer status: codex clean (iter <N>) + pr-toolkit clean (iter <N>)
+- E2E report: <report-path>
+- Council fires this run: <count>
+
+Create a PR to <base> using the title "<title>" and the summary above?
+- Yes: write authorization to state.md and run gh pr create
+- No: pause the workflow for your direction
+```
+
+On YES, REPLACE the entire `## PR authorization` section in `.claude/local/state.md` with exactly ONE line:
+
+```
+- [x] PR creation authorized — `<ISO-8601-UTC-timestamp>` — nonce=`<session nonce>` — head=`<current HEAD SHA>`
+```
+
+If `## PR authorization` does not exist yet, create it. If it exists with old content, replace all content (heading + old lines) with the heading + this one new line. Never append.
+
+Then run `gh pr create`. The PreToolUse guard (`check-workflow-gates.{sh,ps1}`) will verify the authorization line matches before allowing the command.
+
+On NO, append a blocker line to `## Blockers` in state.md and STOP the autonomous loop.
+
+---
+
 ## Phase 2: Research (MANDATORY — agent-enforced)
 
 > **Checkpoint:** Update `## Workflow` in .claude/local/state.md — Phase: `2 — Research`, check off "PRD created".
