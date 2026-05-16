@@ -124,7 +124,7 @@ if ($command -match '^\s*gh\s+pr\s+create\b') {
                 [Console]::Error.WriteLine("A /forge-goal-driven workflow is active (nonce: $goalNonce).")
                 [Console]::Error.WriteLine("PR creation requires user authorization via AskUserQuestion.")
                 [Console]::Error.WriteLine("On user YES, REPLACE any existing ## PR authorization content with:")
-                [Console]::Error.WriteLine("  - [x] PR creation authorized -- ``<ts>`` -- nonce=``<n>`` -- head=``<sha>``")
+                [Console]::Error.WriteLine("  - [x] PR creation authorized — ``<ts>`` — nonce=``<n>`` — head=``<sha>``")
                 exit 2
             }
 
@@ -138,6 +138,7 @@ if ($command -match '^\s*gh\s+pr\s+create\b') {
                 [Console]::Error.WriteLine("Session nonce:   $goalNonce")
                 [Console]::Error.WriteLine("Auth line nonce: $authNonce")
                 [Console]::Error.WriteLine("Stale authorization from a previous /forge-goal session. Re-authorize via AskUserQuestion.")
+                [Console]::Error.WriteLine("  - [x] PR creation authorized — ``<ts>`` — nonce=``<n>`` — head=``<sha>``")
                 exit 2
             }
 
@@ -146,6 +147,7 @@ if ($command -match '^\s*gh\s+pr\s+create\b') {
                 [Console]::Error.WriteLine("Current HEAD:   $headSha")
                 [Console]::Error.WriteLine("Auth line head: $authHead")
                 [Console]::Error.WriteLine("Commits added since authorization; re-authorize at the new HEAD.")
+                [Console]::Error.WriteLine("  - [x] PR creation authorized — ``<ts>`` — nonce=``<n>`` — head=``<sha>``")
                 exit 2
             }
 
