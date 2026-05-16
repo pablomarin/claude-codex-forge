@@ -26,6 +26,35 @@
 
 The Stop hook reminds you of the current phase on every response. The PreToolUse hook blocks commit/push/PR if quality gates are incomplete. This rule is re-injected every turn — it survives context compaction.
 
+## Council During `/forge-goal` Autonomous Run
+
+When a `/forge-goal`-driven `/goal` is active (`## /goal session` is populated in `.claude/local/state.md` with a non-empty nonce), the agent's pause-for-user discipline changes:
+
+**Before asking the user any question during the autonomous run, ask yourself:**
+
+> _Is this a PR creation authorization?_
+
+- **If YES:** call `AskUserQuestion` with the PR-create modal. The user's answer is the only human-authority signal in the loop.
+- **If NO:** invoke `/council` with the question. Apply the chairman's verdict. Continue the loop.
+
+**Triggers for council** (the agent invokes council at its discretion when):
+
+- An ambiguous product or technical choice would otherwise prompt the user
+- A reviewer recommends plan revision (not just code patch)
+- A high-impact implementation fork has multiple defensible approaches
+- A retried tool/subagent has also failed
+- Council/reviewer output is unrecognizable and needs interpretation
+
+**Explicit NON-triggers:**
+
+- Normal plan-review-loop iterations (Claude + Codex back-and-forth on the plan) — these stay as today's reviewer iteration flow
+- Normal code-review-loop iterations (Codex + PR-toolkit + Claude fix cycles)
+- Any moment that doesn't actually require human-level judgment
+
+**Council failure handling:** If `/council` itself fails (network, advisor timeout, missing chairman verdict), the autonomous loop pauses and writes a blocker line to `.claude/local/state.md` (`## Blockers`). The user takes over.
+
+**Audit:** Each council invocation during an autonomous run is durable in the conversation transcript — the agent's response naming the council outcome and the applied action is the record. No separate audit log file.
+
 ## Severity Rubric
 
 | Level | Meaning                                                                | Action                     |
