@@ -1025,6 +1025,252 @@ for key in "${REQUIRED_KEYS[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — workflow commands have their checkpoint sections
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — /new-feature has PRD-Complete Checkpoint with correct content"
+
+NF="$REPO_ROOT/commands/new-feature.md"
+assert_file_exists "$NF" "commands/new-feature.md exists"
+assert_contains "$NF" "PRD-Complete Checkpoint" "new-feature.md has PRD-complete checkpoint section"
+assert_contains "$NF" "FORGE_GOAL_EVIDENCE" "new-feature.md references Layer 1 evidence markers in condition"
+assert_contains "$NF" "session_nonce" "new-feature.md references session_nonce in condition"
+assert_contains "$NF" "pr_ready=true" "new-feature.md uses pr_ready=true in condition"
+assert_contains "$NF" "AskUserQuestion" "new-feature.md references AskUserQuestion at PR-create gate"
+# P1.1: all_gates_green must NOT appear in the /goal condition string
+if grep -q 'all_gates_green=true' "$NF"; then
+    fail "new-feature.md /goal condition contains all_gates_green=true (unsatisfiable — must be absent)"
+else
+    pass "new-feature.md /goal condition does NOT contain all_gates_green=true (correct)"
+fi
+# P1.4: REPLACE semantics documented
+assert_contains "$NF" "REPLACE" "new-feature.md documents REPLACE semantics for /goal session and PR auth"
+
+start_test "Layer 2 — /fix-bug has Plan-Approved Checkpoint at Phase 3→4 boundary"
+
+FB="$REPO_ROOT/commands/fix-bug.md"
+assert_file_exists "$FB" "commands/fix-bug.md exists"
+assert_contains "$FB" "Plan-Approved Checkpoint" "fix-bug.md has Plan-Approved checkpoint (not PRD-complete)"
+# P1.3: fix-bug must NOT use PRD-complete naming
+if grep -q "PRD-Complete Checkpoint" "$FB"; then
+    fail "fix-bug.md has PRD-Complete Checkpoint section (incorrect — must be Plan-Approved)"
+else
+    pass "fix-bug.md does NOT have PRD-Complete Checkpoint naming (correct)"
+fi
+assert_contains "$FB" "Phase 3" "fix-bug.md checkpoint references Phase 3"
+assert_contains "$FB" "Phase 4" "fix-bug.md checkpoint references Phase 4 boundary"
+assert_contains "$FB" "session_nonce" "fix-bug.md references session_nonce in condition"
+assert_contains "$FB" "pr_ready=true" "fix-bug.md uses pr_ready=true in condition"
+# P1.1: all_gates_green must NOT appear in the /goal condition string
+if grep -q 'all_gates_green=true' "$FB"; then
+    fail "fix-bug.md /goal condition contains all_gates_green=true (unsatisfiable — must be absent)"
+else
+    pass "fix-bug.md /goal condition does NOT contain all_gates_green=true (correct)"
+fi
+# P1.4: REPLACE semantics documented
+assert_contains "$FB" "REPLACE" "fix-bug.md documents REPLACE semantics for /goal session and PR auth"
+
+# ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — rules/workflow.md has council-during-/goal rule
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — rules/workflow.md has council-during-/goal trigger rule"
+
+WF_RULE="$REPO_ROOT/rules/workflow.md"
+assert_file_exists "$WF_RULE" "rules/workflow.md exists"
+assert_contains "$WF_RULE" "Council During" "council section header present"
+assert_contains "$WF_RULE" "PR creation authorization" "PR-creation pause exception documented"
+assert_contains "$WF_RULE" "/council" "invokes /council for non-PR doubts"
+
+# ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — state.template.md has new section docs (no empty instance)
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — state.template.md documents /goal session + PR authorization conventions"
+
+ST_TPL="$REPO_ROOT/state.template.md"
+assert_file_exists "$ST_TPL" "state.template.md exists"
+assert_contains "$ST_TPL" "## /goal session" "/goal session section documented"
+assert_contains "$ST_TPL" "## PR authorization" "PR authorization section documented"
+assert_contains "$ST_TPL" "Code review iteration" "reviewer-iteration head-SHA convention documented"
+assert_contains "$ST_TPL" "REPLACE semantics" "REPLACE semantics documented in state.template.md"
+# P1.2: state.template must NOT have a pre-populated empty /goal session table
+# (The section documents the FORMAT, not an empty instance.)
+# Check that the nonce row, if present, does not have an empty value placeholder
+# that would cause the Bash guard to find a block with no actual nonce.
+if grep -E '^\|\s*nonce\s*\|\s*\|\s*$' "$ST_TPL" > /dev/null 2>&1; then
+    fail "state.template.md has empty nonce row (would cause false-active /goal session detection)"
+else
+    pass "state.template.md does NOT have empty nonce row (correct — format documented, not instantiated)"
+fi
+
+# ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — check-workflow-gates has PR-auth guard
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — check-workflow-gates.{sh,ps1} have PR-auth guard with consistent key strings"
+
+# Each guard file must reference the canonical auth line string and the nonce variable
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "PR creation authorized" \
+    "check-workflow-gates.sh references PR auth line"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "PR creation authorized" \
+    "check-workflow-gates.ps1 references PR auth line"
+
+# P1.2: Bash guard must use non-empty GOAL_NONCE as "active" definition
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh" 'if [ -n "$GOAL_NONCE"' \
+    "Bash guard checks non-empty GOAL_NONCE (not just block presence)"
+# PS guard must also use non-empty goalNonce
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" 'if ($goalNonce)' \
+    "PS guard checks non-empty goalNonce"
+
+# ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — stuck-detection in check-state-updated
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — check-state-updated.{sh,ps1} have stuck-detection code"
+
+assert_contains "$REPO_ROOT/hooks/check-state-updated.sh"  "FORGE_GOAL_STUCK_WARNING" \
+    "check-state-updated.sh emits FORGE_GOAL_STUCK_WARNING"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" "FORGE_GOAL_STUCK_WARNING" \
+    "check-state-updated.ps1 emits FORGE_GOAL_STUCK_WARNING"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.sh"  "forge-goal-stuck-count" \
+    "check-state-updated.sh references the counter file"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" "forge-goal-stuck-count" \
+    "check-state-updated.ps1 references the counter file"
+
+# ---------------------------------------------------------------------------
+# Runtime parity contract: Bash vs PS guards for nonce-mismatch + empty-inactive
+# (conditional on pwsh availability)
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — PS guard runtime parity with Bash guard (nonce-mismatch + empty-inactive; skipped if pwsh absent)"
+
+if command -v pwsh > /dev/null 2>&1; then
+    # Test 1: nonce mismatch → both guards must exit 2 with "nonce mismatch" in stderr
+    scratch=$(scratch_dir parity-nonce-mismatch)
+    mkdir -p "$scratch/.claude/local"
+    cat > "$scratch/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | correct-session-nonce |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## PR authorization
+
+- [x] PR creation authorized — `2026-05-16T10:15:00Z` — nonce=`stale-different-nonce` — head=`abc123`
+EOF
+
+    (
+        cd "$scratch"
+        INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+        echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" > "$scratch/.bash_out" 2>&1
+        echo $? > "$scratch/.bash_exit"
+        echo "$INPUT" | pwsh -NoProfile -File "$REPO_ROOT/hooks/check-workflow-gates.ps1" > "$scratch/.ps_out" 2>&1
+        echo $? > "$scratch/.ps_exit"
+    )
+
+    BASH_EXIT=$(cat "$scratch/.bash_exit")
+    PS_EXIT=$(cat "$scratch/.ps_exit")
+    assert_equals "$BASH_EXIT" "2" "Bash guard exits 2 on nonce mismatch"
+    assert_equals "$PS_EXIT" "2" "PS guard exits 2 on nonce mismatch (parity)"
+    assert_contains "$scratch/.bash_out" "nonce mismatch" "Bash guard mentions nonce mismatch"
+    assert_contains "$scratch/.ps_out" "nonce mismatch" "PS guard mentions nonce mismatch (parity)"
+
+    # Test 2: empty nonce row → both guards treat session as INACTIVE (exit 0)
+    scratch2=$(scratch_dir parity-empty-nonce)
+    mkdir -p "$scratch2/.claude/local"
+    cat > "$scratch2/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            |       |
+| workflow_command |       |
+| issued_at        |       |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — Ship          |
+| Next step | gh pr create      |
+
+### Checklist
+
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+    (
+        cd "$scratch2"
+        INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+        echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" > "$scratch2/.bash_out" 2>&1
+        echo $? > "$scratch2/.bash_exit"
+        echo "$INPUT" | pwsh -NoProfile -File "$REPO_ROOT/hooks/check-workflow-gates.ps1" > "$scratch2/.ps_out" 2>&1
+        echo $? > "$scratch2/.ps_exit"
+    )
+
+    BASH_EXIT2=$(cat "$scratch2/.bash_exit")
+    PS_EXIT2=$(cat "$scratch2/.ps_exit")
+    assert_equals "$BASH_EXIT2" "0" "Bash guard exits 0 on empty nonce (INACTIVE)"
+    assert_equals "$PS_EXIT2" "0" "PS guard exits 0 on empty nonce (INACTIVE, parity)"
+
+else
+    pass "pwsh not available — PS runtime parity tests skipped (not a failure)"
+fi
+
+# ---------------------------------------------------------------------------
+# Stale-duplicate auth line contract: Bash guard uses LAST auth line
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — Bash guard uses LAST PR authorization line when multiple present"
+
+if command -v git > /dev/null 2>&1; then
+    scratch=$(scratch_dir stale-dup-contract)
+    mkdir -p "$scratch/.claude/local"
+    (
+        cd "$scratch"
+        git init -q -b main >/dev/null 2>&1 || git init -q >/dev/null 2>&1
+        git config user.email "t@t"
+        git config user.name "t"
+        echo x > a; git add a; git commit -qm init >/dev/null 2>&1
+        HEAD_SHA=$(git rev-parse HEAD)
+
+        cat > .claude/local/state.md <<EOF
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | current-nonce |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## PR authorization
+
+- [x] PR creation authorized — \`2026-05-16T09:00:00Z\` — nonce=\`stale-nonce\` — head=\`stalehash\`
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`current-nonce\` — head=\`$HEAD_SHA\`
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+        INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+        echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" > .bash_out 2>&1
+        echo $? > .bash_exit
+    )
+
+    BASH_EXIT=$(cat "$scratch/.bash_exit")
+    assert_equals "$BASH_EXIT" "0" "Bash guard uses LAST auth line (matching) and ALLOWS (exit 0)"
+else
+    pass "git not available — stale-duplicate contract test skipped"
+fi
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 report "test-contracts.sh"

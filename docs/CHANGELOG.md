@@ -2,53 +2,54 @@
 
 All notable changes to claude-codex-forge.
 
-## 5.28 — 2026-05-15 · forge-goal Layer 1: unified evidence primitive
+## 5.29 — 2026-05-16 · `/forge-goal` autonomous PRD-to-PR-ready workflow
 
-**New:** `hooks/build-evidence.{sh,ps1}` — read-only script that parses
-`state.md` (Markdown table format, all sections), queries `git` + `gh pr view`
+**Why this exists:** Manual phase-by-phase shepherding through `/new-feature` and `/fix-bug` was the babysitting tax. `/forge-goal` lets the user type ONE command after PRD approval (or plan approval for bug fixes) and the agent autonomously drives plan → plan-review → implement → code-review → E2E → PR-ready, surfacing council for non-PR judgment moments and pausing only at PR creation.
 
-- E2E report mtime, and emits a unified JSON evidence blob between
-  `FORGE_GOAL_EVIDENCE_BEGIN` / `FORGE_GOAL_EVIDENCE_END` markers on STDERR.
-  Computes `pr_ready`, `all_gates_green`, and a deterministic
-  `progress_fingerprint` (SHA256 of a scoped subset, CRLF-normalized).
+**Capability:** After the gate checkpoint passes, the workflow command generates a session nonce, writes `## /goal session` to state.md, and prints a `/goal` command. The user types it; the agent enters autonomous mode. Stops at the PR-creation gate (AskUserQuestion modal + hook-enforced authorization signal in state.md) and at council-resolved decisions.
 
-**Fixed:** `hooks/check-state-updated.{sh,ps1}` now invokes `build-evidence`
-BEFORE the `stop_hook_active` early-return. Previously the early-return
-suppressed evidence emission inside an active `/goal` loop — would have made
-the loop's Haiku verifier blind. Load-bearing for Layer 2 (the autonomous
-`/forge-goal` workflow).
+**Checkpoint placement:** `/new-feature` places the checkpoint at PRD-complete (after Phase 1, before Phase 2 Research). `/fix-bug` places it at Plan-Approved (after Phase 3.3 Plan Review Loop, before Phase 4 Execute) — because `/fix-bug` has no PRD phase. Simple fixes (1-2 files skipping Phase 3) are not eligible for the autonomous loop.
 
-**New tests:**
+**New (Layer 1):**
 
-- `tests/template/test-build-evidence.sh` — 35 assertions covering parsers
-  (goal section, workflow checklist, reviewer rows, PR auth), git + gh + E2E
-  external queries, derived fields (`pr_ready`, `all_gates_green`,
-  `progress_fingerprint`), CRLF guard, and fingerprint stability.
-- Cross-file contract in `tests/template/test-contracts.sh` — three checks:
-  (1) producer markers present in both `.sh` and `.ps1`, (2) consumer invokes
-  `build-evidence` BEFORE the `stop_hook_active` early-return in both
-  `check-state-updated` files, (3) all required top-level JSON schema keys
-  present in both producers.
+- `hooks/build-evidence.{sh,ps1}` — read-only evidence emitter. Parses state.md, queries git/`gh pr view`/E2E reports, emits unified JSON between `FORGE_GOAL_EVIDENCE_BEGIN/END` markers. Computes `pr_ready`, deterministic `progress_fingerprint` (SHA256, CRLF-normalized, ordered, ASCII US delimiter).
 
-**Notes:**
+**New (Layer 2):**
 
-- Layer 1 is independently useful: the evidence JSON centralizes what existing
-  gate hooks already compute ad-hoc, and exposes it uniformly to any consumer
-  (human transcript, future autonomous loop, external tooling).
-- Layer 2 (the autonomous `/forge-goal` workflow) is a separate workstream;
-  see `docs/plans/2026-05-14-forge-goal-design.md` and
-  `docs/plans/2026-05-14-forge-goal-experiments.md` for the full design.
+- `commands/new-feature.md` — PRD-Complete Checkpoint prints the `/goal` command; REPLACE semantics for `/goal session` and `## PR authorization`; PR-create AskUserQuestion modal documented; `all_gates_green` excluded from condition (post-PR checklist items are structurally unclearable while PR is open).
+- `commands/fix-bug.md` — Plan-Approved Checkpoint at Phase 3→4 boundary; bug-fix-specific wording throughout; same REPLACE semantics and `all_gates_green` exclusion.
+- `rules/workflow.md` — "Council During `/forge-goal`" trigger rule (route non-PR doubts to `/council`, leave reviewer-loop iterations as today).
+- `state.template.md` — conventions for `## /goal session` (format documentation, no empty instance), `## PR authorization`, reviewer-iteration head-SHA labels, REPLACE semantics, and the non-empty-nonce "active" definition.
+
+**Fixed (Layer 1):**
+
+- `hooks/check-state-updated.{sh,ps1}` — invokes `build-evidence` BEFORE the `stop_hook_active` early-return. Previously the early-return suppressed evidence emission inside active `/goal` loops.
+
+**Extended (Layer 2):**
+
+- `hooks/check-workflow-gates.{sh,ps1}` — PR-create authorization guard. Blocks `gh pr create` during an active `/forge-goal` session unless `## PR authorization` matches the session nonce AND current HEAD SHA. "Active" = non-empty nonce. LAST-line defense for stale-duplicate state.md.
+- `hooks/check-state-updated.{sh,ps1}` — stuck-detection soft warning. After 5 consecutive turns with identical `progress_fingerprint`, emits `FORGE_GOAL_STUCK_WARNING` to STDERR (informational, no abort).
+
+**New tests:** `tests/template/test-build-evidence.sh` (35 assertions, Layer 1), 10 new test blocks in `test-hooks.sh` (6 PR-create guard + 4 stuck-detection), 8 new contracts in `test-contracts.sh` (Layer 1 + Layer 2, including fixture-based runtime parity tests for Bash vs PS guards).
+
+**Architecture trace:** Native Anthropic `/goal` (CC 2.1.139+) drives the loop; forge supplies the evidence the verifier reads. State.md is the single source of truth (no sidecar state files). See `docs/plans/2026-05-14-forge-goal-design.md` and `docs/plans/2026-05-13-forge-goal-experiments.md`.
 
 **Files:**
 
 - `hooks/build-evidence.sh` + `hooks/build-evidence.ps1` — new (Layer 1 evidence primitive)
-- `hooks/check-state-updated.sh` + `hooks/check-state-updated.ps1` — ordering fix
-- `tests/template/test-build-evidence.sh` — 35 new assertions
-- `tests/template/test-contracts.sh` — FORGE_GOAL_EVIDENCE producer/consumer/schema contract
+- `hooks/check-state-updated.sh` + `hooks/check-state-updated.ps1` — ordering fix (Layer 1) + stuck-detection (Layer 2)
+- `hooks/check-workflow-gates.sh` + `hooks/check-workflow-gates.ps1` — PR-create authorization guard (Layer 2)
+- `commands/new-feature.md` — PRD-Complete Checkpoint (Layer 2)
+- `commands/fix-bug.md` — Plan-Approved Checkpoint (Layer 2)
+- `rules/workflow.md` — council-during-`/forge-goal` trigger rule (Layer 2)
+- `state.template.md` — `/goal session` + PR authorization + reviewer-iteration conventions (Layer 2)
+- `tests/template/test-build-evidence.sh` — 35 new assertions (Layer 1)
+- `tests/template/test-hooks.sh` — 10 new test blocks (Layer 2)
+- `tests/template/test-contracts.sh` — FORGE_GOAL_EVIDENCE + 8 new Layer 2 contracts
 - `setup.sh` + `setup.ps1` — install `build-evidence.{sh,ps1}` to downstream `.claude/hooks/`
-- `docs/CHANGELOG.md` + `README.md` — version bump 5.27 → 5.28
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.27 → 5.29 (Layer 1 deferred; ships unified)
 
-**Existing installs:** run `./setup.sh --upgrade` from your Forge clone to pick up the new script.
+**Existing installs:** run `./setup.sh --upgrade` from your Forge clone to pick up all new scripts and updated templates.
 
 ## 5.27 — 2026-05-12 · `/council` chairman output reliability (`--output-last-message`)
 
