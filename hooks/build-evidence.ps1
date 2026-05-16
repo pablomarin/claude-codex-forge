@@ -430,6 +430,20 @@ $hashBytes = $sha256.ComputeHash($fpBytes)
 $sha256.Dispose()
 $ProgressFp = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
 
+# Side-channel: write fingerprint to .claude/local/forge-goal-last-fingerprint so
+# the stuck-detection logic in check-state-updated.ps1 can read it without
+# re-running build-evidence or parsing STDERR. One line — just the SHA256 value.
+# Best-effort: failure must not abort the evidence emission.
+if (-not [string]::IsNullOrEmpty($ProgressFp)) {
+    $sidechannel = ".claude/local/forge-goal-last-fingerprint"
+    try {
+        $null = New-Item -ItemType Directory -Path ".claude/local" -Force -ErrorAction SilentlyContinue
+        [System.IO.File]::WriteAllText($sidechannel, $ProgressFp + "`n")
+    } catch {
+        # Non-blocking: ignore write failures
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Build JSON field strings
 # ---------------------------------------------------------------------------

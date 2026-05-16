@@ -48,6 +48,87 @@ if (Test-Path $evidenceScript) {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Task 8: /forge-goal stuck-detection soft warning.
+#
+# Fires after build-evidence (which writes .claude/local/forge-goal-last-fingerprint
+# as a side-channel). After 5 consecutive identical progress_fingerprint values,
+# emits FORGE_GOAL_STUCK_WARNING to STDERR. Informational only — does NOT abort.
+# Fires even when stop_hook_active=true. Counter lives in
+# .claude/local/forge-goal-stuck-count: format "<count>|<fingerprint_sha256>".
+# PS 5.1 compatible: no ??, [Console]::Error.WriteLine for STDERR.
+# ---------------------------------------------------------------------------
+function Invoke-ForgeGoalStuckCheck {
+    $stateMd = ".claude/local/state.md"
+    $fpFile   = ".claude/local/forge-goal-last-fingerprint"
+    $ctrFile  = ".claude/local/forge-goal-stuck-count"
+
+    # Only proceed if /forge-goal is active: state.md must have a non-empty
+    # nonce in the ## /goal session table.
+    if (-not (Test-Path $stateMd)) { return }
+
+    $raw = Get-Content $stateMd -Raw -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrEmpty($raw)) { return }
+
+    # CRLF normalize then extract nonce from ## /goal session block.
+    $lines = ($raw -replace "`r", "") -split "`n"
+    $inSection = $false
+    $nonce = ""
+    foreach ($line in $lines) {
+        if ($line -match '^## /goal session$') { $inSection = $true; continue }
+        if ($inSection -and $line -match '^## ') { break }
+        if (-not $inSection) { continue }
+        if ($line -match '^\|\s*nonce\s*\|\s*(.+?)\s*\|') {
+            $nonce = $matches[1].Trim()
+            break
+        }
+    }
+    if ([string]::IsNullOrEmpty($nonce)) { return }
+
+    # Read the current fingerprint written by build-evidence.ps1.
+    if (-not (Test-Path $fpFile)) { return }
+    $currentFp = (Get-Content $fpFile -Raw -ErrorAction SilentlyContinue)
+    if ([string]::IsNullOrEmpty($currentFp)) { return }
+    $currentFp = $currentFp.Trim()
+    if ([string]::IsNullOrEmpty($currentFp)) { return }
+
+    # Read previous counter state (format: "<count>|<fingerprint>").
+    $prevCount = 0
+    $prevFp    = ""
+    if (Test-Path $ctrFile) {
+        $ctrRaw = (Get-Content $ctrFile -Raw -ErrorAction SilentlyContinue)
+        if (-not [string]::IsNullOrEmpty($ctrRaw)) {
+            $ctrRaw = $ctrRaw.Trim()
+            $pipeIdx = $ctrRaw.IndexOf('|')
+            if ($pipeIdx -gt 0) {
+                $countStr = $ctrRaw.Substring(0, $pipeIdx)
+                $prevFp   = $ctrRaw.Substring($pipeIdx + 1)
+                $parsedCount = 0
+                if ([int]::TryParse($countStr, [ref]$parsedCount) -and $parsedCount -ge 0) {
+                    $prevCount = $parsedCount
+                }
+            }
+        }
+    }
+
+    # Update counter: increment if fingerprint unchanged, reset if changed.
+    $newCount = if ($currentFp -eq $prevFp) { $prevCount + 1 } else { 1 }
+
+    # Persist updated counter (WriteAllText to avoid BOM that Set-Content adds).
+    try {
+        $null = New-Item -ItemType Directory -Path ".claude/local" -Force -ErrorAction SilentlyContinue
+        [System.IO.File]::WriteAllText($ctrFile, "$newCount|$currentFp`n")
+    } catch {
+        # Non-blocking: ignore write failures
+    }
+
+    # Emit warning if threshold reached (>= 5 consecutive identical fingerprints).
+    if ($newCount -ge 5) {
+        [Console]::Error.WriteLine("FORGE_GOAL_STUCK_WARNING: no measurable progress for $newCount consecutive turns (fingerprint unchanged). Consider invoking /council, checkpointing state.md, or surfacing a blocker. Loop continues — this is informational only.")
+    }
+}
+Invoke-ForgeGoalStuckCheck
+
 # Check if stop_hook_active to prevent infinite loops
 if ($data.stop_hook_active -eq $true) {
     exit 0

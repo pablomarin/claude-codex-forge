@@ -48,6 +48,72 @@ if [ -x "$EVIDENCE_SCRIPT" ]; then
     bash "$EVIDENCE_SCRIPT" || true   # non-blocking; stderr passes through naturally
 fi
 
+# ---------------------------------------------------------------------------
+# Task 8: /forge-goal stuck-detection soft warning.
+#
+# Fires after build-evidence (which writes .claude/local/forge-goal-last-fingerprint
+# as a side-channel). After 5 consecutive identical progress_fingerprint values,
+# emits FORGE_GOAL_STUCK_WARNING to STDERR. Informational only — does NOT abort.
+# Fires even when stop_hook_active=true (inside the active /goal loop — where
+# it's most useful). Counter lives in .claude/local/forge-goal-stuck-count:
+# format "<count>|<fingerprint_sha256>".
+# ---------------------------------------------------------------------------
+_forge_goal_stuck_check() {
+    local state_md=".claude/local/state.md"
+    local fp_file=".claude/local/forge-goal-last-fingerprint"
+    local counter_file=".claude/local/forge-goal-stuck-count"
+
+    # Only proceed if /forge-goal is active: state.md must have a non-empty
+    # nonce in the ## /goal session table. Best-effort: if missing, skip silently.
+    [ -f "$state_md" ] || return 0
+
+    local nonce
+    nonce=$(tr -d '\r' < "$state_md" \
+        | awk '/^## \/goal session$/{flag=1;next} flag && /^## /{flag=0} flag' \
+        | grep -E '\|[[:space:]]*nonce[[:space:]]*\|' \
+        | head -1 | awk -F'|' '{print $3}' | xargs 2>/dev/null)
+    [ -n "$nonce" ] || return 0
+
+    # Read the current fingerprint written by build-evidence.sh.
+    [ -f "$fp_file" ] || return 0
+    local current_fp
+    current_fp=$(tr -d '[:space:]' < "$fp_file" 2>/dev/null)
+    [ -n "$current_fp" ] || return 0
+
+    # Read previous counter state.
+    local prev_count=0
+    local prev_fp=""
+    if [ -f "$counter_file" ]; then
+        local raw
+        raw=$(cat "$counter_file" 2>/dev/null)
+        prev_count="${raw%%|*}"
+        prev_fp="${raw##*|}"
+        # Validate that prev_count is a non-negative integer.
+        case "$prev_count" in
+            ''|*[!0-9]*) prev_count=0; prev_fp="" ;;
+        esac
+    fi
+
+    # Update counter: increment if fingerprint unchanged, reset if changed.
+    local new_count
+    if [ "$current_fp" = "$prev_fp" ]; then
+        new_count=$((prev_count + 1))
+    else
+        new_count=1
+    fi
+
+    # Persist updated counter.
+    mkdir -p ".claude/local" 2>/dev/null || true
+    printf '%s|%s\n' "$new_count" "$current_fp" > "$counter_file" 2>/dev/null || true
+
+    # Emit warning if threshold reached (>= 5 consecutive identical fingerprints).
+    if [ "$new_count" -ge 5 ]; then
+        echo "FORGE_GOAL_STUCK_WARNING: no measurable progress for $new_count consecutive turns (fingerprint unchanged). Consider invoking /council, checkpointing state.md, or surfacing a blocker. Loop continues — this is informational only." >&2
+    fi
+    return 0
+}
+_forge_goal_stuck_check
+
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 
 # All git commands run in current directory (Claude cd's into worktrees)

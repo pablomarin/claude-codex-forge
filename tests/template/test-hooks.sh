@@ -1106,6 +1106,64 @@ assert_equals "$EXIT" "2" "gh pr create BLOCKED when auth-line nonce doesn't mat
 assert_contains "$scratch/.out" "nonce" "hook output mentions nonce mismatch"
 
 # ===========================================================================
+# Layer 2 — Task 8: stuck-detection soft warning
+# After 5 consecutive Stop calls with an identical progress_fingerprint,
+# check-state-updated.sh must emit FORGE_GOAL_STUCK_WARNING to STDERR.
+# Turns 1-4 must NOT emit the warning; turn 5 must.
+# ===========================================================================
+start_test "Layer 2 — check-state-updated emits FORGE_GOAL_STUCK_WARNING after 5 identical fingerprints"
+
+(
+    scratch=$(scratch_dir checkstate-stuck)
+    mkdir -p "$scratch/.claude/local" "$scratch/.claude/hooks"
+    cp "$REPO_ROOT/hooks/build-evidence.sh" "$scratch/.claude/hooks/build-evidence.sh"
+    chmod +x "$scratch/.claude/hooks/build-evidence.sh"
+
+    # state.md with /forge-goal active (non-empty nonce)
+    cat > "$scratch/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | test-nonce-stuck-detection |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 4 — Execute       |
+| Next step | Write code        |
+
+### Checklist
+
+- [ ] Item 1
+- [ ] Item 2
+EOF
+
+    # Fire the Stop hook 5 times with stop_hook_active=true so the CHANGELOG
+    # gate doesn't fire (the scratch dir has no git repo). Same state.md
+    # content on every call → same progress_fingerprint → stuck counter increments.
+    INPUT='{"stop_hook_active":true,"transcript_path":"/tmp/x"}'
+
+    (
+        cd "$scratch"
+        for i in 1 2 3 4 5; do
+            echo "$INPUT" | bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$scratch/.out.$i" 2>&1
+        done
+    )
+
+    # Turns 1-4 must NOT have the warning; turn 5 MUST.
+    assert_not_contains "$scratch/.out.1" "FORGE_GOAL_STUCK_WARNING" "no warning on turn 1"
+    assert_not_contains "$scratch/.out.2" "FORGE_GOAL_STUCK_WARNING" "no warning on turn 2"
+    assert_not_contains "$scratch/.out.3" "FORGE_GOAL_STUCK_WARNING" "no warning on turn 3"
+    assert_not_contains "$scratch/.out.4" "FORGE_GOAL_STUCK_WARNING" "no warning on turn 4"
+    assert_contains     "$scratch/.out.5" "FORGE_GOAL_STUCK_WARNING" "warning fires on turn 5 (identical fingerprint)"
+)
+
+# ===========================================================================
 # Report
 # ===========================================================================
 report "test-hooks.sh"

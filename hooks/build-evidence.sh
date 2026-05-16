@@ -369,6 +369,16 @@ else
 fi
 rm -f "$FP_TMP"
 
+# Side-channel: write fingerprint to .claude/local/forge-goal-last-fingerprint so
+# the stuck-detection logic in check-state-updated.sh can read it without
+# re-running build-evidence or parsing STDERR. One line — just the SHA256 value.
+# Best-effort: failure here must not abort the evidence emission.
+FINGERPRINT_SIDECHANNEL=".claude/local/forge-goal-last-fingerprint"
+if [ -n "$PROGRESS_FP" ]; then
+    mkdir -p ".claude/local" 2>/dev/null || true
+    printf '%s\n' "$PROGRESS_FP" > "$FINGERPRINT_SIDECHANNEL" 2>/dev/null || true
+fi
+
 # Task 5: git + PR + E2E field strings
 BRANCH_JSON=$(json_str_field "branch" "$BRANCH")
 HEAD_SHA_JSON=$(json_str_field "head_sha" "$HEAD_SHA")
