@@ -585,11 +585,8 @@ chmod +x "$GH_STUB_DIR_C/gh"
 
 rc15c=$(printf '{"stop_hook_active":false}' | (cd "$S15C" && PATH="$GH_STUB_DIR_C:$PATH" bash "$HOOK_STATE") 2>"$S15C/.state-stderr"; echo "$?")
 assert_equals "$rc15c" "0" "clean Stop → exit 0"
-if [ -e "$TRIPWIRE" ]; then
-    fail_test "gh pr view stub WAS invoked on a clean Stop (probe must be lazy — only fire when CHANGELOG block triggers)"
-else
-    pass_test "gh pr view probe is lazy — tripwire NOT touched on clean Stop"
-fi
+assert_file_missing "$TRIPWIRE" \
+    "gh pr view probe is lazy — tripwire NOT touched on clean Stop"
 
 # ===========================================================================
 # Hard-cut test: state.md missing + legacy CONTINUITY.md present →
