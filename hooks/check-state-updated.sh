@@ -40,20 +40,42 @@ else
     STOP_HOOK_ACTIVE=$(echo "$INPUT" | grep -o '"stop_hook_active"[[:space:]]*:[[:space:]]*true' | head -1)
     [ -n "$STOP_HOOK_ACTIVE" ] && STOP_HOOK_ACTIVE="true" || STOP_HOOK_ACTIVE="false"
 fi
-# Emit FORGE_GOAL evidence FIRST — must run on every Stop call,
-# including those with stop_hook_active=true (active /goal loop),
-# so the /goal verifier sees the current evidence in transcript.
-EVIDENCE_SCRIPT="${CLAUDE_PROJECT_DIR:-$(pwd)}/.claude/hooks/build-evidence.sh"
-if [ -x "$EVIDENCE_SCRIPT" ]; then
-    bash "$EVIDENCE_SCRIPT" || true   # non-blocking; stderr passes through naturally
+
+# ---------------------------------------------------------------------------
+# Worktree CWD fix (v5.32) — same rationale as build-evidence.sh. CC's Stop
+# hook runs with CWD=$CLAUDE_PROJECT_DIR (the parent project in worktree
+# sessions), but the user's actual session CWD lives in the stdin JSON.
+# cd there so relative state.md reads and git ops target the worktree.
+# ---------------------------------------------------------------------------
+if command -v jq &> /dev/null; then
+    HOOK_CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null || true)
+else
+    HOOK_CWD=$(printf '%s' "$INPUT" \
+        | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        | head -1 \
+        | sed -E 's/.*"cwd"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/' || true)
 fi
+if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
+    cd "$HOOK_CWD" 2>/dev/null || true
+elif TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$TOPLEVEL" ]; then
+    cd "$TOPLEVEL" 2>/dev/null || true
+fi
+
+# Note: build-evidence is no longer invoked inline. It runs as its own Stop
+# hook entry (registered in settings.template.json) BEFORE this one — so its
+# STDERR output is rendered as informational hook output rather than being
+# concatenated with our exit-2 stderr and labeled "Stop hook error" by CC.
+# build-evidence still writes the fingerprint side-channel file that the
+# stuck-detection logic below reads.
 
 # ---------------------------------------------------------------------------
 # Task 8: /forge-goal stuck-detection soft warning.
 #
-# Fires after build-evidence (which writes .claude/local/forge-goal-last-fingerprint
-# as a side-channel). After 5 consecutive identical progress_fingerprint values,
-# emits FORGE_GOAL_STUCK_WARNING to STDERR. Informational only — does NOT abort.
+# build-evidence.sh runs as a separate Stop hook entry BEFORE this one (per
+# settings.template.json hook ordering) and writes the current
+# progress_fingerprint to .claude/local/forge-goal-last-fingerprint as a
+# side-channel. We read it here. After 5 consecutive identical fingerprints,
+# emit FORGE_GOAL_STUCK_WARNING to STDERR. Informational only — does NOT abort.
 # Fires even when stop_hook_active=true (inside the active /goal loop — where
 # it's most useful). Counter lives in .claude/local/forge-goal-stuck-count:
 # format "<count>|<fingerprint_sha256>".

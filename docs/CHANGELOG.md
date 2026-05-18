@@ -2,6 +2,41 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.32 — 2026-05-18 · Worktree CWD fix + split build-evidence into its own Stop hook
+
+**Surfaced during the msai-v2 portfolio-backtest soak of /forge-goal v1.0.** Two coupled bugs:
+
+1. **Worktree CWD bug.** Evidence JSON reported `session_nonce:null`, `phase:null`, `checklist_total:0` even though the worktree's state.md was correctly populated with an active `## /goal session`. Root cause: CC's Stop hook runs with CWD = `$CLAUDE_PROJECT_DIR` (which resolves to the PARENT project in worktree sessions, not the worktree). `build-evidence` read `.claude/local/state.md` relative to that CWD → wrong (or missing) state.md. Consequence: the PR-create authorization gate would NOT fire when the autonomous run reached `gh pr create` (it gates on a non-empty nonce in evidence). The agent would have opened a PR without the modal pause.
+
+2. **Pre-PR Stop hook noise.** v5.30 only downgraded the CHANGELOG threshold gate to advisory when an OPEN PR existed. Pre-PR (where /forge-goal spends 90% of its time) still hit exit 2 → CC labeled the entire combined STDERR (build-evidence's evidence dump + check-state-updated's CHANGELOG nag) as "Stop hook error" → giant JSON dump flooded every Stop turn. The deferred "split build-evidence into its own Stop hook" refactor that v5.30 explicitly punted is now done.
+
+**Fixes:**
+
+- **`hooks/build-evidence.{sh,ps1}`** — registered as its **own** Stop hook entry in `settings.template.json` (BEFORE check-state-updated so the fingerprint side-channel file is written before stuck-detection reads it). Always exits 0 → its STDERR is rendered as informational `Ran stop hook` output, not labeled "error". Also: both scripts now parse `cwd` from the Stop hook stdin JSON and `cd` there at the top, fixing the worktree CWD bug. Fallback chain: `stdin.cwd` → `git rev-parse --show-toplevel` → current CWD.
+- **`hooks/check-state-updated.{sh,ps1}`** — removed the inline call to build-evidence (it's now a separate hook). Added the same `cwd` parsing so stuck-detection reads/writes the worktree's `.claude/local/` not the main repo's. Comments updated to reflect the new architecture.
+- **`settings/settings.template.json` + `settings-windows.template.json`** — Stop hook array now lists both build-evidence and check-state-updated commands in that order.
+- **`scripts/merge-settings.py`** — added deep-merge for hook events. The old shallow merge skipped existing hook events entirely, so adding a new parallel command to an existing event (the v5.32 case) would never reach existing installs via `--upgrade`. New `merge_hook_event` rebuilds each matcher-block's hooks list **in template order**, picking up the user's version when present and inserting new template hooks at their template position. Preserves ordering invariants (critical for build-evidence-before-check-state-updated) AND any user-only customizations.
+
+**New tests:**
+
+- **`tests/template/test-hooks.sh`** — 2 new tests (5 new assertions): build-evidence reads state.md from `stdin.cwd` not its own CWD; check-state-updated stuck-detection accumulates in the worktree, not the main repo. Includes negative control proving the redirect actually happens.
+- **`tests/template/test-contracts.sh`** — 4 new assertions: settings.template.json (and Windows mirror) register both hooks in the correct order (build-evidence first).
+- **`tests/template/test-merge-settings.sh` (new file)** — 7 unit tests covering deep-merge: new command added to existing matcher-block in template order, idempotency (re-merge doesn't duplicate), new top-level event still added, new matcher-block appended, permissions arrays still merge.
+
+**Architectural note:** The "merge inserts new hook in template position" behavior is what makes the v5.32 upgrade path safe. A user with the old `[check-state-updated]` Stop array gets `[build-evidence, check-state-updated]` after `--upgrade` — not `[check-state-updated, build-evidence]` (which would silently break stuck-detection because build-evidence's fingerprint side-channel wouldn't exist when stuck-check ran).
+
+**Files:**
+
+- `hooks/build-evidence.sh` + `.ps1` — stdin.cwd parse + chdir at top
+- `hooks/check-state-updated.sh` + `.ps1` — removed inline build-evidence call + stdin.cwd parse
+- `settings/settings.template.json` + `settings-windows.template.json` — two-Stop-hooks registration
+- `scripts/merge-settings.py` — `merge_hook_event` deep-merge with template-order insertion
+- `tests/template/test-hooks.sh` — worktree CWD tests
+- `tests/template/test-contracts.sh` — Stop hook ordering contract
+- `tests/template/test-merge-settings.sh` — new file, 7 unit tests
+- `tests/template/run-all.sh` — registered the new suite
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.31 → 5.32
+
 ## 5.31 — 2026-05-18 · E2E user-journey enforcement
 
 **Surfaced during /forge-goal v1.0 soak in msai-v2.** The agent was drafting E2E use cases that read like integration tests ("POST /api/users returns 201") instead of user journeys ("Customer places an order and finds it in their history"). Cause: the rules defined the required fields and listed anti-patterns but provided no positive worked example to pattern-match against; interface selection was driven by project type instead of by what the user actually touches for the feature; and the verify-e2e agent executed whatever it was handed without bouncing back ill-shaped UCs.

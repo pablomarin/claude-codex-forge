@@ -33,27 +33,41 @@ try {
     exit 0
 }
 
-# Emit FORGE_GOAL evidence FIRST — must run on every Stop call,
-# including those with stop_hook_active=true (active /goal loop),
-# so the /goal verifier sees the current evidence in transcript.
-$projectDir = $env:CLAUDE_PROJECT_DIR
-if (-not $projectDir) { $projectDir = (Get-Location).Path }
-$evidenceScript = Join-Path $projectDir ".claude/hooks/build-evidence.ps1"
-if (Test-Path $evidenceScript) {
-    try {
-        & $evidenceScript
-    } catch {
-        # Non-blocking: write one warning to stderr; don't break the Stop hook.
-        [Console]::Error.WriteLine("WARN: build-evidence.ps1 failed: $($_.Exception.Message)")
+# ---------------------------------------------------------------------------
+# Worktree CWD fix (v5.32) — CC's Stop hook runs with CWD=$CLAUDE_PROJECT_DIR
+# (the parent project in worktree sessions), but the user's actual session
+# CWD lives in the stdin JSON. cd there so relative state.md reads and git
+# ops target the worktree, not the main repo.
+# Fallback: git rev-parse --show-toplevel → current CWD.
+# ---------------------------------------------------------------------------
+$hookCwd = ""
+if ($data -and $data.PSObject.Properties['cwd']) {
+    $hookCwd = [string]$data.cwd
+}
+if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
+    Set-Location -LiteralPath $hookCwd
+} else {
+    $toplevel = (& git rev-parse --show-toplevel 2>$null)
+    if ($toplevel -and (Test-Path -LiteralPath $toplevel -PathType Container)) {
+        Set-Location -LiteralPath $toplevel
     }
 }
+
+# Note: build-evidence is no longer invoked inline. It runs as its own Stop
+# hook entry (registered in settings.template.json) BEFORE this one — so its
+# STDERR output is rendered as informational hook output rather than being
+# merged with our exit-2 stderr and labeled "Stop hook error" by CC.
+# build-evidence still writes the fingerprint side-channel file that the
+# stuck-detection logic below reads.
 
 # ---------------------------------------------------------------------------
 # Task 8: /forge-goal stuck-detection soft warning.
 #
-# Fires after build-evidence (which writes .claude/local/forge-goal-last-fingerprint
-# as a side-channel). After 5 consecutive identical progress_fingerprint values,
-# emits FORGE_GOAL_STUCK_WARNING to STDERR. Informational only — does NOT abort.
+# build-evidence.ps1 runs as a separate Stop hook entry BEFORE this one and
+# writes the current progress_fingerprint to
+# .claude/local/forge-goal-last-fingerprint as a side-channel. We read it
+# here. After 5 consecutive identical fingerprints, emit
+# FORGE_GOAL_STUCK_WARNING to STDERR. Informational only — does NOT abort.
 # Fires even when stop_hook_active=true. Counter lives in
 # .claude/local/forge-goal-stuck-count: format "<count>|<fingerprint_sha256>".
 # PS 5.1 compatible: no ??, [Console]::Error.WriteLine for STDERR.

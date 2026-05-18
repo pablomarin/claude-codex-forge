@@ -871,15 +871,19 @@ fi
 #
 # Regression guard for the bug where the early-return path (active /goal loop)
 # suppressed evidence emission entirely, defeating Layer 1 of /forge-goal.
+#
+# v5.32 architecture: build-evidence is registered as its own Stop hook
+# (BEFORE check-state-updated) in settings.template.json. It always exits 0
+# and writes evidence to STDERR regardless of stop_hook_active. This test
+# now invokes build-evidence directly with stop_hook_active=true to assert
+# evidence still emits inside an active /goal loop.
 # ===========================================================================
-start_test "check-state-updated emits FORGE_GOAL_EVIDENCE markers even when stop_hook_active=true"
+start_test "build-evidence emits FORGE_GOAL_EVIDENCE markers even when stop_hook_active=true"
 
-HOOK_STATE_SH="$REPO_ROOT/hooks/check-state-updated.sh"
+HOOK_EVIDENCE_SH="$REPO_ROOT/hooks/build-evidence.sh"
 
 SN=$(scratch_dir checkstateupd-evidence)
-mkdir -p "$SN/.claude/local" "$SN/.claude/hooks"
-cp "$REPO_ROOT/hooks/build-evidence.sh" "$SN/.claude/hooks/build-evidence.sh"
-chmod +x "$SN/.claude/hooks/build-evidence.sh"
+mkdir -p "$SN/.claude/local"
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
    "$SN/.claude/local/state.md"
 
@@ -887,7 +891,7 @@ OUT_N="$SN/.out"
 (
     cd "$SN" || exit 1
     INPUT='{"stop_hook_active":true,"transcript_path":"/tmp/x"}'
-    echo "$INPUT" | bash "$HOOK_STATE_SH" > "$OUT_N" 2>&1
+    echo "$INPUT" | bash "$HOOK_EVIDENCE_SH" > "$OUT_N" 2>&1
 )
 
 assert_contains "$OUT_N" "FORGE_GOAL_EVIDENCE_BEGIN" \
@@ -1267,14 +1271,19 @@ start_test "Layer 2 — check-state-updated emits FORGE_GOAL_STUCK_WARNING after
 - [ ] Item 2
 EOF
 
-    # Fire the Stop hook 5 times with stop_hook_active=true so the CHANGELOG
-    # gate doesn't fire (the scratch dir has no git repo). Same state.md
-    # content on every call → same progress_fingerprint → stuck counter increments.
+    # v5.32: fire BOTH Stop hooks per turn — build-evidence first (writes
+    # fingerprint side-channel), then check-state-updated (reads it for
+    # stuck-detection). This mirrors the real Stop hook ordering in
+    # settings.template.json after the split.
+    # stop_hook_active=true keeps the CHANGELOG gate quiet (scratch dir has
+    # no git repo). Same state.md every turn → same progress_fingerprint →
+    # stuck counter increments.
     INPUT='{"stop_hook_active":true,"transcript_path":"/tmp/x"}'
 
     (
         cd "$scratch"
         for i in 1 2 3 4 5; do
+            echo "$INPUT" | bash "$REPO_ROOT/hooks/build-evidence.sh" > /dev/null 2>&1
             echo "$INPUT" | bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$scratch/.out.$i" 2>&1
         done
     )
@@ -1286,6 +1295,144 @@ EOF
     assert_not_contains "$scratch/.out.4" "FORGE_GOAL_STUCK_WARNING" "no warning on turn 4"
     assert_contains     "$scratch/.out.5" "FORGE_GOAL_STUCK_WARNING" "warning fires on turn 5 (identical fingerprint)"
 )
+
+# ===========================================================================
+# v5.32 Test A — Worktree CWD fix: build-evidence MUST read state.md from
+# the cwd in the stdin JSON, not from its own CWD.
+#
+# Surfaced 2026-05-18 in msai-v2 portfolio-backtest soak: evidence reported
+# session_nonce:null and phase:null even though the worktree's state.md was
+# populated. Root cause: CC's Stop hook runs with CWD=$CLAUDE_PROJECT_DIR
+# (the parent project in worktree sessions). build-evidence read state.md
+# relative to that CWD → wrong (or missing) state.md.
+#
+# Test strategy: create TWO scratch dirs. "Main" has empty/no state.md.
+# "Worktree" has a state.md with a recognizable nonce. Invoke build-evidence
+# WITH CWD=main but stdin.cwd=worktree → assert evidence contains the
+# worktree's nonce.
+# ===========================================================================
+start_test "v5.32 — build-evidence reads state.md from stdin.cwd, not its own CWD"
+
+V32A_MAIN=$(scratch_dir v532-main-repo)
+V32A_WORKTREE=$(scratch_dir v532-worktree)
+mkdir -p "$V32A_MAIN/.claude/local" "$V32A_WORKTREE/.claude/local"
+
+# Main repo has NO /goal session.
+cat > "$V32A_MAIN/.claude/local/state.md" <<'EOF'
+## Workflow
+
+| Field   | Value |
+| ------- | ----- |
+| Command | none  |
+EOF
+
+# Worktree has an ACTIVE /goal session with a recognizable nonce.
+cat > "$V32A_WORKTREE/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | v532-worktree-nonce-marker |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-18T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 4 — Execute       |
+| Next step | Write code        |
+
+### Checklist
+
+- [ ] Item 1
+EOF
+
+# Init both as git repos (build-evidence runs git commands too).
+( cd "$V32A_MAIN" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+( cd "$V32A_WORKTREE" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+
+# Invoke build-evidence from CWD=main, stdin.cwd=worktree. Assert evidence
+# carries the WORKTREE's nonce (proves cwd-redirect happened).
+OUT_V32A="$V32A_MAIN/.out"
+INPUT_V32A=$(printf '{"stop_hook_active":false,"cwd":"%s"}' "$V32A_WORKTREE")
+( cd "$V32A_MAIN" && echo "$INPUT_V32A" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32A.stdout" 2> "$OUT_V32A.stderr" )
+
+assert_contains "$OUT_V32A.stderr" "v532-worktree-nonce-marker" \
+    "build-evidence read state.md from stdin.cwd (worktree), not its own CWD (main)"
+
+# Negative control: same setup but no `cwd` in stdin → build-evidence reads
+# state.md from its own CWD (main repo) and the nonce should be null.
+OUT_V32A_FALLBACK="$V32A_MAIN/.out-fallback"
+INPUT_V32A_NOCWD='{"stop_hook_active":false}'
+( cd "$V32A_MAIN" && echo "$INPUT_V32A_NOCWD" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32A_FALLBACK.stdout" 2> "$OUT_V32A_FALLBACK.stderr" )
+if grep -q "v532-worktree-nonce-marker" "$OUT_V32A_FALLBACK.stderr"; then
+    fail "negative control failed: evidence picked up worktree nonce without stdin.cwd (should have read main repo's state.md)"
+else
+    pass "negative control: without stdin.cwd, evidence reads CWD's state.md (no worktree nonce leak)"
+fi
+
+# ===========================================================================
+# v5.32 Test B — Worktree CWD fix: check-state-updated stuck-detection MUST
+# also honor stdin.cwd so it reads the worktree's nonce + fingerprint file.
+# ===========================================================================
+start_test "v5.32 — check-state-updated stuck-detection honors stdin.cwd"
+
+V32B_MAIN=$(scratch_dir v532-main-repo-b)
+V32B_WORKTREE=$(scratch_dir v532-worktree-b)
+mkdir -p "$V32B_MAIN/.claude/local" "$V32B_WORKTREE/.claude/local"
+
+# Main has no /goal session.
+cat > "$V32B_MAIN/.claude/local/state.md" <<'EOF'
+## Workflow
+| Field   | Value |
+| ------- | ----- |
+| Command | none  |
+EOF
+
+# Worktree has active session.
+cat > "$V32B_WORKTREE/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | v532b-worktree-nonce |
+| workflow_command | /new-feature bar |
+| issued_at        | 2026-05-18T10:00:00Z |
+
+## Workflow
+
+| Field     | Value           |
+| --------- | --------------- |
+| Command   | /new-feature bar |
+| Phase     | 4 — Execute     |
+| Next step | Code            |
+
+### Checklist
+- [ ] X
+EOF
+
+( cd "$V32B_MAIN" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+( cd "$V32B_WORKTREE" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+
+INPUT_V32B=$(printf '{"stop_hook_active":true,"cwd":"%s"}' "$V32B_WORKTREE")
+
+# Fire 5 cycles: build-evidence + check-state-updated, both from CWD=main
+# with stdin.cwd=worktree. Stuck-detection should accumulate inside the
+# WORKTREE's .claude/local (not the main repo's).
+for i in 1 2 3 4 5; do
+    ( cd "$V32B_MAIN" && echo "$INPUT_V32B" | bash "$REPO_ROOT/hooks/build-evidence.sh" > /dev/null 2>&1 )
+    ( cd "$V32B_MAIN" && echo "$INPUT_V32B" | bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$V32B_MAIN/.out.$i" 2>&1 )
+done
+
+# Counter file MUST exist inside the worktree, NOT inside main.
+assert_file_exists "$V32B_WORKTREE/.claude/local/forge-goal-stuck-count" \
+    "stuck-counter file written to worktree (stdin.cwd target)"
+assert_file_missing "$V32B_MAIN/.claude/local/forge-goal-stuck-count" \
+    "stuck-counter file NOT written to main repo (proves cwd-redirect)"
+assert_contains "$V32B_MAIN/.out.5" "FORGE_GOAL_STUCK_WARNING" \
+    "stuck-warning fires on turn 5 even with stdin.cwd redirect"
 
 # ===========================================================================
 # Report

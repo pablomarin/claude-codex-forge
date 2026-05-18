@@ -179,6 +179,56 @@ assert_contains "$FB" ".claude/playwright-dir" \
     "commands/fix-bug.md reads marker file"
 
 # ---------------------------------------------------------------------------
+# Contract 3b: settings.template.json Stop hook ordering
+#
+# v5.32 split build-evidence into its own Stop hook (was inline call from
+# check-state-updated). The two hooks MUST be registered in this order in
+# settings.template.json (and the Windows mirror) — build-evidence FIRST,
+# check-state-updated SECOND — because build-evidence writes the
+# fingerprint side-channel file that check-state-updated's stuck-detection
+# reads. Reversing the order breaks stuck-detection silently.
+# ---------------------------------------------------------------------------
+start_test "Stop hook ordering — build-evidence before check-state-updated"
+
+UNIX_SETTINGS="$REPO_ROOT/settings/settings.template.json"
+WIN_SETTINGS="$REPO_ROOT/settings/settings-windows.template.json"
+assert_file_exists "$UNIX_SETTINGS" "settings template exists"
+assert_file_exists "$WIN_SETTINGS" "settings-windows template exists"
+
+if command -v python3 >/dev/null 2>&1; then
+    # Use Python to parse and assert order — avoids brittle line-grep that
+    # would break on whitespace reformatting.
+    for f in "$UNIX_SETTINGS" "$WIN_SETTINGS"; do
+        order_out=$(python3 -c "
+import json, sys
+with open('$f') as fh:
+    s = json.load(fh)
+stop = s.get('hooks', {}).get('Stop', [])
+cmds = []
+for block in stop:
+    for h in block.get('hooks', []):
+        cmds.append(h.get('command', ''))
+for c in cmds:
+    print(c)
+")
+        # Find indices of build-evidence and check-state-updated in command list
+        be_idx=$(echo "$order_out" | grep -n "build-evidence" | head -1 | cut -d: -f1)
+        cs_idx=$(echo "$order_out" | grep -n "check-state-updated" | head -1 | cut -d: -f1)
+        if [[ -z "$be_idx" ]]; then
+            fail "$(basename "$f"): build-evidence NOT registered in Stop hooks"
+        elif [[ -z "$cs_idx" ]]; then
+            fail "$(basename "$f"): check-state-updated NOT registered in Stop hooks"
+        elif (( be_idx < cs_idx )); then
+            pass "$(basename "$f"): build-evidence ($be_idx) registered before check-state-updated ($cs_idx)"
+        else
+            fail "$(basename "$f"): WRONG order — build-evidence ($be_idx) must come before check-state-updated ($cs_idx)"
+        fi
+    done
+else
+    pass "python3 not available — Stop hook ordering test skipped (not a failure)"
+fi
+
+# ---------------------------------------------------------------------------
 # Contract 6: E2E verified gate — canonical marker vocabulary
 #
 # The "E2E verified" gate string is the single source of truth for the

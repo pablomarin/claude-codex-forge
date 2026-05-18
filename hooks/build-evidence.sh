@@ -3,12 +3,51 @@
 #
 # Read-only. Parses .claude/local/state.md plus git/gh/E2E state and emits a
 # unified evidence JSON between FORGE_GOAL_EVIDENCE_BEGIN/END markers.
-# Stop hook (check-state-updated.sh) invokes this each turn so the Haiku
-# verifier inside an active /goal sees the evidence in the transcript.
+# Registered as its own Stop hook (settings.template.json) so its STDERR
+# output is shown as informational `Ran stop hook` rather than being merged
+# into check-state-updated's exit-2 output (which CC labels "Stop hook error").
+# Always exits 0 — never blocks.
 
 set -u
 
 NOW_UNIX=$(date +%s)
+
+# ---------------------------------------------------------------------------
+# Worktree CWD fix (v5.32) — surfaced 2026-05-18 in msai-v2 portfolio-backtest
+# soak: evidence reported `session_nonce:null, phase:null` even though the
+# worktree state.md was populated. Root cause: CC's Stop hook ran with
+# CWD=$CLAUDE_PROJECT_DIR (the parent project), not the worktree where the
+# /goal session was actually active.
+#
+# Claude Code sends the session's real CWD in the Stop hook stdin JSON.
+# Parse it and cd there before doing any relative-path reads (state.md,
+# .claude/local/forge-goal-last-fingerprint) or git operations (which are
+# also CWD-sensitive — wrong CWD → wrong branch, wrong merge-base).
+#
+# Fallback chain: stdin cwd → $(git rev-parse --show-toplevel) → current cwd.
+# ---------------------------------------------------------------------------
+INPUT=""
+if [ ! -t 0 ]; then
+    INPUT=$(cat 2>/dev/null || true)
+fi
+HOOK_CWD=""
+if [ -n "$INPUT" ]; then
+    if command -v jq >/dev/null 2>&1; then
+        HOOK_CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null || true)
+    else
+        # Grep fallback when jq is unavailable. Match `"cwd":"..."` allowing
+        # whitespace and stopping at the closing quote.
+        HOOK_CWD=$(printf '%s' "$INPUT" \
+            | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' \
+            | head -1 \
+            | sed -E 's/.*"cwd"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/' || true)
+    fi
+fi
+if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
+    cd "$HOOK_CWD" 2>/dev/null || true
+elif TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$TOPLEVEL" ]; then
+    cd "$TOPLEVEL" 2>/dev/null || true
+fi
 
 STATE_MD=".claude/local/state.md"
 

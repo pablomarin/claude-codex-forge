@@ -60,6 +60,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/build-evidence.ps1\""
+          },
+          {
+            "type": "command",
             "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-state-updated.ps1\""
           }
         ]

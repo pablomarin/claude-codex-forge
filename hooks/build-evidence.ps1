@@ -3,13 +3,49 @@
 #
 # Read-only. Parses .claude/local/state.md plus git/gh/E2E state and emits a
 # unified evidence JSON between FORGE_GOAL_EVIDENCE_BEGIN/END markers on STDERR.
-# Stop hook (check-state-updated.ps1) invokes this each turn so the Haiku
-# verifier inside an active /goal sees the evidence in the transcript.
+# Registered as its own Stop hook (settings.template.json) so its STDERR
+# output is shown as informational rather than merged into check-state-updated's
+# exit-2 output. Always exits 0 — never blocks.
 #
 # PS 5.1 compatible. No ??. No ConvertTo-Json for emission (byte-stable
 # hand-built string instead). No Get-Date -UFormat %s (inconsistent across hosts).
 
 $ErrorActionPreference = 'Continue'
+
+# ---------------------------------------------------------------------------
+# Worktree CWD fix (v5.32) — parse `cwd` from stdin JSON and chdir there so
+# relative paths (.claude/local/state.md) and git ops target the worktree,
+# not $CLAUDE_PROJECT_DIR (which CC uses as default Stop hook CWD).
+# Fallback: git rev-parse --show-toplevel → current CWD.
+# ---------------------------------------------------------------------------
+$input_raw = ""
+if (-not [Console]::IsInputRedirected) {
+    # stdin not redirected — running outside hook context (manual invocation)
+} else {
+    try { $input_raw = [Console]::In.ReadToEnd() } catch { $input_raw = "" }
+}
+$hookCwd = ""
+if ($input_raw) {
+    try {
+        $parsed = $input_raw | ConvertFrom-Json -ErrorAction Stop
+        if ($parsed -and $parsed.PSObject.Properties['cwd']) {
+            $hookCwd = [string]$parsed.cwd
+        }
+    } catch {
+        # Fallback regex parse (PS 5.1 ConvertFrom-Json may reject some shapes)
+        if ($input_raw -match '"cwd"\s*:\s*"([^"]*)"') {
+            $hookCwd = $matches[1]
+        }
+    }
+}
+if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
+    Set-Location -LiteralPath $hookCwd
+} else {
+    $toplevel = (& git rev-parse --show-toplevel 2>$null)
+    if ($toplevel -and (Test-Path -LiteralPath $toplevel -PathType Container)) {
+        Set-Location -LiteralPath $toplevel
+    }
+}
 
 $StateMd = ".claude/local/state.md"
 
