@@ -532,22 +532,37 @@ $PythonCmd = $null
 if (Get-Command python -ErrorAction SilentlyContinue) { $PythonCmd = "python" }
 elseif (Get-Command python3 -ErrorAction SilentlyContinue) { $PythonCmd = "python3" }
 
-# Settings — merge on upgrade, copy otherwise
+# Settings — merge on upgrade, copy otherwise.
+#
+# P2-3 (Codex v5.32 review): hard-fail rather than silently leaving the old
+# settings.json in place. Without the merge, NEW Stop hook entries (e.g.,
+# build-evidence) are never registered, and the upgraded check-state-updated.ps1
+# no longer invokes build-evidence inline — silent loss of FORGE_GOAL_EVIDENCE.
+#
+# Codex P2 follow-up (v5.32 iter 2): also detect cases where $PythonCmd is
+# truthy but the invocation FAILS — common on Windows when the resolved
+# `python.exe` is the Microsoft Store alias (no-op), Python 2 (which can't
+# run the script), or when merge-settings.py itself errors out. PowerShell's
+# default $ErrorActionPreference does NOT abort on native command non-zero
+# exits, so we must check $LASTEXITCODE explicitly.
 if ($Upgrade -and (Test-Path ".claude\settings.json")) {
     Write-Color "  ^ Merging .claude\settings.json (upgrade mode)" "Yellow"
-    if ($PythonCmd) {
-        & $PythonCmd (Join-Path (Join-Path $ScriptDir "scripts") "merge-settings.py") (Join-Path (Join-Path $ScriptDir "settings") "settings-windows.template.json") ".claude\settings.json"
-    } else {
-        # P2-3 (Codex v5.32 review): hard-fail rather than silently leaving the
-        # old settings.json in place. Without the merge, NEW Stop hook entries
-        # (e.g., build-evidence) are never registered, and the upgraded
-        # check-state-updated.ps1 no longer invokes build-evidence inline —
-        # silent loss of FORGE_GOAL_EVIDENCE emission. Force the user to
-        # install Python before the upgrade can complete.
+    if (-not $PythonCmd) {
         Write-Color "  X Python not found -- cannot merge settings.json safely." "Red"
         Write-Color "    Install Python 3 (https://www.python.org/downloads/) and re-run --upgrade." "Red"
         Write-Color "    Without the merge, new Stop hook entries (e.g., build-evidence) will" "Red"
         Write-Color "    NOT be registered, silently breaking /forge-goal evidence emission." "Red"
+        exit 1
+    }
+    & $PythonCmd (Join-Path (Join-Path $ScriptDir "scripts") "merge-settings.py") (Join-Path (Join-Path $ScriptDir "settings") "settings-windows.template.json") ".claude\settings.json"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Color "  X merge-settings.py exited $LASTEXITCODE -- settings.json was NOT updated." "Red"
+        Write-Color "    Common causes on Windows:" "Red"
+        Write-Color "      - 'python' resolves to the Microsoft Store alias (no real Python installed)" "Red"
+        Write-Color "      - Python 2 instead of Python 3" "Red"
+        Write-Color "      - merge-settings.py rejected your existing .claude/settings.json as malformed" "Red"
+        Write-Color "    Install Python 3 from https://www.python.org/downloads/ and re-run --upgrade." "Red"
+        Write-Color "    Without a successful merge, new Stop hook entries are NOT registered." "Red"
         exit 1
     }
 } else {
