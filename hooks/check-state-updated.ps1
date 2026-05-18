@@ -253,23 +253,25 @@ if ($totalChanged -gt 3 -and $changelogInBranch -eq 0 -and $changelogModified -e
     }
 }
 
-# Detect open PR for current branch. Once a PR is open, the CHANGELOG gate
-# downgrades from blocking (exit 2) to advisory (exit 0): the human reviewer
-# carries the signal, and per-turn blocking during CI wait is just noise.
-# gh availability and JSON parsing are best-effort; on failure, default to "no
-# open PR" so the original blocking behavior is preserved.
-$prOpen = $false
-$ghCmd = Get-Command gh -ErrorAction SilentlyContinue
-if ($ghCmd) {
-    $prState = (& gh pr view --json state -q .state 2>$null) | Out-String
-    if ($prState.Trim() -eq "OPEN") { $prOpen = $true }
-}
-
 # Block using exit code 2 + stderr (robust — immune to stdout pollution)
 if ($issues) {
     # Prepend workflow reminder if active (so model always sees current phase)
     if ($workflowReminder) { $issues = "[$workflowReminder] $issues" }
     [Console]::Error.WriteLine($issues)
+
+    # Detect open PR for current branch. Once a PR is open, the CHANGELOG gate
+    # downgrades from blocking (exit 2) to advisory (exit 0): the human reviewer
+    # carries the signal, and per-turn blocking during CI wait is just noise.
+    # gh availability and network are best-effort; on failure, default to "no
+    # open PR" so the original blocking behavior is preserved.
+    # Probe only runs when $issues is non-empty — clean stops pay no gh-API cost.
+    $prOpen = $false
+    $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+    if ($ghCmd) {
+        $prState = (& gh pr view --json state -q .state 2>$null) | Out-String
+        if ($prState.Trim() -eq "OPEN") { $prOpen = $true }
+    }
+
     if ($prOpen) {
         # Advisory only — PR already open. Exit 0 so the message is informational
         # and the build-evidence STDERR dump is not labeled "Stop hook error".

@@ -535,6 +535,63 @@ assert_contains "$S15B/.state-stderr" "CHANGELOG" \
     "stderr still mentions CHANGELOG so the human sees the advisory"
 
 # ===========================================================================
+# Test 15c: regression guard — gh pr view probe MUST NOT fire on clean Stops.
+#
+# Surfaced by Codex review of v5.30 (P2): the first cut of the fix called
+# `gh pr view` unconditionally whenever gh was installed, adding an API call
+# to every Stop hook in every repo (~250ms+ on offline/slow networks). Probe
+# must be lazy: only run when CHANGELOG block would fire.
+#
+# Test strategy: wire a gh stub that writes a tripwire file if invoked. Run
+# the hook on a clean repo (no CHANGELOG block trigger). Assert: exit 0 and
+# tripwire file does NOT exist (i.e. stub was never called).
+# ===========================================================================
+start_test "check-state-updated.sh: gh pr view probe is lazy — not called on clean Stops"
+
+S15C=$(scratch_dir state-clean-stop-no-gh-probe)
+(
+    cd "$S15C" || exit 1
+    git init -q
+    git -c user.email=test@test -c user.name=test checkout -q -b main
+    git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "initial"
+    # NO feature branch with 4+ files. Working tree clean. CHANGELOG block will not fire.
+)
+
+mkdir -p "$S15C/.claude/local"
+cat > "$S15C/.claude/local/state.md" <<'CONT'
+## Workflow
+
+| Field     | Value |
+| --------- | ----- |
+| Command   | none  |
+
+## State
+
+### Done
+- Clean
+CONT
+
+# Tripwire stub: any invocation writes a marker file, then returns OPEN.
+TRIPWIRE="$S15C/.gh-was-called"
+GH_STUB_DIR_C="$S15C/.bin"
+mkdir -p "$GH_STUB_DIR_C"
+cat > "$GH_STUB_DIR_C/gh" <<STUB
+#!/usr/bin/env bash
+touch "$TRIPWIRE"
+echo "OPEN"
+exit 0
+STUB
+chmod +x "$GH_STUB_DIR_C/gh"
+
+rc15c=$(printf '{"stop_hook_active":false}' | (cd "$S15C" && PATH="$GH_STUB_DIR_C:$PATH" bash "$HOOK_STATE") 2>"$S15C/.state-stderr"; echo "$?")
+assert_equals "$rc15c" "0" "clean Stop → exit 0"
+if [ -e "$TRIPWIRE" ]; then
+    fail_test "gh pr view stub WAS invoked on a clean Stop (probe must be lazy — only fire when CHANGELOG block triggers)"
+else
+    pass_test "gh pr view probe is lazy — tripwire NOT touched on clean Stop"
+fi
+
+# ===========================================================================
 # Hard-cut test: state.md missing + legacy CONTINUITY.md present →
 # check-workflow-gates.sh must NOT fall back to CONTINUITY.md (post PR #2).
 # Hook should exit 0 (no gating without state.md) and emit a breadcrumb.
