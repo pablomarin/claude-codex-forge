@@ -45,7 +45,13 @@ if ($data -and $data.PSObject.Properties['cwd']) {
     $hookCwd = [string]$data.cwd
 }
 if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
-    Set-Location -LiteralPath $hookCwd
+    # Normalize to repo/worktree root in case stdin.cwd is a subdirectory.
+    $normalized = (& git -C "$hookCwd" rev-parse --show-toplevel 2>$null)
+    if ($normalized -and (Test-Path -LiteralPath $normalized -PathType Container)) {
+        Set-Location -LiteralPath $normalized
+    } else {
+        Set-Location -LiteralPath $hookCwd
+    }
 } else {
     $toplevel = (& git rev-parse --show-toplevel 2>$null)
     if ($toplevel -and (Test-Path -LiteralPath $toplevel -PathType Container)) {

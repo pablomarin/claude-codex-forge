@@ -85,6 +85,7 @@ def merge_hook_event(template_event, user_event):
             continue
         # Same matcher exists — rebuild `hooks` list in template order.
         user_block.setdefault("hooks", [])
+        original_keys = [_hook_key(h) for h in user_block["hooks"]]
         user_by_key = {_hook_key(h): h for h in user_block["hooks"]}
         template_keys = {_hook_key(h) for h in template_block.get("hooks", [])}
 
@@ -105,6 +106,24 @@ def merge_hook_event(template_event, user_event):
         for user_hook in user_block["hooks"]:
             if _hook_key(user_hook) not in template_keys:
                 new_hooks.append(user_hook)
+
+        # P2-2 (Codex v5.32 review): detect ORDER-ONLY changes. If the user
+        # already has both commands but in wrong order, the loop above rebuilds
+        # new_hooks correctly but no "new hook" change is recorded — main()
+        # then treats `changes == []` as "already up to date" and skips the
+        # write, leaving the bad order in place. Record an order change so the
+        # rebuilt list is actually persisted.
+        new_keys = [_hook_key(h) for h in new_hooks]
+        if new_keys != original_keys:
+            # Only record order changes that AREN'T already captured by a
+            # "new hook" addition above (avoid double-reporting).
+            additions = [k for k in new_keys if k not in original_keys]
+            if not additions:
+                changes.append(
+                    f"reordered hooks in matcher={matcher!r} to match template "
+                    f"(ordering invariant — e.g., build-evidence must run before "
+                    f"check-state-updated)"
+                )
 
         user_block["hooks"] = new_hooks
     return changes

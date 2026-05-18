@@ -39,7 +39,14 @@ if ($input_raw) {
     }
 }
 if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
-    Set-Location -LiteralPath $hookCwd
+    # Normalize to repo/worktree root in case stdin.cwd points at a subdirectory
+    # (Codex P2-1, v5.32 review). Without this, relative paths would silently miss.
+    $normalized = (& git -C "$hookCwd" rev-parse --show-toplevel 2>$null)
+    if ($normalized -and (Test-Path -LiteralPath $normalized -PathType Container)) {
+        Set-Location -LiteralPath $normalized
+    } else {
+        Set-Location -LiteralPath $hookCwd
+    }
 } else {
     $toplevel = (& git rev-parse --show-toplevel 2>$null)
     if ($toplevel -and (Test-Path -LiteralPath $toplevel -PathType Container)) {

@@ -1435,6 +1435,55 @@ assert_contains "$V32B_MAIN/.out.5" "FORGE_GOAL_STUCK_WARNING" \
     "stuck-warning fires on turn 5 even with stdin.cwd redirect"
 
 # ===========================================================================
+# v5.32 Test C (Codex P2-1 regression guard) — subdirectory cwd MUST be
+# normalized to the repo/worktree root.
+#
+# Scenario: CC session was launched from a subdirectory like `apps/web` or
+# `frontend/`. Stop hook stdin.cwd points there. If build-evidence just
+# cd's into that subdirectory, then relative reads of `.claude/local/state.md`
+# silently miss (the file lives at repo root). Fix: normalize via
+# `git -C "$cwd" rev-parse --show-toplevel` before cd.
+# ===========================================================================
+start_test "v5.32 — subdirectory stdin.cwd normalizes to repo root (P2-1)"
+
+V32C=$(scratch_dir v532-subdir-cwd)
+mkdir -p "$V32C/.claude/local" "$V32C/apps/web/src"
+
+cat > "$V32C/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | v532c-subdir-marker |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-18T10:00:00Z |
+
+## Workflow
+
+| Field     | Value           |
+| --------- | --------------- |
+| Command   | /new-feature foo |
+| Phase     | 4 — Execute     |
+| Next step | Code            |
+
+### Checklist
+- [ ] X
+EOF
+
+( cd "$V32C" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+
+# Invoke build-evidence with stdin.cwd pointing at the SUBDIRECTORY apps/web/src.
+# The hook must walk up via `git rev-parse --show-toplevel` to the repo root
+# before reading state.md.
+OUT_V32C="$V32C/.out"
+SUBDIR="$V32C/apps/web/src"
+INPUT_V32C=$(printf '{"stop_hook_active":false,"cwd":"%s"}' "$SUBDIR")
+echo "$INPUT_V32C" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32C.stdout" 2> "$OUT_V32C.stderr"
+
+assert_contains "$OUT_V32C.stderr" "v532c-subdir-marker" \
+    "build-evidence normalized subdirectory cwd to repo root and read state.md"
+
+# ===========================================================================
 # Report
 # ===========================================================================
 report "test-hooks.sh"

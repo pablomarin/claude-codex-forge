@@ -44,7 +44,15 @@ if [ -n "$INPUT" ]; then
     fi
 fi
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
-    cd "$HOOK_CWD" 2>/dev/null || true
+    # Normalize to repo/worktree root in case stdin.cwd points at a subdirectory
+    # (e.g., CC was launched from apps/web). Without this, relative paths like
+    # .claude/local/state.md and tests/e2e/reports would silently miss.
+    NORMALIZED=$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null)
+    if [ -n "$NORMALIZED" ] && [ -d "$NORMALIZED" ]; then
+        cd "$NORMALIZED" 2>/dev/null || true
+    else
+        cd "$HOOK_CWD" 2>/dev/null || true
+    fi
 elif TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$TOPLEVEL" ]; then
     cd "$TOPLEVEL" 2>/dev/null || true
 fi

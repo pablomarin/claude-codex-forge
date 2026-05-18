@@ -56,7 +56,14 @@ else
         | sed -E 's/.*"cwd"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/' || true)
 fi
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
-    cd "$HOOK_CWD" 2>/dev/null || true
+    # Normalize to repo/worktree root in case stdin.cwd points at a subdirectory
+    # (Codex P2-1, v5.32 review). Without this, relative paths would miss.
+    NORMALIZED=$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null)
+    if [ -n "$NORMALIZED" ] && [ -d "$NORMALIZED" ]; then
+        cd "$NORMALIZED" 2>/dev/null || true
+    else
+        cd "$HOOK_CWD" 2>/dev/null || true
+    fi
 elif TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$TOPLEVEL" ]; then
     cd "$TOPLEVEL" 2>/dev/null || true
 fi

@@ -215,4 +215,68 @@ else
     fail "permissions check failed: $(cat "$S5/.assert")"
 fi
 
+# ---------------------------------------------------------------------------
+# Test 6 (Codex P2-2 regression guard): order-only changes must be persisted.
+#
+# Scenario: user already has both commands but in WRONG order — e.g., they
+# installed an early v5.32 preview where check-state-updated came first, or
+# they hand-edited their settings.json. The merge MUST rebuild the list in
+# template order AND record the change so main() writes the file (an empty
+# change list would silently skip the write, leaving the bad order).
+# ---------------------------------------------------------------------------
+start_test "deep-merge: order-only changes persist to disk (P2-2 regression)"
+
+S6=$(scratch_dir merge-order-only)
+
+cat > "$S6/template.json" <<'EOF'
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "/path/A.sh" },
+          { "type": "command", "command": "/path/B.sh" }
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+# User has both commands but in REVERSED order.
+cat > "$S6/user.json" <<'EOF'
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "/path/B.sh" },
+          { "type": "command", "command": "/path/A.sh" }
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+python3 "$MERGE" "$S6/template.json" "$S6/user.json" > "$S6/.out" 2>&1
+
+assert_contains "$S6/.out" "reordered hooks" \
+    "merger recorded an order-only change in output"
+
+python3 -c "
+import json
+with open('$S6/user.json') as f: s = json.load(f)
+cmds = [h['command'] for b in s['hooks']['Stop'] for h in b['hooks']]
+assert cmds == ['/path/A.sh', '/path/B.sh'], f'expected A,B order; got {cmds}'
+print('ok')
+" > "$S6/.assert" 2>&1
+if [[ "$(cat "$S6/.assert")" == "ok" ]]; then
+    pass "order-only change persisted: hooks list rebuilt as [A, B]"
+else
+    fail "order-only persistence check failed: $(cat "$S6/.assert")"
+fi
+
 report "test-merge-settings.sh"

@@ -538,7 +538,17 @@ if ($Upgrade -and (Test-Path ".claude\settings.json")) {
     if ($PythonCmd) {
         & $PythonCmd (Join-Path (Join-Path $ScriptDir "scripts") "merge-settings.py") (Join-Path (Join-Path $ScriptDir "settings") "settings-windows.template.json") ".claude\settings.json"
     } else {
-        Write-Color "  ! Python not found -- cannot merge settings. Install Python or merge manually." "Yellow"
+        # P2-3 (Codex v5.32 review): hard-fail rather than silently leaving the
+        # old settings.json in place. Without the merge, NEW Stop hook entries
+        # (e.g., build-evidence) are never registered, and the upgraded
+        # check-state-updated.ps1 no longer invokes build-evidence inline —
+        # silent loss of FORGE_GOAL_EVIDENCE emission. Force the user to
+        # install Python before the upgrade can complete.
+        Write-Color "  X Python not found -- cannot merge settings.json safely." "Red"
+        Write-Color "    Install Python 3 (https://www.python.org/downloads/) and re-run --upgrade." "Red"
+        Write-Color "    Without the merge, new Stop hook entries (e.g., build-evidence) will" "Red"
+        Write-Color "    NOT be registered, silently breaking /forge-goal evidence emission." "Red"
+        exit 1
     }
 } else {
     Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "settings") "settings-windows.template.json") ".claude\settings.json" ".claude\settings.json"
