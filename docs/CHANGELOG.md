@@ -2,6 +2,21 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.30 — 2026-05-18 · Fix: Stop-hook "error" framing during /forge-goal soak
+
+**Surfaced during soak of /forge-goal v1.0 in msai-v2.** Every Stop turn after PR creation printed the FORGE_GOAL_EVIDENCE JSON dump prefixed with "Stop hook error" because `check-state-updated.{sh,ps1}` invokes `build-evidence.{sh,ps1}` inline (shared STDERR) and then hit exit 2 on the CHANGELOG threshold gate. The exit-2 caused Claude Code to label the _entire_ combined STDERR — evidence + reminder — as an error from the calling hook.
+
+**Fix:** when an OPEN PR already exists for the current branch, the CHANGELOG gate downgrades from blocking (exit 2) to advisory (exit 0). Rationale: pre-PR-create the block is correct (force CHANGELOG before opening PR), but once a PR is open the human reviewer carries the signal — per-turn blocking during CI wait is just noise, and exit 0 removes the "Stop hook error" framing so the evidence dump collapses behind ctrl+o.
+
+**Also fixed:** wording — "files changed this session" → "files changed on branch vs `<default-branch>`". The count is committed + uncommitted diff vs the merge-base, not files-this-turn; the old wording suggested otherwise.
+
+**Files:**
+
+- `hooks/check-state-updated.sh` + `hooks/check-state-updated.ps1` — open-PR detection via `gh pr view --json state -q .state` (best-effort, no-gh → preserve original block); exit-2 → exit-0 + advisory when PR is OPEN; wording correction.
+- `tests/template/test-hooks.sh` — new test 15b ("open PR → exit 0 advisory") using a path-shimmed `gh` stub. Test 15 extended to assert the new "on branch vs master" wording.
+
+**Not changed:** `build-evidence` still writes evidence to STDERR (Layer 1 design). The split-evidence-into-own-Stop-hook refactor was considered and deferred — too invasive for a hot-path soak fix.
+
 ## 5.29 — 2026-05-16 · `/forge-goal` autonomous PRD-to-PR-ready workflow
 
 **Why this exists:** Manual phase-by-phase shepherding through `/new-feature` and `/fix-bug` was the babysitting tax. `/forge-goal` lets the user type ONE command after PRD approval (or plan approval for bug fixes) and the agent autonomously drives plan → plan-review → implement → code-review → E2E → PR-ready, surfacing council for non-PR judgment moments and pausing only at PR creation.

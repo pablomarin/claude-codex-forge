@@ -463,6 +463,76 @@ rc15=$(printf '{"stop_hook_active":false}' | (cd "$S15" && bash "$HOOK_STATE") 2
 assert_equals "$rc15" "2" "CHANGELOG gate fires on master-default repo (exit 2)"
 assert_contains "$S15/.state-stderr" "CHANGELOG" \
     "stderr mentions CHANGELOG threshold"
+assert_contains "$S15/.state-stderr" "on branch vs master" \
+    "stderr wording reflects branch-vs-default-branch (not 'this session')"
+
+# ===========================================================================
+# Test 15b: check-state-updated.sh — CHANGELOG gate downgrades to advisory
+# (exit 0) when an OPEN PR already exists for the branch.
+#
+# Surfaced 2026-05-18 during /forge-goal v1.0 soak in msai-v2:
+# the per-turn exit-2 nag during CI wait label-prefixed the build-evidence
+# STDERR dump as "Stop hook error", flooding the transcript every Stop.
+# Once the PR is open the human reviewer carries the signal — gate becomes
+# advisory.
+# ===========================================================================
+start_test "check-state-updated.sh: open PR → CHANGELOG gate downgrades to advisory (exit 0)"
+
+S15B=$(scratch_dir state-pr-open-advisory)
+(
+    cd "$S15B" || exit 1
+    git init -q
+    git -c user.email=test@test -c user.name=test checkout -q -b main
+    git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "initial"
+    git -c user.email=test@test -c user.name=test checkout -q -b feature/x
+    mkdir -p src/a src/b
+    printf 'x' > src/a/file1.txt
+    printf 'x' > src/a/file2.txt
+    printf 'x' > src/b/file3.txt
+    printf 'x' > src/b/file4.txt
+    git add src/
+    git -c user.email=test@test -c user.name=test commit -q -m "feature work: 4 files"
+)
+
+mkdir -p "$S15B/.claude/local"
+cat > "$S15B/.claude/local/state.md" <<'CONT'
+## Workflow
+
+| Field     | Value |
+| --------- | ----- |
+| Command   | none  |
+
+## State
+
+### Done
+- Some work done
+
+### Now
+Working on feature/x
+
+### Next
+Nothing
+CONT
+
+# Build a fake `gh` on PATH that returns "OPEN" for `gh pr view --json state -q .state`.
+# Use a sibling stub dir so the real gh is shadowed only for this test.
+GH_STUB_DIR="$S15B/.bin"
+mkdir -p "$GH_STUB_DIR"
+cat > "$GH_STUB_DIR/gh" <<'STUB'
+#!/usr/bin/env bash
+# Stub matches the exact subcommand the hook uses.
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+    echo "OPEN"
+    exit 0
+fi
+exit 1
+STUB
+chmod +x "$GH_STUB_DIR/gh"
+
+rc15b=$(printf '{"stop_hook_active":false}' | (cd "$S15B" && PATH="$GH_STUB_DIR:$PATH" bash "$HOOK_STATE") 2>"$S15B/.state-stderr"; echo "$?")
+assert_equals "$rc15b" "0" "open PR → exit 0 (advisory, not blocking)"
+assert_contains "$S15B/.state-stderr" "CHANGELOG" \
+    "stderr still mentions CHANGELOG so the human sees the advisory"
 
 # ===========================================================================
 # Hard-cut test: state.md missing + legacy CONTINUITY.md present →

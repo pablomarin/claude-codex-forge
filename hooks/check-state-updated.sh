@@ -182,9 +182,22 @@ fi
 
 ISSUES=""
 
-# Block: 3+ files changed on branch but CHANGELOG.md never updated
+# Block: 3+ files changed on branch but CHANGELOG.md never updated.
+# "files changed on branch vs $DEFAULT_BRANCH" — count is committed + uncommitted
+# diff vs the merge-base, NOT files-this-turn.
 if [ "$TOTAL_CHANGED" -gt 3 ] && [ "$CHANGELOG_IN_BRANCH" -eq 0 ] && [ "$CHANGELOG_MODIFIED" -eq 0 ]; then
-    ISSUES="${ISSUES:+$ISSUES }Update docs/CHANGELOG.md ($TOTAL_CHANGED files changed this session)."
+    ISSUES="${ISSUES:+$ISSUES }Update docs/CHANGELOG.md ($TOTAL_CHANGED files changed on branch vs $DEFAULT_BRANCH)."
+fi
+
+# Detect open PR for current branch. Once a PR is open, the CHANGELOG gate
+# downgrades from blocking (exit 2) to advisory (exit 0): the human reviewer
+# carries the signal, and per-turn blocking during CI wait is just noise.
+# gh availability and JSON parsing are best-effort; on failure, default to "no
+# open PR" so the original blocking behavior is preserved.
+PR_OPEN=false
+if command -v gh >/dev/null 2>&1; then
+    PR_STATE=$(gh pr view --json state -q .state 2>/dev/null || echo "")
+    [ "$PR_STATE" = "OPEN" ] && PR_OPEN=true
 fi
 
 # Block using exit code 2 + stderr (robust — immune to shell profile stdout pollution)
@@ -192,6 +205,11 @@ if [ -n "$ISSUES" ]; then
     # Prepend workflow reminder if active (so model always sees current phase)
     [ -n "$WORKFLOW_REMINDER" ] && ISSUES="[$WORKFLOW_REMINDER] $ISSUES"
     echo "$ISSUES" >&2
+    if [ "$PR_OPEN" = "true" ]; then
+        # Advisory only — PR already open. Exit 0 so the message is informational
+        # and the build-evidence STDERR dump is not labeled "Stop hook error".
+        exit 0
+    fi
     exit 2
 fi
 
