@@ -104,6 +104,66 @@ assert_contains "$FB" "mkdir -p tests/e2e/reports" \
     "commands/fix-bug.md creates reports dir"
 
 # ---------------------------------------------------------------------------
+# Contract 2b: per-UC failure classifications ↔ caller handling
+#
+# Surfaced 2026-05-18 (v5.31): adding FAIL_INVALID_USE_CASE without updating
+# both callers would silently drop the new classification — callers wouldn't
+# know to rewrite the UC vs fix product code. Mirrors Contract 1 (VERDICT
+# vocabulary) but at the per-UC level.
+#
+# Authoritative source: the FAIL_* labels in verify-e2e.md's "Classification
+# rules" section. Each FAIL_* label must be mentioned by name in BOTH
+# new-feature.md and fix-bug.md so caller branching exists for it.
+# ---------------------------------------------------------------------------
+start_test "per-UC FAIL_* classifications ↔ caller handling"
+
+# Extract every FAIL_* label that appears as a bolded definition in the
+# Classification rules section. The Markdown formatter normalizes the
+# bolded labels to put the trailing colon INSIDE the bold span:
+#   - **FAIL_BUG:** ...
+#   - **FAIL_STALE:** ...
+#   - **FAIL_INVALID_USE_CASE:** ...
+# Regex anchors on '- **' start; colon is inside the close-bold token.
+FAIL_LABELS=$(grep -oE '^\- \*\*FAIL_[A-Z_]+:\*\*' "$VE2E" \
+    | sed -E 's/^\- \*\*//; s/:\*\*$//' \
+    | sort -u)
+
+if [[ -z "$FAIL_LABELS" ]]; then
+    fail "could not find any FAIL_* classification labels in verify-e2e.md Classification rules"
+else
+    pass "found $(echo "$FAIL_LABELS" | wc -l | tr -d ' ') FAIL_* classifications in verify-e2e.md"
+fi
+
+# Each FAIL_* must be referenced by name in both caller files (caller
+# branching exists). We match the bare label (e.g. FAIL_BUG) — callers
+# reference it inline in their verdict-handling prose, not in a bolded
+# form. Grep for the literal token with word-ish boundary.
+for label in $FAIL_LABELS; do
+    if grep -qE "\b${label}\b" "$NF"; then
+        pass "commands/new-feature.md handles $label"
+    else
+        fail "commands/new-feature.md missing handling for $label"
+    fi
+    if grep -qE "\b${label}\b" "$FB"; then
+        pass "commands/fix-bug.md handles $label"
+    else
+        fail "commands/fix-bug.md missing handling for $label"
+    fi
+done
+
+# Reverse check: callers must not reference FAIL_* labels that aren't in
+# the agent's vocabulary. Catches stale references after a label rename.
+CALLER_LABELS=$(grep -hoE '\bFAIL_[A-Z_]+\b' "$NF" "$FB" | sort -u)
+for label in $CALLER_LABELS; do
+    if echo "$FAIL_LABELS" | grep -qxF "$label"; then
+        :  # known label — already covered above
+    else
+        fail "caller references unknown FAIL_* label: '$label' (not in agent vocabulary)"
+    fi
+done
+[[ -n "$CALLER_LABELS" ]] && pass "all caller-referenced FAIL_* labels are in the agent vocabulary"
+
+# ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers
 # setup.sh writes .claude/playwright-dir. Commands must read it.
 # ---------------------------------------------------------------------------

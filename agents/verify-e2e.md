@@ -51,6 +51,40 @@ If still ambiguous, report the ambiguity and stop — do not guess.
 
 **Smoke mode:** Same as regression but filter to use cases tagged `@smoke`.
 
+### Step 2b: Validate use-case shape (BEFORE health check — no server needed)
+
+Before running any UC against a live system, validate that each UC has user-journey shape and a defensible interface choice. Invalid UCs are not a transient infra problem; they cannot be salvaged by retrying against a healthy app. Catch them here so the caller fixes test design before infrastructure is touched.
+
+For each UC loaded in Step 2, classify it as `VALID` or `FAIL_INVALID_USE_CASE`:
+
+**Check 1 — `NOT_USER_JOURNEY` (Intent and Verification shape):**
+
+- The Intent names a real user goal in plain language. RED FLAG if Intent contains: a literal HTTP method + path (`POST /api/...`), a function/class/component name, a database table or column name, a status code or HTTP header as the goal, or phrases like "verify that ... returns ...", "test that ... renders ...", "check that ... endpoint ...".
+- The UC has at least 2 user actions (Steps span a sequence, not a single isolated call).
+- The Verification observes something the user would see through the chosen interface (UI text/element, API response body/status, CLI stdout/exit). RED FLAG if Verification mentions database rows, internal logs, function return values, or implementation details the user cannot observe.
+- The UC has a Persistence step (reload, re-request, or re-invoke). Missing Persistence is a smell that the UC tests a single contract, not a journey.
+
+**Check 2 — `WRONG_INTERFACE` (interface vs feature surface):**
+
+- The declared Interface (UI / API / CLI) must match the surface the user touches for this feature.
+- If the feature description mentions a UI page/form/flow → Interface MUST be UI (not API, even if an API call backs the page — that's an internal seam).
+- If the feature description names a public/product API endpoint as the deliverable → Interface MUST be API.
+- If the feature description names a CLI command/flag → Interface MUST be CLI.
+- Cross-surface features (auth, billing) MAY declare both API and UI UCs.
+- Use available context to determine the feature surface: the plan file's feature description, the UC's Intent text, the file paths the implementation touched (if visible in the plan), and `CLAUDE.md ## E2E Configuration` for the capability envelope.
+
+**When in genuine doubt**, prefer to mark the UC valid and let it execute — false positives on `FAIL_INVALID_USE_CASE` are more disruptive than false negatives (a borderline UC still tests SOMETHING; an over-zealous bounce-back blocks a passing UC).
+
+For each UC marked `FAIL_INVALID_USE_CASE`, record:
+
+- The reason: `NOT_USER_JOURNEY` or `WRONG_INTERFACE` (one primary reason per UC; note secondary in the rationale)
+- A 1-2 sentence rationale citing the exact text or absent element that failed the check
+- A concrete suggestion for the rewrite (e.g., "Restate Intent as a user goal — 'Authenticated user creates an order and finds it in their history' — and add a Persistence step that re-fetches the order list.")
+
+**If any UC is `FAIL_INVALID_USE_CASE`:** skip Step 3 (health check) and Step 4 (execution) for the invalid UCs — they cannot be meaningfully executed. Still execute VALID UCs and run health check for them. Report mixed results normally.
+
+**If ALL UCs are `FAIL_INVALID_USE_CASE`:** skip Step 3 entirely and proceed directly to Step 5 with all UCs classified.
+
 ### Step 3: Health check
 
 - **API:** `curl -fsS $API_URL/health` (or documented health endpoint)
@@ -68,14 +102,15 @@ For each use case:
 2. Execute Steps through the declared interface
 3. Verify the outcome
 4. If `Persist` specified, reload/re-request and confirm
-5. Classify: PASS | FAIL_BUG | FAIL_STALE | FAIL_INFRA
+5. Classify: PASS | FAIL_BUG | FAIL_STALE | FAIL_INFRA (FAIL_INVALID_USE_CASE was already assigned in Step 2b — never assigned here)
 
 **Classification rules:**
 
 - **PASS:** All steps completed, all assertions passed
 - **FAIL_BUG:** Unexpected behavior (wrong status, missing element, incorrect data) — a user would hit this
-- **FAIL_STALE:** Use case references endpoint/page/selector that no longer exists or was renamed — the product isn't wrong, the use case is
+- **FAIL_STALE:** Use case references endpoint/page/selector that no longer exists or was renamed — the product isn't wrong, the use case is (but the use case shape is fine)
 - **FAIL_INFRA:** Environmental issue (timeout, connection refused, Playwright crash). Retry once before classifying. Still failing → FAIL_INFRA.
+- **FAIL_INVALID_USE_CASE:** Classified in Step 2b (not Step 4). UC fails authoring discipline. Sub-reason is one of `NOT_USER_JOURNEY` (Intent reads as integration/contract/component test, or Verification observes non-user-visible state, or Persistence missing) or `WRONG_INTERFACE` (declared Interface doesn't match the feature surface the user touches). Test-design failure — bounces back to the main agent to rewrite the UC before re-running. Never the result of running the UC against the product.
 
 ### Step 5: Produce the report
 
@@ -132,6 +167,13 @@ SUGGESTED_PATH: tests/e2e/reports/YYYY-MM-DD-HH-MM-<feature-or-mode>.md
 - **Evidence:** [response excerpt, screenshot path, stderr]
 - **Severity:** Blocks ship — [why]
 
+### UC3: [Intent] — FAIL_INVALID_USE_CASE
+
+- **Reason:** NOT_USER_JOURNEY | WRONG_INTERFACE
+- **Rationale:** [1-2 sentences citing the exact text or absent element that failed Step 2b validation]
+- **Suggested rewrite:** [concrete rewrite hint the caller can apply, e.g., "Restate Intent as 'Authenticated user creates an order and finds it in their history' and add a Persistence step that re-fetches the order list."]
+- **Severity:** Blocks ship — test-design failure, not a product bug. Fix the UC, not the product code.
+
 ## Files Read
 
 - [every file read during execution, excluding reports]
@@ -141,12 +183,15 @@ SUGGESTED_PATH: tests/e2e/reports/YYYY-MM-DD-HH-MM-<feature-or-mode>.md
 [Why PASS/FAIL/PARTIAL — cite classifications]
 ```
 
-**Verdict rules:**
+**Verdict rules** (top-level VERDICT enum stays at `PASS | FAIL | PARTIAL` — no new top-level value):
 
-- Any FAIL_BUG → `FAIL`
-- Only FAIL_STALE, no FAIL_BUG → `PARTIAL` (maintenance flag)
-- Only FAIL_INFRA after retry, no FAIL_BUG → `PARTIAL` (human decides)
-- All PASS → `PASS`
+- Any `FAIL_BUG` → `FAIL`
+- Any `FAIL_INVALID_USE_CASE` → `FAIL` (the E2E gate cannot be satisfied until the UC is rewritten; it is a test-design failure but still blocks the gate)
+- Only `FAIL_STALE`, no `FAIL_BUG`, no `FAIL_INVALID_USE_CASE` → `PARTIAL` (maintenance flag)
+- Only `FAIL_INFRA` after retry, no `FAIL_BUG`, no `FAIL_INVALID_USE_CASE` → `PARTIAL` (human decides)
+- All `PASS` → `PASS`
+
+When the verdict is `FAIL` due to `FAIL_INVALID_USE_CASE` (and no `FAIL_BUG`), include a clear note in the **Verdict Reasoning** section that this is a test-design failure, not a product defect — so the caller does not waste cycles debugging the product code.
 
 ### Step 6: What the caller does
 

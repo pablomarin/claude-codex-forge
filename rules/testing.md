@@ -100,21 +100,107 @@ E2E tests are **user use cases** — think like a person using the product, not 
 
 Each use case MUST include:
 
-1. **Intent** — What the user wants to accomplish
+1. **Intent** — A real user goal in plain language
    Example: "User creates a new project and invites a teammate"
-2. **Steps** — Specific UI interactions as user actions
-   Example: Navigate to /projects → Click "New Project" → Fill name → Click "Create"
-3. **Verification** — What the user should see after
+   **Smell test:** If you cannot describe the Intent to a non-developer in one sentence without naming endpoints, code, tables, components, or other internal terms, it is not a user journey — it is an integration test. Rewrite it before continuing.
+2. **Steps** — The user's actions through the chosen interface, in order
+   - UI: `Navigate to /projects → Click "New Project" → Fill name → Click "Create"`
+   - API: `POST /api/v1/projects with {name: "Launch"} → GET /api/v1/projects to list back`
+   - CLI: `mycli project add --name "Launch" → mycli project list`
+3. **Verification** — Something the **user would see** through the same interface — UI text/elements, API response body/status, or CLI stdout/exit code. Never a database row, internal log, or function return.
    Example: Project appears in list, success toast shows
-4. **Persistence** — Reload and confirm the action stuck
+4. **Persistence** — Reload, re-request, or re-invoke and confirm the state stuck
    Example: Reload /projects → project still visible
 
 ### What E2E is NOT
 
 - ❌ Testing a function returns the right value (unit test)
-- ❌ Testing an API endpoint returns 200 (integration test)
+- ❌ Testing an API endpoint returns 200 (integration test — narrow contract check)
 - ❌ Testing a component renders correctly (component test)
 - ❌ Clicking one button and checking one element (too shallow)
+- ❌ Testing the same internal data path through two interfaces just to "cover both" (still one assertion, just duplicated)
+
+### GOOD vs BAD use cases (canonical examples)
+
+These are the patterns to match against. The BAD versions are **valid integration/component tests** — they are simply not E2E use cases.
+
+#### UI use case — fullstack/UI feature
+
+**❌ BAD (component-shaped):**
+
+```
+Intent:        Verify TodoForm renders a submit button
+Interface:     UI
+Setup:         N/A
+Steps:         Navigate to /todos
+Verification:  Submit button is visible
+Persistence:   N/A
+```
+
+Why bad: the Intent names a component. No real user goal. No persistence. Verification checks one DOM element, not a user-visible outcome of an action.
+
+**✅ GOOD (user-journey):**
+
+```
+Intent:        Signed-in user creates a todo and confirms it survives a page reload
+Interface:     UI
+Setup:         Register + login via the public signup flow (POST /api/v1/users, then UI login)
+Steps:         Navigate to /todos → Click "New Todo" → Type "Buy milk" → Click "Create"
+Verification:  "Buy milk" appears in the list AND a "Created" toast is visible
+Persistence:   Reload /todos → "Buy milk" is still in the list
+```
+
+#### API use case — public/product API feature
+
+**❌ BAD (contract-shaped):**
+
+```
+Intent:        POST /api/v1/orders returns 201 with valid body
+Interface:     API
+Setup:         N/A
+Steps:         curl POST /api/v1/orders with valid JSON
+Verification:  Response status is 201
+Persistence:   N/A
+```
+
+Why bad: tests a single endpoint contract. Doesn't span the journey of a user achieving something through the API. No persistence check.
+
+**✅ GOOD (user-journey):**
+
+```
+Intent:        Authenticated customer places an order and finds it in their order history
+Interface:     API
+Setup:         POST /api/v1/users (register) → POST /api/v1/sessions (login, capture token)
+Steps:         POST /api/v1/orders {items:[…]} with auth → GET /api/v1/users/me/orders
+Verification:  POST returns 201 + Location header; GET response contains the new order with the id from the Location header
+Persistence:   Re-request GET /api/v1/users/me/orders → order still listed
+```
+
+#### CLI use case — CLI feature
+
+**❌ BAD (flag-shaped):**
+
+```
+Intent:        Verify `mycli add --name` accepts a string argument
+Interface:     CLI
+Setup:         N/A
+Steps:         Run `mycli add --name foo`
+Verification:  Exit code is 0
+Persistence:   N/A
+```
+
+Why bad: tests argument parsing. No user goal — operators don't run `add` just to see exit code 0; they run it to add something they later use.
+
+**✅ GOOD (user-journey):**
+
+```
+Intent:        Operator adds a project, then lists it back in a separate invocation
+Interface:     CLI
+Setup:         Run `mycli init` to create the local config
+Steps:         Run `mycli project add --name "launch-2026"` → run `mycli project list`
+Verification:  `add` stdout matches `Created project launch-2026` and exit 0; `list` stdout contains `launch-2026`
+Persistence:   Exit the shell, open a new shell, run `mycli project list` → `launch-2026` is still listed
+```
 
 ### When E2E is required
 
@@ -158,18 +244,36 @@ Intentionally NOT covered by evidence check (gracefully skipped):
 
 These are degraded environments, not policy violations. The checklist check still fires.
 
-## E2E Interface Capability Matrix
+## E2E Interface Selection — Feature-Surface-Driven
 
-The E2E scope depends on the project's user interfaces (declared in `CLAUDE.md` under `## E2E Configuration`):
+**The interface(s) a use case exercises must match the surface the user touches FOR THIS FEATURE — not the project's defaults.**
 
-| Project Type  | Interfaces Tested     | Tools                 | Playwright Required?       |
-| ------------- | --------------------- | --------------------- | -------------------------- |
-| **fullstack** | API + UI              | HTTP + Playwright MCP | Yes                        |
-| **api**       | API only              | HTTP (curl/httpie)    | No                         |
-| **cli**       | CLI only              | Subprocess + stdout   | No                         |
-| **hybrid**    | Declared per use case | Mixed                 | Only if UI use cases exist |
+Two-step selection:
 
-**Fullstack ordering:** API-first, UI-second. API failure means contract/state is broken (stop immediately). API pass + UI failure means the presentation layer is broken (different diagnosis).
+1. **CLAUDE.md `## E2E Configuration` tells you which interfaces the project EXPOSES.** This is the capability envelope — the floor of what's possible to test:
+
+| Project Type  | Interfaces Available | Tools                 | Playwright Required?       |
+| ------------- | -------------------- | --------------------- | -------------------------- |
+| **fullstack** | API + UI             | HTTP + Playwright MCP | Yes (when UI UCs exist)    |
+| **api**       | API only             | HTTP (curl/httpie)    | No                         |
+| **cli**       | CLI only             | Subprocess + stdout   | No                         |
+| **hybrid**    | Mixed per feature    | Mixed                 | Only if UI use cases exist |
+
+2. **The feature tells you which interface(s) the user actually touches.** Pick from the envelope based on the feature surface:
+
+| Feature shape                                             | Interface(s) for this feature's UCs                                            |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| New UI page, form, flow, or visual element                | **UI**                                                                         |
+| New **public/product** REST/GraphQL endpoint              | **API**                                                                        |
+| New CLI command, flag, or output                          | **CLI**                                                                        |
+| Public flow that crosses UI + API (e.g., signup, billing) | **API + UI** (API-first ordering — contract before presentation)               |
+| Same feature exposed in multiple surfaces                 | One UC per surface a user can actually use                                     |
+| **Internal/private endpoint backing a UI page**           | **UI** only — endpoint contract coverage belongs in integration tests, not E2E |
+| Purely internal (no user surface — migration, refactor)   | E2E: N/A with justification                                                    |
+
+**Key principle (Codex review of v5.31):** A new REST endpoint is only an API E2E target if it is part of the **public product API** — something an external integrator or operator would call. An endpoint that exists only to back a UI page is an internal seam; cover its contract in integration tests, and write the E2E use case at the UI surface where the user actually interacts.
+
+**Fullstack ordering:** when a feature requires both API and UI use cases, run API first, UI second. API failure means the contract/state layer is broken (stop immediately — UI will fail for the wrong reason). API pass + UI failure means the presentation layer is broken (different diagnosis, both reports needed).
 
 ## ARRANGE vs VERIFY — The "No Cheating" Boundary
 
@@ -216,14 +320,22 @@ Use cases live in the plan file during development, then graduate to `tests/e2e/
 
 ## Failure Classification
 
-The verify-e2e agent produces a structured markdown report with four classification types:
+The verify-e2e agent produces a structured markdown report with five per-UC classification types:
 
-| Classification | Meaning                                              | Blocks ship?          |
-| -------------- | ---------------------------------------------------- | --------------------- |
-| **PASS**       | Works as specified                                   | No                    |
-| **FAIL_BUG**   | Real product defect — user would hit this            | **Yes**               |
-| **FAIL_STALE** | Use case references changed interface — needs update | No (maintenance flag) |
-| **FAIL_INFRA** | Server down, timeout, flaky selector                 | Retry once, then warn |
+| Classification            | Meaning                                                                                                                                            | Blocks ship?                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| **PASS**                  | Works as specified                                                                                                                                 | No                            |
+| **FAIL_BUG**              | Real product defect — user would hit this                                                                                                          | **Yes**                       |
+| **FAIL_STALE**            | Use case references changed interface (endpoint/page/selector renamed) — needs update                                                              | No (maintenance flag)         |
+| **FAIL_INFRA**            | Server down, timeout, flaky selector                                                                                                               | Retry once, then warn         |
+| **FAIL_INVALID_USE_CASE** | Use case fails authoring discipline — `NOT_USER_JOURNEY` or `WRONG_INTERFACE`. Bounces back to the main agent to rewrite the UC before re-running. | **Yes** (test-design failure) |
+
+`FAIL_INVALID_USE_CASE` reasons:
+
+- **`NOT_USER_JOURNEY`** — the Intent reads as an integration/contract/component test (names code, endpoints as the goal, or has no Persistence step). The smell test in `## E2E Use Case Design` failed.
+- **`WRONG_INTERFACE`** — the declared Interface does not match the surface the user touches for this feature (e.g., API UC for a feature whose only user surface is a UI page; UI UC for a CLI-only feature).
+
+The verify-e2e agent reports `FAIL_INVALID_USE_CASE` per offending UC and maps these to top-level `VERDICT: FAIL`. The caller (main agent in `/new-feature` Phase 5.4 or `/fix-bug` Phase 5.4) rewrites the UC in the plan file (or `docs/plans/<bug-name>-use-cases.md` staging file for simple fixes) and re-invokes verify-e2e. The Phase 5.4 checklist box stays unchecked until verify-e2e returns PASS.
 
 ## Playwright Framework Bridge (Optional)
 

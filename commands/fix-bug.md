@@ -447,20 +447,27 @@ Invoke `/superpowers:writing-plans`. Mirroring `/new-feature` 3.2 — respect `w
 
 If this fix changes any user-facing behavior (UI, API, flows, forms, navigation, permissions), design E2E use cases NOW — before implementation, not after.
 
-Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `rules/testing.md`. Each use case declares its **Interface** (API / UI / CLI / API+UI) based on the project-type matrix in `rules/testing.md` — and includes **Setup** (sanctioned method per the ARRANGE/VERIFY boundary), **Steps**, **Verification**, and **Persistence**.
+Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `rules/testing.md`. Each UC must include **Intent**, **Interface**, **Setup**, **Steps**, **Verification**, and **Persistence**. See `rules/testing.md` "GOOD vs BAD use cases" for canonical worked examples per API / UI / CLI.
 
-**Project type scope** (from `CLAUDE.md` `## E2E Configuration`):
+**Pick the interface from the feature surface, not the project type.** `CLAUDE.md ## E2E Configuration` tells you which interfaces the project EXPOSES — that is the capability envelope. The bug itself tells you which surface the user actually touches:
 
-- **fullstack:** API use cases + UI use cases (API-first ordering for execution)
-- **api:** API use cases only
-- **cli:** CLI use cases only
-- **hybrid:** declare per use case
+| Bug shape                                         | UC interface(s)                                    |
+| ------------------------------------------------- | -------------------------------------------------- |
+| Bug in a UI page, form, flow, or visual element   | **UI**                                             |
+| Bug in a **public/product** REST/GraphQL endpoint | **API**                                            |
+| Bug in a CLI command, flag, or output             | **CLI**                                            |
+| Bug spanning UI + API (auth, billing, etc.)       | **API + UI** (API-first ordering)                  |
+| Bug in an internal endpoint backing a UI page     | **UI** only (endpoint contract → integration test) |
+| Purely internal (no user-visible regression)      | E2E: N/A with justification                        |
 
-For bug fixes, think about:
+**User-journey smell test — before writing, ask yourself for each UC:**
 
-- What was the user doing when the bug occurred? Reproduce that as a use case.
-- After the fix, does the happy path still work?
-- Could the fix break any adjacent user flow?
+- Can I describe the **Intent** to a non-developer in one sentence without naming endpoints, code, components, tables, or other internal terms? If not — rewrite as a real user goal.
+- Does the UC **reproduce what the user was doing** when the bug occurred (multiple actions, not a single isolated call)?
+- Does **Verification** check what the user would **see** through the chosen interface (UI text/elements, API response body, CLI stdout)? Never a DB row, internal log, or function return.
+- Does the **Interface** match the surface where the user actually hits the bug, per the table above?
+
+If any answer is no, rewrite the UC. The verify-e2e agent will bounce non-journey or wrong-interface UCs back as `FAIL_INVALID_USE_CASE` in Phase 5.4, which means an extra round-trip and an unchecked gate — better to catch it here.
 
 **Minimum:** 1 use case that reproduces the original bug through the user's interface and verifies the fix.
 
@@ -593,7 +600,7 @@ When the plan-review-loop passes and the plan is approved (Phase 3.3 exit criter
 
 - **DO NOT** call `gh pr create` until you have run `AskUserQuestion` asking the user to authorize, and they answered YES, and you have REPLACED the `## PR authorization` section in state.md with the new authorization line (matching nonce + current HEAD SHA at the moment of authorization).
 - **DO NOT** call `/goal clear` after success — `/goal` auto-clears when the verifier confirms the condition.
-- **DO** track each code-review iteration by appending `- [x] Code review iteration <N> — codex clean — head=`<sha>` AND `- [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>` to `### Checklist` (state.md). The `reviewer_gate.clean_same_iteration` evidence only fires when BOTH appear for the same iteration AND at the current HEAD.
+- **DO** track each code-review iteration by appending `- [x] Code review iteration <N> — codex clean — head=`<sha>`AND`- [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>` to `### Checklist` (state.md). The `reviewer_gate.clean_same_iteration` evidence only fires when BOTH appear for the same iteration AND at the current HEAD.
 - **DO** invoke `/council` whenever you would otherwise pause for the user (except PR creation). Apply the chairman's verdict; do not second-guess it.
 - **REPLACE, never append** when writing `/goal session` or `## PR authorization`. Appending creates stale duplicate entries that confuse Layer 1's parsers.
 
@@ -783,7 +790,9 @@ The verify-e2e agent tests as a real user: no database access, no internal endpo
 
 Simple fixes (1-2 files, non-high-impact) skip Phase 3 entirely — so no plan file exists. If you took the simple-fix path AND the change is user-facing:
 
-- Write a lightweight use case set inline (1 happy-path + 1 error case minimum) using the UC template from `rules/testing.md`
+- Write a lightweight use case set inline (1 happy-path + 1 error case minimum) using the UC template from `rules/testing.md` (Intent, Interface, Setup, Steps, Verification, Persistence). Reference the "GOOD vs BAD use cases" section for canonical worked examples per API / UI / CLI.
+- **Pick the interface from where the user hits the bug, not the project default** — UI bug → UI UC, public/product API bug → API UC, CLI bug → CLI UC, internal endpoint backing a UI page → UI UC. Same interface-selection table as Phase 3.2b applies.
+- **Apply the user-journey smell test from Phase 3.2b before saving** — Intent describable to a non-developer in one sentence (no endpoints, code, or internal terms); multiple user actions, not one isolated call; Verification checks what the user SEES; Interface matches the surface the user touches. The verify-e2e agent will bounce non-journey or wrong-interface UCs back as `FAIL_INVALID_USE_CASE`.
 - Save to **`docs/plans/<bug-name>-use-cases.md`** as a staging file. **Start the file with a `#### E2E Use Cases` heading** so verify-e2e can extract the UCs correctly.
 - **Why a staging file, not tests/e2e/use-cases/ directly?** Writing directly to `tests/e2e/use-cases/` would cause Phase 5.4b regression mode to pick up the new unverified use case alongside accumulated ones. Staging in `docs/plans/` keeps the separation clean. Phase 6.2b then graduates the staged file after PASS.
 - Then proceed to Step 1
@@ -819,11 +828,14 @@ mkdir -p tests/e2e/reports
 
 **Step 4: Act on the verdict**
 
-The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`, inspect the per-UC classifications in the report body (`FAIL_BUG` / `FAIL_STALE` / `FAIL_INFRA`) to decide next action:
+The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`, inspect the per-UC classifications in the report body (`FAIL_BUG` / `FAIL_STALE` / `FAIL_INFRA` / `FAIL_INVALID_USE_CASE`) to decide next action:
 
 - **VERDICT: PASS** — Proceed to Phase 5.4b.
-- **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` in the body. Fix the issue in code, re-run verify-e2e. Do NOT check the box until PASS. (If the body has mixed `FAIL_BUG` + `FAIL_STALE`, fix the bugs first; stale UCs are addressed separately.)
-- **VERDICT: PARTIAL** — No `FAIL_BUG` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
+- **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body. Do NOT check the box until PASS.
+  - `FAIL_BUG`: Fix the issue in the product code, re-run verify-e2e.
+  - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason (`NOT_USER_JOURNEY` or `WRONG_INTERFACE`). Rewrite the offending UC in the plan file (or `docs/plans/<bug-name>-use-cases.md` for simple-fix) using the smell test from Phase 3.2b / Step 0 and the GOOD examples in `rules/testing.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
+  - If the body has mixed classifications, address `FAIL_INVALID_USE_CASE` first (verify-e2e can't meaningfully run an invalid UC), then `FAIL_BUG`, then `FAIL_STALE`.
+- **VERDICT: PARTIAL** — No `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
   - `FAIL_STALE`: update the stale use case file (interface or selector changed), re-run.
   - `FAIL_INFRA`: retry once manually; if still infra, report to user for decision.
 

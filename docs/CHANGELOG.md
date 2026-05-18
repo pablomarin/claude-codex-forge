@@ -2,9 +2,31 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.31 — 2026-05-18 · E2E user-journey enforcement
+
+**Surfaced during /forge-goal v1.0 soak in msai-v2.** The agent was drafting E2E use cases that read like integration tests ("POST /api/users returns 201") instead of user journeys ("Customer places an order and finds it in their history"). Cause: the rules defined the required fields and listed anti-patterns but provided no positive worked example to pattern-match against; interface selection was driven by project type instead of by what the user actually touches for the feature; and the verify-e2e agent executed whatever it was handed without bouncing back ill-shaped UCs.
+
+**Fix shape** (validated by Codex design review before implementation):
+
+- **`rules/testing.md`** — added a "GOOD vs BAD use cases" section with canonical worked examples per UI / API / CLI. Strengthened the Intent field with a smell test ("If you cannot describe the Intent to a non-developer in one sentence without naming endpoints, code, tables, components, or other internal terms, it is not a user journey"). Replaced the project-type-driven interface matrix with a two-step **feature-surface-driven** model: `CLAUDE.md ## E2E Configuration` is the capability envelope (which interfaces exist); the feature determines which surface(s) the user actually touches. Added Codex's pushback: internal endpoints backing a UI page get a UI UC, not an API UC — endpoint contract coverage is integration-test territory. Added `FAIL_INVALID_USE_CASE` row to the failure classification table.
+- **`rules/critical-rules.md`** — updated the E2E line to reflect the user-journey requirement and feature-surface interface rule. The old text repeated the now-superseded project-type matrix.
+- **`commands/new-feature.md` Phase 3.2b** + **`commands/fix-bug.md` Phase 3.2b + simple-fix Phase 5.4 Step 0** — embed the 4-point smell test inline (Intent describable in one sentence, multiple actions, user-visible Verification, correct Interface). Replaced project-type bullet list with a feature-shape → interface table. Phase 5.4 caller handling extended to recognize `FAIL_INVALID_USE_CASE` and route it to "rewrite the UC, do not change product code".
+- **`agents/verify-e2e.md`** — added **Step 2b: Validate use-case shape** between Load use cases (Step 2) and Health check (Step 3), so invalid UCs are caught BEFORE a server is even probed. New per-UC classification `FAIL_INVALID_USE_CASE` with sub-reasons `NOT_USER_JOURNEY` and `WRONG_INTERFACE`. Top-level `VERDICT:` enum unchanged (still `PASS | FAIL | PARTIAL`); invalid UCs map to `FAIL` with a "test-design failure, not a product bug" note in Verdict Reasoning. Report template gains a UC3 example showing the new classification with rationale + suggested rewrite.
+- **`tests/template/test-contracts.sh`** — new Contract 2b: per-UC `FAIL_*` classifications listed in `verify-e2e.md`'s "Classification rules" must be handled in both `new-feature.md` and `fix-bug.md` (forward + reverse check). 10 new assertions (199 total contract assertions passing).
+
+**Files changed:**
+
+- `rules/testing.md` — GOOD/BAD examples + smell test + feature-surface interface model + `FAIL_INVALID_USE_CASE` row
+- `rules/critical-rules.md` — E2E line rewritten
+- `commands/new-feature.md` — Phase 3.2b smell test + interface table; Phase 5.4 verdict handling
+- `commands/fix-bug.md` — Phase 3.2b smell test + interface table; simple-fix Step 0; Phase 5.4 verdict handling
+- `agents/verify-e2e.md` — Step 2b validation + new classification + verdict mapping + report template update
+- `tests/template/test-contracts.sh` — Contract 2b (per-UC classification handling)
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.30 → 5.31
+
 ## 5.30 — 2026-05-18 · Fix: Stop-hook "error" framing during /forge-goal soak
 
-**Surfaced during soak of /forge-goal v1.0 in msai-v2.** Every Stop turn after PR creation printed the FORGE_GOAL_EVIDENCE JSON dump prefixed with "Stop hook error" because `check-state-updated.{sh,ps1}` invokes `build-evidence.{sh,ps1}` inline (shared STDERR) and then hit exit 2 on the CHANGELOG threshold gate. The exit-2 caused Claude Code to label the _entire_ combined STDERR — evidence + reminder — as an error from the calling hook.
+**Surfaced during soak of /forge-goal v1.0 in msai-v2.** Every Stop turn after PR creation printed the FORGE*GOAL_EVIDENCE JSON dump prefixed with "Stop hook error" because `check-state-updated.{sh,ps1}` invokes `build-evidence.{sh,ps1}` inline (shared STDERR) and then hit exit 2 on the CHANGELOG threshold gate. The exit-2 caused Claude Code to label the \_entire* combined STDERR — evidence + reminder — as an error from the calling hook.
 
 **Fix:** when an OPEN PR already exists for the current branch, the CHANGELOG gate downgrades from blocking (exit 2) to advisory (exit 0). Rationale: pre-PR-create the block is correct (force CHANGELOG before opening PR), but once a PR is open the human reviewer carries the signal — per-turn blocking during CI wait is just noise, and exit 0 removes the "Stop hook error" framing so the evidence dump collapses behind ctrl+o.
 
