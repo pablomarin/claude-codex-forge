@@ -96,7 +96,13 @@ Surfaced 2026-05-18 from msai-v2 portfolio-backtest soak: the agent designed UI 
 1. Read `CLAUDE.md ## E2E Configuration` to enumerate every interface the project exposes.
    - **First** look for an explicit `surfaces:` line (e.g., `surfaces: [UI, API, CLI]`). If present, it is authoritative — use it verbatim and do not fall back to interface_type defaults.
    - **Only if `surfaces:` is absent**, derive from `interface_type`: `fullstack` → UI + API; `api` → API; `cli` → CLI; `hybrid` → treat every interface named anywhere in the section as exposed.
-   - **Why the explicit field exists** (Codex P2-2, v5.33 review): a fullstack project that also ships a CLI is misrepresented by `interface_type: fullstack` alone (default = UI + API, no CLI). Without `surfaces: [UI, API, CLI]` declared, Step 2c would never warn about missing CLI coverage. If you notice the project repo has a CLI entrypoint (e.g., `pyproject.toml` `[project.scripts]`, a `bin/` dir, a `cli.py`) but the E2E config only lists UI + API, flag this as a CONFIG_DRIFT warning in the report so the user can update CLAUDE.md.
+   - **CLI detection regardless of config** (Codex P2-5, v5.33 review): a fullstack project that also ships a CLI is misrepresented by `interface_type: fullstack` alone (default = UI + API, no CLI). To prevent silent passthrough, **also** check for CLI entrypoint signals in the repo even when CLAUDE.md doesn't list CLI:
+     - `pyproject.toml` with `[project.scripts]` or `[tool.poetry.scripts]`
+     - `package.json` with a `bin` field
+     - `setup.py` with `entry_points={'console_scripts': [...]}`
+     - A top-level `cli.py`, `cli/` directory, or `bin/<project>` executable
+     - `Cargo.toml` with `[[bin]]`
+   - If ANY of those signals exist but CLI is NOT in the derived/declared `surfaces:` set, **add CLI to the exposed surfaces set for this run** so Step 2c emits the canonical `SURFACE_COVERAGE_WARNING` for missing CLI coverage. Also emit a `CONFIG_DRIFT` note in the report telling the user to add `surfaces: [..., CLI]` to CLAUDE.md. **Why unify on SURFACE_COVERAGE_WARNING:** Step 4b in both callers only scans for that one marker; emitting CONFIG_DRIFT alone would let an autonomous PASS proceed with the gap unaddressed.
 2. Tally which interfaces appear in the loaded UCs' `Interface` field.
 3. Check the plan file (or `docs/plans/<bug-name>-use-cases.md` for simple-fix staging) for a **Surface coverage decision** sub-block. Recognize lines of the shape `<Interface>: N/A — <justification>` as pre-justified exclusions.
 4. For each exposed interface that is **(a) not covered by any UC** AND **(b) not in the Surface coverage decision sub-block as N/A**, emit a warning in the report.
