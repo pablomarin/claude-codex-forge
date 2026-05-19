@@ -85,6 +85,40 @@ For each UC marked `FAIL_INVALID_USE_CASE`, record:
 
 **If ALL UCs are `FAIL_INVALID_USE_CASE`:** skip Step 3 entirely and proceed directly to Step 5 with all UCs classified.
 
+### Step 2c: Surface coverage check (soft warning, not a UC classification)
+
+Surfaced 2026-05-18 from msai-v2 portfolio-backtest soak: the agent designed UI + API UCs and silently skipped CLI even though the project's CLI exposed the same capability area. The fix landed in v5.31 (feature-surface-driven interface) and v5.33 (this step) — Phase 3.2b now requires a "Surface coverage decision" sub-block, and verify-e2e backstops it.
+
+**Process:**
+
+1. Read `CLAUDE.md ## E2E Configuration` to enumerate every interface the project exposes (UI / API / CLI / any combination). For `hybrid` configs, treat every interface mentioned as exposed.
+2. Tally which interfaces appear in the loaded UCs' `Interface` field.
+3. Check the plan file (or `docs/plans/<bug-name>-use-cases.md` for simple-fix staging) for a **Surface coverage decision** sub-block. Recognize lines of the shape `<Interface>: N/A — <justification>` as pre-justified exclusions.
+4. For each exposed interface that is **(a) not covered by any UC** AND **(b) not in the Surface coverage decision sub-block as N/A**, emit a warning in the report.
+
+**Warning format** (one line per missing interface) — appears in a dedicated `## Surface Coverage` section in the report:
+
+```
+SURFACE_COVERAGE_WARNING: Project exposes <SET>. UCs cover <COVERED>. Missing surface: <X>. No N/A justification found in plan. Confirm with the human reviewer whether <X> coverage is intentionally out of scope or this is a missed surface.
+```
+
+**Crucially:** this is a SOFT warning. Do NOT classify any UC as `FAIL_INVALID_USE_CASE` for this. The exclusion may be legitimate (a UI-only visual element genuinely doesn't need CLI coverage). Surface as informational so the human reviewer — or, during an autonomous `/forge-goal` run, the agent's `/council` consultation — can decide.
+
+**Verdict impact:** SURFACE_COVERAGE_WARNING does NOT change the verdict on its own. A run with all UCs PASS + a SURFACE_COVERAGE_WARNING still returns `VERDICT: PASS`. The warning shows up in the report body for human/council review.
+
+**When the warning fires alongside other issues:** still report it. The reviewer needs the full picture.
+
+**Pre-justified exclusions** — recognize these forms in the Surface coverage decision sub-block:
+
+- `CLI: N/A — feature is admin-only via UI by product decision`
+- `API: N/A — feature is a UI-only UX refinement (no contract change)`
+- `CLI: N/A — Full mode requires interactive risk-policy preview; deferred to v2 with --full-config FILE escape hatch tracked in TODO #1234`
+
+**NOT recognized as pre-justified** (still triggers the warning):
+
+- `CLI: N/A — no CLI changes in my diff` — implementation description, not user-facing scope
+- `CLI: N/A — not needed` — too vague
+
 ### Step 3: Health check
 
 - **API:** `curl -fsS $API_URL/health` (or documented health endpoint)
@@ -173,6 +207,15 @@ SUGGESTED_PATH: tests/e2e/reports/YYYY-MM-DD-HH-MM-<feature-or-mode>.md
 - **Rationale:** [1-2 sentences citing the exact text or absent element that failed Step 2b validation]
 - **Suggested rewrite:** [concrete rewrite hint the caller can apply, e.g., "Restate Intent as 'Authenticated user creates an order and finds it in their history' and add a Persistence step that re-fetches the order list."]
 - **Severity:** Blocks ship — test-design failure, not a product bug. Fix the UC, not the product code.
+
+## Surface Coverage
+
+[Always include this section. Populate from Step 2c.]
+
+- **Project exposes:** [UI, API, CLI — from CLAUDE.md ## E2E Configuration]
+- **UCs cover:** [the subset of exposed interfaces that have at least one UC]
+- **Pre-justified exclusions:** [any `<Interface>: N/A — <reason>` lines from the plan's Surface coverage decision sub-block]
+- **Warnings:** [zero or more `SURFACE_COVERAGE_WARNING` lines per missing-and-not-pre-justified interface]
 
 ## Files Read
 

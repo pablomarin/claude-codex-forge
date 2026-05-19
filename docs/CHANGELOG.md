@@ -2,6 +2,32 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.33 — 2026-05-18 · Multi-surface E2E coverage audit
+
+**Surfaced during /forge-goal v1.0 soak in msai-v2 portfolio-backtest.** At the PR-creation gate, the user asked the agent whether the E2E tests covered UI, CLI, AND API. The agent admitted: it had designed UI + API UCs and silently skipped CLI even though the project's `msai` CLI exposes the same portfolio capability area. The agent's logic was "no CLI changes in my diff" — a description of implementation scope, not user-facing scope.
+
+The v5.31 feature-surface rule existed and was correct in principle, but didn't force the agent to think about EVERY surface the project exposes. v5.33 adds an explicit multi-surface audit at authoring time, and a backstop in verify-e2e.
+
+**Fixes:**
+
+- **`rules/testing.md`** — new "Multi-surface coverage" subsection. A feature touches a _capability area_; users reach it through any of the _surfaces_ the project exposes. UCs must cover every surface the user could use — not just the surface the implementation diff touched. Defines acceptable vs unacceptable N/A justifications. "No CLI changes in my diff" is the canonical disqualifying example.
+- **`commands/new-feature.md` Phase 3.2b** + **`commands/fix-bug.md` Phase 3.2b + simple-fix Phase 5.4 Step 0** — REQUIRED **Surface coverage audit** checklist before writing UCs. Three steps: enumerate exposed interfaces from `CLAUDE.md ## E2E Configuration`, ask per-interface "is this feature's capability area reachable here?", and declare a **Surface coverage decision** sub-block in the plan listing every exposed interface as either `Covered` or `N/A — <substantive justification>`.
+- **`agents/verify-e2e.md` Step 2c (new)** — backstop. After UC shape validation (Step 2b) and before health check (Step 3), enumerate exposed interfaces from `CLAUDE.md`, tally interfaces covered by UCs, recognize pre-justified `N/A` lines, and emit `SURFACE_COVERAGE_WARNING` for any gap. Soft warning — does not change the verdict, does not classify UCs. During an autonomous `/forge-goal` run, the agent treats the warning as a `/council` trigger.
+- **Report template** — new `## Surface Coverage` section always present, populated from Step 2c. Lists what the project exposes, what UCs cover, pre-justified exclusions, and any warnings.
+
+**New tests:** `tests/template/test-contracts.sh` gains Contract 2c — `SURFACE_COVERAGE_WARNING` keyword present in agent (producer); `Surface coverage decision` sub-block name + warning marker present in both command callers (consumers); "Multi-surface coverage" section + decision vocabulary present in `rules/testing.md`. Regression guard: the disqualifying phrase _"no CLI changes in my diff"_ must appear in both commands so future drift doesn't silently allow the bad pattern. 10 new assertions (213 total contract assertions passing).
+
+**Why a soft warning, not a hard FAIL:** some features genuinely are single-surface (a visual element, an admin-only flow, a deferred-to-v2 escape hatch). A hard FAIL would be too aggressive. A soft warning lets the reviewer or `/council` make the call — and surfaces the question early enough to be answered before PR creation rather than after.
+
+**Files:**
+
+- `rules/testing.md` — Multi-surface coverage subsection
+- `commands/new-feature.md` — Surface coverage audit step at Phase 3.2b
+- `commands/fix-bug.md` — Surface coverage audit at Phase 3.2b + simple-fix Phase 5.4 Step 0
+- `agents/verify-e2e.md` — Step 2c surface coverage check + `## Surface Coverage` report section
+- `tests/template/test-contracts.sh` — Contract 2c (10 new assertions)
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.32 → 5.33
+
 ## 5.32 — 2026-05-18 · Worktree CWD fix + split build-evidence into its own Stop hook
 
 **Surfaced during the msai-v2 portfolio-backtest soak of /forge-goal v1.0.** Two coupled bugs:

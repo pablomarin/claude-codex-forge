@@ -460,6 +460,22 @@ Write use cases in the plan file under a `#### E2E Use Cases` heading, using the
 | Bug in an internal endpoint backing a UI page     | **UI** only (endpoint contract → integration test) |
 | Purely internal (no user-visible regression)      | E2E: N/A with justification                        |
 
+**Surface coverage audit — REQUIRED before writing UCs:**
+
+A bug can reproduce across multiple surfaces if the underlying capability is exposed via more than one interface. If you only verify the fix through the surface where you saw the bug, you may ship a fix that works in UI but leaves the same regression in CLI (or vice versa).
+
+Run this checklist:
+
+1. Read `CLAUDE.md ## E2E Configuration` and list every interface the project exposes.
+2. For EACH exposed interface, ask: "Could the user hit this bug through this interface today?"
+3. In the plan file's `#### E2E Use Cases` section, declare a **Surface coverage decision** sub-block listing every exposed interface with either:
+   - **Covered** — a UC for this surface exists below, OR
+   - **N/A — \<substantive justification\>** — see `rules/testing.md` "Multi-surface coverage" for acceptable vs unacceptable N/A reasons.
+
+**The disqualifying N/A justification** (surfaced 2026-05-18 from msai-v2 soak): _"CLI: N/A — no CLI changes in my diff."_ That describes the implementation, not the user-facing scope. If the project's CLI exposes the same capability area, the bug likely reproduces there too — verify it doesn't, or write a CLI UC.
+
+verify-e2e's Step 2c emits a `SURFACE_COVERAGE_WARNING` if UCs cover fewer surfaces than the project exposes; during an autonomous `/forge-goal` run, the warning triggers a `/council` consultation unless the Surface coverage decision sub-block pre-justified the omission.
+
 **User-journey smell test — before writing, ask yourself for each UC:**
 
 - Can I describe the **Intent** to a non-developer in one sentence without naming endpoints, code, components, tables, or other internal terms? If not — rewrite as a real user goal.
@@ -792,6 +808,7 @@ Simple fixes (1-2 files, non-high-impact) skip Phase 3 entirely — so no plan f
 
 - Write a lightweight use case set inline (1 happy-path + 1 error case minimum) using the UC template from `rules/testing.md` (Intent, Interface, Setup, Steps, Verification, Persistence). Reference the "GOOD vs BAD use cases" section for canonical worked examples per API / UI / CLI.
 - **Pick the interface from where the user hits the bug, not the project default** — UI bug → UI UC, public/product API bug → API UC, CLI bug → CLI UC, internal endpoint backing a UI page → UI UC. Same interface-selection table as Phase 3.2b applies.
+- **Run the Surface coverage audit from Phase 3.2b** even on simple fixes. Read `CLAUDE.md ## E2E Configuration`; for EACH exposed interface (UI / API / CLI) ask "could the user hit this bug here?" In the staging file, add a **Surface coverage decision** sub-block listing every exposed interface as either `Covered` (UC below) or `N/A — <substantive justification>`. _"No CLI changes in my diff"_ is NOT a valid justification — that describes implementation, not user-facing scope. verify-e2e's Step 2c will emit `SURFACE_COVERAGE_WARNING` if an exposed surface lacks both a UC and a pre-justified N/A line.
 - **Apply the user-journey smell test from Phase 3.2b before saving** — Intent describable to a non-developer in one sentence (no endpoints, code, or internal terms); multiple user actions, not one isolated call; Verification checks what the user SEES; Interface matches the surface the user touches. The verify-e2e agent will bounce non-journey or wrong-interface UCs back as `FAIL_INVALID_USE_CASE`.
 - Save to **`docs/plans/<bug-name>-use-cases.md`** as a staging file. **Start the file with a `#### E2E Use Cases` heading** so verify-e2e can extract the UCs correctly.
 - **Why a staging file, not tests/e2e/use-cases/ directly?** Writing directly to `tests/e2e/use-cases/` would cause Phase 5.4b regression mode to pick up the new unverified use case alongside accumulated ones. Staging in `docs/plans/` keeps the separation clean. Phase 6.2b then graduates the staged file after PASS.

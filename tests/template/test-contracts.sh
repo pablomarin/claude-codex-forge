@@ -164,6 +164,55 @@ done
 [[ -n "$CALLER_LABELS" ]] && pass "all caller-referenced FAIL_* labels are in the agent vocabulary"
 
 # ---------------------------------------------------------------------------
+# Contract 2c: surface coverage audit vocabulary
+#
+# Surfaced 2026-05-18 (v5.33): msai-v2 soak found that the agent designed
+# UI+API UCs while skipping CLI even though the project's CLI exposes the
+# same capability area. Fix: (1) Phase 3.2b requires a "Surface coverage
+# decision" sub-block; (2) verify-e2e Step 2c emits SURFACE_COVERAGE_WARNING.
+#
+# The keyword `SURFACE_COVERAGE_WARNING` is the canonical marker that all
+# four files (rules + 2 commands + agent) must reference for the loop to
+# wire correctly. Drift in any one file breaks the audit silently.
+# ---------------------------------------------------------------------------
+start_test "Surface coverage audit — canonical vocabulary across files"
+
+SURFACE_KEY="SURFACE_COVERAGE_WARNING"
+SURFACE_DECISION_KEY="Surface coverage decision"
+
+# Producer (agent) must define the warning marker.
+assert_contains "$VE2E" "$SURFACE_KEY" \
+    "verify-e2e.md defines $SURFACE_KEY"
+assert_contains "$VE2E" "Step 2c" \
+    "verify-e2e.md has Step 2c surface coverage check"
+
+# Consumers (callers + rules) must reference the decision sub-block AND the
+# warning marker so the flow is wired.
+for f in "$NF" "$FB"; do
+    base=$(basename "$f")
+    assert_contains "$f" "$SURFACE_DECISION_KEY" \
+        "$base mentions Surface coverage decision sub-block"
+    assert_contains "$f" "$SURFACE_KEY" \
+        "$base references $SURFACE_KEY (cross-file wiring)"
+done
+
+# rules/testing.md must define the "Multi-surface coverage" section so the
+# canonical reference exists for both commands to link to.
+assert_contains "$REPO_ROOT/rules/testing.md" "Multi-surface coverage" \
+    "rules/testing.md has Multi-surface coverage subsection"
+assert_contains "$REPO_ROOT/rules/testing.md" "$SURFACE_DECISION_KEY" \
+    "rules/testing.md defines Surface coverage decision vocabulary"
+
+# Negative-justification regression guard: the disqualifying phrase must
+# appear in BOTH commands so future drift doesn't silently re-enable the
+# bad pattern.
+DISQUALIFIED='no CLI changes in my diff'
+assert_contains "$NF" "$DISQUALIFIED" \
+    "new-feature.md flags the disqualified N/A pattern"
+assert_contains "$FB" "$DISQUALIFIED" \
+    "fix-bug.md flags the disqualified N/A pattern"
+
+# ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers
 # setup.sh writes .claude/playwright-dir. Commands must read it.
 # ---------------------------------------------------------------------------

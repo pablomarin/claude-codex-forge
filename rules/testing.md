@@ -202,6 +202,42 @@ Verification:  `add` stdout matches `Created project launch-2026` and exit 0; `l
 Persistence:   Exit the shell, open a new shell, run `mycli project list` → `launch-2026` is still listed
 ```
 
+### Multi-surface coverage — design UCs for EVERY surface the user could use
+
+**Many features extend a capability area that the project already exposes through multiple interfaces.** A feature touches a _capability area_ (e.g., "create portfolio", "search products", "manage users"); the user reaches that capability through any of the _surfaces_ the project exposes for it — UI page, API endpoint, CLI command.
+
+When designing UCs, ask **per feature**, not per implementation diff:
+
+> For each interface the project exposes (per `CLAUDE.md ## E2E Configuration`), is this feature's capability area reachable through that interface today, or should it be after this PR? If yes — design a UC for it.
+
+**Surface coverage decision (mandatory in the plan file):**
+
+For each interface the project exposes, the plan must explicitly state either:
+
+- **Covered** — a UC exists for this surface, OR
+- **N/A — \<substantive justification\>** — why users of this interface don't need this feature
+
+**Acceptable N/A justifications:**
+
+- "CLI: N/A — feature is a purely visual element (no operational capability change)"
+- "CLI: N/A — feature is admin-only via UI by product decision (CLI users are operators, not admins)"
+- "API: N/A — feature is a UI-only UX refinement (no contract change)"
+
+**NOT acceptable N/A justifications:**
+
+- "CLI: N/A — no CLI changes in my diff" — that describes implementation, not user-facing scope. If the feature's capability area is reachable from CLI today and you've extended it in UI/API, the CLI should be extended too (or you need a substantive product reason it shouldn't).
+- "API: N/A — only the UI calls this endpoint" — internal API for a UI surface → UC goes through the UI, not the API (see the interface-selection table). This is correct N/A _handling_, but write that justification clearly so it's auditable.
+
+**Worked example (the bug this rule prevents):**
+
+A project exposes UI + API + CLI (`CLAUDE.md` says `fullstack` with a CLI). The new feature is "portfolio backtest with optimizer modes." Implementation adds a UI compose page, a new API endpoint, and DB migrations. The agent designs UI UC + API UC and skips CLI because "no CLI changes in the diff."
+
+**This is wrong.** The project's CLI already has `portfolio create` and `portfolio run` commands. After the PR, CLI users have a degraded experience — they can list portfolios but can't use the new modes. Either:
+(a) Extend the CLI commands to expose the new modes (and write a CLI UC for them), OR
+(b) Substantively justify why CLI is out of scope (e.g., "Full mode requires interactive risk-policy preview; deferred to v2 with a `--full-config FILE` escape hatch tracked in TODO #1234.")
+
+The verify-e2e agent (Step 2c) emits a SURFACE_COVERAGE_WARNING when UCs cover fewer surfaces than the project exposes. The warning is informational — the human reviewer decides whether the gap is intentional. During an autonomous `/forge-goal` run, the agent treats this warning as a `/council` trigger if the gap was not pre-justified in the plan.
+
 ### When E2E is required
 
 Any change to **user-facing behavior**: API changes, UI changes, new pages, flow changes, form changes, navigation changes, permission changes — anything a user would notice.

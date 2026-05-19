@@ -632,6 +632,22 @@ Write use cases in the plan file under a `#### E2E Use Cases` heading, using the
 | Internal endpoint backing a UI page             | **UI** only (endpoint contract → integration test) |
 | Purely internal (no user surface)               | E2E: N/A with justification                        |
 
+**Surface coverage audit — REQUIRED before writing UCs:**
+
+A feature touches a _capability area_ (e.g., "create portfolio", "search products"). The user reaches that capability through any of the _surfaces_ the project exposes for it. **Designing UCs for only the surfaces you touched in this diff is the wrong axis** — you need UCs for every surface the user could use to do this thing.
+
+Run this checklist:
+
+1. Read `CLAUDE.md ## E2E Configuration` and list every interface the project exposes (UI / API / CLI / any combination).
+2. For EACH exposed interface, ask: "Does this feature's capability area exist behind this interface today, or should it after this PR?"
+3. In the plan file's `#### E2E Use Cases` section, declare a **Surface coverage decision** sub-block listing every exposed interface with either:
+   - **Covered** — a UC for this surface exists below, OR
+   - **N/A — \<substantive justification\>** — see `rules/testing.md` "Multi-surface coverage" for acceptable vs unacceptable N/A reasons.
+
+**The disqualifying N/A justification** (surfaced 2026-05-18 from msai-v2 soak): _"CLI: N/A — no CLI changes in my diff."_ That describes implementation, not user-facing scope. If the project's CLI already exposes the feature's capability area and you've extended it in UI/API, the CLI should be extended too — OR you need a substantive product reason it shouldn't (e.g., admin-only by product decision, deferred to v2 with a tracked TODO, feature is a UI-only visual element).
+
+verify-e2e's Step 2c emits a `SURFACE_COVERAGE_WARNING` if UCs cover fewer surfaces than the project exposes; during an autonomous `/forge-goal` run, the warning triggers a `/council` consultation unless the Surface coverage decision sub-block pre-justified the omission.
+
 **User-journey smell test — before writing, ask yourself for each UC:**
 
 - Can I describe the **Intent** to a non-developer in one sentence without naming endpoints, code, components, tables, or other internal terms? If not — rewrite as a real user goal.
