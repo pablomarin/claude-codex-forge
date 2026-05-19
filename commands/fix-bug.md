@@ -847,7 +847,7 @@ mkdir -p tests/e2e/reports
 
 The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`, inspect the per-UC classifications in the report body (`FAIL_BUG` / `FAIL_STALE` / `FAIL_INFRA` / `FAIL_INVALID_USE_CASE`) to decide next action:
 
-- **VERDICT: PASS** — Proceed to Phase 5.4b.
+- **VERDICT: PASS** — Proceed to Phase 5.4b — **after** the SURFACE_COVERAGE_WARNING check below.
 - **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body. Do NOT check the box until PASS.
   - `FAIL_BUG`: Fix the issue in the product code, re-run verify-e2e.
   - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason (`NOT_USER_JOURNEY` or `WRONG_INTERFACE`). Rewrite the offending UC in the plan file (or `docs/plans/<bug-name>-use-cases.md` for simple-fix) using the smell test from Phase 3.2b / Step 0 and the GOOD examples in `rules/testing.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
@@ -855,6 +855,17 @@ The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`,
 - **VERDICT: PARTIAL** — No `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
   - `FAIL_STALE`: update the stale use case file (interface or selector changed), re-run.
   - `FAIL_INFRA`: retry once manually; if still infra, report to user for decision.
+
+**Step 4b (REQUIRED before checking the gate, regardless of verdict): scan for SURFACE_COVERAGE_WARNING.**
+
+Read the persisted report file and look for any line containing `SURFACE_COVERAGE_WARNING`. This marker can appear in a PASS report — `VERDICT: PASS` means the UCs that ran all passed, but it does NOT mean coverage was complete. A PASS without this check is the bug v5.33 fixed (Codex P2-1, v5.33 review).
+
+If `SURFACE_COVERAGE_WARNING` is present:
+
+- **Interactive mode** (no active /goal session): Stop. Show the warning text to the user. Ask: "verify-e2e flagged a missing surface — `<X>`. Is that intentional? If yes, add a substantive N/A line to the Surface coverage decision sub-block (in the plan file, or `docs/plans/<bug-name>-use-cases.md` for simple-fix) and re-run. If no, add a UC for that surface and re-run."
+- **Autonomous /forge-goal mode** (`## /goal session` has a non-empty nonce): Do NOT just proceed. Invoke `/council` per `rules/workflow.md` "Council During `/forge-goal` Autonomous Run" with the question: "verify-e2e flagged surface `<X>` as uncovered with no pre-justified N/A. Is this intentional scope or a missed surface?" Apply the chairman's verdict — either add the UC + re-run, or add the substantive N/A line + re-run.
+
+Do NOT check the E2E gate box while a SURFACE_COVERAGE_WARNING is still present in the most recent report.
 
 **If purely internal (no user-facing impact):** Check the box with justification:
 `- [x] E2E verified — N/A: internal fix, no user-facing changes`

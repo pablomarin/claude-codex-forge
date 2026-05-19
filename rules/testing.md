@@ -286,14 +286,18 @@ These are degraded environments, not policy violations. The checklist check stil
 
 Two-step selection:
 
-1. **CLAUDE.md `## E2E Configuration` tells you which interfaces the project EXPOSES.** This is the capability envelope — the floor of what's possible to test:
+1. **CLAUDE.md `## E2E Configuration` tells you which interfaces the project EXPOSES.** This is the capability envelope — the floor of what's possible to test.
 
-| Project Type  | Interfaces Available | Tools                 | Playwright Required?       |
-| ------------- | -------------------- | --------------------- | -------------------------- |
-| **fullstack** | API + UI             | HTTP + Playwright MCP | Yes (when UI UCs exist)    |
-| **api**       | API only             | HTTP (curl/httpie)    | No                         |
-| **cli**       | CLI only             | Subprocess + stdout   | No                         |
-| **hybrid**    | Mixed per feature    | Mixed                 | Only if UI use cases exist |
+   **Read order** (Codex P2-2, v5.33 review): first look for an explicit `surfaces:` line. If present, it is authoritative — use it verbatim. If absent, fall back to the `interface_type` defaults below.
+
+| Project Type  | Default surfaces (when `surfaces:` is absent) | Tools                 | Playwright Required?       |
+| ------------- | --------------------------------------------- | --------------------- | -------------------------- |
+| **fullstack** | API + UI                                      | HTTP + Playwright MCP | Yes (when UI UCs exist)    |
+| **api**       | API only                                      | HTTP (curl/httpie)    | No                         |
+| **cli**       | CLI only                                      | Subprocess + stdout   | No                         |
+| **hybrid**    | Declared per UC                               | Mixed                 | Only if UI use cases exist |
+
+**Why the explicit `surfaces:` field exists** (surfaced 2026-05-18 msai-v2 soak): a fullstack project that ALSO ships a CLI cannot be described by `interface_type` alone — the defaults map fullstack to UI + API only. Without `surfaces: [UI, API, CLI]`, verify-e2e Step 2c never warns when UCs miss the CLI surface, because it doesn't know the CLI exists. **Always declare `surfaces:` explicitly when the project's actual surfaces exceed the interface_type default.**
 
 2. **The feature tells you which interface(s) the user actually touches.** Pick from the envelope based on the feature surface:
 

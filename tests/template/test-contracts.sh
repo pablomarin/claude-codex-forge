@@ -179,12 +179,20 @@ start_test "Surface coverage audit — canonical vocabulary across files"
 
 SURFACE_KEY="SURFACE_COVERAGE_WARNING"
 SURFACE_DECISION_KEY="Surface coverage decision"
+RULES_TESTING="$REPO_ROOT/rules/testing.md"
 
-# Producer (agent) must define the warning marker.
+# Producer (agent) must define BOTH the warning marker AND the decision
+# sub-block name (Codex P2-4 fix v5.33): the agent reads the decision
+# sub-block to recognize pre-justified N/A lines, so the sub-block name
+# must be locked here too.
 assert_contains "$VE2E" "$SURFACE_KEY" \
     "verify-e2e.md defines $SURFACE_KEY"
+assert_contains "$VE2E" "$SURFACE_DECISION_KEY" \
+    "verify-e2e.md references the Surface coverage decision sub-block (reads it for pre-justified N/A)"
 assert_contains "$VE2E" "Step 2c" \
     "verify-e2e.md has Step 2c surface coverage check"
+assert_contains "$VE2E" "feature mode" \
+    "verify-e2e.md gates Step 2c to feature mode only (Codex P2-3 v5.33)"
 
 # Consumers (callers + rules) must reference the decision sub-block AND the
 # warning marker so the flow is wired.
@@ -196,12 +204,15 @@ for f in "$NF" "$FB"; do
         "$base references $SURFACE_KEY (cross-file wiring)"
 done
 
-# rules/testing.md must define the "Multi-surface coverage" section so the
-# canonical reference exists for both commands to link to.
-assert_contains "$REPO_ROOT/rules/testing.md" "Multi-surface coverage" \
+# rules/testing.md must define the "Multi-surface coverage" section AND
+# the canonical SURFACE_COVERAGE_WARNING marker (Codex P2-4 fix v5.33):
+# the marker name could drift in rules/testing.md silently if not asserted.
+assert_contains "$RULES_TESTING" "Multi-surface coverage" \
     "rules/testing.md has Multi-surface coverage subsection"
-assert_contains "$REPO_ROOT/rules/testing.md" "$SURFACE_DECISION_KEY" \
+assert_contains "$RULES_TESTING" "$SURFACE_DECISION_KEY" \
     "rules/testing.md defines Surface coverage decision vocabulary"
+assert_contains "$RULES_TESTING" "$SURFACE_KEY" \
+    "rules/testing.md references the canonical $SURFACE_KEY marker (locked across all 4 files)"
 
 # Negative-justification regression guard: the disqualifying phrase must
 # appear in BOTH commands so future drift doesn't silently re-enable the
@@ -211,6 +222,14 @@ assert_contains "$NF" "$DISQUALIFIED" \
     "new-feature.md flags the disqualified N/A pattern"
 assert_contains "$FB" "$DISQUALIFIED" \
     "fix-bug.md flags the disqualified N/A pattern"
+
+# Codex P2-1 (v5.33): callers must explicitly scan for SURFACE_COVERAGE_WARNING
+# after parsing the verdict. Without this post-report check, a PASS verdict
+# silently swallows the warning and the autonomous loop proceeds.
+assert_contains "$NF" "Step 4b" \
+    "new-feature.md has Step 4b SURFACE_COVERAGE_WARNING scan"
+assert_contains "$FB" "Step 4b" \
+    "fix-bug.md has Step 4b SURFACE_COVERAGE_WARNING scan"
 
 # ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers

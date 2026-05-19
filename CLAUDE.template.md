@@ -68,10 +68,18 @@ The `verify-e2e` agent adapts to this project's interfaces. Declare the interfac
 
 **interface_type:** [fullstack | api | cli | hybrid]
 
-- `fullstack`: Both API and UI (UI tested via Playwright MCP)
+- `fullstack`: API + UI (UI tested via Playwright MCP)
 - `api`: API only (HTTP interface, no UI)
 - `cli`: Command-line only (stdin/stdout)
 - `hybrid`: Use cases declare their own interface
+
+**surfaces** (REQUIRED if your project exposes a CLI alongside fullstack/api, or any combination not exhaustively described by `interface_type`):
+
+The explicit list of user surfaces this project exposes. Used by the verify-e2e Step 2c multi-surface coverage check. If absent, defaults are derived from `interface_type` (fullstack → UI + API, api → API, cli → CLI, hybrid → declared per-UC). **A fullstack project that ALSO has a CLI must declare it here** — otherwise verify-e2e will not warn when UCs miss the CLI surface.
+
+**surfaces:** [UI, API, CLI] _(example for a fullstack-plus-CLI project)_
+
+Valid values: `UI`, `API`, `CLI`. Order does not matter. Omit the line entirely when the `interface_type` default is correct.
 
 **Server URLs** (for fullstack/api):
 

@@ -85,13 +85,18 @@ For each UC marked `FAIL_INVALID_USE_CASE`, record:
 
 **If ALL UCs are `FAIL_INVALID_USE_CASE`:** skip Step 3 entirely and proceed directly to Step 5 with all UCs classified.
 
-### Step 2c: Surface coverage check (soft warning, not a UC classification)
+### Step 2c: Surface coverage check (soft warning, feature mode only)
 
 Surfaced 2026-05-18 from msai-v2 portfolio-backtest soak: the agent designed UI + API UCs and silently skipped CLI even though the project's CLI exposed the same capability area. The fix landed in v5.31 (feature-surface-driven interface) and v5.33 (this step) — Phase 3.2b now requires a "Surface coverage decision" sub-block, and verify-e2e backstops it.
 
+**Mode gating (Codex P2-3, v5.33 review):** This step ONLY runs in `feature` mode. In `regression` and `smoke` modes the UCs are the accumulated history from `tests/e2e/use-cases/` — there is no current-feature plan and no Surface coverage decision block. A regression suite that happens to be all-UI (because all past features were UI-only) would otherwise warn about missing API/CLI on every run, creating noise unrelated to the current change. **If `mode != feature`, skip this step entirely.**
+
 **Process:**
 
-1. Read `CLAUDE.md ## E2E Configuration` to enumerate every interface the project exposes (UI / API / CLI / any combination). For `hybrid` configs, treat every interface mentioned as exposed.
+1. Read `CLAUDE.md ## E2E Configuration` to enumerate every interface the project exposes.
+   - **First** look for an explicit `surfaces:` line (e.g., `surfaces: [UI, API, CLI]`). If present, it is authoritative — use it verbatim and do not fall back to interface_type defaults.
+   - **Only if `surfaces:` is absent**, derive from `interface_type`: `fullstack` → UI + API; `api` → API; `cli` → CLI; `hybrid` → treat every interface named anywhere in the section as exposed.
+   - **Why the explicit field exists** (Codex P2-2, v5.33 review): a fullstack project that also ships a CLI is misrepresented by `interface_type: fullstack` alone (default = UI + API, no CLI). Without `surfaces: [UI, API, CLI]` declared, Step 2c would never warn about missing CLI coverage. If you notice the project repo has a CLI entrypoint (e.g., `pyproject.toml` `[project.scripts]`, a `bin/` dir, a `cli.py`) but the E2E config only lists UI + API, flag this as a CONFIG_DRIFT warning in the report so the user can update CLAUDE.md.
 2. Tally which interfaces appear in the loaded UCs' `Interface` field.
 3. Check the plan file (or `docs/plans/<bug-name>-use-cases.md` for simple-fix staging) for a **Surface coverage decision** sub-block. Recognize lines of the shape `<Interface>: N/A — <justification>` as pre-justified exclusions.
 4. For each exposed interface that is **(a) not covered by any UC** AND **(b) not in the Surface coverage decision sub-block as N/A**, emit a warning in the report.
