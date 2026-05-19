@@ -96,12 +96,13 @@ Surfaced 2026-05-18 from msai-v2 portfolio-backtest soak: the agent designed UI 
 1. Read `CLAUDE.md ## E2E Configuration` to enumerate every interface the project exposes.
    - **First** look for an explicit `surfaces:` line (e.g., `surfaces: [UI, API, CLI]`). If present, it is authoritative — use it verbatim and do not fall back to interface_type defaults.
    - **Only if `surfaces:` is absent**, derive from `interface_type`: `fullstack` → UI + API; `api` → API; `cli` → CLI; `hybrid` → treat every interface named anywhere in the section as exposed.
-   - **CLI detection regardless of config** (Codex P2-5, v5.33 review): a fullstack project that also ships a CLI is misrepresented by `interface_type: fullstack` alone (default = UI + API, no CLI). To prevent silent passthrough, **also** check for CLI entrypoint signals in the repo even when CLAUDE.md doesn't list CLI:
-     - `pyproject.toml` with `[project.scripts]` or `[tool.poetry.scripts]`
-     - `package.json` with a `bin` field
-     - `setup.py` with `entry_points={'console_scripts': [...]}`
-     - A top-level `cli.py`, `cli/` directory, or `bin/<project>` executable
-     - `Cargo.toml` with `[[bin]]`
+   - **CLI detection regardless of config** (Codex P2-5 + P2-6, v5.33 review): a fullstack project that also ships a CLI is misrepresented by `interface_type: fullstack` alone (default = UI + API, no CLI). To prevent silent passthrough, **also** check for CLI entrypoint signals in the repo even when CLAUDE.md doesn't list CLI:
+     - **Python:** `pyproject.toml` with `[project.scripts]` or `[tool.poetry.scripts]`; `setup.cfg` with `[options.entry_points]` containing `console_scripts`; `setup.py` with `entry_points={'console_scripts': [...]}`; a top-level `cli.py` or `cli/` package
+     - **Node:** `package.json` with a `bin` field
+     - **Rust:** `Cargo.toml` with `[[bin]]` OR the default binary target `src/main.rs` even without an explicit `[[bin]]`
+     - **Go:** `go.mod` plus any `cmd/<project>/main.go` (the standard `cmd/` layout)
+     - **Any language:** a `bin/` directory containing executable files at the repo root
+   - **Non-exhaustive list:** if you find evidence of any user-facing CLI in the repo that isn't covered above (shell-script entrypoints, language-specific build outputs, etc.), treat CLI as exposed and emit the warnings as if it were listed. The list above covers the common conventions but is not authoritative; the principle is "if the project ships a CLI to users, the user surface includes CLI." Users with non-standard conventions should declare `surfaces:` explicitly in CLAUDE.md to skip this auto-detection.
    - If ANY of those signals exist but CLI is NOT in the derived/declared `surfaces:` set, **add CLI to the exposed surfaces set for this run** so Step 2c emits the canonical `SURFACE_COVERAGE_WARNING` for missing CLI coverage. Also emit a `CONFIG_DRIFT` note in the report telling the user to add `surfaces: [..., CLI]` to CLAUDE.md. **Why unify on SURFACE_COVERAGE_WARNING:** Step 4b in both callers only scans for that one marker; emitting CONFIG_DRIFT alone would let an autonomous PASS proceed with the gap unaddressed.
 2. Tally which interfaces appear in the loaded UCs' `Interface` field.
 3. Check the plan file (or `docs/plans/<bug-name>-use-cases.md` for simple-fix staging) for a **Surface coverage decision** sub-block. Recognize lines of the shape `<Interface>: N/A — <justification>` as pre-justified exclusions.
