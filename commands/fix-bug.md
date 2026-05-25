@@ -956,6 +956,7 @@ If no files (empty directory, or directory missing): check the box with `- [x] E
 - **FAIL_BUG (framework: spec failure; agent: FAIL_BUG verdict):** This fix broke something that previously worked. Fix it, then re-run 5.4b (and 5.4 if this fix has its own user-facing E2E scope).
 - **FAIL_STALE (agent only):** Update stale use case file and re-run.
 - **FAIL_INFRA / flake (both paths):** Retry once. If still failing, report to user for decision.
+- **FAIL_INVALID_USE_CASE (agent only, should be rare in regression mode):** v5.35 gates Step 2b's hard gates to feature mode, so regression-mode UCs from before v5.34 are NOT failed for missing `Actor:` / `Scenario:` fields. If this classification fires in regression, a UC graduated AFTER v5.34 was checked into `tests/e2e/use-cases/` without the required shape — that's a graduation bug. Open the offending UC, rewrite it to the v5.34 shape (see `rules/testing.md`), commit, re-run. Do NOT change product code.
 
 **Note:** `pnpm exec playwright test` runs the binary directly — no `package.json` script is required. setup.sh does not modify `package.json`; use the binary invocation above.
 

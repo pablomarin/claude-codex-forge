@@ -308,6 +308,43 @@ assert_contains "$RULES_TESTING" "Actor:         Operator running the CLI" \
     "rules/testing.md GOOD CLI example uses concrete Actor"
 
 # ---------------------------------------------------------------------------
+# Contract 2e: Step 2b hard gates feature-mode-only (v5.35).
+#
+# v5.34 introduced strict hard gates (MISSING_ACTOR, MISSING_SCENARIO, etc.)
+# that were mode-agnostic. That retroactively breaks regression suites that
+# accumulated UCs under earlier rules — a UC graduated under v5.31 with no
+# Actor field would fail v5.34's hard gate on every regression run.
+#
+# v5.35 mirrors v5.33's Step 2c gating: hard gates run in feature mode only.
+# In regression/smoke modes, hard-gate misses fall back to the prefer-valid
+# bias used by the judgment calls.
+#
+# Lock the gating across verify-e2e + both Phase 5.4b verdict-handling
+# blocks so future drift can't silently re-introduce the breaking change.
+# ---------------------------------------------------------------------------
+start_test "v5.35 — Step 2b hard gates gated to feature mode only"
+
+# Agent: Step 2b must explicitly state the mode gating.
+assert_contains "$VE2E" "Mode gating for hard gates" \
+    "verify-e2e.md Step 2b documents the mode gating"
+assert_contains "$VE2E" "feature mode only" \
+    "verify-e2e.md Step 2b mentions 'feature mode only' (Step 2b hard gates)"
+
+# The Hard gates header must NAME feature mode (not just the prose before it).
+# This catches a partial edit that updates the rationale but leaves the
+# header generic.
+assert_contains "$VE2E" "Hard gates (feature mode only" \
+    "verify-e2e.md Step 2b Hard gates header names feature-mode gating"
+
+# Both Phase 5.4b verdict-handling blocks must reference FAIL_INVALID_USE_CASE
+# AND explain that it should be rare in regression mode. Catches the
+# graduation-bug case (a post-v5.34 UC checked in without the new shape).
+assert_contains "$NF" "FAIL_INVALID_USE_CASE (agent only, should be rare in regression mode)" \
+    "new-feature.md Phase 5.4b handles FAIL_INVALID_USE_CASE with rare-in-regression context"
+assert_contains "$FB" "FAIL_INVALID_USE_CASE (agent only, should be rare in regression mode)" \
+    "fix-bug.md Phase 5.4b handles FAIL_INVALID_USE_CASE with rare-in-regression context"
+
+# ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers
 # setup.sh writes .claude/playwright-dir. Commands must read it.
 # ---------------------------------------------------------------------------

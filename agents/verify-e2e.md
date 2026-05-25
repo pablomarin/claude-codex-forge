@@ -55,9 +55,11 @@ If still ambiguous, report the ambiguity and stop — do not guess.
 
 Before running any UC against a live system, validate that each UC has user-journey shape and a defensible interface choice. Invalid UCs are not a transient infra problem; they cannot be salvaged by retrying against a healthy app. Catch them here so the caller fixes test design before infrastructure is touched.
 
-For each UC loaded in Step 2, run the hard gates first, then the judgment calls. Hard-gate failure → `FAIL_INVALID_USE_CASE`, no judgment, no borderline bias.
+For each UC loaded in Step 2, run the hard gates first, then the judgment calls.
 
-**Hard gates (any miss → `FAIL_INVALID_USE_CASE`):**
+**Mode gating for hard gates (v5.35):** The hard gates below ONLY apply in `feature` mode. In `regression` and `smoke` modes, hard-gate misses (e.g., a graduated UC from before v5.34 that lacks `Actor:` or `Scenario:` fields) are downgraded to the prefer-valid bias used by the judgment calls — they do NOT trigger `FAIL_INVALID_USE_CASE`. Rationale: UCs graduated under earlier rules predate the v5.34 shape requirement; retroactively failing them on every regression run would block ship for historical reasons. New UCs going through Phase 3.2b/6.2b authoring still get the strict shape because verify-e2e runs in `feature` mode at that point. Symmetry with Step 2c, which is also feature-mode-only.
+
+**Hard gates (feature mode only, any miss → `FAIL_INVALID_USE_CASE`):**
 
 1. **Actor field present and non-generic.** A line literally named `Actor:` (or equivalent header) must exist. The Actor must be a specific role or situation — `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`, `Any signed-in member`. Bare `user` / `users` / `a user` as the Actor — with no role and no situation — is rejected as `MISSING_ACTOR`. (The bare word IS allowed elsewhere — e.g., "the user sees X" inside Verification — but not as the Actor identity itself.)
 
@@ -86,7 +88,7 @@ For each UC loaded in Step 2, run the hard gates first, then the judgment calls.
    - CLI command/flag → Interface MUST be CLI.
    - Cross-surface features MAY declare both.
 
-**When in genuine doubt on the judgment calls (7, 8)**, prefer to mark the UC valid and let it execute — false positives on judgment failures are more disruptive than false negatives. **Hard gates (1–6) get no such bias** — those are objective shape requirements.
+**When in genuine doubt on the judgment calls (7, 8)**, prefer to mark the UC valid and let it execute — false positives on judgment failures are more disruptive than false negatives. **Hard gates (1–6) get no such bias IN `feature` MODE** — those are objective shape requirements. In `regression` and `smoke` modes, the hard gates inherit the prefer-valid bias per the v5.35 mode-gating note above (old graduated UCs aren't required to have the new shape).
 
 For each UC marked `FAIL_INVALID_USE_CASE`, record:
 

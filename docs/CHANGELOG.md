@@ -2,6 +2,20 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.35 — 2026-05-25 · Step 2b hard gates gated to feature mode only
+
+**Discovered immediately after v5.34 shipped.** v5.34's new hard gates (`MISSING_ACTOR`, `MISSING_SCENARIO`, `THIN_VERIFICATION`, etc.) were mode-agnostic. That retroactively breaks regression suites: any UC graduated under v5.31/v5.33 lacked the new `Actor:` / `Scenario:` fields, so the next regression run would mark all of them `FAIL_INVALID_USE_CASE` and block ship for purely historical reasons.
+
+**Fix:** mirror v5.33's Step 2c gating. The hard gates run in `feature` mode only. In `regression` and `smoke` modes, hard-gate misses fall back to the prefer-valid bias used by the judgment calls. New UCs going through Phase 3.2b/6.2b authoring still get the strict shape because verify-e2e runs in `feature` mode at that point.
+
+**Files:**
+
+- `agents/verify-e2e.md` Step 2b — added "Mode gating for hard gates" paragraph + renamed the section header to `Hard gates (feature mode only, …)`.
+- `commands/new-feature.md` + `commands/fix-bug.md` Phase 5.4b — verdict-handling blocks now reference `FAIL_INVALID_USE_CASE` with explicit "should be rare in regression mode" framing. If it does fire in regression, the message points to a graduation bug (a post-v5.34 UC checked into `tests/e2e/use-cases/` without the new shape) — fix the UC, not product code.
+- `tests/template/test-contracts.sh` — new Contract 2e locks the mode-gating across all three files. 5 new assertions; **360 total** across 4 hot-path suites.
+
+**Why no Codex review on this one:** Codex was attempted on the v5.34 commit but hit a network reconnect error mid-review and never returned a verdict. The trace before it died showed Codex was exploring the Phase 5.4b verdict-handling blocks — the very lines this commit fixes. Self-identified gap from the trace + applied Option A (feature-mode gating, the structural symmetry codex itself recommended in the v5.33 review of Step 2c).
+
 ## 5.34 — 2026-05-25 · E2E UC shape — Actor + Scenario + surface-specific Verification
 
 **Surfaced by Pablo during ongoing /forge-goal soak.** Even with v5.31's smell test and v5.33's surface coverage audit, the agent kept drafting code-shaped UCs ("User creates a todo" / "POST /api/v1/orders returns 201"). Codex pinned the root cause: the rules said "be specific" but the canonical GOOD examples in `rules/testing.md` still modeled generic phrasing — and Step 2b's prefer-valid bias let borderline UCs slide. The model copies what the examples show, not what the prose argues for.
