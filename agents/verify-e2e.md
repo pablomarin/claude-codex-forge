@@ -85,7 +85,28 @@ For each UC loaded in Step 2, run the hard gates first, then the judgment calls.
 
 **Judgment calls (prefer-valid bias remains):**
 
-7. **`NOT_USER_JOURNEY` (Intent shape):** RED FLAG if Intent contains a literal HTTP method + path, a function/class/component name as the goal, a status code or HTTP header as the goal, or "verify that ... returns ...", "test that ... renders ...", "check that ... endpoint ...". This is a softer check than the hard gates above — borderline phrasing gets the benefit of the doubt, blatant code-shaped Intents are rejected.
+7. **`NOT_USER_JOURNEY` (overall UC journey shape):** Two triggers, either one fires the classification. Both fire in all modes (including regression/smoke) — this is the v5.37/v5.38 design: legacy code-shaped UCs SHOULD be surfaced for cleanup.
+
+   **(a) Intent shape:** RED FLAG if Intent contains a literal HTTP method + path, a function/class/component name as the goal, a status code or HTTP header as the goal, or "verify that ... returns ...", "test that ... renders ...", "check that ... endpoint ...".
+
+   **(b) Whole-UC shape (v5.38, addresses Codex final-pass finding):** RED FLAG when the UC reads as a contract test even if the Intent prose is okay. The signal is the COMBINATION of all three:
+   - Steps is a single isolated call/click (one curl invocation, one click, one CLI command)
+   - Verification is a bare token (just a status code, just an exit code, or just an element-visible assertion — no surface-appropriate observation language per the UI/CLI/API rubric)
+   - Persistence is `N/A` or absent
+     The combination is the tell. Any one of these alone might be acceptable in a particular UC, but ALL THREE together = this isn't a journey, it's a contract test. The individual hard gates (`TOO_SHALLOW`, `THIN_VERIFICATION`, `MISSING_PERSISTENCE`) get skipped in regression/smoke for backward compat with pre-v5.34 UCs that may have legitimate per-field exceptions. But the COMBINATION is "this isn't a journey at all" — that signal fires in every mode.
+
+   Example of a whole-UC NOT_USER_JOURNEY catch:
+
+   ```md
+   Intent: Customer creates an order through the API ← Intent prose is fine
+   Steps: curl POST /api/v1/orders with valid JSON ← shallow (1)
+   Verification: Response status is 201 ← bare token (2)
+   Persistence: N/A ← absent (3)
+   ```
+
+   All three combined → `NOT_USER_JOURNEY`. Rewrite as a journey UC per the GOOD examples in `rules/testing.md`.
+
+   This is a softer check than the hard gates (1–6) — borderline phrasing or borderline shallowness gets the benefit of the doubt. Blatant code-shaped UCs (either Intent shape OR whole-UC shape) are rejected.
 
 8. **`WRONG_INTERFACE` (interface vs feature surface):**
    - The declared Interface (UI / API / CLI) must match the surface the user touches for this feature.

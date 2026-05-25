@@ -2,6 +2,29 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.38 — 2026-05-25 · Whole-UC NOT_USER_JOURNEY + stale-text cleanup
+
+Codex final-pass on v5.34–v5.37 found one structural enforcement gap plus three stale-text sites. All addressed.
+
+**Structural fix — NOT_USER_JOURNEY broadened to whole-UC shape.** Codex demonstrated a real escape route in v5.37: an old UC with a decent-looking Intent (e.g., "Customer creates an order through the API") could still slide through regression mode if its Steps are a single isolated call, Verification is bare status, and Persistence is N/A. The individual hard gates (`TOO_SHALLOW`, `THIN_VERIFICATION`, `MISSING_PERSISTENCE`) are skipped in regression to avoid retroactive breakage — but the _combination_ of all three is "this isn't a journey at all", and that signal should fire in every mode.
+
+`agents/verify-e2e.md` judgment-call #7 now has TWO triggers:
+
+- **(a) Intent shape** (existing) — RED FLAG on code-shaped Intent text.
+- **(b) Whole-UC shape (NEW)** — RED FLAG when Steps are shallow AND Verification is bare AND Persistence is N/A or absent, all three together. Either trigger fires `NOT_USER_JOURNEY` in any mode (including regression/smoke). Includes a worked example showing the kind of UC this catches.
+
+This is the structural enforcement that delivers Pablo's stated intent of v5.37: legacy code-shaped UCs SHOULD be surfaced by the regression suite so they get rewritten. Without the whole-UC trigger, only the most obviously code-shaped Intents got caught.
+
+**Stale-text fixes (Codex final-pass):**
+
+- **`rules/testing.md` Failure Classification table** — was out of sync, listing `FAIL_INVALID_USE_CASE` as having only `NOT_USER_JOURNEY` / `WRONG_INTERFACE`. Now enumerates all 9 reason codes, grouped into Hard-SHAPE reasons (skipped in regression by v5.35) and Judgment-call reasons (fire in all modes by design).
+- **`rules/testing.md` NOT_USER_JOURNEY definition** — said the trigger included "no Persistence step", which contradicted the agent (missing persistence is `MISSING_PERSISTENCE`, a hard gate). Corrected.
+- **`commands/fix-bug.md:819` simple-fix parenthetical** — still listed the old 6 fields. Now lists all 8 (Actor + Scenario + Interface + Intent + Setup + Steps + Verification + Persistence).
+
+**Tests** — Contract 2f extended with 13 new assertions: rules/testing.md lists all 7 v5.34 reason codes by name + uses the Hard-SHAPE / Judgment-call bucket vocabulary; negative-guard ensures the stale "no Persistence step" wording can't drift back; verify-e2e.md states the whole-UC shape trigger + mode-by-design intent. **392 total** across 4 hot-path suites, 0 failed.
+
+**What we deliberately did NOT do** from Codex's pass: the vocabulary-layering simplification (collapse mechanical/policy/hard-shape/judgment into 2 buckets instead of the current 4). Reshuffling would churn the same files we just stabilized; current layering is dense but defensible, and contract tests lock it.
+
 ## 5.37 — 2026-05-25 · Reframe: legacy-UC bounce-back is intentional design
 
 Pablo's clarification on v5.36: the residual-risk framing ("NOT_USER_JOURNEY can still fire on legacy regression UCs — that's a side effect of v5.35's mode gating") undersells what's happening. The intent is the opposite of residual: when the regression suite encounters an old code-shaped UC, the journey-quality bounce-back **should** fire so the team can rewrite it to the new standard. The point of pulling forward old bad UCs is that they were testing the wrong thing all along.

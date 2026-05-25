@@ -410,17 +410,29 @@ Use cases live in the plan file during development, then graduate to `tests/e2e/
 
 The verify-e2e agent produces a structured markdown report with five per-UC classification types:
 
-| Classification            | Meaning                                                                                                                                            | Blocks ship?                  |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| **PASS**                  | Works as specified                                                                                                                                 | No                            |
-| **FAIL_BUG**              | Real product defect — user would hit this                                                                                                          | **Yes**                       |
-| **FAIL_STALE**            | Use case references changed interface (endpoint/page/selector renamed) — needs update                                                              | No (maintenance flag)         |
-| **FAIL_INFRA**            | Server down, timeout, flaky selector                                                                                                               | Retry once, then warn         |
-| **FAIL_INVALID_USE_CASE** | Use case fails authoring discipline — `NOT_USER_JOURNEY` or `WRONG_INTERFACE`. Bounces back to the main agent to rewrite the UC before re-running. | **Yes** (test-design failure) |
+| Classification            | Meaning                                                                                                                                   | Blocks ship?                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| **PASS**                  | Works as specified                                                                                                                        | No                            |
+| **FAIL_BUG**              | Real product defect — user would hit this                                                                                                 | **Yes**                       |
+| **FAIL_STALE**            | Use case references changed interface (endpoint/page/selector renamed) — needs update                                                     | No (maintenance flag)         |
+| **FAIL_INFRA**            | Server down, timeout, flaky selector                                                                                                      | Retry once, then warn         |
+| **FAIL_INVALID_USE_CASE** | Use case fails authoring discipline. See the reason-code table below. Bounces back to the main agent to rewrite the UC before re-running. | **Yes** (test-design failure) |
 
-`FAIL_INVALID_USE_CASE` reasons:
+`FAIL_INVALID_USE_CASE` reasons (kept in sync with `agents/verify-e2e.md` Step 2b):
 
-- **`NOT_USER_JOURNEY`** — the Intent reads as an integration/contract/component test (names code, endpoints as the goal, or has no Persistence step). The smell test in `## E2E Use Case Design` failed.
+**Hard-SHAPE reasons** (skipped in regression/smoke modes per v5.35 mode-gating — old UCs predate v5.34's shape requirement):
+
+- **`MISSING_ACTOR`** — no Actor field, or bare "user"/"users"/"a user" without role and situation.
+- **`MISSING_SCENARIO`** — no Scenario field.
+- **`SCENARIO_FLUFF`** — Scenario contains biography filler (age, city, hobbies, personality) or product-irrelevant fluff instead of starting-state + trigger + outcome.
+- **`CHEAT_SETUP`** — Setup performs the same action the UC is testing (e.g., Setup creates the resource and Steps just read it back).
+- **`THIN_VERIFICATION`** — Verification is bare status code / bare exit code / single element-visible. No surface-appropriate observation language.
+- **`MISSING_PERSISTENCE`** — no Persistence step, or `Persistence: N/A` used outside the narrow stateless-outcome whitelist (see `## E2E Use Case Design` Persistence rules).
+- **`TOO_SHALLOW`** — fewer than 2 user-meaningful Steps.
+
+**Judgment-call reasons** (fire in **all** modes including regression/smoke — by design, so legacy code-shaped UCs surface and get rewritten):
+
+- **`NOT_USER_JOURNEY`** — the UC reads as an integration/contract/component test, EITHER because the Intent names code/endpoints as the goal, OR because the **whole-UC shape** (Steps + Verification + Persistence taken together) reads as a single endpoint/flag/component check. See "whole-UC shape" trigger in `agents/verify-e2e.md` Step 2b judgment-call #7.
 - **`WRONG_INTERFACE`** — the declared Interface does not match the surface the user touches for this feature (e.g., API UC for a feature whose only user surface is a UI page; UI UC for a CLI-only feature).
 
 The verify-e2e agent reports `FAIL_INVALID_USE_CASE` per offending UC and maps these to top-level `VERDICT: FAIL`. The caller (main agent in `/new-feature` Phase 5.4 or `/fix-bug` Phase 5.4) rewrites the UC in the plan file (or `docs/plans/<bug-name>-use-cases.md` staging file for simple fixes) and re-invokes verify-e2e. The Phase 5.4 checklist box stays unchecked until verify-e2e returns PASS.

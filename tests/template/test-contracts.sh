@@ -361,6 +361,45 @@ assert_contains "$NF" "DO fire in regression mode by design" \
 assert_contains "$FB" "DO fire in regression mode by design" \
     "fix-bug.md Phase 5.4b frames judgment-call firing as intentional design"
 
+# Codex final-pass gap (v5.38): the AGENT must also state the by-design
+# intent in its own Step 2b mode-gating note. Without this assertion the
+# caller text could keep saying "by design" while the agent drifts.
+assert_contains "$VE2E" "fire in" \
+    "verify-e2e.md mode-gating note still asserts judgment calls fire across modes"
+assert_contains "$VE2E" "by design" \
+    "verify-e2e.md mode-gating note frames legacy-UC surfacing as intentional"
+
+# v5.38: NOT_USER_JOURNEY now has TWO triggers — Intent shape (existing)
+# AND whole-UC shape (new). Lock the whole-UC shape vocabulary so future
+# drift can't silently narrow it back to Intent-only.
+assert_contains "$VE2E" "overall UC journey shape" \
+    "verify-e2e.md NOT_USER_JOURNEY definition expanded beyond Intent shape"
+assert_contains "$VE2E" "Whole-UC shape" \
+    "verify-e2e.md names the whole-UC shape trigger (v5.38)"
+
+# v5.38: rules/testing.md Failure Classification reason list must enumerate
+# all 9 reason codes (was stale, only listed NOT_USER_JOURNEY + WRONG_INTERFACE).
+# Catches the codex final-pass finding that the rules file lagged the agent.
+for reason in MISSING_ACTOR MISSING_SCENARIO SCENARIO_FLUFF CHEAT_SETUP THIN_VERIFICATION MISSING_PERSISTENCE TOO_SHALLOW; do
+    assert_contains "$RULES_TESTING" "**\`$reason\`**" \
+        "rules/testing.md Failure Classification lists $reason (v5.38 sync)"
+done
+# And the canonical Hard-SHAPE / Judgment-call bucket labels must be in the
+# rules file too (not just the commands).
+assert_contains "$RULES_TESTING" "Hard-SHAPE reasons" \
+    "rules/testing.md uses Hard-SHAPE reasons bucket vocabulary"
+assert_contains "$RULES_TESTING" "Judgment-call reasons" \
+    "rules/testing.md uses Judgment-call reasons bucket vocabulary"
+
+# Stale-text guard: the old NOT_USER_JOURNEY definition that said "no
+# Persistence step" must be gone from rules/testing.md. Missing persistence
+# is now MISSING_PERSISTENCE (a hard gate), not a NOT_USER_JOURNEY trigger.
+if grep -qF 'or has no Persistence step' "$RULES_TESTING"; then
+    fail "rules/testing.md still says NOT_USER_JOURNEY includes 'no Persistence step' — that's MISSING_PERSISTENCE now (v5.38 fix #2 missing)"
+else
+    pass "rules/testing.md NOT_USER_JOURNEY no longer claims missing-Persistence (correctly handed off to MISSING_PERSISTENCE)"
+fi
+
 # ---------------------------------------------------------------------------
 # Contract 2f: v5.36 — Codex review fixes to v5.34/v5.35.
 #
