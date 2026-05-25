@@ -337,12 +337,29 @@ assert_contains "$VE2E" "Hard gates (feature mode only" \
     "verify-e2e.md Step 2b Hard gates header names feature-mode gating"
 
 # Both Phase 5.4b verdict-handling blocks must reference FAIL_INVALID_USE_CASE
-# AND explain that it's rare in regression mode. Catches the
-# graduation-bug case (a post-v5.34 UC checked in without the new shape).
-assert_contains "$NF" "FAIL_INVALID_USE_CASE (agent only, rare in regression mode)" \
-    "new-feature.md Phase 5.4b handles FAIL_INVALID_USE_CASE with rare-in-regression context"
-assert_contains "$FB" "FAIL_INVALID_USE_CASE (agent only, rare in regression mode)" \
-    "fix-bug.md Phase 5.4b handles FAIL_INVALID_USE_CASE with rare-in-regression context"
+# AND distinguish hard-SHAPE (skipped in regression) from judgment (still
+# fires by design). Catches the graduation-bug case AND ensures the
+# intentional-surfacing-of-legacy-bad-UCs framing stays explicit (v5.37).
+assert_contains "$NF" "FAIL_INVALID_USE_CASE (agent only)" \
+    "new-feature.md Phase 5.4b handles FAIL_INVALID_USE_CASE"
+assert_contains "$FB" "FAIL_INVALID_USE_CASE (agent only)" \
+    "fix-bug.md Phase 5.4b handles FAIL_INVALID_USE_CASE"
+# Both commands must split hard-SHAPE vs judgment-call reasons explicitly.
+assert_contains "$NF" "Hard-SHAPE reasons" \
+    "new-feature.md Phase 5.4b names Hard-SHAPE reasons bucket"
+assert_contains "$FB" "Hard-SHAPE reasons" \
+    "fix-bug.md Phase 5.4b names Hard-SHAPE reasons bucket"
+assert_contains "$NF" "Judgment-call reasons" \
+    "new-feature.md Phase 5.4b names Judgment-call reasons bucket"
+assert_contains "$FB" "Judgment-call reasons" \
+    "fix-bug.md Phase 5.4b names Judgment-call reasons bucket"
+# v5.37 framing: NOT_USER_JOURNEY firing in regression is BY DESIGN, not
+# a residual risk. Lock the "by design" wording so it doesn't drift back
+# to "still applies"/"residual" framing.
+assert_contains "$NF" "DO fire in regression mode by design" \
+    "new-feature.md Phase 5.4b frames judgment-call firing as intentional design"
+assert_contains "$FB" "DO fire in regression mode by design" \
+    "fix-bug.md Phase 5.4b frames judgment-call firing as intentional design"
 
 # ---------------------------------------------------------------------------
 # Contract 2f: v5.36 — Codex review fixes to v5.34/v5.35.
@@ -403,12 +420,15 @@ assert_contains "$VE2E" "narrow" \
 assert_contains "$VE2E" "Mechanical vs policy gates" \
     "verify-e2e.md splits hard gates into mechanical vs policy"
 
-# Fix 5: Phase 5.4b regression promise must say "hard SHAPE gates" so the
-# distinction between shape (hard) and journey (judgment) is clear.
-assert_contains "$NF" "hard SHAPE gates" \
-    "new-feature.md Phase 5.4b says 'hard SHAPE gates' (clarifies NOT_USER_JOURNEY still fires in regression)"
-assert_contains "$FB" "hard SHAPE gates" \
-    "fix-bug.md Phase 5.4b says 'hard SHAPE gates'"
+# Fix 5: Phase 5.4b regression promise must distinguish shape (hard, skipped
+# in regression) from journey (judgment, fires by design). v5.37 promoted
+# this from a one-liner to a two-bullet bucket split — the canonical phrasing
+# is now "Hard-SHAPE reasons" vs "Judgment-call reasons" (asserted above in
+# the v5.37 block). Just verify the bucket vocabulary is present here.
+assert_contains "$NF" "skipped in regression mode" \
+    "new-feature.md Phase 5.4b explains hard-SHAPE skip in regression"
+assert_contains "$FB" "skipped in regression mode" \
+    "fix-bug.md Phase 5.4b explains hard-SHAPE skip in regression"
 
 # ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers

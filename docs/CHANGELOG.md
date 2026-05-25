@@ -2,6 +2,17 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.37 — 2026-05-25 · Reframe: legacy-UC bounce-back is intentional design
+
+Pablo's clarification on v5.36: the residual-risk framing ("NOT_USER_JOURNEY can still fire on legacy regression UCs — that's a side effect of v5.35's mode gating") undersells what's happening. The intent is the opposite of residual: when the regression suite encounters an old code-shaped UC, the journey-quality bounce-back **should** fire so the team can rewrite it to the new standard. The point of pulling forward old bad UCs is that they were testing the wrong thing all along.
+
+**Changes (wording only, no behavior change):**
+
+- **`commands/new-feature.md` + `commands/fix-bug.md` Phase 5.4b** — promoted the `FAIL_INVALID_USE_CASE` regression-mode entry from a one-liner to a two-bullet split. **Hard-SHAPE reasons** (skipped in regression by v5.35) and **Judgment-call reasons** (`NOT_USER_JOURNEY`, `WRONG_INTERFACE`) are now explicitly named buckets. The judgment-call bullet states bluntly: "**DO fire in regression mode by design**" — old bad UCs surfaced this way are real finds, not noise.
+- **`agents/verify-e2e.md`** Step 2b — mirror note added below the v5.35 mode-gating paragraph: the judgment calls fire in `regression` and `smoke` modes by design (v5.37). Pre-valid bias still applies to borderline phrasing; blatantly code-shaped Intents still get classified `FAIL_INVALID_USE_CASE` in any mode.
+
+**Tests:** Contract 2f updated to lock the new bucket vocabulary (`Hard-SHAPE reasons` / `Judgment-call reasons` / `DO fire in regression mode by design`). 6 assertions added, 378 total across 4 hot-path suites, 0 failed.
+
 ## 5.36 — 2026-05-25 · Codex review fixes to v5.34/v5.35
 
 Codex assessment of v5.34 + v5.35 was mostly positive ("strong improvement, not a complete cure" — `927675b` and `6983a39` will materially move Pablo's user-journey-quality concern) but flagged five concrete fixes. All applied:
