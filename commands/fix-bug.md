@@ -447,7 +447,7 @@ Invoke `/superpowers:writing-plans`. Mirroring `/new-feature` 3.2 — respect `w
 
 If this fix changes any user-facing behavior (UI, API, flows, forms, navigation, permissions), design E2E use cases NOW — before implementation, not after.
 
-Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `rules/testing.md`. Each UC must include **Intent**, **Interface**, **Setup**, **Steps**, **Verification**, and **Persistence**. See `rules/testing.md` "GOOD vs BAD use cases" for canonical worked examples per API / UI / CLI.
+Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `rules/testing.md`. Each UC must include **Actor**, **Scenario**, **Interface**, **Intent**, **Setup**, **Steps**, **Verification**, and **Persistence** — see the required-shape checklist below. See `rules/testing.md` "GOOD vs BAD use cases" for canonical worked examples per API / UI / CLI.
 
 **Pick the interface from the feature surface, not the project type.** `CLAUDE.md ## E2E Configuration` tells you which interfaces the project EXPOSES — that is the capability envelope. The bug itself tells you which surface the user actually touches:
 
@@ -476,7 +476,7 @@ Run this checklist:
 
 verify-e2e's Step 2c emits a `SURFACE_COVERAGE_WARNING` if UCs cover fewer surfaces than the project exposes; during an autonomous `/forge-goal` run, the warning triggers a `/council` consultation unless the Surface coverage decision sub-block pre-justified the omission.
 
-**Required UC shape — every UC must have these fields filled, in this order:**
+**Required UC shape — every UC must have these fields filled:**
 
 1. **Actor** — A specific role/situation. Bare `user` / `users` / `a user` is rejected by verify-e2e Step 2b as `MISSING_ACTOR`. Use `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`, etc.
 2. **Scenario** — 1-2 sentences: what the Actor was doing when the bug occurred + what they expected. Traceable to the bug report. No biography fluff (verify-e2e rejects as `SCENARIO_FLUFF`).
@@ -956,7 +956,7 @@ If no files (empty directory, or directory missing): check the box with `- [x] E
 - **FAIL_BUG (framework: spec failure; agent: FAIL_BUG verdict):** This fix broke something that previously worked. Fix it, then re-run 5.4b (and 5.4 if this fix has its own user-facing E2E scope).
 - **FAIL_STALE (agent only):** Update stale use case file and re-run.
 - **FAIL_INFRA / flake (both paths):** Retry once. If still failing, report to user for decision.
-- **FAIL_INVALID_USE_CASE (agent only, should be rare in regression mode):** v5.35 gates Step 2b's hard gates to feature mode, so regression-mode UCs from before v5.34 are NOT failed for missing `Actor:` / `Scenario:` fields. If this classification fires in regression, a UC graduated AFTER v5.34 was checked into `tests/e2e/use-cases/` without the required shape — that's a graduation bug. Open the offending UC, rewrite it to the v5.34 shape (see `rules/testing.md`), commit, re-run. Do NOT change product code.
+- **FAIL_INVALID_USE_CASE (agent only, rare in regression mode):** v5.35 gates Step 2b's **hard SHAPE gates** (missing Actor/Scenario/Persistence/etc.) to feature mode, so regression-mode UCs from before v5.34 are NOT failed for missing fields. The **judgment-call reasons** (`NOT_USER_JOURNEY`, `WRONG_INTERFACE`) still apply in all modes — if a legacy UC has a blatantly endpoint-shaped Intent, the regression run will surface it as `NOT_USER_JOURNEY`. If this classification fires in regression with any hard-shape reason code (`MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW`), that points to a graduation bug — a UC checked into `tests/e2e/use-cases/` post-v5.34 without the required shape. Open the offending UC, rewrite it (see `rules/testing.md`), commit, re-run. Do NOT change product code.
 
 **Note:** `pnpm exec playwright test` runs the binary directly — no `package.json` script is required. setup.sh does not modify `package.json`; use the binary invocation above.
 

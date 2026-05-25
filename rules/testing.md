@@ -112,6 +112,15 @@ Each use case MUST include:
 7. **Verification** — Surface-specific user-observable outcome. See the rubric below — a bare status code / bare exit code / single element-visible check is disqualified.
 8. **Persistence** — Reload, re-request, or re-invoke through the same interface and confirm the state stuck. Missing Persistence is a hard-fail.
 
+   **`Persistence: N/A` is narrow.** Allowed ONLY for genuinely stateless outcomes the product itself does not retain:
+   - A pure read-only query whose result depends only on inputs the test already controls (e.g., `GET /api/v1/health`, `mycli --version`)
+   - An idempotent computation that returns the same answer every call (e.g., a stateless calculator endpoint)
+
+   Disallowed (verify-e2e rejects as `MISSING_PERSISTENCE`):
+   - "N/A — fix doesn't change state" — the _fix_ may not, but the _journey_ still creates/updates/transitions state that the user expects to find later. Persist through the same interface.
+   - "N/A — this is a read endpoint" — only valid if the read truly depends on nothing the test created. If your Setup created a resource and Verification observes it, then Persistence must re-read after a delay/reload.
+   - Any UC whose Steps include creating, updating, deleting, or transitioning state.
+
 ### Verification language — surface-specific
 
 Verification must describe what the Actor can **observe** AND ideally what they can **do next** with what just happened. Surface vocabulary:

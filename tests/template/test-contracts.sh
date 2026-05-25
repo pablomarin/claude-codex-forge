@@ -337,12 +337,78 @@ assert_contains "$VE2E" "Hard gates (feature mode only" \
     "verify-e2e.md Step 2b Hard gates header names feature-mode gating"
 
 # Both Phase 5.4b verdict-handling blocks must reference FAIL_INVALID_USE_CASE
-# AND explain that it should be rare in regression mode. Catches the
+# AND explain that it's rare in regression mode. Catches the
 # graduation-bug case (a post-v5.34 UC checked in without the new shape).
-assert_contains "$NF" "FAIL_INVALID_USE_CASE (agent only, should be rare in regression mode)" \
+assert_contains "$NF" "FAIL_INVALID_USE_CASE (agent only, rare in regression mode)" \
     "new-feature.md Phase 5.4b handles FAIL_INVALID_USE_CASE with rare-in-regression context"
-assert_contains "$FB" "FAIL_INVALID_USE_CASE (agent only, should be rare in regression mode)" \
+assert_contains "$FB" "FAIL_INVALID_USE_CASE (agent only, rare in regression mode)" \
     "fix-bug.md Phase 5.4b handles FAIL_INVALID_USE_CASE with rare-in-regression context"
+
+# ---------------------------------------------------------------------------
+# Contract 2f: v5.36 — Codex review fixes to v5.34/v5.35.
+#
+# Codex flagged: (1) stale 6-field intro lines contradicting the new 8-field
+# shape, (2) "in this order" rigidity, (3) Persistence: N/A escape hatch
+# needs narrow whitelist, (4) "objective" claim too strong for SCENARIO_FLUFF/
+# CHEAT_SETUP/non-bare THIN_VERIFICATION, (5) Phase 5.4b should say "hard
+# SHAPE gates" to clarify NOT_USER_JOURNEY can still fire on legacy UCs.
+#
+# Lock all five so future drift doesn't regress.
+# ---------------------------------------------------------------------------
+start_test "v5.36 — Codex review fixes hold across files"
+
+# Fix 1: stale 6-field intro lines MUST be gone from both commands. The
+# canonical intro now names all 8 fields including Actor + Scenario.
+STALE_INTRO='Each UC must include **Intent**, **Interface**, **Setup**, **Steps**, **Verification**, and **Persistence**'
+if grep -qF "$STALE_INTRO" "$NF"; then
+    fail "new-feature.md still contains the stale 6-field intro (v5.36 fix #1 missing)"
+else
+    pass "new-feature.md does NOT contain the stale 6-field intro"
+fi
+if grep -qF "$STALE_INTRO" "$FB"; then
+    fail "fix-bug.md still contains the stale 6-field intro (v5.36 fix #1 missing)"
+else
+    pass "fix-bug.md does NOT contain the stale 6-field intro"
+fi
+# And the new 8-field intro MUST be present in both.
+NEW_INTRO='Each UC must include **Actor**, **Scenario**, **Interface**, **Intent**, **Setup**, **Steps**, **Verification**, and **Persistence**'
+assert_contains "$NF" "$NEW_INTRO" \
+    "new-feature.md has the canonical 8-field intro naming Actor + Scenario"
+assert_contains "$FB" "$NEW_INTRO" \
+    "fix-bug.md has the canonical 8-field intro naming Actor + Scenario"
+
+# Fix 2: "in this order" rigidity must be gone.
+if grep -qF "in this order" "$NF"; then
+    fail "new-feature.md still has 'in this order' rigidity (v5.36 fix #2 missing)"
+else
+    pass "new-feature.md no longer has 'in this order' rigidity"
+fi
+if grep -qF "in this order" "$FB"; then
+    fail "fix-bug.md still has 'in this order' rigidity"
+else
+    pass "fix-bug.md no longer has 'in this order' rigidity"
+fi
+
+# Fix 3: Persistence: N/A whitelist must be narrow — both rules and agent
+# must mention "stateless" outcomes as the only valid N/A case.
+assert_contains "$RULES_TESTING" "narrow" \
+    "rules/testing.md describes Persistence: N/A as narrow"
+assert_contains "$RULES_TESTING" "stateless" \
+    "rules/testing.md restricts N/A to stateless outcomes"
+assert_contains "$VE2E" "narrow" \
+    "verify-e2e.md describes Persistence: N/A as narrow"
+
+# Fix 4: "objective" claim about hard gates must be softened —
+# acknowledge mechanical vs policy.
+assert_contains "$VE2E" "Mechanical vs policy gates" \
+    "verify-e2e.md splits hard gates into mechanical vs policy"
+
+# Fix 5: Phase 5.4b regression promise must say "hard SHAPE gates" so the
+# distinction between shape (hard) and journey (judgment) is clear.
+assert_contains "$NF" "hard SHAPE gates" \
+    "new-feature.md Phase 5.4b says 'hard SHAPE gates' (clarifies NOT_USER_JOURNEY still fires in regression)"
+assert_contains "$FB" "hard SHAPE gates" \
+    "fix-bug.md Phase 5.4b says 'hard SHAPE gates'"
 
 # ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers

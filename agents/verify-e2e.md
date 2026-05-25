@@ -59,6 +59,8 @@ For each UC loaded in Step 2, run the hard gates first, then the judgment calls.
 
 **Mode gating for hard gates (v5.35):** The hard gates below ONLY apply in `feature` mode. In `regression` and `smoke` modes, hard-gate misses (e.g., a graduated UC from before v5.34 that lacks `Actor:` or `Scenario:` fields) are downgraded to the prefer-valid bias used by the judgment calls — they do NOT trigger `FAIL_INVALID_USE_CASE`. Rationale: UCs graduated under earlier rules predate the v5.34 shape requirement; retroactively failing them on every regression run would block ship for historical reasons. New UCs going through Phase 3.2b/6.2b authoring still get the strict shape because verify-e2e runs in `feature` mode at that point. Symmetry with Step 2c, which is also feature-mode-only.
 
+**Mechanical vs policy gates (Codex v5.34 review):** The hard-gate list mixes two flavors. **Mechanical gates** are auto-detectable from UC text alone — missing field, fewer than 2 Steps, bare-only Verification token. **Policy gates** still block in feature mode but require judgment (e.g., deciding whether a Scenario is "biography fluff" or whether Setup performs the same action the Steps test). Both block. The distinction matters only for failure messaging — be more confident about mechanical failures, more explanatory about policy failures.
+
 **Hard gates (feature mode only, any miss → `FAIL_INVALID_USE_CASE`):**
 
 1. **Actor field present and non-generic.** A line literally named `Actor:` (or equivalent header) must exist. The Actor must be a specific role or situation — `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`, `Any signed-in member`. Bare `user` / `users` / `a user` as the Actor — with no role and no situation — is rejected as `MISSING_ACTOR`. (The bare word IS allowed elsewhere — e.g., "the user sees X" inside Verification — but not as the Actor identity itself.)
@@ -73,7 +75,9 @@ For each UC loaded in Step 2, run the hard gates first, then the judgment calls.
    - API Verification must contain at least one of: receives / response includes / client can use / follow-up request returns / error body explains — AND something beyond a bare status code.
      Verifications that are ONLY `status code is 201` or `exit code is 0` or `element is visible` fail this gate as `THIN_VERIFICATION`.
 
-5. **Persistence step present (or explicit `Persistence: N/A — <reason>`).** Reload, re-request, or re-invoke through the same interface. Missing or empty Persistence fails as `MISSING_PERSISTENCE`.
+5. **Persistence step present.** Reload, re-request, or re-invoke through the same interface. Missing or empty Persistence fails as `MISSING_PERSISTENCE`.
+
+   **`Persistence: N/A` is narrow** (per `rules/testing.md`): allowed only for genuinely stateless outcomes — pure read-only query with no test-controlled state, or an idempotent stateless computation. If the Steps include creating / updating / deleting / transitioning state, `N/A` is rejected as `MISSING_PERSISTENCE` regardless of the justification text. Reject "N/A — fix doesn't change state", "N/A — this is a read endpoint" (when Setup created the resource), or any other reason that effectively excuses skipping the re-read.
 
 6. **At least 2 Steps.** A single isolated call/click is too shallow for a journey. Fails as `TOO_SHALLOW`.
 
@@ -88,7 +92,7 @@ For each UC loaded in Step 2, run the hard gates first, then the judgment calls.
    - CLI command/flag → Interface MUST be CLI.
    - Cross-surface features MAY declare both.
 
-**When in genuine doubt on the judgment calls (7, 8)**, prefer to mark the UC valid and let it execute — false positives on judgment failures are more disruptive than false negatives. **Hard gates (1–6) get no such bias IN `feature` MODE** — those are objective shape requirements. In `regression` and `smoke` modes, the hard gates inherit the prefer-valid bias per the v5.35 mode-gating note above (old graduated UCs aren't required to have the new shape).
+**When in genuine doubt on the judgment calls (7, 8)**, prefer to mark the UC valid and let it execute — false positives on judgment failures are more disruptive than false negatives. **Hard gates (1–6) get no such bias IN `feature` MODE** — but note that 2 (SCENARIO_FLUFF), 3 (CHEAT_SETUP), and the non-bare arm of 4 (THIN_VERIFICATION) still require judgment (the "policy gates" above). They block in feature mode but the rationale you cite for failing them must point at specific text in the UC, not a vibe. In `regression` and `smoke` modes, all hard gates inherit the prefer-valid bias per the v5.35 mode-gating note (old graduated UCs aren't required to have the new shape).
 
 For each UC marked `FAIL_INVALID_USE_CASE`, record:
 

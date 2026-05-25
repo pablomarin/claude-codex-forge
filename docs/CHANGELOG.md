@@ -2,6 +2,25 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.36 — 2026-05-25 · Codex review fixes to v5.34/v5.35
+
+Codex assessment of v5.34 + v5.35 was mostly positive ("strong improvement, not a complete cure" — `927675b` and `6983a39` will materially move Pablo's user-journey-quality concern) but flagged five concrete fixes. All applied:
+
+- **Stale 6-field intro lines.** Both commands had a now-contradictory sentence saying "Each UC must include **Intent**, **Interface**, **Setup**, **Steps**, **Verification**, and **Persistence**" — directly above the new 8-field required-shape checklist that added Actor + Scenario. Updated both intros to name all 8 fields.
+- **"in this order" rigidity.** Dropped from both Phase 3.2b required-shape headings. Field order doesn't improve user-journey quality; it just creates formatting friction.
+- **`Persistence: N/A` escape hatch.** Tightened in both `rules/testing.md` and `agents/verify-e2e.md` Step 2b to a narrow whitelist: only genuinely stateless outcomes (pure read-only query, idempotent stateless computation). Any UC whose Steps include create/update/delete/transition gets `MISSING_PERSISTENCE` regardless of justification text. Catches the "N/A — fix doesn't change state" / "N/A — this is a read endpoint" excuses Codex called out.
+- **"Objective" claim softened.** Added a "Mechanical vs policy gates" note acknowledging that `SCENARIO_FLUFF`, `CHEAT_SETUP`, and the non-bare arm of `THIN_VERIFICATION` require judgment. They still block in feature mode (no functional change), but the docs no longer claim all hard gates are auto-detectable. Failure rationale must point at specific UC text, not a vibe.
+- **Phase 5.4b regression-mode wording.** Both commands now say "hard SHAPE gates" (not "hard gates") and explicitly call out that `NOT_USER_JOURNEY` / `WRONG_INTERFACE` (judgment calls) still fire in regression mode. v5.35's mode-gating only protects against the new shape requirements, not the older journey-shape check.
+
+**What we deliberately did NOT do** from Codex's review: chase the "lazy compliance loophole" further. An agent that writes `Scenario: They need to create an order and confirm it works` to satisfy the field requirement is hard to detect without crossing into parody. v5.34+v5.35+v5.36 is a 70% solution to the user-journey-quality problem; further hardening has diminishing returns.
+
+**Files:**
+
+- `rules/testing.md` — narrow Persistence: N/A whitelist with allowed/disallowed examples
+- `agents/verify-e2e.md` — Mechanical vs policy gates note; narrow Persistence gate
+- `commands/new-feature.md` + `commands/fix-bug.md` — 8-field intro lines, removed "in this order", Phase 5.4b says "hard SHAPE gates" and explicitly carves out the judgment-call reasons
+- `tests/template/test-contracts.sh` — Contract 2f locks all 5 fixes. Updated v5.35 wording assertion ("rare in regression mode" instead of "should be rare"). **12 new assertions; 372 total.**
+
 ## 5.35 — 2026-05-25 · Step 2b hard gates gated to feature mode only
 
 **Discovered immediately after v5.34 shipped.** v5.34's new hard gates (`MISSING_ACTOR`, `MISSING_SCENARIO`, `THIN_VERIFICATION`, etc.) were mode-agnostic. That retroactively breaks regression suites: any UC graduated under v5.31/v5.33 lacked the new `Actor:` / `Scenario:` fields, so the next regression run would mark all of them `FAIL_INVALID_USE_CASE` and block ship for purely historical reasons.
