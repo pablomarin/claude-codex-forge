@@ -55,31 +55,44 @@ If still ambiguous, report the ambiguity and stop — do not guess.
 
 Before running any UC against a live system, validate that each UC has user-journey shape and a defensible interface choice. Invalid UCs are not a transient infra problem; they cannot be salvaged by retrying against a healthy app. Catch them here so the caller fixes test design before infrastructure is touched.
 
-For each UC loaded in Step 2, classify it as `VALID` or `FAIL_INVALID_USE_CASE`:
+For each UC loaded in Step 2, run the hard gates first, then the judgment calls. Hard-gate failure → `FAIL_INVALID_USE_CASE`, no judgment, no borderline bias.
 
-**Check 1 — `NOT_USER_JOURNEY` (Intent and Verification shape):**
+**Hard gates (any miss → `FAIL_INVALID_USE_CASE`):**
 
-- The Intent names a real user goal in plain language. RED FLAG if Intent contains: a literal HTTP method + path (`POST /api/...`), a function/class/component name, a database table or column name, a status code or HTTP header as the goal, or phrases like "verify that ... returns ...", "test that ... renders ...", "check that ... endpoint ...".
-- The UC has at least 2 user actions (Steps span a sequence, not a single isolated call).
-- The Verification observes something the user would see through the chosen interface (UI text/element, API response body/status, CLI stdout/exit). RED FLAG if Verification mentions database rows, internal logs, function return values, or implementation details the user cannot observe.
-- The UC has a Persistence step (reload, re-request, or re-invoke). Missing Persistence is a smell that the UC tests a single contract, not a journey.
+1. **Actor field present and non-generic.** A line literally named `Actor:` (or equivalent header) must exist. The Actor must be a specific role or situation — `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`, `Any signed-in member`. Bare `user` / `users` / `a user` as the Actor — with no role and no situation — is rejected as `MISSING_ACTOR`. (The bare word IS allowed elsewhere — e.g., "the user sees X" inside Verification — but not as the Actor identity itself.)
 
-**Check 2 — `WRONG_INTERFACE` (interface vs feature surface):**
+2. **Scenario field present, 1–2 sentences, not biography fluff.** A line literally named `Scenario:` (or equivalent header) must exist. The Scenario states starting state + trigger + desired outcome, traceable to a PRD persona / bug report / feature request. Rejected as `MISSING_SCENARIO` if absent. Rejected as `SCENARIO_FLUFF` if it includes age, city, hobbies, personality (e.g., "Sarah is a busy 32-year-old marketing manager from Cleveland") OR product-irrelevant filler like "wants a smooth experience" / "is short on time" with no product-specific stakes.
 
-- The declared Interface (UI / API / CLI) must match the surface the user touches for this feature.
-- If the feature description mentions a UI page/form/flow → Interface MUST be UI (not API, even if an API call backs the page — that's an internal seam).
-- If the feature description names a public/product API endpoint as the deliverable → Interface MUST be API.
-- If the feature description names a CLI command/flag → Interface MUST be CLI.
-- Cross-surface features (auth, billing) MAY declare both API and UI UCs.
-- Use available context to determine the feature surface: the plan file's feature description, the UC's Intent text, the file paths the implementation touched (if visible in the plan), and `CLAUDE.md ## E2E Configuration` for the capability envelope.
+3. **Setup does NOT do the action under test.** Setup may register accounts, authenticate, seed unrelated baseline data via sanctioned interfaces. It must NOT perform the same action the Steps perform — if Setup already creates the resource and Steps just read it, the UC is testing a read, not the create journey. Rejected as `CHEAT_SETUP`. Also: don't put login work in Steps — declare it in Setup so each feature UC starts from natural product state. Auth itself gets its own dedicated UCs.
 
-**When in genuine doubt**, prefer to mark the UC valid and let it execute — false positives on `FAIL_INVALID_USE_CASE` are more disruptive than false negatives (a borderline UC still tests SOMETHING; an over-zealous bounce-back blocks a passing UC).
+4. **Verification uses surface-appropriate user-observable language.** Per `rules/testing.md` "Verification language — surface-specific":
+   - UI Verification must contain at least one of: sees / appears / is shown / can open / the page reads / the toast says / the row is highlighted — AND something beyond a single element-visible check.
+   - CLI Verification must contain at least one of: stdout shows / stderr explains / the next invocation lists/shows/returns / the human-readable line matches — AND something beyond bare exit code 0.
+   - API Verification must contain at least one of: receives / response includes / client can use / follow-up request returns / error body explains — AND something beyond a bare status code.
+     Verifications that are ONLY `status code is 201` or `exit code is 0` or `element is visible` fail this gate as `THIN_VERIFICATION`.
+
+5. **Persistence step present (or explicit `Persistence: N/A — <reason>`).** Reload, re-request, or re-invoke through the same interface. Missing or empty Persistence fails as `MISSING_PERSISTENCE`.
+
+6. **At least 2 Steps.** A single isolated call/click is too shallow for a journey. Fails as `TOO_SHALLOW`.
+
+**Judgment calls (prefer-valid bias remains):**
+
+7. **`NOT_USER_JOURNEY` (Intent shape):** RED FLAG if Intent contains a literal HTTP method + path, a function/class/component name as the goal, a status code or HTTP header as the goal, or "verify that ... returns ...", "test that ... renders ...", "check that ... endpoint ...". This is a softer check than the hard gates above — borderline phrasing gets the benefit of the doubt, blatant code-shaped Intents are rejected.
+
+8. **`WRONG_INTERFACE` (interface vs feature surface):**
+   - The declared Interface (UI / API / CLI) must match the surface the user touches for this feature.
+   - UI page/form/flow → Interface MUST be UI (not API, even if an API call backs the page — that's an internal seam).
+   - Public/product API endpoint as deliverable → Interface MUST be API.
+   - CLI command/flag → Interface MUST be CLI.
+   - Cross-surface features MAY declare both.
+
+**When in genuine doubt on the judgment calls (7, 8)**, prefer to mark the UC valid and let it execute — false positives on judgment failures are more disruptive than false negatives. **Hard gates (1–6) get no such bias** — those are objective shape requirements.
 
 For each UC marked `FAIL_INVALID_USE_CASE`, record:
 
-- The reason: `NOT_USER_JOURNEY` or `WRONG_INTERFACE` (one primary reason per UC; note secondary in the rationale)
-- A 1-2 sentence rationale citing the exact text or absent element that failed the check
-- A concrete suggestion for the rewrite (e.g., "Restate Intent as a user goal — 'Authenticated user creates an order and finds it in their history' — and add a Persistence step that re-fetches the order list.")
+- The primary reason code: `MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW` / `NOT_USER_JOURNEY` / `WRONG_INTERFACE` (one primary; secondaries in rationale)
+- A 1–2 sentence rationale citing the exact text or absent element that failed the check
+- A concrete rewrite hint (e.g., "Add an `Actor:` line naming a specific role + situation, like `Signed-in customer on the order history page`. Rewrite the Setup to register + log in only, NOT pre-create the order under test.")
 
 **If any UC is `FAIL_INVALID_USE_CASE`:** skip Step 3 (health check) and Step 4 (execution) for the invalid UCs — they cannot be meaningfully executed. Still execute VALID UCs and run health check for them. Report mixed results normally.
 
@@ -156,7 +169,7 @@ For each use case:
 - **FAIL_BUG:** Unexpected behavior (wrong status, missing element, incorrect data) — a user would hit this
 - **FAIL_STALE:** Use case references endpoint/page/selector that no longer exists or was renamed — the product isn't wrong, the use case is (but the use case shape is fine)
 - **FAIL_INFRA:** Environmental issue (timeout, connection refused, Playwright crash). Retry once before classifying. Still failing → FAIL_INFRA.
-- **FAIL_INVALID_USE_CASE:** Classified in Step 2b (not Step 4). UC fails authoring discipline. Sub-reason is one of `NOT_USER_JOURNEY` (Intent reads as integration/contract/component test, or Verification observes non-user-visible state, or Persistence missing) or `WRONG_INTERFACE` (declared Interface doesn't match the feature surface the user touches). Test-design failure — bounces back to the main agent to rewrite the UC before re-running. Never the result of running the UC against the product.
+- **FAIL_INVALID_USE_CASE:** Classified in Step 2b (not Step 4). UC fails authoring discipline. Primary reason code is one of: `MISSING_ACTOR` (no Actor field, or bare "user"/"users"), `MISSING_SCENARIO` (no Scenario field), `SCENARIO_FLUFF` (biography filler instead of product-specific scenario), `CHEAT_SETUP` (Setup performs the action the UC tests), `THIN_VERIFICATION` (bare status / bare exit / single element-visible), `MISSING_PERSISTENCE` (no reload/re-request/re-invoke step), `TOO_SHALLOW` (fewer than 2 Steps), `NOT_USER_JOURNEY` (Intent reads as integration/contract/component test), or `WRONG_INTERFACE` (declared Interface doesn't match the feature surface). Test-design failure — bounces back to the main agent to rewrite the UC before re-running. Never the result of running the UC against the product.
 
 ### Step 5: Produce the report
 
@@ -187,10 +200,11 @@ SUGGESTED_PATH: tests/e2e/reports/YYYY-MM-DD-HH-MM-<feature-or-mode>.md
 
 ## Per-UC Details
 
-### UC1: User creates a todo — PASS
+### UC1: Signed-in customer captures a new todo and confirms it survives a reload — PASS
 
+**Actor:** Signed-in customer on the personal todo list
 **Interface used:** UI (via Playwright MCP)
-**Setup:** API register + login
+**Setup:** API register + login (NOT pre-creating the todo)
 
 **Observed selectors (for spec generation):**
 
@@ -215,9 +229,9 @@ SUGGESTED_PATH: tests/e2e/reports/YYYY-MM-DD-HH-MM-<feature-or-mode>.md
 
 ### UC3: [Intent] — FAIL_INVALID_USE_CASE
 
-- **Reason:** NOT_USER_JOURNEY | WRONG_INTERFACE
+- **Reason:** one of `MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW` / `NOT_USER_JOURNEY` / `WRONG_INTERFACE`
 - **Rationale:** [1-2 sentences citing the exact text or absent element that failed Step 2b validation]
-- **Suggested rewrite:** [concrete rewrite hint the caller can apply, e.g., "Restate Intent as 'Authenticated user creates an order and finds it in their history' and add a Persistence step that re-fetches the order list."]
+- **Suggested rewrite:** [concrete rewrite hint the caller can apply, e.g., "Add an `Actor:` line naming a specific role + situation, like `Signed-in customer on the order history page`. Rewrite Setup to register + log in only (NOT pre-create the order). Strengthen Verification to include the Location header follow-up fetch returning the same items."]
 - **Severity:** Blocks ship — test-design failure, not a product bug. Fix the UC, not the product code.
 
 ## Surface Coverage

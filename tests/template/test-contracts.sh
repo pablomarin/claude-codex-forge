@@ -232,6 +232,82 @@ assert_contains "$FB" "Step 4b" \
     "fix-bug.md has Step 4b SURFACE_COVERAGE_WARNING scan"
 
 # ---------------------------------------------------------------------------
+# Contract 2d: user-journey UC shape — Actor + Scenario + surface-specific
+# Verification rubric (v5.34).
+#
+# Pablo's complaint 2026-05-25: agent keeps drafting code-shaped UCs even
+# with v5.31's smell test. Codex pinpointed root cause: examples still
+# modeled generic "User creates …" phrasing, and Step 2b's prefer-valid
+# bias let borderline UCs slide. v5.34 adds:
+#   - Required Actor field (rejects bare "user" via MISSING_ACTOR)
+#   - Required Scenario field (1-2 sentences, no biography fluff)
+#   - Surface-specific Verification language rubric per UI/CLI/API
+#   - Setup-cheat detection (CHEAT_SETUP)
+#   - Hard gates vs judgment calls split in Step 2b
+#   - GOOD examples rewritten to model the new shape
+#
+# This contract locks the new reason codes + the surface verbs across
+# rules + agent + both commands.
+# ---------------------------------------------------------------------------
+start_test "v5.34 — user-journey UC shape vocabulary across files"
+
+# The new reason codes introduced by v5.34. Each must be referenced in
+# verify-e2e.md (the agent emits them) AND in both command callers (the
+# callers tell the agent what to do with each). NOT_USER_JOURNEY and
+# WRONG_INTERFACE already shipped in v5.31; the rest are v5.34.
+V534_REASONS=(
+    "MISSING_ACTOR"
+    "MISSING_SCENARIO"
+    "SCENARIO_FLUFF"
+    "CHEAT_SETUP"
+    "THIN_VERIFICATION"
+    "MISSING_PERSISTENCE"
+    "TOO_SHALLOW"
+)
+for reason in "${V534_REASONS[@]}"; do
+    assert_contains "$VE2E" "$reason" \
+        "verify-e2e.md defines $reason reason code"
+    assert_contains "$NF" "$reason" \
+        "new-feature.md references $reason in caller handling"
+    assert_contains "$FB" "$reason" \
+        "fix-bug.md references $reason in caller handling"
+done
+
+# Required UC fields (Actor + Scenario) must be in rules/testing.md as
+# canonical AND in both commands' Phase 3.2b inline checklist so authoring
+# guidance matches the verifier.
+for field in "Actor" "Scenario"; do
+    assert_contains "$RULES_TESTING" "**$field**" \
+        "rules/testing.md defines required $field field"
+    assert_contains "$NF" "**$field**" \
+        "new-feature.md Phase 3.2b requires $field field"
+    assert_contains "$FB" "**$field**" \
+        "fix-bug.md Phase 3.2b requires $field field"
+done
+
+# Surface-specific Verification rubric: the rules file must contain the
+# canonical verb sets for UI, CLI, and API verification language so the
+# agent has a reference. The agent must mirror them in Step 2b gate logic.
+assert_contains "$RULES_TESTING" "Verification language — surface-specific" \
+    "rules/testing.md has Verification language section"
+assert_contains "$RULES_TESTING" "sees, appears, is shown" \
+    "rules/testing.md lists UI Verification verbs"
+assert_contains "$RULES_TESTING" "stdout shows, stderr explains" \
+    "rules/testing.md lists CLI Verification verbs"
+assert_contains "$RULES_TESTING" "receives, response includes" \
+    "rules/testing.md lists API Verification verbs"
+
+# GOOD examples must model the new shape — at least one Actor: line in
+# the GOOD blocks. This catches the v5.31 mistake where the rules said
+# "be specific" but the examples still used generic phrasing.
+assert_contains "$RULES_TESTING" "Actor:         Signed-in customer" \
+    "rules/testing.md GOOD UI example uses concrete Actor"
+assert_contains "$RULES_TESTING" "Actor:         API integrator" \
+    "rules/testing.md GOOD API example uses concrete Actor"
+assert_contains "$RULES_TESTING" "Actor:         Operator running the CLI" \
+    "rules/testing.md GOOD CLI example uses concrete Actor"
+
+# ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers
 # setup.sh writes .claude/playwright-dir. Commands must read it.
 # ---------------------------------------------------------------------------

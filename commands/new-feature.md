@@ -648,14 +648,24 @@ Run this checklist:
 
 verify-e2e's Step 2c emits a `SURFACE_COVERAGE_WARNING` if UCs cover fewer surfaces than the project exposes; during an autonomous `/forge-goal` run, the warning triggers a `/council` consultation unless the Surface coverage decision sub-block pre-justified the omission.
 
-**User-journey smell test — before writing, ask yourself for each UC:**
+**Required UC shape — every UC must have these fields filled, in this order:**
 
-- Can I describe the **Intent** to a non-developer in one sentence without naming endpoints, code, components, tables, or other internal terms? If not — rewrite as a real user goal.
-- Does the UC span **multiple user actions** that achieve a goal, not a single isolated click or call?
-- Does **Verification** check what the user would **see** through the chosen interface (UI text/elements, API response body, CLI stdout)? Never a DB row, internal log, or function return.
-- Does the **Interface** match the surface the user touches **for this feature**, per the table above? Pick the surface where the user actually does the work — not the project's default and not the implementation seam.
+1. **Actor** — A specific role/situation. Bare `user` / `users` / `a user` is rejected by verify-e2e Step 2b as `MISSING_ACTOR`. Use `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`, `Any signed-in member`, etc.
+2. **Scenario** — 1-2 sentences: starting state, trigger, desired outcome. Traceable to a PRD persona / bug report / feature request. No age, city, hobbies, personality, or product-irrelevant filler. (Verify-e2e rejects biography fluff as `SCENARIO_FLUFF`.)
+3. **Interface** — per the feature-surface table above
+4. **Intent** — one sentence stating what the Actor achieves, in the Actor's terms
+5. **Setup** — sanctioned setup only. Must NOT perform the same action the UC tests (verify-e2e rejects as `CHEAT_SETUP`). Don't re-test login here; declare the auth state and use a sanctioned auth path.
+6. **Steps** — at least 2 user actions through the declared interface
+7. **Verification** — surface-specific user-observable outcome. See the rubric in `rules/testing.md` "Verification language — surface-specific". A bare status code / bare exit code / single element-visible check is rejected as `THIN_VERIFICATION`.
+8. **Persistence** — reload, re-request, or re-invoke through the same interface. Missing = `MISSING_PERSISTENCE`.
 
-If any answer is no, rewrite the UC. The verify-e2e agent will bounce non-journey or wrong-interface UCs back as `FAIL_INVALID_USE_CASE` in Phase 5.4, which means an extra round-trip and an unchecked gate — better to catch it here.
+**Quick sanity check before saving:**
+
+- Could the **Intent** appear on a product/support ticket written by the affected Actor? If not, it's probably a test case wearing journey clothes.
+- Does **Verification** describe what the Actor would actually **observe** AND **do next** through the chosen interface, not just an assertion?
+- Does the **Interface** match the surface the user touches **for this feature**, per the table above?
+
+If any answer is no, rewrite the UC. verify-e2e Step 2b's hard gates above will reject malformed UCs as `FAIL_INVALID_USE_CASE` — better to fix it here than round-trip through an unchecked gate.
 
 **Minimum:** 1 happy-path use case + 1 error/edge case. Complex features need more.
 
@@ -932,7 +942,7 @@ The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`,
 - **VERDICT: PASS** — Proceed to Phase 5.4b — **after** the SURFACE_COVERAGE_WARNING check below.
 - **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body. Do NOT check the box until PASS.
   - `FAIL_BUG`: Fix the issue in the product code, re-run verify-e2e.
-  - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason (`NOT_USER_JOURNEY` or `WRONG_INTERFACE`). Rewrite the offending UC in the plan file using the smell test from Phase 3.2b and the GOOD examples in `rules/testing.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
+  - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason code: `MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW` / `NOT_USER_JOURNEY` / `WRONG_INTERFACE`. Rewrite the offending UC in the plan file using the required-shape checklist from Phase 3.2b and the GOOD examples in `rules/testing.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
   - If the body has mixed classifications, address `FAIL_INVALID_USE_CASE` first (verify-e2e can't meaningfully run an invalid UC), then `FAIL_BUG`, then `FAIL_STALE`.
 - **VERDICT: PARTIAL** — No `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
   - `FAIL_STALE`: update the stale use case file (interface or selector changed), re-run.

@@ -96,21 +96,33 @@ await expect(page.getByText("Test")).toBeVisible(); // Still there?
 
 ## E2E Use Case Design
 
-E2E tests are **user use cases** — think like a person using the product, not a developer testing code.
+E2E tests are **user use cases** — a specific actor in a specific situation achieving a real product outcome. The shape below is what verify-e2e validates in Step 2b. Missing any required field is a hard-fail.
 
 Each use case MUST include:
 
-1. **Intent** — A real user goal in plain language
-   Example: "User creates a new project and invites a teammate"
-   **Smell test:** If you cannot describe the Intent to a non-developer in one sentence without naming endpoints, code, tables, components, or other internal terms, it is not a user journey — it is an integration test. Rewrite it before continuing.
-2. **Steps** — The user's actions through the chosen interface, in order
-   - UI: `Navigate to /projects → Click "New Project" → Fill name → Click "Create"`
-   - API: `POST /api/v1/projects with {name: "Launch"} → GET /api/v1/projects to list back`
-   - CLI: `mycli project add --name "Launch" → mycli project list`
-3. **Verification** — Something the **user would see** through the same interface — UI text/elements, API response body/status, or CLI stdout/exit code. Never a database row, internal log, or function return.
-   Example: Project appears in list, success toast shows
-4. **Persistence** — Reload, re-request, or re-invoke and confirm the state stuck
-   Example: Reload /projects → project still visible
+1. **Actor** — A specific role/situation, NOT the bare word "user".
+   Acceptable: `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`, `Any signed-in member`.
+   Forbidden: `User`, `Users`, `A user` (no role, no situation — disqualified by Step 2b).
+2. **Scenario** — 1-2 sentences setting starting state + trigger + desired outcome. No biography fluff (no age, city, hobbies, personality). Must be traceable to a PRD persona, bug report, or feature request.
+   Example: `A portfolio manager has just imported holdings and needs to run the optimizer before sending the client report. They want the selected mode to be saved so tomorrow's rerun uses the same assumptions.`
+3. **Interface** — UI / API / CLI / API+UI. Per the feature-surface table below.
+4. **Intent** — One sentence stating what the Actor achieves, in the Actor's terms. No endpoints, code, tables, components, or internal language.
+5. **Setup** — Sanctioned setup only (public API, public signup/login, app CLI, UI, documented seed commands). Must NOT perform the same action the UC is testing — that turns Verification into a trivial re-read (Step 2b rejects this as `CHEAT_SETUP`). Don't re-test login in every UC: declare the auth/account state needed and use a sanctioned auth path; auth itself gets its own dedicated UCs.
+6. **Steps** — The Actor's actions through the declared interface, in order. At least 2 steps (a single isolated call is too shallow).
+7. **Verification** — Surface-specific user-observable outcome. See the rubric below — a bare status code / bare exit code / single element-visible check is disqualified.
+8. **Persistence** — Reload, re-request, or re-invoke through the same interface and confirm the state stuck. Missing Persistence is a hard-fail.
+
+### Verification language — surface-specific
+
+Verification must describe what the Actor can **observe** AND ideally what they can **do next** with what just happened. Surface vocabulary:
+
+| Surface | Acceptable verbs                                                                                        | Too thin alone              |
+| ------- | ------------------------------------------------------------------------------------------------------- | --------------------------- |
+| UI      | sees, appears, is shown, can open, the page reads, the toast says, the row is highlighted               | a single element is visible |
+| CLI     | stdout shows, stderr explains, the next invocation lists/shows/returns, the human-readable line matches | exit code 0 alone           |
+| API     | receives, response includes, client can use, follow-up request returns, error body explains             | status code alone           |
+
+**Rule:** at least one verb from the Acceptable list, AND a meaningful "next observable thing" beyond bare status/exit/element. Example: "Receives 201 + Location header; following that link returns the same order id and item list."
 
 ### What E2E is NOT
 
@@ -119,6 +131,7 @@ Each use case MUST include:
 - ❌ Testing a component renders correctly (component test)
 - ❌ Clicking one button and checking one element (too shallow)
 - ❌ Testing the same internal data path through two interfaces just to "cover both" (still one assertion, just duplicated)
+- ❌ Setup creates the thing and Verification reads it back (cheat — the real action belongs in Steps)
 
 ### GOOD vs BAD use cases (canonical examples)
 
@@ -137,17 +150,24 @@ Verification:  Submit button is visible
 Persistence:   N/A
 ```
 
-Why bad: the Intent names a component. No real user goal. No persistence. Verification checks one DOM element, not a user-visible outcome of an action.
+Why bad: no Actor, no Scenario. Intent names a component. Verification checks one DOM element. No Persistence.
 
 **✅ GOOD (user-journey):**
 
 ```
-Intent:        Signed-in user creates a todo and confirms it survives a page reload
+Actor:         Signed-in customer on the personal todo list
+Scenario:      They just remembered something to buy while making dinner and want
+               it captured before they forget. They'll come back to the list tomorrow
+               morning to plan the day.
 Interface:     UI
-Setup:         Register + login via the public signup flow (POST /api/v1/users, then UI login)
+Intent:        The customer captures a new todo and sees it survive a reload so they
+               can trust the list overnight.
+Setup:         Register a new customer via the public signup flow + log in via UI.
 Steps:         Navigate to /todos → Click "New Todo" → Type "Buy milk" → Click "Create"
-Verification:  "Buy milk" appears in the list AND a "Created" toast is visible
-Persistence:   Reload /todos → "Buy milk" is still in the list
+Verification:  The customer sees "Buy milk" appear in the list with a "Created" toast
+               that names it; clicking the row opens its detail view.
+Persistence:   Reload /todos → "Buy milk" is still in the list at the position it
+               was created.
 ```
 
 #### API use case — public/product API feature
@@ -163,17 +183,27 @@ Verification:  Response status is 201
 Persistence:   N/A
 ```
 
-Why bad: tests a single endpoint contract. Doesn't span the journey of a user achieving something through the API. No persistence check.
+Why bad: no Actor, no Scenario. Tests a single endpoint contract. Verification is bare status. No Persistence.
 
 **✅ GOOD (user-journey):**
 
 ```
-Intent:        Authenticated customer places an order and finds it in their order history
+Actor:         API integrator wiring an external storefront to our order service
+Scenario:      They have a logged-in customer session token and a cart of items. They
+               need to place the order programmatically and confirm it lands in the
+               customer's history so the storefront can show it on the next page load.
 Interface:     API
-Setup:         POST /api/v1/users (register) → POST /api/v1/sessions (login, capture token)
+Intent:        The integrator places an order on behalf of a customer and retrieves
+               it back from the customer's order history.
+Setup:         Register a customer via POST /api/v1/users; obtain session token via
+               POST /api/v1/sessions. (Do NOT pre-create the order — that's the
+               action under test.)
 Steps:         POST /api/v1/orders {items:[…]} with auth → GET /api/v1/users/me/orders
-Verification:  POST returns 201 + Location header; GET response contains the new order with the id from the Location header
-Persistence:   Re-request GET /api/v1/users/me/orders → order still listed
+Verification:  The integrator receives 201 + a Location header; following that link
+               returns the new order with the same items and total. GET /orders
+               response includes the new order at the top with the id from Location.
+Persistence:   Re-request GET /api/v1/users/me/orders after a short delay; the order
+               is still listed with the same id and items.
 ```
 
 #### CLI use case — CLI feature
@@ -189,17 +219,26 @@ Verification:  Exit code is 0
 Persistence:   N/A
 ```
 
-Why bad: tests argument parsing. No user goal — operators don't run `add` just to see exit code 0; they run it to add something they later use.
+Why bad: no Actor, no Scenario. Tests argument parsing. Verification is bare exit code. No Persistence.
 
 **✅ GOOD (user-journey):**
 
 ```
-Intent:        Operator adds a project, then lists it back in a separate invocation
+Actor:         Operator running the CLI on their laptop to bootstrap a new project
+Scenario:      They've just been assigned the "launch-2026" project and want to add
+               it to their local registry so they can drive subsequent runs from the
+               shell without opening the UI.
 Interface:     CLI
-Setup:         Run `mycli init` to create the local config
+Intent:        The operator adds a project and lists it back in a separate invocation
+               to confirm it persists across shell sessions.
+Setup:         Run `mycli init` once to create the local config. (Do NOT pre-create
+               the project — that's the action under test.)
 Steps:         Run `mycli project add --name "launch-2026"` → run `mycli project list`
-Verification:  `add` stdout matches `Created project launch-2026` and exit 0; `list` stdout contains `launch-2026`
-Persistence:   Exit the shell, open a new shell, run `mycli project list` → `launch-2026` is still listed
+Verification:  `add` stdout shows `Created project launch-2026 (id: <UUID>)` with
+               exit 0; the next invocation `mycli project list` returns a table whose
+               first row is `launch-2026 <UUID>`.
+Persistence:   Exit the shell, open a new one, run `mycli project list` → the new
+               row is still there with the same id.
 ```
 
 ### Multi-surface coverage — design UCs for EVERY surface the user could use

@@ -476,14 +476,24 @@ Run this checklist:
 
 verify-e2e's Step 2c emits a `SURFACE_COVERAGE_WARNING` if UCs cover fewer surfaces than the project exposes; during an autonomous `/forge-goal` run, the warning triggers a `/council` consultation unless the Surface coverage decision sub-block pre-justified the omission.
 
-**User-journey smell test — before writing, ask yourself for each UC:**
+**Required UC shape — every UC must have these fields filled, in this order:**
 
-- Can I describe the **Intent** to a non-developer in one sentence without naming endpoints, code, components, tables, or other internal terms? If not — rewrite as a real user goal.
-- Does the UC **reproduce what the user was doing** when the bug occurred (multiple actions, not a single isolated call)?
-- Does **Verification** check what the user would **see** through the chosen interface (UI text/elements, API response body, CLI stdout)? Never a DB row, internal log, or function return.
+1. **Actor** — A specific role/situation. Bare `user` / `users` / `a user` is rejected by verify-e2e Step 2b as `MISSING_ACTOR`. Use `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`, etc.
+2. **Scenario** — 1-2 sentences: what the Actor was doing when the bug occurred + what they expected. Traceable to the bug report. No biography fluff (verify-e2e rejects as `SCENARIO_FLUFF`).
+3. **Interface** — per the bug-surface table above
+4. **Intent** — one sentence stating the journey the Actor takes that should now work after the fix
+5. **Setup** — sanctioned setup only. Must NOT perform the action under test (`CHEAT_SETUP`). Declare auth state; use a sanctioned auth path.
+6. **Steps** — at least 2 user actions that reproduce the original bug path
+7. **Verification** — surface-specific user-observable outcome. See `rules/testing.md` "Verification language — surface-specific". A bare status code / bare exit code / single element-visible check is `THIN_VERIFICATION`.
+8. **Persistence** — reload, re-request, or re-invoke and confirm the fix stuck. Missing = `MISSING_PERSISTENCE`.
+
+**Quick sanity check before saving:**
+
+- Could the **Intent** be quoted from the original bug report by the affected Actor? If not, you're testing a code path, not the user's experience.
+- Does **Verification** describe what the Actor would actually **observe** AND **do next** through the chosen interface, not just an assertion?
 - Does the **Interface** match the surface where the user actually hits the bug, per the table above?
 
-If any answer is no, rewrite the UC. The verify-e2e agent will bounce non-journey or wrong-interface UCs back as `FAIL_INVALID_USE_CASE` in Phase 5.4, which means an extra round-trip and an unchecked gate — better to catch it here.
+If any answer is no, rewrite the UC. verify-e2e Step 2b's hard gates above will reject malformed UCs as `FAIL_INVALID_USE_CASE` — better to fix it here than round-trip through an unchecked gate.
 
 **Minimum:** 1 use case that reproduces the original bug through the user's interface and verifies the fix.
 
@@ -809,7 +819,7 @@ Simple fixes (1-2 files, non-high-impact) skip Phase 3 entirely — so no plan f
 - Write a lightweight use case set inline (1 happy-path + 1 error case minimum) using the UC template from `rules/testing.md` (Intent, Interface, Setup, Steps, Verification, Persistence). Reference the "GOOD vs BAD use cases" section for canonical worked examples per API / UI / CLI.
 - **Pick the interface from where the user hits the bug, not the project default** — UI bug → UI UC, public/product API bug → API UC, CLI bug → CLI UC, internal endpoint backing a UI page → UI UC. Same interface-selection table as Phase 3.2b applies.
 - **Run the Surface coverage audit from Phase 3.2b** even on simple fixes. Read `CLAUDE.md ## E2E Configuration`; for EACH exposed interface (UI / API / CLI) ask "could the user hit this bug here?" In the staging file, add a **Surface coverage decision** sub-block listing every exposed interface as either `Covered` (UC below) or `N/A — <substantive justification>`. _"No CLI changes in my diff"_ is NOT a valid justification — that describes implementation, not user-facing scope. verify-e2e's Step 2c will emit `SURFACE_COVERAGE_WARNING` if an exposed surface lacks both a UC and a pre-justified N/A line.
-- **Apply the user-journey smell test from Phase 3.2b before saving** — Intent describable to a non-developer in one sentence (no endpoints, code, or internal terms); multiple user actions, not one isolated call; Verification checks what the user SEES; Interface matches the surface the user touches. The verify-e2e agent will bounce non-journey or wrong-interface UCs back as `FAIL_INVALID_USE_CASE`.
+- **Apply the required UC shape from Phase 3.2b before saving** — every UC must have an `Actor:` (not bare "user"), a `Scenario:` (1-2 sentences, no biography fluff), `Intent`, `Interface`, `Setup` (NOT the action under test), at least 2 `Steps`, `Verification` with surface-appropriate user-observable language (UI: sees/appears/shows; CLI: stdout shows/next invocation lists; API: receives/follow-up returns — bare status / bare exit code / single element-visible is `THIN_VERIFICATION`), and `Persistence`. verify-e2e Step 2b's hard gates reject malformed UCs as `FAIL_INVALID_USE_CASE` — see `rules/testing.md` "E2E Use Case Design" + "GOOD vs BAD use cases".
 - Save to **`docs/plans/<bug-name>-use-cases.md`** as a staging file. **Start the file with a `#### E2E Use Cases` heading** so verify-e2e can extract the UCs correctly.
 - **Why a staging file, not tests/e2e/use-cases/ directly?** Writing directly to `tests/e2e/use-cases/` would cause Phase 5.4b regression mode to pick up the new unverified use case alongside accumulated ones. Staging in `docs/plans/` keeps the separation clean. Phase 6.2b then graduates the staged file after PASS.
 - Then proceed to Step 1
@@ -850,7 +860,7 @@ The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`,
 - **VERDICT: PASS** — Proceed to Phase 5.4b — **after** the SURFACE_COVERAGE_WARNING check below.
 - **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body. Do NOT check the box until PASS.
   - `FAIL_BUG`: Fix the issue in the product code, re-run verify-e2e.
-  - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason (`NOT_USER_JOURNEY` or `WRONG_INTERFACE`). Rewrite the offending UC in the plan file (or `docs/plans/<bug-name>-use-cases.md` for simple-fix) using the smell test from Phase 3.2b / Step 0 and the GOOD examples in `rules/testing.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
+  - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason code: `MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW` / `NOT_USER_JOURNEY` / `WRONG_INTERFACE`. Rewrite the offending UC in the plan file (or `docs/plans/<bug-name>-use-cases.md` for simple-fix) using the required-shape checklist from Phase 3.2b / Step 0 and the GOOD examples in `rules/testing.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
   - If the body has mixed classifications, address `FAIL_INVALID_USE_CASE` first (verify-e2e can't meaningfully run an invalid UC), then `FAIL_BUG`, then `FAIL_STALE`.
 - **VERDICT: PARTIAL** — No `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
   - `FAIL_STALE`: update the stale use case file (interface or selector changed), re-run.

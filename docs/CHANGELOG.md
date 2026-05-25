@@ -2,6 +2,44 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.34 — 2026-05-25 · E2E UC shape — Actor + Scenario + surface-specific Verification
+
+**Surfaced by Pablo during ongoing /forge-goal soak.** Even with v5.31's smell test and v5.33's surface coverage audit, the agent kept drafting code-shaped UCs ("User creates a todo" / "POST /api/v1/orders returns 201"). Codex pinned the root cause: the rules said "be specific" but the canonical GOOD examples in `rules/testing.md` still modeled generic phrasing — and Step 2b's prefer-valid bias let borderline UCs slide. The model copies what the examples show, not what the prose argues for.
+
+**Fix — required UC shape with hard gates** (Codex-revised plan, two iterations of pushback):
+
+- **`rules/testing.md`** — UC template revised. Added two REQUIRED fields BEFORE Intent:
+  - **Actor** — a specific role/situation (e.g., `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`). Bare `user` / `users` / `a user` is rejected as `MISSING_ACTOR`.
+  - **Scenario** — 1-2 sentences with starting state + trigger + desired outcome. Must be traceable to a PRD persona / bug report / feature request. No age, city, hobbies, personality, or product-irrelevant filler. Biography fluff rejected as `SCENARIO_FLUFF`.
+    Added surface-specific **Verification language rubric** (UI: sees/appears/shows; CLI: stdout shows/next invocation lists/exit code SUPPORTS outcome; API: receives/response includes/follow-up returns). Bare status code, bare exit code, or single element-visible check is rejected as `THIN_VERIFICATION`. Added Setup-cheat rule: Setup must NOT perform the action under test (rejected as `CHEAT_SETUP`). All three canonical GOOD examples (UI/API/CLI) rewritten end-to-end to model the new shape.
+
+- **`agents/verify-e2e.md` Step 2b** — split into **hard gates** (objective shape requirements, no judgment bias: `MISSING_ACTOR`, `MISSING_SCENARIO`, `SCENARIO_FLUFF`, `CHEAT_SETUP`, `THIN_VERIFICATION`, `MISSING_PERSISTENCE`, `TOO_SHALLOW`) and **judgment calls** (prefer-valid bias preserved: `NOT_USER_JOURNEY` for borderline Intent wording, `WRONG_INTERFACE` for borderline surface mismatch). 7 new reason codes added to the classification.
+
+- **`commands/new-feature.md` + `commands/fix-bug.md`** — Phase 3.2b inline checklist rewritten from prose smell test to the 8-field required UC shape. Both Phase 5.4 caller-handling blocks reference the full reason code set. Simple-fix Step 0 in fix-bug.md gets the same required-shape language.
+
+**What we deliberately did NOT do** (per Codex's pushback on the original "ban bare 'user' / day-in-the-life paragraph" plan):
+
+- **No mechanical bare-`user` ban** — folded into Actor validation as a sub-rule. "Bare actor identity" is what we reject; `Visitor`, `Signed-in member`, etc. are fine without naming a persona.
+- **No "day-in-the-life paragraph"** — that framing invites biography-fluff parody. Codex's tighter "Scenario: 1-2 sentences, no fluff, traceable to PRD/bug/request" is what shipped.
+- **No PRD persona carry-forward** — deferred; too brittle as a universal gate (not every flow goes through /prd:discuss).
+
+**Architectural shifts:**
+
+1. **Step 2b hard-gate vs judgment-call split** — missing fields are objective failures, not borderline. Only Intent wording and Interface selection retain the prefer-valid bias.
+2. **Setup is no longer free real estate** — Setup that does the action under test counts as cheating; the UC is testing a read, not the journey it claims to test.
+3. **Login is not part of every UC** — Setup declares the auth state and uses a sanctioned auth path; auth itself gets its own dedicated UCs. Stops every feature UC from re-testing login.
+
+**New tests:** `tests/template/test-contracts.sh` gains Contract 2d — every new reason code (`MISSING_ACTOR`, `MISSING_SCENARIO`, `SCENARIO_FLUFF`, `CHEAT_SETUP`, `THIN_VERIFICATION`, `MISSING_PERSISTENCE`, `TOO_SHALLOW`) must be referenced in verify-e2e (producer) AND both command callers (consumer). Required field names + surface-specific Verification verbs locked in `rules/testing.md`. GOOD examples asserted to contain concrete Actor lines (not generic "User"). 34 new assertions; **355 total across 4 hot-path suites**.
+
+**Files:**
+
+- `rules/testing.md` — UC template revision, Verification rubric, three GOOD examples rewritten
+- `agents/verify-e2e.md` — Step 2b hard-gate/judgment split, 7 new reason codes, UC1 + UC3 examples rewritten
+- `commands/new-feature.md` — Phase 3.2b required-shape checklist, Phase 5.4 caller-handling reason codes
+- `commands/fix-bug.md` — Phase 3.2b required-shape checklist, simple-fix Step 0 alignment, Phase 5.4 caller-handling reason codes
+- `tests/template/test-contracts.sh` — Contract 2d (34 new assertions)
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.33 → 5.34
+
 ## 5.33 — 2026-05-18 · Multi-surface E2E coverage audit
 
 **Surfaced during /forge-goal v1.0 soak in msai-v2 portfolio-backtest.** At the PR-creation gate, the user asked the agent whether the E2E tests covered UI, CLI, AND API. The agent admitted: it had designed UI + API UCs and silently skipped CLI even though the project's `msai` CLI exposes the same portfolio capability area. The agent's logic was "no CLI changes in my diff" — a description of implementation scope, not user-facing scope.
