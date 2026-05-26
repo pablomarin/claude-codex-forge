@@ -1924,8 +1924,27 @@ for leadcmd in \
     assert_equals "$rc" "2" "leading-nonship chain blocked: $leadcmd"
 done
 
-# Non-ship commands (no ship verb anywhere) must still pass immediately.
-for safecmd in "git status" "npm test" "git log --oneline" "echo done && ls"; do
+# env-prefix + `git -C <dir>` ship forms must be DETECTED (were bypassing the
+# `^\s*git` anchor before — exit 0). With incomplete gates each must block (exit 2),
+# whether standalone or chained after a separator.
+for shipform in \
+    "GIT_AUTHOR_NAME=x git commit -m y" \
+    "FOO=bar git push" \
+    "git -C . commit -m y" \
+    "git -c user.name=x commit -m y" \
+    "git -C /repo push" \
+    "ls && git -C sub commit -m y" \
+    "FOO=bar gh pr create --title t"; do
+    printf '{"tool_input":{"command":"%s"}}' "$shipform" \
+        | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>/dev/null
+    rc=$?
+    assert_equals "$rc" "2" "env-prefix / git -C ship form detected + gated: $shipform"
+done
+
+# Non-ship commands (no ship verb anywhere) must still pass immediately —
+# including `git -C` with a non-ship subcommand and an env-prefixed non-ship.
+for safecmd in "git status" "npm test" "git log --oneline" "echo done && ls" \
+    "git -C . status" "FOO=bar npm test"; do
     printf '{"tool_input":{"command":"%s"}}' "$safecmd" \
         | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>/dev/null
     rc=$?

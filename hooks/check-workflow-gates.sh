@@ -35,16 +35,24 @@ fi
 [ -z "$COMMAND" ] && exit 0
 
 # --- Only gate ship actions ---
+# Ship-verb detection tolerant of two common, fully-legitimate invocation forms
+# that a plain `^git commit` anchor misses:
+#   - env-assignment prefix:  GIT_AUTHOR_NAME=x git commit ...   /  FOO=bar git push
+#   - git global options:     git -C <dir> commit ...           /  git -c k=v push
+# matched at BOTH the command start AND after a separator (&&, ||, ;, |).
+#
+# KNOWN RESIDUAL (accepted, fail-safe — conscious scope decision 2026-05-26):
+# exotic wrappers — subshell `(git push)`, control-flow `if true; then git push; fi`,
+# and command-substitution `$(git push)` — are NOT matched here. They are rare,
+# non-idiomatic ways to ship; missing them yields a non-block (exit 0), never a
+# crash. Robust shell-command parsing is out of scope for this gate. Pushes/PRs
+# also re-enter this hook at push/PR time against the stable HEAD.
+_ENVP='([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*'
+_GITOPT='([[:space:]]+-[cC][[:space:]]+[^[:space:]]+)*'
+_SHIP_VERB="${_ENVP}(git${_GITOPT}[[:space:]]+(commit|push)\b|gh[[:space:]]+pr[[:space:]]+create\b)"
 IS_SHIP=false
-echo "$COMMAND" | grep -qE '^\s*git\s+commit\b' && IS_SHIP=true
-echo "$COMMAND" | grep -qE '^\s*git\s+push\b' && IS_SHIP=true
-echo "$COMMAND" | grep -qE '^\s*gh\s+pr\s+create\b' && IS_SHIP=true
-# Ship verb AFTER a separator (&&, ||, ;, |). Without this, a leading-nonship
-# chain like `git status && git commit && git push` has IS_SHIP=false and exits
-# below BEFORE reaching the compound-command block — shipping an unreviewed HEAD
-# past every gate. Matching the trailing ship verb routes it into the compound
-# block, which then blocks it.
-echo "$COMMAND" | grep -qE '[&|;]+\s*(git\s+commit\b|git\s+push\b|gh\s+pr\s+create\b)' && IS_SHIP=true
+echo "$COMMAND" | grep -qE "^[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
+echo "$COMMAND" | grep -qE "[&|;]+[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
 
 # Not a ship action — allow immediately
 $IS_SHIP || exit 0
@@ -62,7 +70,7 @@ $IS_SHIP || exit 0
 # false positive only asks the user to split the command (fail-safe).
 COMPOUND_TAIL=$(echo "$COMMAND" | sed -E 's/^[^&|;]*([&|;]+)//')
 if [ "$COMPOUND_TAIL" != "$COMMAND" ]; then
-    if echo "$COMPOUND_TAIL" | grep -qE '(git\s+commit\b|git\s+push\b|gh\s+pr\s+create\b)'; then
+    if echo "$COMPOUND_TAIL" | grep -qE "$_SHIP_VERB"; then
         echo "WORKFLOW GATE: compound ship command blocked." >&2
         echo "" >&2
         echo "This command chains a ship action (git commit / git push / gh pr create)" >&2
@@ -383,9 +391,11 @@ elif [ -n "$PLAN_PASS_LINE" ]; then
         exit 2
     fi
 
-    # Branch on the clean-line variant. Codex is mandatory: only `codex clean`
+    # Branch on the clean-line variant. Match the canonical delimited form
+    # (— codex clean —), not a bare substring, so "not-codex clean" can't pass.
+    # Codex is mandatory: only `codex clean`
     # (plan_sha bound) is accepted. No "codex unavailable" escapes.
-    if echo "$PLAN_CLEAN" | grep -q "codex clean"; then
+    if echo "$PLAN_CLEAN" | grep -qF -- "— codex clean —"; then
         # Presence check BEFORE sed extraction. `sed -E 's/.*plan=`...`.*/\1/'`
         # returns the WHOLE line on no-match, so a clean line missing the
         # plan=/plan_sha= tokens would slip past a non-empty check and hit a
@@ -524,7 +534,7 @@ elif [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
             exit 2
         fi
 
-        if echo "$LINE" | grep -q "$TOOL clean"; then
+        if echo "$LINE" | grep -qF -- "— $TOOL clean —"; then
             : # clean variant — head already verified above
         else
             echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line variant not recognized." >&2

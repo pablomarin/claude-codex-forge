@@ -181,9 +181,10 @@ function Compute-ReviewerGate {
                 $iter = $matches[1]
             } else { continue }
 
-            # Extract tool
-            if ($line -match 'codex clean') { $tool = "codex" }
-            elseif ($line -match 'pr-toolkit clean') { $tool = "pr-toolkit" }
+            # Extract tool — canonical delimited form only (— codex clean —),
+            # so "not-codex clean" can't pass.
+            if ($line -match '— codex clean —') { $tool = "codex" }
+            elseif ($line -match '— pr-toolkit clean —') { $tool = "pr-toolkit" }
             else { continue }
 
             # Extract head sha
@@ -250,7 +251,7 @@ function Compute-PlanReviewGate {
         | Select-Object -Last 1)
     if (-not $cleanLine) { return $result }
 
-    if ($cleanLine -match 'codex clean') {
+    if ($cleanLine -match '— codex clean —') {
         if ($cleanLine -match 'plan=`([^`]+)`') { $planPath = $matches[1] } else { return $result }
         if ($cleanLine -match 'plan_sha=`([^`]+)`') { $claimedSha = $matches[1].ToLower() } else { return $result }
         if (-not (Test-Path $planPath)) { return $result }

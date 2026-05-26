@@ -33,16 +33,24 @@ $command = $data.tool_input.command
 if (-not $command) { exit 0 }
 
 # --- Only gate ship actions ---
+# Ship-verb detection tolerant of two common, fully-legitimate invocation forms
+# that a plain `^git commit` anchor misses:
+#   - env-assignment prefix:  GIT_AUTHOR_NAME=x git commit ...   /  FOO=bar git push
+#   - git global options:     git -C <dir> commit ...           /  git -c k=v push
+# matched at BOTH the command start AND after a separator (&&, ||, ;, |).
+#
+# KNOWN RESIDUAL (accepted, fail-safe — conscious scope decision 2026-05-26):
+# exotic wrappers — subshell `(git push)`, control-flow `if true; then git push; fi`,
+# and command-substitution `$(git push)` — are NOT matched here. They are rare,
+# non-idiomatic ways to ship; missing them yields a non-block (exit 0), never a
+# crash. Robust shell-command parsing is out of scope for this gate. Pushes/PRs
+# also re-enter this hook at push/PR time against the stable HEAD.
+$envp = '([A-Za-z_][A-Za-z0-9_]*=\S+\s+)*'
+$gitopt = '(\s+-[cC]\s+\S+)*'
+$shipVerb = "$envp(git$gitopt\s+(commit|push)\b|gh\s+pr\s+create\b)"
 $isShip = $false
-if ($command -match '^\s*git\s+commit\b') { $isShip = $true }
-if ($command -match '^\s*git\s+push\b') { $isShip = $true }
-if ($command -match '^\s*gh\s+pr\s+create\b') { $isShip = $true }
-# Ship verb AFTER a separator (&&, ||, ;, |). Without this, a leading-nonship
-# chain like `git status && git commit && git push` has $isShip=$false and exits
-# below BEFORE reaching the compound-command block — shipping an unreviewed HEAD
-# past every gate. Matching the trailing ship verb routes it into the compound
-# block, which then blocks it.
-if ($command -match '[&|;]+\s*(git\s+commit\b|git\s+push\b|gh\s+pr\s+create\b)') { $isShip = $true }
+if ($command -match "^\s*$shipVerb") { $isShip = $true }
+if ($command -match "[&|;]+\s*$shipVerb") { $isShip = $true }
 
 if (-not $isShip) { exit 0 }
 
@@ -54,7 +62,7 @@ if (-not $isShip) { exit 0 }
 # individually so every one gets its own gate evaluation.
 $compoundTail = $command -replace '^[^&|;]*[&|;]+', ''
 if ($compoundTail -ne $command) {
-    if ($compoundTail -match '(git\s+commit\b|git\s+push\b|gh\s+pr\s+create\b)') {
+    if ($compoundTail -match $shipVerb) {
         [Console]::Error.WriteLine("WORKFLOW GATE: compound ship command blocked.")
         [Console]::Error.WriteLine("")
         [Console]::Error.WriteLine("This command chains a ship action (git commit / git push / gh pr create)")
@@ -345,7 +353,7 @@ if ($planNaLine) {
     }
 
     # Codex is mandatory: only `codex clean` (plan_sha bound) is accepted.
-    if ($planClean -match 'codex clean') {
+    if ($planClean -match '— codex clean —') {
         # Presence check BEFORE extraction (mirror .sh): a clean line missing
         # plan=/plan_sha= tokens must hit "malformed", not a garbled missing-file error.
         if ($planClean -notmatch 'plan=`[^`]+`.*plan_sha=`[^`]+`') {
@@ -449,7 +457,7 @@ if ($codeNaLine) {
             exit 2
         }
 
-        if ($line -match "$tool clean") {
+        if ($line -match "— $tool clean —") {
             # clean variant — head already verified above
         } else {
             [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN $tool line variant not recognized.")

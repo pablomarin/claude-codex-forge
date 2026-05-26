@@ -226,8 +226,11 @@ compute_reviewer_gate() {
             if (match(line, /iteration [0-9]+/)) {
                 iter=substr(line, RSTART+10, RLENGTH-10)
             } else { next }
-            if (line ~ /codex clean/)           { tool="codex" }
-            else if (line ~ /pr-toolkit clean/) { tool="pr-toolkit" }
+            # Match the canonical delimited variant only; a bare substring would
+            # let "not-codex clean" pass. (No apostrophes in this awk comment:
+            # the program is single-quoted, an apostrophe would terminate it.)
+            if (line ~ /— codex clean —/)           { tool="codex" }
+            else if (line ~ /— pr-toolkit clean —/) { tool="pr-toolkit" }
             else { next }
             if (match(line, /head=`[0-9a-f]+`/)) {
                 sha=substr(line, RSTART+6, RLENGTH-7)
@@ -289,8 +292,9 @@ compute_plan_review_gate() {
         | tail -1)
     [ -z "$clean_line" ] && { echo "false||"; return 0; }
 
-    # Match codex clean variant + verify plan_sha (read from file, hash, compare)
-    if echo "$clean_line" | grep -q "codex clean"; then
+    # Match codex clean variant + verify plan_sha (read from file, hash, compare).
+    # Canonical delimited form only (— codex clean —), so "not-codex clean" can't pass.
+    if echo "$clean_line" | grep -qF -- "— codex clean —"; then
         local plan_path claimed_sha actual_sha
         plan_path=$(echo "$clean_line" | sed -E 's/.*plan=`([^`]+)`.*/\1/')
         claimed_sha=$(echo "$clean_line" | sed -E 's/.*plan_sha=`([^`]+)`.*/\1/')

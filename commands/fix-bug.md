@@ -764,10 +764,8 @@ This runs 6 specialized agents: code-reviewer, silent-failure-hunter, pr-test-an
 
 **Tool availability:**
 
-- **Both available (normal):** Run Codex + PR Toolkit in parallel
-- **Codex unavailable:** PR Toolkit alone is sufficient
-- **PR Toolkit unavailable:** Codex alone is sufficient
-- **Neither available:** Alert user, perform manual review, get user sign-off
+- **Both available (normal):** Run Codex + PR Toolkit in parallel — the expected path. The ship gate requires BOTH a `codex clean` AND a `pr-toolkit clean` per-iter line at the current HEAD.
+- **Codex is mandatory** (this repo is Claude × Codex dual-engine). If Codex is unavailable: during a `/goal` autonomous run the loop HALTS and a human takes over — it cannot self-complete without real Codex evidence. In interactive mode a human may do manual review and mark the loop `- [x] Code review loop — N/A: <reason>` (caught at PR review). `build-evidence` does NOT count N/A as clean, so an N/A never satisfies `/goal` completion.
 
 **Step B — Collect findings and evaluate:**
 
@@ -776,7 +774,14 @@ Gather severity-tagged findings from all available reviewers. Use the same P0–
 **Step C — Exit criteria:**
 
 - **P0/P1/P2 found by any reviewer →** Fix the issues. If fixes are substantial (3+ files changed), re-run verify-app before next review iteration to catch regressions early. Increment counter in the state.md checklist (`Code review loop (N iterations)`), go back to Step A.
-- **Only P3 or clean from all available reviewers on the same pass →** Check the box in state.md with final count: `- [x] Code review loop (3 iterations) — PASS`. Proceed to 5.2.
+- **Only P3 or clean from all available reviewers on the same pass →**
+  1. Append the per-iter clean lines to `.claude/local/state.md` `### Checklist` (head = current `git rev-parse HEAD`):
+     `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``
+`- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``
+  2. Check the loop-complete box: `- [x] Code review loop (<N> iterations) — PASS`
+  3. Proceed to 5.2.
+
+The PreToolUse `check-workflow-gates` hook blocks ship actions if (2) is checked without (1). New commits since iter-N invalidate the head-bound lines — re-run reviewers at the new HEAD and append a fresh iteration row.
 
 **Rules:**
 
