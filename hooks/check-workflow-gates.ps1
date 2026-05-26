@@ -259,4 +259,174 @@ if ($e2eCheckedLine -and ($e2eCheckedLine -notmatch 'N/A:')) {
     # No branch-off (user on main / no main or master) → skip evidence check.
 }
 
+# ---------------------------------------------------------------------------
+# Evidence-based gate for Plan review loop PASS
+# Mirrors check-workflow-gates.sh Task 3 — see those comments for rationale.
+# The .sh hook uses $CHECKLIST (a sed-extracted string); the .ps1 hook builds
+# $checklistLines from $workflowBlockLines (different shape, same scope).
+# ---------------------------------------------------------------------------
+
+# Build $checklistLines from $workflowBlockLines (mirrors the .ps1 pattern at
+# lines 165-177 of the existing quality-gate scan).
+$checklistLines = @()
+$inCl = $false
+foreach ($l in $workflowBlockLines) {
+    if ($l -match '^### Checklist') { $inCl = $true; continue }
+    if ($l -match '^## ' -and $inCl) { break }
+    if ($inCl) { $checklistLines += $l }
+}
+
+$planPassLine = ($checklistLines `
+    | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Plan review loop \(\d+ iterations\) — PASS' } `
+    | Select-Object -Last 1)
+
+if ($planPassLine) {
+    if ($planPassLine -match 'Plan review loop \((\d+) iterations\)') {
+        $planN = $matches[1]
+    } else {
+        $planN = $null
+    }
+
+    $planClean = ($checklistLines `
+        | Where-Object { $_ -match "^\s*-\s*\[x\]\s+Plan review iteration $planN — " } `
+        | Select-Object -Last 1)
+
+    if (-not $planClean) {
+        [Console]::Error.WriteLine("WORKFLOW GATE: [x] Plan review loop ($planN iterations) — PASS lacks per-iter clean evidence.")
+        [Console]::Error.WriteLine("")
+        [Console]::Error.WriteLine("Required: matching line in state.md (### Checklist):")
+        [Console]::Error.WriteLine("  - [x] Plan review iteration $planN — codex clean — plan=``<plan-file>`` — plan_sha=``<sha256>`` — ts=``<ts>``")
+        exit 2
+    }
+
+    if ($planClean -match 'codex clean') {
+        if ($planClean -match 'plan=`([^`]+)`') { $planPath = $matches[1] } else { $planPath = $null }
+        if ($planClean -match 'plan_sha=`([^`]+)`') { $claimedSha = $matches[1].ToLower() } else { $claimedSha = $null }
+        if (-not $planPath -or -not $claimedSha) {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN clean line is malformed.")
+            exit 2
+        }
+        if (-not (Test-Path $planPath)) {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review evidence references missing file: $planPath")
+            exit 2
+        }
+        # Lowercase BOTH sides of hash comparison (Get-FileHash returns uppercase).
+        $actualSha = (Get-FileHash -Algorithm SHA256 -Path $planPath).Hash.ToLower()
+        if ($actualSha -ne $claimedSha) {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN plan_sha mismatch.")
+            [Console]::Error.WriteLine("  Claimed (state.md): $claimedSha")
+            [Console]::Error.WriteLine("  Actual ($planPath): $actualSha")
+            exit 2
+        }
+    } elseif ($planClean -match 'codex unavailable, user-confirmed') {
+        if (Get-Command codex -ErrorAction SilentlyContinue) {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN claims 'codex unavailable, user-confirmed' but codex is available on this machine at gate time.")
+            exit 2
+        }
+    } elseif ($planClean -match 'codex unavailable, council-confirmed') {
+        # Require UUID-format council_nonce.
+        if ($planClean -match 'council_nonce=`([^`]+)`') {
+            $councilNonce = $matches[1]
+        } else {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN council-confirmed escape missing council_nonce.")
+            exit 2
+        }
+        if ($councilNonce -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN council_nonce malformed (expected UUID).")
+            [Console]::Error.WriteLine("Got: $councilNonce")
+            exit 2
+        }
+    } else {
+        [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN clean line variant not recognized.")
+        [Console]::Error.WriteLine("Got: $planClean")
+        exit 2
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Evidence-based gate for Code review loop PASS
+# Mirrors check-workflow-gates.sh Task 5 — binds to git HEAD. Codex + pr-toolkit
+# both required for the same iteration at the current HEAD.
+# Canonical clean-line stem (test-contracts.sh parity check):
+#   Code review iteration N — codex clean — head=`<sha>`
+# ---------------------------------------------------------------------------
+$codePassLine = ($checklistLines `
+    | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Code review loop \(\d+ iterations\) — PASS' } `
+    | Select-Object -Last 1)
+
+$headShaCode = (git rev-parse HEAD 2>$null)
+if ($headShaCode) { $headShaCode = ([string]$headShaCode).Trim() } else { $headShaCode = "" }
+
+# Degraded env (no git repo) → skip code-review evidence check entirely.
+if ($codePassLine -and $headShaCode) {
+    if ($codePassLine -match 'Code review loop \((\d+) iterations\)') {
+        $codeN = $matches[1]
+    } else {
+        $codeN = $null
+    }
+
+    $codexLine = ($checklistLines `
+        | Where-Object { $_ -match "^\s*-\s*\[x\]\s+Code review iteration $codeN — codex " } `
+        | Select-Object -Last 1)
+    $toolkitLine = ($checklistLines `
+        | Where-Object { $_ -match "^\s*-\s*\[x\]\s+Code review iteration $codeN — pr-toolkit " } `
+        | Select-Object -Last 1)
+
+    if (-not $codexLine -or -not $toolkitLine) {
+        [Console]::Error.WriteLine("WORKFLOW GATE: [x] Code review loop ($codeN iterations) — PASS lacks per-iter clean evidence.")
+        [Console]::Error.WriteLine("")
+        [Console]::Error.WriteLine("Required: matching lines in state.md (### Checklist):")
+        [Console]::Error.WriteLine("  - [x] Code review iteration $codeN — codex clean — head=``$headShaCode``")
+        [Console]::Error.WriteLine("  - [x] Code review iteration $codeN — pr-toolkit clean — head=``$headShaCode``")
+        exit 2
+    }
+
+    foreach ($pair in @(@{ tool = 'codex'; line = $codexLine }, @{ tool = 'pr-toolkit'; line = $toolkitLine })) {
+        $tool = $pair.tool
+        $line = $pair.line
+
+        # Every variant must carry head=`<sha>` matching current HEAD.
+        if ($line -match 'head=`([0-9a-f]+)`') {
+            $lineHead = $matches[1]
+        } else {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN $tool line missing head=``<sha>``.")
+            [Console]::Error.WriteLine("Got: $line")
+            exit 2
+        }
+        if ($lineHead -ne $headShaCode) {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN $tool line is at a stale HEAD (head mismatch).")
+            [Console]::Error.WriteLine("  Line head:    $lineHead")
+            [Console]::Error.WriteLine("  Current head: $headShaCode")
+            [Console]::Error.WriteLine("New commits landed since iter-$codeN. Re-run $tool at current head.")
+            exit 2
+        }
+
+        if ($line -match "$tool clean") {
+            # clean variant — head already verified above
+        } elseif ($line -match "$tool unavailable, user-confirmed") {
+            # Hard reject if codex is actually available (codex side only).
+            if ($tool -eq 'codex' -and (Get-Command codex -ErrorAction SilentlyContinue)) {
+                [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN claims '$tool unavailable, user-confirmed' but codex is available on this machine at gate time.")
+                exit 2
+            }
+        } elseif ($line -match "$tool unavailable, council-confirmed") {
+            if ($line -match 'council_nonce=`([^`]+)`') {
+                $councilNonce = $matches[1]
+            } else {
+                [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN $tool council-confirmed escape missing council_nonce.")
+                exit 2
+            }
+            if ($councilNonce -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+                [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN $tool council_nonce malformed (expected UUID).")
+                [Console]::Error.WriteLine("Got: $councilNonce")
+                exit 2
+            }
+        } else {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN $tool line variant not recognized.")
+            [Console]::Error.WriteLine("Got: $line")
+            exit 2
+        }
+    }
+}
+
 exit 0

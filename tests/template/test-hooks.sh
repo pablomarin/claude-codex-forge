@@ -1697,6 +1697,55 @@ cd "$REPO_ROOT"
 
 assert_equals "$rc" "0" "council-confirmed escape accepted"
 
+# ---------------------------------------------------------------------------
+# Test 24: PowerShell parity for the 8 workflow-gate-evidence fixtures.
+# Runs each fixture through run_hook_ps and asserts the exit code matches
+# the .sh expectation. Skipped if pwsh not installed.
+# ---------------------------------------------------------------------------
+start_test "PowerShell parity for evidence-gate fixtures (Tests 16-23)"
+
+if ! command -v pwsh >/dev/null 2>&1; then
+    pass "skipped (pwsh not installed)"
+else
+    # Include all 8 fixtures (including the escape ones) to test PS
+    # council_nonce validation + user-confirmed rejection parity.
+    for fixture in plan-review-pass-no-evidence plan-review-pass-evidence-ok \
+                   plan-review-pass-wrong-sha code-review-pass-no-evidence \
+                   code-review-pass-evidence-ok code-review-pass-wrong-head \
+                   codex-unavailable-user-confirmed codex-unavailable-council-confirmed; do
+        SP=$(scratch_dir wgate-ps-$fixture)
+        mkdir -p "$SP/.claude/local" "$SP/docs/plans"
+        echo "# Fake plan" > "$SP/docs/plans/fake-plan.md"
+        cd "$SP"
+        git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+        if command -v shasum >/dev/null 2>&1; then
+            PSHA=$(shasum -a 256 docs/plans/fake-plan.md | awk '{print $1}')
+        else
+            PSHA=$(sha256sum docs/plans/fake-plan.md | awk '{print $1}')
+        fi
+        HSHA=$(git rev-parse HEAD)
+        sed "s/__FAKE_PLAN_SHA__/$PSHA/g; s/__FAKE_HEAD_SHA__/$HSHA/g" \
+            "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/${fixture}.md" \
+            > .claude/local/state.md
+        # Extract the checklist body for run_hook_ps. Use awk that handles EOF
+        # correctly (fixtures may end at EOF without a trailing `## State`).
+        checklist=$(awk '/^### Checklist/{p=1; next} /^## /{p=0} p' .claude/local/state.md)
+        rc_ps=$(run_hook_ps "$SP" 'git commit -m x' "$checklist")
+        # Mirror expected exit codes from the .sh tests
+        case "$fixture" in
+            *-evidence-ok) expected=0 ;;
+            codex-unavailable-user-confirmed)
+                # If codex available at gate time → 2 (rejected); else → 0 (accepted)
+                if command -v codex >/dev/null 2>&1; then expected=2; else expected=0; fi
+                ;;
+            codex-unavailable-council-confirmed) expected=0 ;;
+            *) expected=2 ;;
+        esac
+        assert_equals "$rc_ps" "$expected" ".ps1 parity for $fixture (expected $expected)"
+        cd "$REPO_ROOT"
+    done
+fi
+
 # ===========================================================================
 # Report
 # ===========================================================================
