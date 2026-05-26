@@ -1653,6 +1653,50 @@ cd "$REPO_ROOT"
 assert_equals "$rc" "2" "Code review PASS with stale HEAD is blocked"
 assert_contains "$S21/.hook-stderr" "head" "stderr mentions head mismatch"
 
+# ---------------------------------------------------------------------------
+# Test 22: codex unavailable user-confirmed but codex IS available → exit 2
+# ---------------------------------------------------------------------------
+start_test "codex unavailable user-confirmed REJECTED when codex actually available"
+
+# This test only runs if codex is actually available (otherwise the escape is valid)
+if ! command -v codex >/dev/null 2>&1; then
+    skip_test "codex CLI not installed — escape would be valid; test inapplicable"
+else
+    S22=$(scratch_dir wgate-escape-rejected)
+    mkdir -p "$S22/.claude/local"
+    cd "$S22"
+    git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+    cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/codex-unavailable-user-confirmed.md" \
+       .claude/local/state.md
+    echo '{"tool_input":{"command":"git commit -m test"}}' \
+        | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S22/.hook-stderr"
+    rc=$?
+    cd "$REPO_ROOT"
+
+    assert_equals "$rc" "2" "user-confirmed escape rejected when codex available"
+    assert_contains "$S22/.hook-stderr" "codex is available" \
+        "stderr explains rejection reason"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 23: codex unavailable council-confirmed → exit 0 (always accepted)
+# ---------------------------------------------------------------------------
+start_test "codex unavailable council-confirmed accepted"
+
+S23=$(scratch_dir wgate-escape-council)
+mkdir -p "$S23/.claude/local" "$S23/docs/plans"
+echo "# Fake plan" > "$S23/docs/plans/fake-plan.md"
+cd "$S23"
+git init -q . && git add -A && git -c user.email=test@test -c user.name=test commit -q -m init
+cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/codex-unavailable-council-confirmed.md" \
+   .claude/local/state.md
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S23/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "0" "council-confirmed escape accepted"
+
 # ===========================================================================
 # Report
 # ===========================================================================

@@ -378,7 +378,7 @@ if [ -n "$PLAN_PASS_LINE" ]; then
         # Hard reject if codex is actually available at gate time
         if codex_available; then
             echo "WORKFLOW GATE: Plan review iteration $PLAN_N claims 'codex unavailable, user-confirmed'" >&2
-            echo "but \`codex\` is available on this machine at gate time." >&2
+            echo "but codex is available on this machine at gate time." >&2
             echo "" >&2
             echo "Re-run the iter-$PLAN_N codex review OR re-mark with the real outcome." >&2
             exit 2
@@ -481,7 +481,7 @@ if [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
             # user-confirmed for it. Codex catches the primary fakery vector.)
             if [ "$TOOL" = "codex" ] && codex_available; then
                 echo "WORKFLOW GATE: Code review iteration $CODE_N claims '$TOOL unavailable, user-confirmed'" >&2
-                echo "but \`codex\` is available on this machine at gate time." >&2
+                echo "but codex is available on this machine at gate time." >&2
                 exit 2
             fi
         elif echo "$LINE" | grep -q "$TOOL unavailable, council-confirmed"; then
