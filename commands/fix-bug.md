@@ -556,7 +556,19 @@ Gather severity-tagged findings from all available reviewers. Use this rubric:
 **Step C — Exit criteria:**
 
 - **P0/P1/P2 found by any reviewer →** Fix the plan, increment iteration counter in the state.md checklist (`Plan review loop (N iterations)`), go back to Step A.
-- **Only P3 or clean from all available reviewers on the same pass →** Check the box in state.md with final count: `- [x] Plan review loop (3 iterations) — PASS`. Proceed to Phase 4.
+- **Only P3 or clean from all available reviewers on the same pass →**
+  1. Compute `plan_sha`:
+     ```bash
+     PLAN_SHA=$(shasum -a 256 docs/plans/<name>.md 2>/dev/null | awk '{print $1}')
+     # Linux: PLAN_SHA=$(sha256sum docs/plans/<name>.md | awk '{print $1}')
+     ```
+  2. Append the per-iter clean line to `.claude/local/state.md` `### Checklist`:
+     `- [x] Plan review iteration <N> — codex clean — plan=\`docs/plans/<name>.md\` — plan_sha=\`<sha>\` — ts=\`<ISO8601>\``
+  3. Check the loop-complete box:
+     `- [x] Plan review loop (<N> iterations) — PASS`
+  4. Proceed to Phase 4.
+
+The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is checked without (2). The plan_sha binds the clean claim to the actual reviewed plan content — re-patching the plan after the clean line invalidates the gate.
 
 **Rules:**
 
@@ -608,7 +620,7 @@ When the plan-review-loop passes and the plan is approved (Phase 3.3 exit criter
     Plan approved. Type this to begin the autonomous loop:
    ────────────────────────────────────────
 
-   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
+   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND plan_review_gate.clean_same_iteration=true AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
 
    ────────────────────────────────────────
     Or type "no" to continue manually phase-by-phase.
