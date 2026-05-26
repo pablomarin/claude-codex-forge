@@ -104,6 +104,372 @@ assert_contains "$FB" "mkdir -p tests/e2e/reports" \
     "commands/fix-bug.md creates reports dir"
 
 # ---------------------------------------------------------------------------
+# Contract 2b: per-UC failure classifications ↔ caller handling
+#
+# Surfaced 2026-05-18 (v5.31): adding FAIL_INVALID_USE_CASE without updating
+# both callers would silently drop the new classification — callers wouldn't
+# know to rewrite the UC vs fix product code. Mirrors Contract 1 (VERDICT
+# vocabulary) but at the per-UC level.
+#
+# Authoritative source: the FAIL_* labels in verify-e2e.md's "Classification
+# rules" section. Each FAIL_* label must be mentioned by name in BOTH
+# new-feature.md and fix-bug.md so caller branching exists for it.
+# ---------------------------------------------------------------------------
+start_test "per-UC FAIL_* classifications ↔ caller handling"
+
+# Extract every FAIL_* label that appears as a bolded definition in the
+# Classification rules section. The Markdown formatter normalizes the
+# bolded labels to put the trailing colon INSIDE the bold span:
+#   - **FAIL_BUG:** ...
+#   - **FAIL_STALE:** ...
+#   - **FAIL_INVALID_USE_CASE:** ...
+# Regex anchors on '- **' start; colon is inside the close-bold token.
+FAIL_LABELS=$(grep -oE '^\- \*\*FAIL_[A-Z_]+:\*\*' "$VE2E" \
+    | sed -E 's/^\- \*\*//; s/:\*\*$//' \
+    | sort -u)
+
+if [[ -z "$FAIL_LABELS" ]]; then
+    fail "could not find any FAIL_* classification labels in verify-e2e.md Classification rules"
+else
+    pass "found $(echo "$FAIL_LABELS" | wc -l | tr -d ' ') FAIL_* classifications in verify-e2e.md"
+fi
+
+# Each FAIL_* must be referenced by name in both caller files (caller
+# branching exists). We match the bare label (e.g. FAIL_BUG) — callers
+# reference it inline in their verdict-handling prose, not in a bolded
+# form. Grep for the literal token with word-ish boundary.
+for label in $FAIL_LABELS; do
+    if grep -qE "\b${label}\b" "$NF"; then
+        pass "commands/new-feature.md handles $label"
+    else
+        fail "commands/new-feature.md missing handling for $label"
+    fi
+    if grep -qE "\b${label}\b" "$FB"; then
+        pass "commands/fix-bug.md handles $label"
+    else
+        fail "commands/fix-bug.md missing handling for $label"
+    fi
+done
+
+# Reverse check: callers must not reference FAIL_* labels that aren't in
+# the agent's vocabulary. Catches stale references after a label rename.
+CALLER_LABELS=$(grep -hoE '\bFAIL_[A-Z_]+\b' "$NF" "$FB" | sort -u)
+for label in $CALLER_LABELS; do
+    if echo "$FAIL_LABELS" | grep -qxF "$label"; then
+        :  # known label — already covered above
+    else
+        fail "caller references unknown FAIL_* label: '$label' (not in agent vocabulary)"
+    fi
+done
+[[ -n "$CALLER_LABELS" ]] && pass "all caller-referenced FAIL_* labels are in the agent vocabulary"
+
+# ---------------------------------------------------------------------------
+# Contract 2c: surface coverage audit vocabulary
+#
+# Surfaced 2026-05-18 (v5.33): msai-v2 soak found that the agent designed
+# UI+API UCs while skipping CLI even though the project's CLI exposes the
+# same capability area. Fix: (1) Phase 3.2b requires a "Surface coverage
+# decision" sub-block; (2) verify-e2e Step 2c emits SURFACE_COVERAGE_WARNING.
+#
+# The keyword `SURFACE_COVERAGE_WARNING` is the canonical marker that all
+# four files (rules + 2 commands + agent) must reference for the loop to
+# wire correctly. Drift in any one file breaks the audit silently.
+# ---------------------------------------------------------------------------
+start_test "Surface coverage audit — canonical vocabulary across files"
+
+SURFACE_KEY="SURFACE_COVERAGE_WARNING"
+SURFACE_DECISION_KEY="Surface coverage decision"
+RULES_TESTING="$REPO_ROOT/rules/testing.md"
+
+# Producer (agent) must define BOTH the warning marker AND the decision
+# sub-block name (Codex P2-4 fix v5.33): the agent reads the decision
+# sub-block to recognize pre-justified N/A lines, so the sub-block name
+# must be locked here too.
+assert_contains "$VE2E" "$SURFACE_KEY" \
+    "verify-e2e.md defines $SURFACE_KEY"
+assert_contains "$VE2E" "$SURFACE_DECISION_KEY" \
+    "verify-e2e.md references the Surface coverage decision sub-block (reads it for pre-justified N/A)"
+assert_contains "$VE2E" "Step 2c" \
+    "verify-e2e.md has Step 2c surface coverage check"
+assert_contains "$VE2E" "feature mode" \
+    "verify-e2e.md gates Step 2c to feature mode only (Codex P2-3 v5.33)"
+
+# Consumers (callers + rules) must reference the decision sub-block AND the
+# warning marker so the flow is wired.
+for f in "$NF" "$FB"; do
+    base=$(basename "$f")
+    assert_contains "$f" "$SURFACE_DECISION_KEY" \
+        "$base mentions Surface coverage decision sub-block"
+    assert_contains "$f" "$SURFACE_KEY" \
+        "$base references $SURFACE_KEY (cross-file wiring)"
+done
+
+# rules/testing.md must define the "Multi-surface coverage" section AND
+# the canonical SURFACE_COVERAGE_WARNING marker (Codex P2-4 fix v5.33):
+# the marker name could drift in rules/testing.md silently if not asserted.
+assert_contains "$RULES_TESTING" "Multi-surface coverage" \
+    "rules/testing.md has Multi-surface coverage subsection"
+assert_contains "$RULES_TESTING" "$SURFACE_DECISION_KEY" \
+    "rules/testing.md defines Surface coverage decision vocabulary"
+assert_contains "$RULES_TESTING" "$SURFACE_KEY" \
+    "rules/testing.md references the canonical $SURFACE_KEY marker (locked across all 4 files)"
+
+# Negative-justification regression guard: the disqualifying phrase must
+# appear in BOTH commands so future drift doesn't silently re-enable the
+# bad pattern.
+DISQUALIFIED='no CLI changes in my diff'
+assert_contains "$NF" "$DISQUALIFIED" \
+    "new-feature.md flags the disqualified N/A pattern"
+assert_contains "$FB" "$DISQUALIFIED" \
+    "fix-bug.md flags the disqualified N/A pattern"
+
+# Codex P2-1 (v5.33): callers must explicitly scan for SURFACE_COVERAGE_WARNING
+# after parsing the verdict. Without this post-report check, a PASS verdict
+# silently swallows the warning and the autonomous loop proceeds.
+assert_contains "$NF" "Step 4b" \
+    "new-feature.md has Step 4b SURFACE_COVERAGE_WARNING scan"
+assert_contains "$FB" "Step 4b" \
+    "fix-bug.md has Step 4b SURFACE_COVERAGE_WARNING scan"
+
+# ---------------------------------------------------------------------------
+# Contract 2d: user-journey UC shape — Actor + Scenario + surface-specific
+# Verification rubric (v5.34).
+#
+# Pablo's complaint 2026-05-25: agent keeps drafting code-shaped UCs even
+# with v5.31's smell test. Codex pinpointed root cause: examples still
+# modeled generic "User creates …" phrasing, and Step 2b's prefer-valid
+# bias let borderline UCs slide. v5.34 adds:
+#   - Required Actor field (rejects bare "user" via MISSING_ACTOR)
+#   - Required Scenario field (1-2 sentences, no biography fluff)
+#   - Surface-specific Verification language rubric per UI/CLI/API
+#   - Setup-cheat detection (CHEAT_SETUP)
+#   - Hard gates vs judgment calls split in Step 2b
+#   - GOOD examples rewritten to model the new shape
+#
+# This contract locks the new reason codes + the surface verbs across
+# rules + agent + both commands.
+# ---------------------------------------------------------------------------
+start_test "v5.34 — user-journey UC shape vocabulary across files"
+
+# The new reason codes introduced by v5.34. Each must be referenced in
+# verify-e2e.md (the agent emits them) AND in both command callers (the
+# callers tell the agent what to do with each). NOT_USER_JOURNEY and
+# WRONG_INTERFACE already shipped in v5.31; the rest are v5.34.
+V534_REASONS=(
+    "MISSING_ACTOR"
+    "MISSING_SCENARIO"
+    "SCENARIO_FLUFF"
+    "CHEAT_SETUP"
+    "THIN_VERIFICATION"
+    "MISSING_PERSISTENCE"
+    "TOO_SHALLOW"
+)
+for reason in "${V534_REASONS[@]}"; do
+    assert_contains "$VE2E" "$reason" \
+        "verify-e2e.md defines $reason reason code"
+    assert_contains "$NF" "$reason" \
+        "new-feature.md references $reason in caller handling"
+    assert_contains "$FB" "$reason" \
+        "fix-bug.md references $reason in caller handling"
+done
+
+# Required UC fields (Actor + Scenario) must be in rules/testing.md as
+# canonical AND in both commands' Phase 3.2b inline checklist so authoring
+# guidance matches the verifier.
+for field in "Actor" "Scenario"; do
+    assert_contains "$RULES_TESTING" "**$field**" \
+        "rules/testing.md defines required $field field"
+    assert_contains "$NF" "**$field**" \
+        "new-feature.md Phase 3.2b requires $field field"
+    assert_contains "$FB" "**$field**" \
+        "fix-bug.md Phase 3.2b requires $field field"
+done
+
+# Surface-specific Verification rubric: the rules file must contain the
+# canonical verb sets for UI, CLI, and API verification language so the
+# agent has a reference. The agent must mirror them in Step 2b gate logic.
+assert_contains "$RULES_TESTING" "Verification language — surface-specific" \
+    "rules/testing.md has Verification language section"
+assert_contains "$RULES_TESTING" "sees, appears, is shown" \
+    "rules/testing.md lists UI Verification verbs"
+assert_contains "$RULES_TESTING" "stdout shows, stderr explains" \
+    "rules/testing.md lists CLI Verification verbs"
+assert_contains "$RULES_TESTING" "receives, response includes" \
+    "rules/testing.md lists API Verification verbs"
+
+# GOOD examples must model the new shape — at least one Actor: line in
+# the GOOD blocks. This catches the v5.31 mistake where the rules said
+# "be specific" but the examples still used generic phrasing.
+assert_contains "$RULES_TESTING" "Actor:         Signed-in customer" \
+    "rules/testing.md GOOD UI example uses concrete Actor"
+assert_contains "$RULES_TESTING" "Actor:         API integrator" \
+    "rules/testing.md GOOD API example uses concrete Actor"
+assert_contains "$RULES_TESTING" "Actor:         Operator running the CLI" \
+    "rules/testing.md GOOD CLI example uses concrete Actor"
+
+# ---------------------------------------------------------------------------
+# Contract 2e: Step 2b hard gates feature-mode-only (v5.35).
+#
+# v5.34 introduced strict hard gates (MISSING_ACTOR, MISSING_SCENARIO, etc.)
+# that were mode-agnostic. That retroactively breaks regression suites that
+# accumulated UCs under earlier rules — a UC graduated under v5.31 with no
+# Actor field would fail v5.34's hard gate on every regression run.
+#
+# v5.35 mirrors v5.33's Step 2c gating: hard gates run in feature mode only.
+# In regression/smoke modes, hard-gate misses fall back to the prefer-valid
+# bias used by the judgment calls.
+#
+# Lock the gating across verify-e2e + both Phase 5.4b verdict-handling
+# blocks so future drift can't silently re-introduce the breaking change.
+# ---------------------------------------------------------------------------
+start_test "v5.35 — Step 2b hard gates gated to feature mode only"
+
+# Agent: Step 2b must explicitly state the mode gating.
+assert_contains "$VE2E" "Mode gating for hard gates" \
+    "verify-e2e.md Step 2b documents the mode gating"
+assert_contains "$VE2E" "feature mode only" \
+    "verify-e2e.md Step 2b mentions 'feature mode only' (Step 2b hard gates)"
+
+# The Hard gates header must NAME feature mode (not just the prose before it).
+# This catches a partial edit that updates the rationale but leaves the
+# header generic.
+assert_contains "$VE2E" "Hard gates (feature mode only" \
+    "verify-e2e.md Step 2b Hard gates header names feature-mode gating"
+
+# Both Phase 5.4b verdict-handling blocks must reference FAIL_INVALID_USE_CASE
+# AND distinguish hard-SHAPE (skipped in regression) from judgment (still
+# fires by design). Catches the graduation-bug case AND ensures the
+# intentional-surfacing-of-legacy-bad-UCs framing stays explicit (v5.37).
+assert_contains "$NF" "FAIL_INVALID_USE_CASE (agent only)" \
+    "new-feature.md Phase 5.4b handles FAIL_INVALID_USE_CASE"
+assert_contains "$FB" "FAIL_INVALID_USE_CASE (agent only)" \
+    "fix-bug.md Phase 5.4b handles FAIL_INVALID_USE_CASE"
+# Both commands must split hard-SHAPE vs judgment-call reasons explicitly.
+assert_contains "$NF" "Hard-SHAPE reasons" \
+    "new-feature.md Phase 5.4b names Hard-SHAPE reasons bucket"
+assert_contains "$FB" "Hard-SHAPE reasons" \
+    "fix-bug.md Phase 5.4b names Hard-SHAPE reasons bucket"
+assert_contains "$NF" "Judgment-call reasons" \
+    "new-feature.md Phase 5.4b names Judgment-call reasons bucket"
+assert_contains "$FB" "Judgment-call reasons" \
+    "fix-bug.md Phase 5.4b names Judgment-call reasons bucket"
+# v5.37 framing: NOT_USER_JOURNEY firing in regression is BY DESIGN, not
+# a residual risk. Lock the "by design" wording so it doesn't drift back
+# to "still applies"/"residual" framing.
+assert_contains "$NF" "DO fire in regression mode by design" \
+    "new-feature.md Phase 5.4b frames judgment-call firing as intentional design"
+assert_contains "$FB" "DO fire in regression mode by design" \
+    "fix-bug.md Phase 5.4b frames judgment-call firing as intentional design"
+
+# Codex final-pass gap (v5.38): the AGENT must also state the by-design
+# intent in its own Step 2b mode-gating note. Without this assertion the
+# caller text could keep saying "by design" while the agent drifts.
+assert_contains "$VE2E" "fire in" \
+    "verify-e2e.md mode-gating note still asserts judgment calls fire across modes"
+assert_contains "$VE2E" "by design" \
+    "verify-e2e.md mode-gating note frames legacy-UC surfacing as intentional"
+
+# v5.38: NOT_USER_JOURNEY now has TWO triggers — Intent shape (existing)
+# AND whole-UC shape (new). Lock the whole-UC shape vocabulary so future
+# drift can't silently narrow it back to Intent-only.
+assert_contains "$VE2E" "overall UC journey shape" \
+    "verify-e2e.md NOT_USER_JOURNEY definition expanded beyond Intent shape"
+assert_contains "$VE2E" "Whole-UC shape" \
+    "verify-e2e.md names the whole-UC shape trigger (v5.38)"
+
+# v5.38: rules/testing.md Failure Classification reason list must enumerate
+# all 9 reason codes (was stale, only listed NOT_USER_JOURNEY + WRONG_INTERFACE).
+# Catches the codex final-pass finding that the rules file lagged the agent.
+for reason in MISSING_ACTOR MISSING_SCENARIO SCENARIO_FLUFF CHEAT_SETUP THIN_VERIFICATION MISSING_PERSISTENCE TOO_SHALLOW; do
+    assert_contains "$RULES_TESTING" "**\`$reason\`**" \
+        "rules/testing.md Failure Classification lists $reason (v5.38 sync)"
+done
+# And the canonical Hard-SHAPE / Judgment-call bucket labels must be in the
+# rules file too (not just the commands).
+assert_contains "$RULES_TESTING" "Hard-SHAPE reasons" \
+    "rules/testing.md uses Hard-SHAPE reasons bucket vocabulary"
+assert_contains "$RULES_TESTING" "Judgment-call reasons" \
+    "rules/testing.md uses Judgment-call reasons bucket vocabulary"
+
+# Stale-text guard: the old NOT_USER_JOURNEY definition that said "no
+# Persistence step" must be gone from rules/testing.md. Missing persistence
+# is now MISSING_PERSISTENCE (a hard gate), not a NOT_USER_JOURNEY trigger.
+if grep -qF 'or has no Persistence step' "$RULES_TESTING"; then
+    fail "rules/testing.md still says NOT_USER_JOURNEY includes 'no Persistence step' — that's MISSING_PERSISTENCE now (v5.38 fix #2 missing)"
+else
+    pass "rules/testing.md NOT_USER_JOURNEY no longer claims missing-Persistence (correctly handed off to MISSING_PERSISTENCE)"
+fi
+
+# ---------------------------------------------------------------------------
+# Contract 2f: v5.36 — Codex review fixes to v5.34/v5.35.
+#
+# Codex flagged: (1) stale 6-field intro lines contradicting the new 8-field
+# shape, (2) "in this order" rigidity, (3) Persistence: N/A escape hatch
+# needs narrow whitelist, (4) "objective" claim too strong for SCENARIO_FLUFF/
+# CHEAT_SETUP/non-bare THIN_VERIFICATION, (5) Phase 5.4b should say "hard
+# SHAPE gates" to clarify NOT_USER_JOURNEY can still fire on legacy UCs.
+#
+# Lock all five so future drift doesn't regress.
+# ---------------------------------------------------------------------------
+start_test "v5.36 — Codex review fixes hold across files"
+
+# Fix 1: stale 6-field intro lines MUST be gone from both commands. The
+# canonical intro now names all 8 fields including Actor + Scenario.
+STALE_INTRO='Each UC must include **Intent**, **Interface**, **Setup**, **Steps**, **Verification**, and **Persistence**'
+if grep -qF "$STALE_INTRO" "$NF"; then
+    fail "new-feature.md still contains the stale 6-field intro (v5.36 fix #1 missing)"
+else
+    pass "new-feature.md does NOT contain the stale 6-field intro"
+fi
+if grep -qF "$STALE_INTRO" "$FB"; then
+    fail "fix-bug.md still contains the stale 6-field intro (v5.36 fix #1 missing)"
+else
+    pass "fix-bug.md does NOT contain the stale 6-field intro"
+fi
+# And the new 8-field intro MUST be present in both.
+NEW_INTRO='Each UC must include **Actor**, **Scenario**, **Interface**, **Intent**, **Setup**, **Steps**, **Verification**, and **Persistence**'
+assert_contains "$NF" "$NEW_INTRO" \
+    "new-feature.md has the canonical 8-field intro naming Actor + Scenario"
+assert_contains "$FB" "$NEW_INTRO" \
+    "fix-bug.md has the canonical 8-field intro naming Actor + Scenario"
+
+# Fix 2: "in this order" rigidity must be gone.
+if grep -qF "in this order" "$NF"; then
+    fail "new-feature.md still has 'in this order' rigidity (v5.36 fix #2 missing)"
+else
+    pass "new-feature.md no longer has 'in this order' rigidity"
+fi
+if grep -qF "in this order" "$FB"; then
+    fail "fix-bug.md still has 'in this order' rigidity"
+else
+    pass "fix-bug.md no longer has 'in this order' rigidity"
+fi
+
+# Fix 3: Persistence: N/A whitelist must be narrow — both rules and agent
+# must mention "stateless" outcomes as the only valid N/A case.
+assert_contains "$RULES_TESTING" "narrow" \
+    "rules/testing.md describes Persistence: N/A as narrow"
+assert_contains "$RULES_TESTING" "stateless" \
+    "rules/testing.md restricts N/A to stateless outcomes"
+assert_contains "$VE2E" "narrow" \
+    "verify-e2e.md describes Persistence: N/A as narrow"
+
+# Fix 4: "objective" claim about hard gates must be softened —
+# acknowledge mechanical vs policy.
+assert_contains "$VE2E" "Mechanical vs policy gates" \
+    "verify-e2e.md splits hard gates into mechanical vs policy"
+
+# Fix 5: Phase 5.4b regression promise must distinguish shape (hard, skipped
+# in regression) from journey (judgment, fires by design). v5.37 promoted
+# this from a one-liner to a two-bullet bucket split — the canonical phrasing
+# is now "Hard-SHAPE reasons" vs "Judgment-call reasons" (asserted above in
+# the v5.37 block). Just verify the bucket vocabulary is present here.
+assert_contains "$NF" "skipped in regression mode" \
+    "new-feature.md Phase 5.4b explains hard-SHAPE skip in regression"
+assert_contains "$FB" "skipped in regression mode" \
+    "fix-bug.md Phase 5.4b explains hard-SHAPE skip in regression"
+
+# ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers
 # setup.sh writes .claude/playwright-dir. Commands must read it.
 # ---------------------------------------------------------------------------
@@ -117,6 +483,56 @@ assert_contains "$NF" ".claude/playwright-dir" \
     "commands/new-feature.md reads marker file"
 assert_contains "$FB" ".claude/playwright-dir" \
     "commands/fix-bug.md reads marker file"
+
+# ---------------------------------------------------------------------------
+# Contract 3b: settings.template.json Stop hook ordering
+#
+# v5.32 split build-evidence into its own Stop hook (was inline call from
+# check-state-updated). The two hooks MUST be registered in this order in
+# settings.template.json (and the Windows mirror) — build-evidence FIRST,
+# check-state-updated SECOND — because build-evidence writes the
+# fingerprint side-channel file that check-state-updated's stuck-detection
+# reads. Reversing the order breaks stuck-detection silently.
+# ---------------------------------------------------------------------------
+start_test "Stop hook ordering — build-evidence before check-state-updated"
+
+UNIX_SETTINGS="$REPO_ROOT/settings/settings.template.json"
+WIN_SETTINGS="$REPO_ROOT/settings/settings-windows.template.json"
+assert_file_exists "$UNIX_SETTINGS" "settings template exists"
+assert_file_exists "$WIN_SETTINGS" "settings-windows template exists"
+
+if command -v python3 >/dev/null 2>&1; then
+    # Use Python to parse and assert order — avoids brittle line-grep that
+    # would break on whitespace reformatting.
+    for f in "$UNIX_SETTINGS" "$WIN_SETTINGS"; do
+        order_out=$(python3 -c "
+import json, sys
+with open('$f') as fh:
+    s = json.load(fh)
+stop = s.get('hooks', {}).get('Stop', [])
+cmds = []
+for block in stop:
+    for h in block.get('hooks', []):
+        cmds.append(h.get('command', ''))
+for c in cmds:
+    print(c)
+")
+        # Find indices of build-evidence and check-state-updated in command list
+        be_idx=$(echo "$order_out" | grep -n "build-evidence" | head -1 | cut -d: -f1)
+        cs_idx=$(echo "$order_out" | grep -n "check-state-updated" | head -1 | cut -d: -f1)
+        if [[ -z "$be_idx" ]]; then
+            fail "$(basename "$f"): build-evidence NOT registered in Stop hooks"
+        elif [[ -z "$cs_idx" ]]; then
+            fail "$(basename "$f"): check-state-updated NOT registered in Stop hooks"
+        elif (( be_idx < cs_idx )); then
+            pass "$(basename "$f"): build-evidence ($be_idx) registered before check-state-updated ($cs_idx)"
+        else
+            fail "$(basename "$f"): WRONG order — build-evidence ($be_idx) must come before check-state-updated ($cs_idx)"
+        fi
+    done
+else
+    pass "python3 not available — Stop hook ordering test skipped (not a failure)"
+fi
 
 # ---------------------------------------------------------------------------
 # Contract 6: E2E verified gate — canonical marker vocabulary
@@ -952,6 +1368,323 @@ assert_contains "$SETUP_SH" "codex-pty.ps1" "setup.sh installs codex-pty.ps1 (cr
 assert_contains "$SETUP_PS" "codex-pty.ps1" "setup.ps1 installs codex-pty.ps1"
 assert_contains "$SETUP_PS" "codex-pty.sh" "setup.ps1 installs codex-pty.sh (cross-platform parity)"
 assert_contains "$SETUP_PS" "codex-pty-helper.py" "setup.ps1 installs codex-pty-helper.py"
+
+# ---------------------------------------------------------------------------
+# Contract: FORGE_GOAL_EVIDENCE producer/consumer/schema
+#
+# (1) Producer markers: both build-evidence.{sh,ps1} contain BEGIN/END markers.
+# (2) Consumer ordering: check-state-updated.{sh,ps1} calls build-evidence
+#     BEFORE the stop_hook_active early-return (text-order check).
+# (3) Schema shape: the producer emits all required top-level JSON keys.
+#     Using a string-match on the literal token as it appears in source
+#     (same form for both .sh printf strings and .ps1 quoted literals).
+# ---------------------------------------------------------------------------
+start_test "FORGE_GOAL_EVIDENCE producer/consumer/schema contract"
+
+# (1) Producer markers
+for f in "$REPO_ROOT/hooks/build-evidence.sh" "$REPO_ROOT/hooks/build-evidence.ps1"; do
+    assert_file_exists "$f" "producer exists: $(basename "$f")"
+    assert_contains "$f" "FORGE_GOAL_EVIDENCE_BEGIN" "$(basename "$f") begin marker"
+    assert_contains "$f" "FORGE_GOAL_EVIDENCE_END"   "$(basename "$f") end marker"
+done
+
+# (2) Consumer ordering: build-evidence invocation must appear BEFORE the
+#     stop_hook_active early-return in check-state-updated.{sh,ps1}.
+#
+#     The early-return takes different forms in each file:
+#       .sh  — `[ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0` (uppercase var, after parsing)
+#       .ps1 — `if ($data.stop_hook_active -eq $true) {`
+#     We match on those exact guard patterns (not the comment that mentions
+#     stop_hook_active in lowercase, which appears in the parsing block and
+#     would give a false earlier line number via tail -1).
+#     Note: bash 3.2 (macOS) has no associative arrays — use explicit if/else.
+for f in "$REPO_ROOT/hooks/check-state-updated.sh" "$REPO_ROOT/hooks/check-state-updated.ps1"; do
+    [ -f "$f" ] || { fail "consumer missing: $f"; continue; }
+    case "$(basename "$f")" in
+        check-state-updated.sh)  guard_pattern='STOP_HOOK_ACTIVE.*exit 0' ;;
+        check-state-updated.ps1) guard_pattern='data\.stop_hook_active' ;;
+        *) fail "unexpected consumer file: $(basename "$f")"; continue ;;
+    esac
+    EVIDENCE_LINE=$(grep -n 'build-evidence' "$f" | head -1 | cut -d: -f1)
+    EXIT_LINE=$(grep -En "$guard_pattern" "$f" | tail -1 | cut -d: -f1)
+    if [ -n "$EVIDENCE_LINE" ] && [ -n "$EXIT_LINE" ] && [ "$EVIDENCE_LINE" -lt "$EXIT_LINE" ]; then
+        pass "$(basename "$f") invokes build-evidence BEFORE stop_hook_active early-return"
+    else
+        fail "$(basename "$f") consumer ordering wrong (build-evidence line $EVIDENCE_LINE not before early-return line $EXIT_LINE)"
+    fi
+done
+
+# (3) Schema shape — producer emits required top-level JSON keys.
+#     Each key appears as a literal substring in both .sh (printf format string)
+#     and .ps1 (PowerShell string concatenation literal). The grep is
+#     straightforward because the source uses the exact key token in both files.
+REQUIRED_KEYS=(
+    '"type":"forge_goal_evidence"'
+    '"schema_version":'
+    '"produced_at_unix":'
+    '"session_nonce"'
+    '"pr_ready":'
+    '"all_gates_green":'
+    '"reviewer_gate":{'
+    '"e2e_report":{'
+    '"pr_state":{'
+    '"pr_authorization":{'
+    '"progress_fingerprint":'
+)
+# Note: "session_nonce" uses the string token without a colon because both
+# producers construct it via a helper function (json_str_field / Build-JsonStringField)
+# that never appears as the literal "session_nonce": in source. The shorter form
+# is sufficient to assert the field exists in the schema.
+for key in "${REQUIRED_KEYS[@]}"; do
+    assert_contains "$REPO_ROOT/hooks/build-evidence.sh"  "$key" "schema key in build-evidence.sh: $key"
+    assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" "$key" "schema key in build-evidence.ps1: $key"
+done
+
+# ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — workflow commands have their checkpoint sections
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — /new-feature has PRD-Complete Checkpoint with correct content"
+
+NF="$REPO_ROOT/commands/new-feature.md"
+assert_file_exists "$NF" "commands/new-feature.md exists"
+assert_contains "$NF" "PRD-Complete Checkpoint" "new-feature.md has PRD-complete checkpoint section"
+assert_contains "$NF" "FORGE_GOAL_EVIDENCE" "new-feature.md references Layer 1 evidence markers in condition"
+assert_contains "$NF" "session_nonce" "new-feature.md references session_nonce in condition"
+assert_contains "$NF" "pr_ready=true" "new-feature.md uses pr_ready=true in condition"
+assert_contains "$NF" "AskUserQuestion" "new-feature.md references AskUserQuestion at PR-create gate"
+# P1.1: all_gates_green must NOT appear in the /goal condition string
+if grep -q 'all_gates_green=true' "$NF"; then
+    fail "new-feature.md /goal condition contains all_gates_green=true (unsatisfiable — must be absent)"
+else
+    pass "new-feature.md /goal condition does NOT contain all_gates_green=true (correct)"
+fi
+# P1.4: REPLACE semantics documented
+assert_contains "$NF" "REPLACE" "new-feature.md documents REPLACE semantics for /goal session and PR auth"
+
+start_test "Layer 2 — /fix-bug has Plan-Approved Checkpoint at Phase 3→4 boundary"
+
+FB="$REPO_ROOT/commands/fix-bug.md"
+assert_file_exists "$FB" "commands/fix-bug.md exists"
+assert_contains "$FB" "Plan-Approved Checkpoint" "fix-bug.md has Plan-Approved checkpoint (not PRD-complete)"
+# P1.3: fix-bug must NOT use PRD-complete naming
+if grep -q "PRD-Complete Checkpoint" "$FB"; then
+    fail "fix-bug.md has PRD-Complete Checkpoint section (incorrect — must be Plan-Approved)"
+else
+    pass "fix-bug.md does NOT have PRD-Complete Checkpoint naming (correct)"
+fi
+assert_contains "$FB" "Phase 3" "fix-bug.md checkpoint references Phase 3"
+assert_contains "$FB" "Phase 4" "fix-bug.md checkpoint references Phase 4 boundary"
+assert_contains "$FB" "session_nonce" "fix-bug.md references session_nonce in condition"
+assert_contains "$FB" "pr_ready=true" "fix-bug.md uses pr_ready=true in condition"
+# P1.1: all_gates_green must NOT appear in the /goal condition string
+if grep -q 'all_gates_green=true' "$FB"; then
+    fail "fix-bug.md /goal condition contains all_gates_green=true (unsatisfiable — must be absent)"
+else
+    pass "fix-bug.md /goal condition does NOT contain all_gates_green=true (correct)"
+fi
+# P1.4: REPLACE semantics documented
+assert_contains "$FB" "REPLACE" "fix-bug.md documents REPLACE semantics for /goal session and PR auth"
+
+# ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — rules/workflow.md has council-during-/goal rule
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — rules/workflow.md has council-during-/goal trigger rule"
+
+WF_RULE="$REPO_ROOT/rules/workflow.md"
+assert_file_exists "$WF_RULE" "rules/workflow.md exists"
+assert_contains "$WF_RULE" "Council During" "council section header present"
+assert_contains "$WF_RULE" "PR creation authorization" "PR-creation pause exception documented"
+assert_contains "$WF_RULE" "/council" "invokes /council for non-PR doubts"
+
+# ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — state.template.md has new section docs (no empty instance)
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — state.template.md documents /goal session + PR authorization conventions"
+
+ST_TPL="$REPO_ROOT/state.template.md"
+assert_file_exists "$ST_TPL" "state.template.md exists"
+assert_contains "$ST_TPL" "## /goal session" "/goal session section documented"
+assert_contains "$ST_TPL" "## PR authorization" "PR authorization section documented"
+assert_contains "$ST_TPL" "Code review iteration" "reviewer-iteration head-SHA convention documented"
+assert_contains "$ST_TPL" "REPLACE semantics" "REPLACE semantics documented in state.template.md"
+# P1.2: state.template must NOT have a pre-populated empty /goal session table
+# (The section documents the FORMAT, not an empty instance.)
+# Check that the nonce row, if present, does not have an empty value placeholder
+# that would cause the Bash guard to find a block with no actual nonce.
+if grep -E '^\|\s*nonce\s*\|\s*\|\s*$' "$ST_TPL" > /dev/null 2>&1; then
+    fail "state.template.md has empty nonce row (would cause false-active /goal session detection)"
+else
+    pass "state.template.md does NOT have empty nonce row (correct — format documented, not instantiated)"
+fi
+
+# ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — check-workflow-gates has PR-auth guard
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — check-workflow-gates.{sh,ps1} have PR-auth guard with consistent key strings"
+
+# Each guard file must reference the canonical auth line string and the nonce variable
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "PR creation authorized" \
+    "check-workflow-gates.sh references PR auth line"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "PR creation authorized" \
+    "check-workflow-gates.ps1 references PR auth line"
+
+# P1.2: Bash guard must use non-empty GOAL_NONCE as "active" definition
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh" 'if [ -n "$GOAL_NONCE"' \
+    "Bash guard checks non-empty GOAL_NONCE (not just block presence)"
+# PS guard must also use non-empty goalNonce
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" 'if ($goalNonce)' \
+    "PS guard checks non-empty goalNonce"
+
+# ---------------------------------------------------------------------------
+# Contract: /forge-goal Layer 2 — stuck-detection in check-state-updated
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — check-state-updated.{sh,ps1} have stuck-detection code"
+
+assert_contains "$REPO_ROOT/hooks/check-state-updated.sh"  "FORGE_GOAL_STUCK_WARNING" \
+    "check-state-updated.sh emits FORGE_GOAL_STUCK_WARNING"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" "FORGE_GOAL_STUCK_WARNING" \
+    "check-state-updated.ps1 emits FORGE_GOAL_STUCK_WARNING"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.sh"  "forge-goal-stuck-count" \
+    "check-state-updated.sh references the counter file"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" "forge-goal-stuck-count" \
+    "check-state-updated.ps1 references the counter file"
+
+# ---------------------------------------------------------------------------
+# Runtime parity contract: Bash vs PS guards for nonce-mismatch + empty-inactive
+# (conditional on pwsh availability)
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — PS guard runtime parity with Bash guard (nonce-mismatch + empty-inactive; skipped if pwsh absent)"
+
+if command -v pwsh > /dev/null 2>&1; then
+    # Test 1: nonce mismatch → both guards must exit 2 with "nonce mismatch" in stderr
+    scratch=$(scratch_dir parity-nonce-mismatch)
+    mkdir -p "$scratch/.claude/local"
+    cat > "$scratch/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | correct-session-nonce |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## PR authorization
+
+- [x] PR creation authorized — `2026-05-16T10:15:00Z` — nonce=`stale-different-nonce` — head=`abc123`
+EOF
+
+    (
+        cd "$scratch"
+        INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+        echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" > "$scratch/.bash_out" 2>&1
+        echo $? > "$scratch/.bash_exit"
+        echo "$INPUT" | pwsh -NoProfile -File "$REPO_ROOT/hooks/check-workflow-gates.ps1" > "$scratch/.ps_out" 2>&1
+        echo $? > "$scratch/.ps_exit"
+    )
+
+    BASH_EXIT=$(cat "$scratch/.bash_exit")
+    PS_EXIT=$(cat "$scratch/.ps_exit")
+    assert_equals "$BASH_EXIT" "2" "Bash guard exits 2 on nonce mismatch"
+    assert_equals "$PS_EXIT" "2" "PS guard exits 2 on nonce mismatch (parity)"
+    assert_contains "$scratch/.bash_out" "nonce mismatch" "Bash guard mentions nonce mismatch"
+    assert_contains "$scratch/.ps_out" "nonce mismatch" "PS guard mentions nonce mismatch (parity)"
+
+    # Test 2: empty nonce row → both guards treat session as INACTIVE (exit 0)
+    scratch2=$(scratch_dir parity-empty-nonce)
+    mkdir -p "$scratch2/.claude/local"
+    cat > "$scratch2/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            |       |
+| workflow_command |       |
+| issued_at        |       |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — Ship          |
+| Next step | gh pr create      |
+
+### Checklist
+
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+    (
+        cd "$scratch2"
+        INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+        echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" > "$scratch2/.bash_out" 2>&1
+        echo $? > "$scratch2/.bash_exit"
+        echo "$INPUT" | pwsh -NoProfile -File "$REPO_ROOT/hooks/check-workflow-gates.ps1" > "$scratch2/.ps_out" 2>&1
+        echo $? > "$scratch2/.ps_exit"
+    )
+
+    BASH_EXIT2=$(cat "$scratch2/.bash_exit")
+    PS_EXIT2=$(cat "$scratch2/.ps_exit")
+    assert_equals "$BASH_EXIT2" "0" "Bash guard exits 0 on empty nonce (INACTIVE)"
+    assert_equals "$PS_EXIT2" "0" "PS guard exits 0 on empty nonce (INACTIVE, parity)"
+
+else
+    pass "pwsh not available — PS runtime parity tests skipped (not a failure)"
+fi
+
+# ---------------------------------------------------------------------------
+# Stale-duplicate auth line contract: Bash guard uses LAST auth line
+# ---------------------------------------------------------------------------
+start_test "Layer 2 — Bash guard uses LAST PR authorization line when multiple present"
+
+if command -v git > /dev/null 2>&1; then
+    scratch=$(scratch_dir stale-dup-contract)
+    mkdir -p "$scratch/.claude/local"
+    (
+        cd "$scratch"
+        git init -q -b main >/dev/null 2>&1 || git init -q >/dev/null 2>&1
+        git config user.email "t@t"
+        git config user.name "t"
+        echo x > a; git add a; git commit -qm init >/dev/null 2>&1
+        HEAD_SHA=$(git rev-parse HEAD)
+
+        cat > .claude/local/state.md <<EOF
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | current-nonce |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## PR authorization
+
+- [x] PR creation authorized — \`2026-05-16T09:00:00Z\` — nonce=\`stale-nonce\` — head=\`stalehash\`
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`current-nonce\` — head=\`$HEAD_SHA\`
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+        INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+        echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" > .bash_out 2>&1
+        echo $? > .bash_exit
+    )
+
+    BASH_EXIT=$(cat "$scratch/.bash_exit")
+    assert_equals "$BASH_EXIT" "0" "Bash guard uses LAST auth line (matching) and ALLOWS (exit 0)"
+else
+    pass "git not available — stale-duplicate contract test skipped"
+fi
 
 # ---------------------------------------------------------------------------
 # Report

@@ -338,6 +338,98 @@ Then create the PRD:
 
 ---
 
+## PRD-Complete Checkpoint — Print `/goal` for Autonomous Loop
+
+When Phase 1 (PRD) completes (PRD file exists in `docs/prds/<feature>.md` and the user is ready to advance), if you (the agent) judge `/forge-goal` would help here (the feature is substantial enough to warrant autonomous execution), you may offer the user the option to kick off the autonomous loop.
+
+### Steps
+
+1. **Generate a session nonce.** Run:
+
+   ```bash
+   uuidgen | tr 'A-Z' 'a-z'
+   ```
+
+   Capture the output (e.g. `5f1a2b3c-9d8e-4f6a-b7c8-1e2d3f4a5b6c`).
+
+2. **REPLACE any existing `## /goal session` and `## PR authorization` sections in `.claude/local/state.md`.** Use the Edit tool to find the existing `## /goal session` heading (if any) and replace the entire block — heading + table + any trailing blank lines up to the next `## ` heading — with the new session. Likewise, if `## PR authorization` has any existing content, clear it now (stale auth from a prior run must not persist). Then write the new `/goal session` block immediately AFTER `## Workflow` and BEFORE `## State`:
+
+   ```markdown
+   ## /goal session
+
+   | Field            | Value                    |
+   | ---------------- | ------------------------ |
+   | nonce            | <UUID-from-step-1>       |
+   | workflow_command | /new-feature <name>      |
+   | issued_at        | <ISO-8601-UTC-timestamp> |
+   ```
+
+   Use `date -u +%Y-%m-%dT%H:%M:%SZ` for the timestamp.
+
+   **If `## /goal session` does not exist yet**, insert the section (heading + table) in the correct position using the Edit tool's insert-before capability on the `## State` heading.
+
+3. **Print the `/goal` command for the user to copy-paste.** Format the message EXACTLY:
+
+   ```
+   ────────────────────────────────────────
+    PRD approved. Type this to begin the autonomous loop:
+   ────────────────────────────────────────
+
+   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through research, plan, plan review, implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
+
+   ────────────────────────────────────────
+    Or type "no" to continue manually phase-by-phase.
+   ```
+
+   Substitute `<NONCE>` with the value from step 1.
+
+   **Note:** `all_gates_green` is intentionally excluded from the condition. The `/new-feature` checklist includes post-PR items like "PR reviews addressed" and "Branch finished" — those cannot be checked while the PR is still open, making `all_gates_green` unsatisfiable at stop time. The condition above instead uses `pr_ready=true` (which captures the key quality gates: reviewer clean, E2E fresh, PR auth) plus explicit `pr_state.state="OPEN"` and `pr_authorization.authorized=true` checks.
+
+4. **If the user types the `/goal` command**, you (the agent) enter autonomous mode per `rules/workflow.md` "Council During `/forge-goal` Autonomous Run" — pause for the PR-creation gate only, route all other doubts to `/council`.
+
+5. **If the user declines** (types "no" or anything other than the `/goal` command), continue the standard `/new-feature` workflow phase-by-phase.
+
+### Critical reminders during the autonomous loop
+
+- **DO NOT** call `gh pr create` until you have run `AskUserQuestion` asking the user to authorize, and they answered YES, and you have REPLACED the `## PR authorization` section in state.md with the new authorization line (matching nonce + current HEAD SHA at the moment of authorization).
+- **DO NOT** call `/goal clear` after success — `/goal` auto-clears when the verifier confirms the condition.
+- **DO** track each code-review iteration by appending `- [x] Code review iteration <N> — codex clean — head=`<sha>`AND`- [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>` to `### Checklist` (state.md). The `reviewer_gate.clean_same_iteration` evidence only fires when BOTH appear for the same iteration AND at the current HEAD.
+- **DO** invoke `/council` whenever you would otherwise pause for the user (except PR creation). Apply the chairman's verdict; do not second-guess it.
+- **REPLACE, never append** when writing `/goal session` or `## PR authorization`. Appending creates stale duplicate entries that confuse Layer 1's parsers.
+
+### PR-create gate — AskUserQuestion modal text
+
+When you (the agent) are ready to run `gh pr create` during a `/forge-goal`-driven run, FIRST call `AskUserQuestion` with this exact modal:
+
+```
+Authorize PR creation?
+
+Branch <branch> is pushed and Forge gates are green. Summary of work:
+- Files changed: <count> (<top-3-by-line-count>)
+- Tests added/modified: <count>
+- Reviewer status: codex clean (iter <N>) + pr-toolkit clean (iter <N>)
+- E2E report: <report-path>
+- Council fires this run: <count>
+
+Create a PR to <base> using the title "<title>" and the summary above?
+- Yes: write authorization to state.md and run gh pr create
+- No: pause the workflow for your direction
+```
+
+On YES, REPLACE the entire `## PR authorization` section in `.claude/local/state.md` with exactly ONE line:
+
+```
+- [x] PR creation authorized — `<ISO-8601-UTC-timestamp>` — nonce=`<session nonce>` — head=`<current HEAD SHA>`
+```
+
+If `## PR authorization` does not exist yet, create it. If it exists with old content, replace all content (heading + old lines) with the heading + this one new line. Never append.
+
+Then run `gh pr create`. The PreToolUse guard (`check-workflow-gates.{sh,ps1}`) will verify the authorization line matches before allowing the command.
+
+On NO, append a blocker line to `## Blockers` in state.md and STOP the autonomous loop.
+
+---
+
 ## Phase 2: Research (MANDATORY — agent-enforced)
 
 > **Checkpoint:** Update `## Workflow` in .claude/local/state.md — Phase: `2 — Research`, check off "PRD created".
@@ -527,20 +619,53 @@ This is the single moment design content leaves your in-memory context and becom
 
 If this feature changes any user-facing behavior (UI, API, flows, forms, navigation, permissions), design E2E use cases NOW — before implementation, not after.
 
-Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `rules/testing.md`. Each use case declares its **Interface** (API / UI / CLI / API+UI) based on the project-type matrix in `rules/testing.md` — and includes **Setup** (sanctioned method per the ARRANGE/VERIFY boundary), **Steps**, **Verification**, and **Persistence**.
+Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `rules/testing.md`. Each UC must include **Actor**, **Scenario**, **Interface**, **Intent**, **Setup**, **Steps**, **Verification**, and **Persistence** — see the required-shape checklist below. See `rules/testing.md` "GOOD vs BAD use cases" for canonical worked examples per API / UI / CLI.
 
-**Project type scope** (from `CLAUDE.md` `## E2E Configuration`):
+**Pick the interface from the feature surface, not the project type.** `CLAUDE.md ## E2E Configuration` tells you which interfaces the project EXPOSES — that is the capability envelope. The feature itself tells you which surface the user actually touches:
 
-- **fullstack:** API use cases + UI use cases (API-first ordering for execution)
-- **api:** API use cases only
-- **cli:** CLI use cases only
-- **hybrid:** declare per use case
+| Feature shape                                   | UC interface(s)                                    |
+| ----------------------------------------------- | -------------------------------------------------- |
+| New UI page, form, flow, or visual element      | **UI**                                             |
+| New **public/product** REST/GraphQL endpoint    | **API**                                            |
+| New CLI command, flag, or output                | **CLI**                                            |
+| Public flow crossing UI + API (signup, billing) | **API + UI** (API-first ordering)                  |
+| Internal endpoint backing a UI page             | **UI** only (endpoint contract → integration test) |
+| Purely internal (no user surface)               | E2E: N/A with justification                        |
 
-Think like a user, not a developer:
+**Surface coverage audit — REQUIRED before writing UCs:**
 
-- What will the user try to do with this feature?
-- What's the happy path? What are the error paths?
-- What existing flows could this break?
+A feature touches a _capability area_ (e.g., "create portfolio", "search products"). The user reaches that capability through any of the _surfaces_ the project exposes for it. **Designing UCs for only the surfaces you touched in this diff is the wrong axis** — you need UCs for every surface the user could use to do this thing.
+
+Run this checklist:
+
+1. Read `CLAUDE.md ## E2E Configuration` and list every interface the project exposes (UI / API / CLI / any combination).
+2. For EACH exposed interface, ask: "Does this feature's capability area exist behind this interface today, or should it after this PR?"
+3. In the plan file's `#### E2E Use Cases` section, declare a **Surface coverage decision** sub-block listing every exposed interface with either:
+   - **Covered** — a UC for this surface exists below, OR
+   - **N/A — \<substantive justification\>** — see `rules/testing.md` "Multi-surface coverage" for acceptable vs unacceptable N/A reasons.
+
+**The disqualifying N/A justification** (surfaced 2026-05-18 from msai-v2 soak): _"CLI: N/A — no CLI changes in my diff."_ That describes implementation, not user-facing scope. If the project's CLI already exposes the feature's capability area and you've extended it in UI/API, the CLI should be extended too — OR you need a substantive product reason it shouldn't (e.g., admin-only by product decision, deferred to v2 with a tracked TODO, feature is a UI-only visual element).
+
+verify-e2e's Step 2c emits a `SURFACE_COVERAGE_WARNING` if UCs cover fewer surfaces than the project exposes; during an autonomous `/forge-goal` run, the warning triggers a `/council` consultation unless the Surface coverage decision sub-block pre-justified the omission.
+
+**Required UC shape — every UC must have these fields filled:**
+
+1. **Actor** — A specific role/situation. Bare `user` / `users` / `a user` is rejected by verify-e2e Step 2b as `MISSING_ACTOR`. Use `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`, `Any signed-in member`, etc.
+2. **Scenario** — 1-2 sentences: starting state, trigger, desired outcome. Traceable to a PRD persona / bug report / feature request. No age, city, hobbies, personality, or product-irrelevant filler. (Verify-e2e rejects biography fluff as `SCENARIO_FLUFF`.)
+3. **Interface** — per the feature-surface table above
+4. **Intent** — one sentence stating what the Actor achieves, in the Actor's terms
+5. **Setup** — sanctioned setup only. Must NOT perform the same action the UC tests (verify-e2e rejects as `CHEAT_SETUP`). Don't re-test login here; declare the auth state and use a sanctioned auth path.
+6. **Steps** — at least 2 user actions through the declared interface
+7. **Verification** — surface-specific user-observable outcome. See the rubric in `rules/testing.md` "Verification language — surface-specific". A bare status code / bare exit code / single element-visible check is rejected as `THIN_VERIFICATION`.
+8. **Persistence** — reload, re-request, or re-invoke through the same interface. Missing = `MISSING_PERSISTENCE`.
+
+**Quick sanity check before saving:**
+
+- Could the **Intent** appear on a product/support ticket written by the affected Actor? If not, it's probably a test case wearing journey clothes.
+- Does **Verification** describe what the Actor would actually **observe** AND **do next** through the chosen interface, not just an assertion?
+- Does the **Interface** match the surface the user touches **for this feature**, per the table above?
+
+If any answer is no, rewrite the UC. verify-e2e Step 2b's hard gates above will reject malformed UCs as `FAIL_INVALID_USE_CASE` — better to fix it here than round-trip through an unchecked gate.
 
 **Minimum:** 1 happy-path use case + 1 error/edge case. Complex features need more.
 
@@ -812,13 +937,27 @@ mkdir -p tests/e2e/reports
 
 **Step 4: Act on the verdict**
 
-The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`, inspect the per-UC classifications in the report body (`FAIL_BUG` / `FAIL_STALE` / `FAIL_INFRA`) to decide next action:
+The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`, inspect the per-UC classifications in the report body (`FAIL_BUG` / `FAIL_STALE` / `FAIL_INFRA` / `FAIL_INVALID_USE_CASE`) to decide next action:
 
-- **VERDICT: PASS** — Proceed to Phase 5.4b.
-- **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` in the body. Fix the issue in code, re-run verify-e2e. Do NOT check the box until PASS. (If the body has mixed `FAIL_BUG` + `FAIL_STALE`, fix the bugs first; stale UCs are addressed separately.)
-- **VERDICT: PARTIAL** — No `FAIL_BUG` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
+- **VERDICT: PASS** — Proceed to Phase 5.4b — **after** the SURFACE_COVERAGE_WARNING check below.
+- **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body. Do NOT check the box until PASS.
+  - `FAIL_BUG`: Fix the issue in the product code, re-run verify-e2e.
+  - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason code: `MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW` / `NOT_USER_JOURNEY` / `WRONG_INTERFACE`. Rewrite the offending UC in the plan file using the required-shape checklist from Phase 3.2b and the GOOD examples in `rules/testing.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
+  - If the body has mixed classifications, address `FAIL_INVALID_USE_CASE` first (verify-e2e can't meaningfully run an invalid UC), then `FAIL_BUG`, then `FAIL_STALE`.
+- **VERDICT: PARTIAL** — No `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
   - `FAIL_STALE`: update the stale use case file (interface or selector changed), re-run.
   - `FAIL_INFRA`: retry once manually; if still infra, report to user for decision.
+
+**Step 4b (REQUIRED before checking the gate, regardless of verdict): scan for SURFACE_COVERAGE_WARNING.**
+
+Read the persisted report file and look for any line containing `SURFACE_COVERAGE_WARNING`. This marker can appear in a PASS report — `VERDICT: PASS` means the UCs that ran all passed, but it does NOT mean coverage was complete. A PASS without this check is the bug v5.33 fixed (Codex P2-1, v5.33 review).
+
+If `SURFACE_COVERAGE_WARNING` is present:
+
+- **Interactive mode** (no active /goal session): Stop. Show the warning text to the user. Ask: "verify-e2e flagged a missing surface — `<X>`. Is that intentional? If yes, add a substantive N/A line to the plan's Surface coverage decision sub-block and re-run verify-e2e. If no, add a UC for that surface and re-run."
+- **Autonomous /forge-goal mode** (`## /goal session` has a non-empty nonce): Do NOT just proceed. Invoke `/council` per `rules/workflow.md` "Council During `/forge-goal` Autonomous Run" with the question: "verify-e2e flagged surface `<X>` as uncovered with no pre-justified N/A. Is this intentional scope or a missed surface?" Apply the chairman's verdict — either add the UC + re-run, or add the substantive N/A line + re-run.
+
+Do NOT check the E2E gate box while a SURFACE_COVERAGE_WARNING is still present in the most recent report. The warning is only resolved when (a) the missing surface gets a UC and verify-e2e re-runs PASS without the warning, OR (b) the plan's Surface coverage decision sub-block has a substantive N/A line for that surface and verify-e2e re-runs PASS without the warning.
 
 **If purely internal (no user-facing impact):** Check the box with justification:
 `- [x] E2E verified — N/A: internal migration, no user-facing changes`
@@ -899,6 +1038,9 @@ If no files (empty directory, or directory missing): check the box with `- [x] E
 - **FAIL_BUG (framework: spec failure; agent: FAIL_BUG verdict):** This feature broke something that previously worked. Fix it, then re-run 5.4b (and 5.4 if this feature has its own user-facing E2E scope).
 - **FAIL_STALE (agent only):** Update stale use case file and re-run.
 - **FAIL_INFRA / flake (both paths):** Retry once. If still failing, report to user for decision.
+- **FAIL_INVALID_USE_CASE (agent only):** two flavors in regression mode, both telling you to fix the UC (NOT product code):
+  - **Hard-SHAPE reasons** (`MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW`) are skipped in regression mode (v5.35 mode-gating) to avoid retroactively failing legacy UCs that predate v5.34's shape requirement. If one of these fires anyway, it's a graduation bug — a post-v5.34 UC reached `tests/e2e/use-cases/` without the new shape. Rewrite it to the v5.34 shape (see `rules/testing.md`), commit, re-run.
+  - **Judgment-call reasons** (`NOT_USER_JOURNEY`, `WRONG_INTERFACE`) **DO fire in regression mode by design.** This is the desired behavior: pulling forward old bad UCs (endpoint-shaped Intents, wrong-interface declarations) so they get cleaned up to the new standard. Treat each one as a real find — open the UC, rewrite it to a proper user-journey UC per `rules/testing.md`, commit, re-run. The point of the regression suite catching these isn't ceremony; it's that old code-shaped UCs were testing the wrong thing all along.
 
 **Note:** `pnpm exec playwright test` runs the binary directly — no `package.json` script is required. setup.sh does not modify `package.json`; use the binary invocation above.
 

@@ -32,7 +32,7 @@ When a `/forge-goal`-driven `/goal` is active (`## /goal session` is populated i
 
 **Before asking the user any question during the autonomous run, ask yourself:**
 
-> _Is this a PR creation authorization?_
+> *Is this a PR creation authorization?*
 
 - **If YES:** call `AskUserQuestion` with the PR-create modal. The user's answer is the only human-authority signal in the loop.
 - **If NO:** invoke `/council` with the question. Apply the chairman's verdict. Continue the loop.

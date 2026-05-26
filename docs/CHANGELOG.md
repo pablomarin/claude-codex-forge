@@ -2,6 +2,258 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.38 — 2026-05-25 · Whole-UC NOT_USER_JOURNEY + stale-text cleanup
+
+Codex final-pass on v5.34–v5.37 found one structural enforcement gap plus three stale-text sites. All addressed.
+
+**Structural fix — NOT_USER_JOURNEY broadened to whole-UC shape.** Codex demonstrated a real escape route in v5.37: an old UC with a decent-looking Intent (e.g., "Customer creates an order through the API") could still slide through regression mode if its Steps are a single isolated call, Verification is bare status, and Persistence is N/A. The individual hard gates (`TOO_SHALLOW`, `THIN_VERIFICATION`, `MISSING_PERSISTENCE`) are skipped in regression to avoid retroactive breakage — but the _combination_ of all three is "this isn't a journey at all", and that signal should fire in every mode.
+
+`agents/verify-e2e.md` judgment-call #7 now has TWO triggers:
+
+- **(a) Intent shape** (existing) — RED FLAG on code-shaped Intent text.
+- **(b) Whole-UC shape (NEW)** — RED FLAG when Steps are shallow AND Verification is bare AND Persistence is N/A or absent, all three together. Either trigger fires `NOT_USER_JOURNEY` in any mode (including regression/smoke). Includes a worked example showing the kind of UC this catches.
+
+This is the structural enforcement that delivers Pablo's stated intent of v5.37: legacy code-shaped UCs SHOULD be surfaced by the regression suite so they get rewritten. Without the whole-UC trigger, only the most obviously code-shaped Intents got caught.
+
+**Stale-text fixes (Codex final-pass):**
+
+- **`rules/testing.md` Failure Classification table** — was out of sync, listing `FAIL_INVALID_USE_CASE` as having only `NOT_USER_JOURNEY` / `WRONG_INTERFACE`. Now enumerates all 9 reason codes, grouped into Hard-SHAPE reasons (skipped in regression by v5.35) and Judgment-call reasons (fire in all modes by design).
+- **`rules/testing.md` NOT_USER_JOURNEY definition** — said the trigger included "no Persistence step", which contradicted the agent (missing persistence is `MISSING_PERSISTENCE`, a hard gate). Corrected.
+- **`commands/fix-bug.md:819` simple-fix parenthetical** — still listed the old 6 fields. Now lists all 8 (Actor + Scenario + Interface + Intent + Setup + Steps + Verification + Persistence).
+
+**Tests** — Contract 2f extended with 13 new assertions: rules/testing.md lists all 7 v5.34 reason codes by name + uses the Hard-SHAPE / Judgment-call bucket vocabulary; negative-guard ensures the stale "no Persistence step" wording can't drift back; verify-e2e.md states the whole-UC shape trigger + mode-by-design intent. **392 total** across 4 hot-path suites, 0 failed.
+
+**What we deliberately did NOT do** from Codex's pass: the vocabulary-layering simplification (collapse mechanical/policy/hard-shape/judgment into 2 buckets instead of the current 4). Reshuffling would churn the same files we just stabilized; current layering is dense but defensible, and contract tests lock it.
+
+## 5.37 — 2026-05-25 · Reframe: legacy-UC bounce-back is intentional design
+
+Pablo's clarification on v5.36: the residual-risk framing ("NOT_USER_JOURNEY can still fire on legacy regression UCs — that's a side effect of v5.35's mode gating") undersells what's happening. The intent is the opposite of residual: when the regression suite encounters an old code-shaped UC, the journey-quality bounce-back **should** fire so the team can rewrite it to the new standard. The point of pulling forward old bad UCs is that they were testing the wrong thing all along.
+
+**Changes (wording only, no behavior change):**
+
+- **`commands/new-feature.md` + `commands/fix-bug.md` Phase 5.4b** — promoted the `FAIL_INVALID_USE_CASE` regression-mode entry from a one-liner to a two-bullet split. **Hard-SHAPE reasons** (skipped in regression by v5.35) and **Judgment-call reasons** (`NOT_USER_JOURNEY`, `WRONG_INTERFACE`) are now explicitly named buckets. The judgment-call bullet states bluntly: "**DO fire in regression mode by design**" — old bad UCs surfaced this way are real finds, not noise.
+- **`agents/verify-e2e.md`** Step 2b — mirror note added below the v5.35 mode-gating paragraph: the judgment calls fire in `regression` and `smoke` modes by design (v5.37). Pre-valid bias still applies to borderline phrasing; blatantly code-shaped Intents still get classified `FAIL_INVALID_USE_CASE` in any mode.
+
+**Tests:** Contract 2f updated to lock the new bucket vocabulary (`Hard-SHAPE reasons` / `Judgment-call reasons` / `DO fire in regression mode by design`). 6 assertions added, 378 total across 4 hot-path suites, 0 failed.
+
+## 5.36 — 2026-05-25 · Codex review fixes to v5.34/v5.35
+
+Codex assessment of v5.34 + v5.35 was mostly positive ("strong improvement, not a complete cure" — `927675b` and `6983a39` will materially move Pablo's user-journey-quality concern) but flagged five concrete fixes. All applied:
+
+- **Stale 6-field intro lines.** Both commands had a now-contradictory sentence saying "Each UC must include **Intent**, **Interface**, **Setup**, **Steps**, **Verification**, and **Persistence**" — directly above the new 8-field required-shape checklist that added Actor + Scenario. Updated both intros to name all 8 fields.
+- **"in this order" rigidity.** Dropped from both Phase 3.2b required-shape headings. Field order doesn't improve user-journey quality; it just creates formatting friction.
+- **`Persistence: N/A` escape hatch.** Tightened in both `rules/testing.md` and `agents/verify-e2e.md` Step 2b to a narrow whitelist: only genuinely stateless outcomes (pure read-only query, idempotent stateless computation). Any UC whose Steps include create/update/delete/transition gets `MISSING_PERSISTENCE` regardless of justification text. Catches the "N/A — fix doesn't change state" / "N/A — this is a read endpoint" excuses Codex called out.
+- **"Objective" claim softened.** Added a "Mechanical vs policy gates" note acknowledging that `SCENARIO_FLUFF`, `CHEAT_SETUP`, and the non-bare arm of `THIN_VERIFICATION` require judgment. They still block in feature mode (no functional change), but the docs no longer claim all hard gates are auto-detectable. Failure rationale must point at specific UC text, not a vibe.
+- **Phase 5.4b regression-mode wording.** Both commands now say "hard SHAPE gates" (not "hard gates") and explicitly call out that `NOT_USER_JOURNEY` / `WRONG_INTERFACE` (judgment calls) still fire in regression mode. v5.35's mode-gating only protects against the new shape requirements, not the older journey-shape check.
+
+**What we deliberately did NOT do** from Codex's review: chase the "lazy compliance loophole" further. An agent that writes `Scenario: They need to create an order and confirm it works` to satisfy the field requirement is hard to detect without crossing into parody. v5.34+v5.35+v5.36 is a 70% solution to the user-journey-quality problem; further hardening has diminishing returns.
+
+**Files:**
+
+- `rules/testing.md` — narrow Persistence: N/A whitelist with allowed/disallowed examples
+- `agents/verify-e2e.md` — Mechanical vs policy gates note; narrow Persistence gate
+- `commands/new-feature.md` + `commands/fix-bug.md` — 8-field intro lines, removed "in this order", Phase 5.4b says "hard SHAPE gates" and explicitly carves out the judgment-call reasons
+- `tests/template/test-contracts.sh` — Contract 2f locks all 5 fixes. Updated v5.35 wording assertion ("rare in regression mode" instead of "should be rare"). **12 new assertions; 372 total.**
+
+## 5.35 — 2026-05-25 · Step 2b hard gates gated to feature mode only
+
+**Discovered immediately after v5.34 shipped.** v5.34's new hard gates (`MISSING_ACTOR`, `MISSING_SCENARIO`, `THIN_VERIFICATION`, etc.) were mode-agnostic. That retroactively breaks regression suites: any UC graduated under v5.31/v5.33 lacked the new `Actor:` / `Scenario:` fields, so the next regression run would mark all of them `FAIL_INVALID_USE_CASE` and block ship for purely historical reasons.
+
+**Fix:** mirror v5.33's Step 2c gating. The hard gates run in `feature` mode only. In `regression` and `smoke` modes, hard-gate misses fall back to the prefer-valid bias used by the judgment calls. New UCs going through Phase 3.2b/6.2b authoring still get the strict shape because verify-e2e runs in `feature` mode at that point.
+
+**Files:**
+
+- `agents/verify-e2e.md` Step 2b — added "Mode gating for hard gates" paragraph + renamed the section header to `Hard gates (feature mode only, …)`.
+- `commands/new-feature.md` + `commands/fix-bug.md` Phase 5.4b — verdict-handling blocks now reference `FAIL_INVALID_USE_CASE` with explicit "should be rare in regression mode" framing. If it does fire in regression, the message points to a graduation bug (a post-v5.34 UC checked into `tests/e2e/use-cases/` without the new shape) — fix the UC, not product code.
+- `tests/template/test-contracts.sh` — new Contract 2e locks the mode-gating across all three files. 5 new assertions; **360 total** across 4 hot-path suites.
+
+**Why no Codex review on this one:** Codex was attempted on the v5.34 commit but hit a network reconnect error mid-review and never returned a verdict. The trace before it died showed Codex was exploring the Phase 5.4b verdict-handling blocks — the very lines this commit fixes. Self-identified gap from the trace + applied Option A (feature-mode gating, the structural symmetry codex itself recommended in the v5.33 review of Step 2c).
+
+## 5.34 — 2026-05-25 · E2E UC shape — Actor + Scenario + surface-specific Verification
+
+**Surfaced by Pablo during ongoing /forge-goal soak.** Even with v5.31's smell test and v5.33's surface coverage audit, the agent kept drafting code-shaped UCs ("User creates a todo" / "POST /api/v1/orders returns 201"). Codex pinned the root cause: the rules said "be specific" but the canonical GOOD examples in `rules/testing.md` still modeled generic phrasing — and Step 2b's prefer-valid bias let borderline UCs slide. The model copies what the examples show, not what the prose argues for.
+
+**Fix — required UC shape with hard gates** (Codex-revised plan, two iterations of pushback):
+
+- **`rules/testing.md`** — UC template revised. Added two REQUIRED fields BEFORE Intent:
+  - **Actor** — a specific role/situation (e.g., `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`). Bare `user` / `users` / `a user` is rejected as `MISSING_ACTOR`.
+  - **Scenario** — 1-2 sentences with starting state + trigger + desired outcome. Must be traceable to a PRD persona / bug report / feature request. No age, city, hobbies, personality, or product-irrelevant filler. Biography fluff rejected as `SCENARIO_FLUFF`.
+    Added surface-specific **Verification language rubric** (UI: sees/appears/shows; CLI: stdout shows/next invocation lists/exit code SUPPORTS outcome; API: receives/response includes/follow-up returns). Bare status code, bare exit code, or single element-visible check is rejected as `THIN_VERIFICATION`. Added Setup-cheat rule: Setup must NOT perform the action under test (rejected as `CHEAT_SETUP`). All three canonical GOOD examples (UI/API/CLI) rewritten end-to-end to model the new shape.
+
+- **`agents/verify-e2e.md` Step 2b** — split into **hard gates** (objective shape requirements, no judgment bias: `MISSING_ACTOR`, `MISSING_SCENARIO`, `SCENARIO_FLUFF`, `CHEAT_SETUP`, `THIN_VERIFICATION`, `MISSING_PERSISTENCE`, `TOO_SHALLOW`) and **judgment calls** (prefer-valid bias preserved: `NOT_USER_JOURNEY` for borderline Intent wording, `WRONG_INTERFACE` for borderline surface mismatch). 7 new reason codes added to the classification.
+
+- **`commands/new-feature.md` + `commands/fix-bug.md`** — Phase 3.2b inline checklist rewritten from prose smell test to the 8-field required UC shape. Both Phase 5.4 caller-handling blocks reference the full reason code set. Simple-fix Step 0 in fix-bug.md gets the same required-shape language.
+
+**What we deliberately did NOT do** (per Codex's pushback on the original "ban bare 'user' / day-in-the-life paragraph" plan):
+
+- **No mechanical bare-`user` ban** — folded into Actor validation as a sub-rule. "Bare actor identity" is what we reject; `Visitor`, `Signed-in member`, etc. are fine without naming a persona.
+- **No "day-in-the-life paragraph"** — that framing invites biography-fluff parody. Codex's tighter "Scenario: 1-2 sentences, no fluff, traceable to PRD/bug/request" is what shipped.
+- **No PRD persona carry-forward** — deferred; too brittle as a universal gate (not every flow goes through /prd:discuss).
+
+**Architectural shifts:**
+
+1. **Step 2b hard-gate vs judgment-call split** — missing fields are objective failures, not borderline. Only Intent wording and Interface selection retain the prefer-valid bias.
+2. **Setup is no longer free real estate** — Setup that does the action under test counts as cheating; the UC is testing a read, not the journey it claims to test.
+3. **Login is not part of every UC** — Setup declares the auth state and uses a sanctioned auth path; auth itself gets its own dedicated UCs. Stops every feature UC from re-testing login.
+
+**New tests:** `tests/template/test-contracts.sh` gains Contract 2d — every new reason code (`MISSING_ACTOR`, `MISSING_SCENARIO`, `SCENARIO_FLUFF`, `CHEAT_SETUP`, `THIN_VERIFICATION`, `MISSING_PERSISTENCE`, `TOO_SHALLOW`) must be referenced in verify-e2e (producer) AND both command callers (consumer). Required field names + surface-specific Verification verbs locked in `rules/testing.md`. GOOD examples asserted to contain concrete Actor lines (not generic "User"). 34 new assertions; **355 total across 4 hot-path suites**.
+
+**Files:**
+
+- `rules/testing.md` — UC template revision, Verification rubric, three GOOD examples rewritten
+- `agents/verify-e2e.md` — Step 2b hard-gate/judgment split, 7 new reason codes, UC1 + UC3 examples rewritten
+- `commands/new-feature.md` — Phase 3.2b required-shape checklist, Phase 5.4 caller-handling reason codes
+- `commands/fix-bug.md` — Phase 3.2b required-shape checklist, simple-fix Step 0 alignment, Phase 5.4 caller-handling reason codes
+- `tests/template/test-contracts.sh` — Contract 2d (34 new assertions)
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.33 → 5.34
+
+## 5.33 — 2026-05-18 · Multi-surface E2E coverage audit
+
+**Surfaced during /forge-goal v1.0 soak in msai-v2 portfolio-backtest.** At the PR-creation gate, the user asked the agent whether the E2E tests covered UI, CLI, AND API. The agent admitted: it had designed UI + API UCs and silently skipped CLI even though the project's `msai` CLI exposes the same portfolio capability area. The agent's logic was "no CLI changes in my diff" — a description of implementation scope, not user-facing scope.
+
+The v5.31 feature-surface rule existed and was correct in principle, but didn't force the agent to think about EVERY surface the project exposes. v5.33 adds an explicit multi-surface audit at authoring time, and a backstop in verify-e2e.
+
+**Fixes:**
+
+- **`rules/testing.md`** — new "Multi-surface coverage" subsection. A feature touches a _capability area_; users reach it through any of the _surfaces_ the project exposes. UCs must cover every surface the user could use — not just the surface the implementation diff touched. Defines acceptable vs unacceptable N/A justifications. "No CLI changes in my diff" is the canonical disqualifying example.
+- **`commands/new-feature.md` Phase 3.2b** + **`commands/fix-bug.md` Phase 3.2b + simple-fix Phase 5.4 Step 0** — REQUIRED **Surface coverage audit** checklist before writing UCs. Three steps: enumerate exposed interfaces from `CLAUDE.md ## E2E Configuration`, ask per-interface "is this feature's capability area reachable here?", and declare a **Surface coverage decision** sub-block in the plan listing every exposed interface as either `Covered` or `N/A — <substantive justification>`.
+- **`agents/verify-e2e.md` Step 2c (new)** — backstop. After UC shape validation (Step 2b) and before health check (Step 3), enumerate exposed interfaces from `CLAUDE.md`, tally interfaces covered by UCs, recognize pre-justified `N/A` lines, and emit `SURFACE_COVERAGE_WARNING` for any gap. Soft warning — does not change the verdict, does not classify UCs. During an autonomous `/forge-goal` run, the agent treats the warning as a `/council` trigger.
+- **Report template** — new `## Surface Coverage` section always present, populated from Step 2c. Lists what the project exposes, what UCs cover, pre-justified exclusions, and any warnings.
+
+**New tests:** `tests/template/test-contracts.sh` gains Contract 2c — `SURFACE_COVERAGE_WARNING` keyword present in agent (producer); `Surface coverage decision` sub-block name + warning marker present in both command callers (consumers); "Multi-surface coverage" section + decision vocabulary present in `rules/testing.md`. Regression guard: the disqualifying phrase _"no CLI changes in my diff"_ must appear in both commands so future drift doesn't silently allow the bad pattern. 10 new assertions (213 total contract assertions passing).
+
+**Why a soft warning, not a hard FAIL:** some features genuinely are single-surface (a visual element, an admin-only flow, a deferred-to-v2 escape hatch). A hard FAIL would be too aggressive. A soft warning lets the reviewer or `/council` make the call — and surfaces the question early enough to be answered before PR creation rather than after.
+
+**Files:**
+
+- `rules/testing.md` — Multi-surface coverage subsection
+- `commands/new-feature.md` — Surface coverage audit step at Phase 3.2b
+- `commands/fix-bug.md` — Surface coverage audit at Phase 3.2b + simple-fix Phase 5.4 Step 0
+- `agents/verify-e2e.md` — Step 2c surface coverage check + `## Surface Coverage` report section
+- `tests/template/test-contracts.sh` — Contract 2c (10 new assertions)
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.32 → 5.33
+
+## 5.32 — 2026-05-18 · Worktree CWD fix + split build-evidence into its own Stop hook
+
+**Surfaced during the msai-v2 portfolio-backtest soak of /forge-goal v1.0.** Two coupled bugs:
+
+1. **Worktree CWD bug.** Evidence JSON reported `session_nonce:null`, `phase:null`, `checklist_total:0` even though the worktree's state.md was correctly populated with an active `## /goal session`. Root cause: CC's Stop hook runs with CWD = `$CLAUDE_PROJECT_DIR` (which resolves to the PARENT project in worktree sessions, not the worktree). `build-evidence` read `.claude/local/state.md` relative to that CWD → wrong (or missing) state.md. Consequence: the PR-create authorization gate would NOT fire when the autonomous run reached `gh pr create` (it gates on a non-empty nonce in evidence). The agent would have opened a PR without the modal pause.
+
+2. **Pre-PR Stop hook noise.** v5.30 only downgraded the CHANGELOG threshold gate to advisory when an OPEN PR existed. Pre-PR (where /forge-goal spends 90% of its time) still hit exit 2 → CC labeled the entire combined STDERR (build-evidence's evidence dump + check-state-updated's CHANGELOG nag) as "Stop hook error" → giant JSON dump flooded every Stop turn. The deferred "split build-evidence into its own Stop hook" refactor that v5.30 explicitly punted is now done.
+
+**Fixes:**
+
+- **`hooks/build-evidence.{sh,ps1}`** — registered as its **own** Stop hook entry in `settings.template.json` (BEFORE check-state-updated so the fingerprint side-channel file is written before stuck-detection reads it). Always exits 0 → its STDERR is rendered as informational `Ran stop hook` output, not labeled "error". Also: both scripts now parse `cwd` from the Stop hook stdin JSON and `cd` there at the top, fixing the worktree CWD bug. Fallback chain: `stdin.cwd` → `git rev-parse --show-toplevel` → current CWD.
+- **`hooks/check-state-updated.{sh,ps1}`** — removed the inline call to build-evidence (it's now a separate hook). Added the same `cwd` parsing so stuck-detection reads/writes the worktree's `.claude/local/` not the main repo's. Comments updated to reflect the new architecture.
+- **`settings/settings.template.json` + `settings-windows.template.json`** — Stop hook array now lists both build-evidence and check-state-updated commands in that order.
+- **`scripts/merge-settings.py`** — added deep-merge for hook events. The old shallow merge skipped existing hook events entirely, so adding a new parallel command to an existing event (the v5.32 case) would never reach existing installs via `--upgrade`. New `merge_hook_event` rebuilds each matcher-block's hooks list **in template order**, picking up the user's version when present and inserting new template hooks at their template position. Preserves ordering invariants (critical for build-evidence-before-check-state-updated) AND any user-only customizations.
+
+**New tests:**
+
+- **`tests/template/test-hooks.sh`** — 2 new tests (5 new assertions): build-evidence reads state.md from `stdin.cwd` not its own CWD; check-state-updated stuck-detection accumulates in the worktree, not the main repo. Includes negative control proving the redirect actually happens.
+- **`tests/template/test-contracts.sh`** — 4 new assertions: settings.template.json (and Windows mirror) register both hooks in the correct order (build-evidence first).
+- **`tests/template/test-merge-settings.sh` (new file)** — 7 unit tests covering deep-merge: new command added to existing matcher-block in template order, idempotency (re-merge doesn't duplicate), new top-level event still added, new matcher-block appended, permissions arrays still merge.
+
+**Architectural note:** The "merge inserts new hook in template position" behavior is what makes the v5.32 upgrade path safe. A user with the old `[check-state-updated]` Stop array gets `[build-evidence, check-state-updated]` after `--upgrade` — not `[check-state-updated, build-evidence]` (which would silently break stuck-detection because build-evidence's fingerprint side-channel wouldn't exist when stuck-check ran).
+
+**Files:**
+
+- `hooks/build-evidence.sh` + `.ps1` — stdin.cwd parse + chdir at top
+- `hooks/check-state-updated.sh` + `.ps1` — removed inline build-evidence call + stdin.cwd parse
+- `settings/settings.template.json` + `settings-windows.template.json` — two-Stop-hooks registration
+- `scripts/merge-settings.py` — `merge_hook_event` deep-merge with template-order insertion
+- `tests/template/test-hooks.sh` — worktree CWD tests
+- `tests/template/test-contracts.sh` — Stop hook ordering contract
+- `tests/template/test-merge-settings.sh` — new file, 7 unit tests
+- `tests/template/run-all.sh` — registered the new suite
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.31 → 5.32
+
+## 5.31 — 2026-05-18 · E2E user-journey enforcement
+
+**Surfaced during /forge-goal v1.0 soak in msai-v2.** The agent was drafting E2E use cases that read like integration tests ("POST /api/users returns 201") instead of user journeys ("Customer places an order and finds it in their history"). Cause: the rules defined the required fields and listed anti-patterns but provided no positive worked example to pattern-match against; interface selection was driven by project type instead of by what the user actually touches for the feature; and the verify-e2e agent executed whatever it was handed without bouncing back ill-shaped UCs.
+
+**Fix shape** (validated by Codex design review before implementation):
+
+- **`rules/testing.md`** — added a "GOOD vs BAD use cases" section with canonical worked examples per UI / API / CLI. Strengthened the Intent field with a smell test ("If you cannot describe the Intent to a non-developer in one sentence without naming endpoints, code, tables, components, or other internal terms, it is not a user journey"). Replaced the project-type-driven interface matrix with a two-step **feature-surface-driven** model: `CLAUDE.md ## E2E Configuration` is the capability envelope (which interfaces exist); the feature determines which surface(s) the user actually touches. Added Codex's pushback: internal endpoints backing a UI page get a UI UC, not an API UC — endpoint contract coverage is integration-test territory. Added `FAIL_INVALID_USE_CASE` row to the failure classification table.
+- **`rules/critical-rules.md`** — updated the E2E line to reflect the user-journey requirement and feature-surface interface rule. The old text repeated the now-superseded project-type matrix.
+- **`commands/new-feature.md` Phase 3.2b** + **`commands/fix-bug.md` Phase 3.2b + simple-fix Phase 5.4 Step 0** — embed the 4-point smell test inline (Intent describable in one sentence, multiple actions, user-visible Verification, correct Interface). Replaced project-type bullet list with a feature-shape → interface table. Phase 5.4 caller handling extended to recognize `FAIL_INVALID_USE_CASE` and route it to "rewrite the UC, do not change product code".
+- **`agents/verify-e2e.md`** — added **Step 2b: Validate use-case shape** between Load use cases (Step 2) and Health check (Step 3), so invalid UCs are caught BEFORE a server is even probed. New per-UC classification `FAIL_INVALID_USE_CASE` with sub-reasons `NOT_USER_JOURNEY` and `WRONG_INTERFACE`. Top-level `VERDICT:` enum unchanged (still `PASS | FAIL | PARTIAL`); invalid UCs map to `FAIL` with a "test-design failure, not a product bug" note in Verdict Reasoning. Report template gains a UC3 example showing the new classification with rationale + suggested rewrite.
+- **`tests/template/test-contracts.sh`** — new Contract 2b: per-UC `FAIL_*` classifications listed in `verify-e2e.md`'s "Classification rules" must be handled in both `new-feature.md` and `fix-bug.md` (forward + reverse check). 10 new assertions (199 total contract assertions passing).
+
+**Files changed:**
+
+- `rules/testing.md` — GOOD/BAD examples + smell test + feature-surface interface model + `FAIL_INVALID_USE_CASE` row
+- `rules/critical-rules.md` — E2E line rewritten
+- `commands/new-feature.md` — Phase 3.2b smell test + interface table; Phase 5.4 verdict handling
+- `commands/fix-bug.md` — Phase 3.2b smell test + interface table; simple-fix Step 0; Phase 5.4 verdict handling
+- `agents/verify-e2e.md` — Step 2b validation + new classification + verdict mapping + report template update
+- `tests/template/test-contracts.sh` — Contract 2b (per-UC classification handling)
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.30 → 5.31
+
+## 5.30 — 2026-05-18 · Fix: Stop-hook "error" framing during /forge-goal soak
+
+**Surfaced during soak of /forge-goal v1.0 in msai-v2.** Every Stop turn after PR creation printed the FORGE*GOAL_EVIDENCE JSON dump prefixed with "Stop hook error" because `check-state-updated.{sh,ps1}` invokes `build-evidence.{sh,ps1}` inline (shared STDERR) and then hit exit 2 on the CHANGELOG threshold gate. The exit-2 caused Claude Code to label the \_entire* combined STDERR — evidence + reminder — as an error from the calling hook.
+
+**Fix:** when an OPEN PR already exists for the current branch, the CHANGELOG gate downgrades from blocking (exit 2) to advisory (exit 0). Rationale: pre-PR-create the block is correct (force CHANGELOG before opening PR), but once a PR is open the human reviewer carries the signal — per-turn blocking during CI wait is just noise, and exit 0 removes the "Stop hook error" framing so the evidence dump collapses behind ctrl+o.
+
+**Also fixed:** wording — "files changed this session" → "files changed on branch vs `<default-branch>`". The count is committed + uncommitted diff vs the merge-base, not files-this-turn; the old wording suggested otherwise.
+
+**Files:**
+
+- `hooks/check-state-updated.sh` + `hooks/check-state-updated.ps1` — open-PR detection via `gh pr view --json state -q .state` (best-effort, no-gh → preserve original block); exit-2 → exit-0 + advisory when PR is OPEN; wording correction.
+- `tests/template/test-hooks.sh` — new test 15b ("open PR → exit 0 advisory") using a path-shimmed `gh` stub. Test 15 extended to assert the new "on branch vs master" wording.
+
+**Not changed:** `build-evidence` still writes evidence to STDERR (Layer 1 design). The split-evidence-into-own-Stop-hook refactor was considered and deferred — too invasive for a hot-path soak fix.
+
+## 5.29 — 2026-05-16 · `/forge-goal` autonomous PRD-to-PR-ready workflow
+
+**Why this exists:** Manual phase-by-phase shepherding through `/new-feature` and `/fix-bug` was the babysitting tax. `/forge-goal` lets the user type ONE command after PRD approval (or plan approval for bug fixes) and the agent autonomously drives plan → plan-review → implement → code-review → E2E → PR-ready, surfacing council for non-PR judgment moments and pausing only at PR creation.
+
+**Capability:** After the gate checkpoint passes, the workflow command generates a session nonce, writes `## /goal session` to state.md, and prints a `/goal` command. The user types it; the agent enters autonomous mode. Stops at the PR-creation gate (AskUserQuestion modal + hook-enforced authorization signal in state.md) and at council-resolved decisions.
+
+**Checkpoint placement:** `/new-feature` places the checkpoint at PRD-complete (after Phase 1, before Phase 2 Research). `/fix-bug` places it at Plan-Approved (after Phase 3.3 Plan Review Loop, before Phase 4 Execute) — because `/fix-bug` has no PRD phase. Simple fixes (1-2 files skipping Phase 3) are not eligible for the autonomous loop.
+
+**New (Layer 1):**
+
+- `hooks/build-evidence.{sh,ps1}` — read-only evidence emitter. Parses state.md, queries git/`gh pr view`/E2E reports, emits unified JSON between `FORGE_GOAL_EVIDENCE_BEGIN/END` markers. Computes `pr_ready`, deterministic `progress_fingerprint` (SHA256, CRLF-normalized, ordered, ASCII US delimiter).
+
+**New (Layer 2):**
+
+- `commands/new-feature.md` — PRD-Complete Checkpoint prints the `/goal` command; REPLACE semantics for `/goal session` and `## PR authorization`; PR-create AskUserQuestion modal documented; `all_gates_green` excluded from condition (post-PR checklist items are structurally unclearable while PR is open).
+- `commands/fix-bug.md` — Plan-Approved Checkpoint at Phase 3→4 boundary; bug-fix-specific wording throughout; same REPLACE semantics and `all_gates_green` exclusion.
+- `rules/workflow.md` — "Council During `/forge-goal`" trigger rule (route non-PR doubts to `/council`, leave reviewer-loop iterations as today).
+- `state.template.md` — conventions for `## /goal session` (format documentation, no empty instance), `## PR authorization`, reviewer-iteration head-SHA labels, REPLACE semantics, and the non-empty-nonce "active" definition.
+
+**Fixed (Layer 1):**
+
+- `hooks/check-state-updated.{sh,ps1}` — invokes `build-evidence` BEFORE the `stop_hook_active` early-return. Previously the early-return suppressed evidence emission inside active `/goal` loops.
+
+**Extended (Layer 2):**
+
+- `hooks/check-workflow-gates.{sh,ps1}` — PR-create authorization guard. Blocks `gh pr create` during an active `/forge-goal` session unless `## PR authorization` matches the session nonce AND current HEAD SHA. "Active" = non-empty nonce. LAST-line defense for stale-duplicate state.md.
+- `hooks/check-state-updated.{sh,ps1}` — stuck-detection soft warning. After 5 consecutive turns with identical `progress_fingerprint`, emits `FORGE_GOAL_STUCK_WARNING` to STDERR (informational, no abort).
+
+**New tests:** `tests/template/test-build-evidence.sh` (35 assertions, Layer 1), 10 new test blocks in `test-hooks.sh` (6 PR-create guard + 4 stuck-detection), 8 new contracts in `test-contracts.sh` (Layer 1 + Layer 2, including fixture-based runtime parity tests for Bash vs PS guards).
+
+**Architecture trace:** Native Anthropic `/goal` (CC 2.1.139+) drives the loop; forge supplies the evidence the verifier reads. State.md is the single source of truth (no sidecar state files). See `docs/plans/2026-05-14-forge-goal-design.md` and `docs/plans/2026-05-13-forge-goal-experiments.md`.
+
+**Files:**
+
+- `hooks/build-evidence.sh` + `hooks/build-evidence.ps1` — new (Layer 1 evidence primitive)
+- `hooks/check-state-updated.sh` + `hooks/check-state-updated.ps1` — ordering fix (Layer 1) + stuck-detection (Layer 2)
+- `hooks/check-workflow-gates.sh` + `hooks/check-workflow-gates.ps1` — PR-create authorization guard (Layer 2)
+- `commands/new-feature.md` — PRD-Complete Checkpoint (Layer 2)
+- `commands/fix-bug.md` — Plan-Approved Checkpoint (Layer 2)
+- `rules/workflow.md` — council-during-`/forge-goal` trigger rule (Layer 2)
+- `state.template.md` — `/goal session` + PR authorization + reviewer-iteration conventions (Layer 2)
+- `tests/template/test-build-evidence.sh` — 35 new assertions (Layer 1)
+- `tests/template/test-hooks.sh` — 10 new test blocks (Layer 2)
+- `tests/template/test-contracts.sh` — FORGE_GOAL_EVIDENCE + 8 new Layer 2 contracts
+- `setup.sh` + `setup.ps1` — install `build-evidence.{sh,ps1}` to downstream `.claude/hooks/`
+- `docs/CHANGELOG.md` + `README.md` — version bump 5.27 → 5.29 (Layer 1 deferred; ships unified)
+
+**Existing installs:** run `./setup.sh --upgrade` from your Forge clone to pick up all new scripts and updated templates.
+
 ## 5.27 — 2026-05-12 · `/council` chairman output reliability (`--output-last-message`)
 
 **Bug:** When `/council` ran the chairman call, `codex exec` dumped everything to stdout — the CLI banner, the entire 16KB+ prompt echoed back, the `codex` marker, the response, and a `tokens used` footer. The skill said "Display the chairman's output VERBATIM" but never told Claude HOW to extract the response from that verbose capture. Claude improvised with ad-hoc `tail`/`grep`/`sed` patterns. When extraction failed it reported "Codex chairman exited without producing analysis on both attempts" — even when the verdict was sitting cleanly in the file, fully structured. Field-confirmed today: a single `/council` session in `actbl-he` produced 21KB and 4.3KB chairman responses (both with complete `## Council Verdict` / `### Minority Report` sections) and both were narrated as failures.

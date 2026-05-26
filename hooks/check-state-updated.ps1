@@ -33,6 +33,122 @@ try {
     exit 0
 }
 
+# ---------------------------------------------------------------------------
+# Worktree CWD fix (v5.32) — CC's Stop hook runs with CWD=$CLAUDE_PROJECT_DIR
+# (the parent project in worktree sessions), but the user's actual session
+# CWD lives in the stdin JSON. cd there so relative state.md reads and git
+# ops target the worktree, not the main repo.
+# Fallback: git rev-parse --show-toplevel → current CWD.
+# ---------------------------------------------------------------------------
+$hookCwd = ""
+if ($data -and $data.PSObject.Properties['cwd']) {
+    $hookCwd = [string]$data.cwd
+}
+if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
+    # Normalize to repo/worktree root in case stdin.cwd is a subdirectory.
+    $normalized = (& git -C "$hookCwd" rev-parse --show-toplevel 2>$null)
+    if ($normalized -and (Test-Path -LiteralPath $normalized -PathType Container)) {
+        Set-Location -LiteralPath $normalized
+    } else {
+        Set-Location -LiteralPath $hookCwd
+    }
+} else {
+    $toplevel = (& git rev-parse --show-toplevel 2>$null)
+    if ($toplevel -and (Test-Path -LiteralPath $toplevel -PathType Container)) {
+        Set-Location -LiteralPath $toplevel
+    }
+}
+
+# Note: build-evidence is no longer invoked inline. It runs as its own Stop
+# hook entry (registered in settings.template.json) BEFORE this one — so its
+# STDERR output is rendered as informational hook output rather than being
+# merged with our exit-2 stderr and labeled "Stop hook error" by CC.
+# build-evidence still writes the fingerprint side-channel file that the
+# stuck-detection logic below reads.
+
+# ---------------------------------------------------------------------------
+# Task 8: /forge-goal stuck-detection soft warning.
+#
+# build-evidence.ps1 runs as a separate Stop hook entry BEFORE this one and
+# writes the current progress_fingerprint to
+# .claude/local/forge-goal-last-fingerprint as a side-channel. We read it
+# here. After 5 consecutive identical fingerprints, emit
+# FORGE_GOAL_STUCK_WARNING to STDERR. Informational only — does NOT abort.
+# Fires even when stop_hook_active=true. Counter lives in
+# .claude/local/forge-goal-stuck-count: format "<count>|<fingerprint_sha256>".
+# PS 5.1 compatible: no ??, [Console]::Error.WriteLine for STDERR.
+# ---------------------------------------------------------------------------
+function Invoke-ForgeGoalStuckCheck {
+    $stateMd = ".claude/local/state.md"
+    $fpFile   = ".claude/local/forge-goal-last-fingerprint"
+    $ctrFile  = ".claude/local/forge-goal-stuck-count"
+
+    # Only proceed if /forge-goal is active: state.md must have a non-empty
+    # nonce in the ## /goal session table.
+    if (-not (Test-Path $stateMd)) { return }
+
+    $raw = Get-Content $stateMd -Raw -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrEmpty($raw)) { return }
+
+    # CRLF normalize then extract nonce from ## /goal session block.
+    $lines = ($raw -replace "`r", "") -split "`n"
+    $inSection = $false
+    $nonce = ""
+    foreach ($line in $lines) {
+        if ($line -match '^## /goal session$') { $inSection = $true; continue }
+        if ($inSection -and $line -match '^## ') { break }
+        if (-not $inSection) { continue }
+        if ($line -match '^\|\s*nonce\s*\|\s*(.+?)\s*\|') {
+            $nonce = $matches[1].Trim()
+            break
+        }
+    }
+    if ([string]::IsNullOrEmpty($nonce)) { return }
+
+    # Read the current fingerprint written by build-evidence.ps1.
+    if (-not (Test-Path $fpFile)) { return }
+    $currentFp = (Get-Content $fpFile -Raw -ErrorAction SilentlyContinue)
+    if ([string]::IsNullOrEmpty($currentFp)) { return }
+    $currentFp = $currentFp.Trim()
+    if ([string]::IsNullOrEmpty($currentFp)) { return }
+
+    # Read previous counter state (format: "<count>|<fingerprint>").
+    $prevCount = 0
+    $prevFp    = ""
+    if (Test-Path $ctrFile) {
+        $ctrRaw = (Get-Content $ctrFile -Raw -ErrorAction SilentlyContinue)
+        if (-not [string]::IsNullOrEmpty($ctrRaw)) {
+            $ctrRaw = $ctrRaw.Trim()
+            $pipeIdx = $ctrRaw.IndexOf('|')
+            if ($pipeIdx -gt 0) {
+                $countStr = $ctrRaw.Substring(0, $pipeIdx)
+                $prevFp   = $ctrRaw.Substring($pipeIdx + 1)
+                $parsedCount = 0
+                if ([int]::TryParse($countStr, [ref]$parsedCount) -and $parsedCount -ge 0) {
+                    $prevCount = $parsedCount
+                }
+            }
+        }
+    }
+
+    # Update counter: increment if fingerprint unchanged, reset if changed.
+    $newCount = if ($currentFp -eq $prevFp) { $prevCount + 1 } else { 1 }
+
+    # Persist updated counter (WriteAllText to avoid BOM that Set-Content adds).
+    try {
+        $null = New-Item -ItemType Directory -Path ".claude/local" -Force -ErrorAction SilentlyContinue
+        [System.IO.File]::WriteAllText($ctrFile, "$newCount|$currentFp`n")
+    } catch {
+        # Non-blocking: ignore write failures
+    }
+
+    # Emit warning if threshold reached (>= 5 consecutive identical fingerprints).
+    if ($newCount -ge 5) {
+        [Console]::Error.WriteLine("FORGE_GOAL_STUCK_WARNING: no measurable progress for $newCount consecutive turns (fingerprint unchanged). Consider invoking /council, checkpointing state.md, or surfacing a blocker. Loop continues — this is informational only.")
+    }
+}
+Invoke-ForgeGoalStuckCheck
+
 # Check if stop_hook_active to prevent infinite loops
 if ($data.stop_hook_active -eq $true) {
     exit 0
@@ -146,12 +262,14 @@ if (Test-Path ".claude/local/state.md") {
 # Build response
 $issues = ""
 
-# Block: 3+ files changed on branch but CHANGELOG.md never updated
+# Block: 3+ files changed on branch but CHANGELOG.md never updated.
+# "files changed on branch vs $defaultBranch" — count is committed + uncommitted
+# diff vs the merge-base, NOT files-this-turn.
 if ($totalChanged -gt 3 -and $changelogInBranch -eq 0 -and $changelogModified -eq 0) {
     if ($issues) {
-        $issues = "$issues Update docs/CHANGELOG.md ($totalChanged files changed this session)."
+        $issues = "$issues Update docs/CHANGELOG.md ($totalChanged files changed on branch vs $defaultBranch)."
     } else {
-        $issues = "Update docs/CHANGELOG.md ($totalChanged files changed this session)."
+        $issues = "Update docs/CHANGELOG.md ($totalChanged files changed on branch vs $defaultBranch)."
     }
 }
 
@@ -160,6 +278,25 @@ if ($issues) {
     # Prepend workflow reminder if active (so model always sees current phase)
     if ($workflowReminder) { $issues = "[$workflowReminder] $issues" }
     [Console]::Error.WriteLine($issues)
+
+    # Detect open PR for current branch. Once a PR is open, the CHANGELOG gate
+    # downgrades from blocking (exit 2) to advisory (exit 0): the human reviewer
+    # carries the signal, and per-turn blocking during CI wait is just noise.
+    # gh availability and network are best-effort; on failure, default to "no
+    # open PR" so the original blocking behavior is preserved.
+    # Probe only runs when $issues is non-empty — clean stops pay no gh-API cost.
+    $prOpen = $false
+    $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+    if ($ghCmd) {
+        $prState = (& gh pr view --json state -q .state 2>$null) | Out-String
+        if ($prState.Trim() -eq "OPEN") { $prOpen = $true }
+    }
+
+    if ($prOpen) {
+        # Advisory only — PR already open. Exit 0 so the message is informational
+        # and the build-evidence STDERR dump is not labeled "Stop hook error".
+        exit 0
+    }
     exit 2
 }
 

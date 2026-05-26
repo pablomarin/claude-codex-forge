@@ -70,6 +70,95 @@ WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -iE '\|\s*Command\s*\|' | head -1 |
 [ "$WORKFLOW_CMD" = "—" ] && exit 0
 [ "$WORKFLOW_CMD" = "-" ] && exit 0
 
+# ---------------------------------------------------------------------------
+# Layer 2 — /forge-goal PR-create authorization guard
+#
+# When /forge-goal is active (## /goal session has a non-empty nonce in state.md),
+# gh pr create requires an explicit ## PR authorization line with matching nonce +
+# current HEAD SHA. The line is written by the workflow agent after the user
+# answers YES to the AskUserQuestion PR-create modal.
+#
+# ACTIVE definition: GOAL_NONCE is non-empty after parsing. An empty nonce cell,
+# a missing /goal session section, or missing state.md → guard is a no-op.
+#
+# LAST-LINE defense: if state.md has multiple PR auth lines (state corruption),
+# the guard uses the LAST one. Proper REPLACE semantics keep exactly one line;
+# multiple lines surface as a diagnostic in the error message.
+#
+# When /forge-goal is NOT active, this guard is a no-op and the existing
+# checklist-completion guard below runs unchanged.
+# ---------------------------------------------------------------------------
+if echo "$COMMAND" | grep -qE '^[[:space:]]*gh[[:space:]]+pr[[:space:]]+create\b'; then
+    if [ -f "$STATE_FILE" ]; then
+        # CRLF normalize before awk anchors (matches Layer 1 parser pattern)
+        GOAL_BLOCK=$(tr -d '\r' < "$STATE_FILE" \
+                    | awk '/^## \/goal session$/{flag=1;next} flag && /^## /{flag=0} flag')
+        GOAL_NONCE=""
+        if [ -n "$GOAL_BLOCK" ]; then
+            GOAL_NONCE=$(echo "$GOAL_BLOCK" \
+                        | grep -E '\|[[:space:]]*nonce[[:space:]]*\|' \
+                        | head -1 | awk -F'|' '{print $3}' | tr -d ' \t')
+        fi
+        if [ -n "$GOAL_NONCE" ]; then
+            # /forge-goal is active (non-empty nonce); enforce PR-auth requirements
+            HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+
+            # Use LAST matching auth line (stale-duplicate defense; REPLACE semantics
+            # should keep exactly one, but guard defensively against state corruption)
+            PR_AUTH_LINE=$(tr -d '\r' < "$STATE_FILE" \
+                          | grep -E '^-[[:space:]]*\[x\][[:space:]]+PR creation authorized' \
+                          | tail -1)
+
+            # Count auth lines for diagnostic
+            AUTH_LINE_COUNT=$(tr -d '\r' < "$STATE_FILE" \
+                             | grep -c '^-[[:space:]]*\[x\][[:space:]]*PR creation authorized' 2>/dev/null || echo 0)
+
+            if [ -z "$PR_AUTH_LINE" ]; then
+                echo "WORKFLOW GATE: gh pr create blocked — no ## PR authorization line in state.md." >&2
+                echo "" >&2
+                echo "A /forge-goal-driven workflow is active (nonce: $GOAL_NONCE)." >&2
+                echo "PR creation requires user authorization via AskUserQuestion." >&2
+                echo "On user YES, write (REPLACE any existing ## PR authorization content):" >&2
+                echo "  - [x] PR creation authorized — \`<ts>\` — nonce=\`<n>\` — head=\`<sha>\`" >&2
+                exit 2
+            fi
+
+            if [ "$AUTH_LINE_COUNT" -gt 1 ]; then
+                echo "WORKFLOW GATE WARNING: Multiple PR authorization lines found in state.md (count: $AUTH_LINE_COUNT)." >&2
+                echo "This indicates state.md corruption — REPLACE semantics should keep exactly one line." >&2
+                echo "Using the LAST authorization line for this check. Consider cleaning state.md." >&2
+            fi
+
+            # Extract nonce and head from the auth line. Pattern:
+            # - [x] PR creation authorized — `<ts>` — nonce=`<nonce>` — head=`<sha>`
+            AUTH_NONCE=$(echo "$PR_AUTH_LINE" \
+                        | sed -E 's/.*nonce=`([^`]+)`.*/\1/')
+            AUTH_HEAD=$(echo "$PR_AUTH_LINE" \
+                        | sed -E 's/.*head=`([^`]+)`.*/\1/')
+
+            if [ "$AUTH_NONCE" != "$GOAL_NONCE" ]; then
+                echo "WORKFLOW GATE: gh pr create blocked — PR authorization nonce mismatch." >&2
+                echo "Session nonce:   $GOAL_NONCE" >&2
+                echo "Auth line nonce: $AUTH_NONCE" >&2
+                echo "Stale authorization from a previous /forge-goal session. Re-authorize via AskUserQuestion." >&2
+                echo "  - [x] PR creation authorized — \`<ts>\` — nonce=\`<n>\` — head=\`<sha>\`" >&2
+                exit 2
+            fi
+
+            if [ -z "$HEAD_SHA" ] || [ "$AUTH_HEAD" != "$HEAD_SHA" ]; then
+                echo "WORKFLOW GATE: gh pr create blocked — PR authorization HEAD mismatch." >&2
+                echo "Current HEAD:   $HEAD_SHA" >&2
+                echo "Auth line head: $AUTH_HEAD" >&2
+                echo "Commits added since authorization; re-authorize at the new HEAD." >&2
+                echo "  - [x] PR creation authorized — \`<ts>\` — nonce=\`<n>\` — head=\`<sha>\`" >&2
+                exit 2
+            fi
+
+            # All checks passed; fall through to the existing checklist guard
+        fi
+    fi
+fi
+
 # --- Active workflow: check always-required quality gates ---
 # Extract the Checklist section (between ### Checklist and next ## or ### heading
 # inside the Workflow block — staying scoped prevents stray "### Checklist"

@@ -40,6 +40,109 @@ else
     STOP_HOOK_ACTIVE=$(echo "$INPUT" | grep -o '"stop_hook_active"[[:space:]]*:[[:space:]]*true' | head -1)
     [ -n "$STOP_HOOK_ACTIVE" ] && STOP_HOOK_ACTIVE="true" || STOP_HOOK_ACTIVE="false"
 fi
+
+# ---------------------------------------------------------------------------
+# Worktree CWD fix (v5.32) — same rationale as build-evidence.sh. CC's Stop
+# hook runs with CWD=$CLAUDE_PROJECT_DIR (the parent project in worktree
+# sessions), but the user's actual session CWD lives in the stdin JSON.
+# cd there so relative state.md reads and git ops target the worktree.
+# ---------------------------------------------------------------------------
+if command -v jq &> /dev/null; then
+    HOOK_CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null || true)
+else
+    HOOK_CWD=$(printf '%s' "$INPUT" \
+        | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        | head -1 \
+        | sed -E 's/.*"cwd"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/' || true)
+fi
+if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
+    # Normalize to repo/worktree root in case stdin.cwd points at a subdirectory
+    # (Codex P2-1, v5.32 review). Without this, relative paths would miss.
+    NORMALIZED=$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null)
+    if [ -n "$NORMALIZED" ] && [ -d "$NORMALIZED" ]; then
+        cd "$NORMALIZED" 2>/dev/null || true
+    else
+        cd "$HOOK_CWD" 2>/dev/null || true
+    fi
+elif TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$TOPLEVEL" ]; then
+    cd "$TOPLEVEL" 2>/dev/null || true
+fi
+
+# Note: build-evidence is no longer invoked inline. It runs as its own Stop
+# hook entry (registered in settings.template.json) BEFORE this one — so its
+# STDERR output is rendered as informational hook output rather than being
+# concatenated with our exit-2 stderr and labeled "Stop hook error" by CC.
+# build-evidence still writes the fingerprint side-channel file that the
+# stuck-detection logic below reads.
+
+# ---------------------------------------------------------------------------
+# Task 8: /forge-goal stuck-detection soft warning.
+#
+# build-evidence.sh runs as a separate Stop hook entry BEFORE this one (per
+# settings.template.json hook ordering) and writes the current
+# progress_fingerprint to .claude/local/forge-goal-last-fingerprint as a
+# side-channel. We read it here. After 5 consecutive identical fingerprints,
+# emit FORGE_GOAL_STUCK_WARNING to STDERR. Informational only — does NOT abort.
+# Fires even when stop_hook_active=true (inside the active /goal loop — where
+# it's most useful). Counter lives in .claude/local/forge-goal-stuck-count:
+# format "<count>|<fingerprint_sha256>".
+# ---------------------------------------------------------------------------
+_forge_goal_stuck_check() {
+    local state_md=".claude/local/state.md"
+    local fp_file=".claude/local/forge-goal-last-fingerprint"
+    local counter_file=".claude/local/forge-goal-stuck-count"
+
+    # Only proceed if /forge-goal is active: state.md must have a non-empty
+    # nonce in the ## /goal session table. Best-effort: if missing, skip silently.
+    [ -f "$state_md" ] || return 0
+
+    local nonce
+    nonce=$(tr -d '\r' < "$state_md" \
+        | awk '/^## \/goal session$/{flag=1;next} flag && /^## /{flag=0} flag' \
+        | grep -E '\|[[:space:]]*nonce[[:space:]]*\|' \
+        | head -1 | awk -F'|' '{print $3}' | xargs 2>/dev/null)
+    [ -n "$nonce" ] || return 0
+
+    # Read the current fingerprint written by build-evidence.sh.
+    [ -f "$fp_file" ] || return 0
+    local current_fp
+    current_fp=$(tr -d '[:space:]' < "$fp_file" 2>/dev/null)
+    [ -n "$current_fp" ] || return 0
+
+    # Read previous counter state.
+    local prev_count=0
+    local prev_fp=""
+    if [ -f "$counter_file" ]; then
+        local raw
+        raw=$(cat "$counter_file" 2>/dev/null)
+        prev_count="${raw%%|*}"
+        prev_fp="${raw##*|}"
+        # Validate that prev_count is a non-negative integer.
+        case "$prev_count" in
+            ''|*[!0-9]*) prev_count=0; prev_fp="" ;;
+        esac
+    fi
+
+    # Update counter: increment if fingerprint unchanged, reset if changed.
+    local new_count
+    if [ "$current_fp" = "$prev_fp" ]; then
+        new_count=$((prev_count + 1))
+    else
+        new_count=1
+    fi
+
+    # Persist updated counter.
+    mkdir -p ".claude/local" 2>/dev/null || true
+    printf '%s|%s\n' "$new_count" "$current_fp" > "$counter_file" 2>/dev/null || true
+
+    # Emit warning if threshold reached (>= 5 consecutive identical fingerprints).
+    if [ "$new_count" -ge 5 ]; then
+        echo "FORGE_GOAL_STUCK_WARNING: no measurable progress for $new_count consecutive turns (fingerprint unchanged). Consider invoking /council, checkpointing state.md, or surfacing a blocker. Loop continues — this is informational only." >&2
+    fi
+    return 0
+}
+_forge_goal_stuck_check
+
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 
 # All git commands run in current directory (Claude cd's into worktrees)
@@ -108,9 +211,11 @@ fi
 
 ISSUES=""
 
-# Block: 3+ files changed on branch but CHANGELOG.md never updated
+# Block: 3+ files changed on branch but CHANGELOG.md never updated.
+# "files changed on branch vs $DEFAULT_BRANCH" — count is committed + uncommitted
+# diff vs the merge-base, NOT files-this-turn.
 if [ "$TOTAL_CHANGED" -gt 3 ] && [ "$CHANGELOG_IN_BRANCH" -eq 0 ] && [ "$CHANGELOG_MODIFIED" -eq 0 ]; then
-    ISSUES="${ISSUES:+$ISSUES }Update docs/CHANGELOG.md ($TOTAL_CHANGED files changed this session)."
+    ISSUES="${ISSUES:+$ISSUES }Update docs/CHANGELOG.md ($TOTAL_CHANGED files changed on branch vs $DEFAULT_BRANCH)."
 fi
 
 # Block using exit code 2 + stderr (robust — immune to shell profile stdout pollution)
@@ -118,6 +223,24 @@ if [ -n "$ISSUES" ]; then
     # Prepend workflow reminder if active (so model always sees current phase)
     [ -n "$WORKFLOW_REMINDER" ] && ISSUES="[$WORKFLOW_REMINDER] $ISSUES"
     echo "$ISSUES" >&2
+
+    # Detect open PR for current branch. Once a PR is open, the CHANGELOG gate
+    # downgrades from blocking (exit 2) to advisory (exit 0): the human reviewer
+    # carries the signal, and per-turn blocking during CI wait is just noise.
+    # gh availability and network are best-effort; on failure, default to "no
+    # open PR" so the original blocking behavior is preserved.
+    # Probe only runs when ISSUES is non-empty — clean stops pay no gh-API cost.
+    PR_OPEN=false
+    if command -v gh >/dev/null 2>&1; then
+        PR_STATE=$(gh pr view --json state -q .state 2>/dev/null || echo "")
+        [ "$PR_STATE" = "OPEN" ] && PR_OPEN=true
+    fi
+
+    if [ "$PR_OPEN" = "true" ]; then
+        # Advisory only — PR already open. Exit 0 so the message is informational
+        # and the build-evidence STDERR dump is not labeled "Stop hook error".
+        exit 0
+    fi
     exit 2
 fi
 

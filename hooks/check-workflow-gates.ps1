@@ -73,6 +73,89 @@ if (-not $cmdLine) { exit 0 }
 $cmd = ($cmdLine -split '\|')[2].Trim()
 if (-not $cmd -or $cmd -eq "none" -or $cmd -eq ([char]0x2014).ToString() -or $cmd -eq "-") { exit 0 }
 
+# ---------------------------------------------------------------------------
+# Layer 2 — /forge-goal PR-create authorization guard (PS parity for .sh)
+#
+# ACTIVE definition: $goalNonce is non-empty after parsing. An empty nonce
+# cell, missing /goal session section, or missing state.md → guard is no-op.
+# LAST-LINE defense: multiple PR auth lines → use last (REPLACE semantics
+# should keep exactly one; multiple = state.md corruption, surface to user).
+# PS 5.1 constraints: no ??, no Out-Null on STDERR, no pwsh spawn,
+# [Console]::Error.WriteLine for STDERR, CRLF normalize before regex.
+# ---------------------------------------------------------------------------
+if ($command -match '^\s*gh\s+pr\s+create\b') {
+    if (Test-Path $stateFile) {
+        # CRLF normalize, then scope to ## /goal session block
+        $raw = Get-Content $stateFile -Raw -ErrorAction SilentlyContinue
+        if (-not $raw) { $raw = "" }
+        $allLines = ($raw -replace "`r", "") -split "`n"
+        $inSession = $false
+        $goalNonce = ""
+        foreach ($line in $allLines) {
+            if ($line -match '^## /goal session$') { $inSession = $true; continue }
+            if ($inSession -and $line -match '^## ') { break }
+            if (-not $inSession) { continue }
+            if ($line -match '^\|\s*nonce\s*\|\s*(.+?)\s*\|$') {
+                $goalNonce = $matches[1].Trim()
+            }
+        }
+
+        if ($goalNonce) {
+            # /forge-goal is active (non-empty nonce); enforce PR-auth requirements
+            $headSha = ""
+            try { $headSha = ((git rev-parse HEAD 2>$null) -join "").Trim() } catch {}
+
+            # Collect ALL auth lines, use LAST (stale-duplicate defense)
+            $prAuthLines = @()
+            foreach ($line in $allLines) {
+                if ($line -match '^-\s*\[x\]\s+PR creation authorized') {
+                    $prAuthLines += $line
+                }
+            }
+            $prAuthLine = if ($prAuthLines.Count -gt 0) { $prAuthLines[-1] } else { "" }
+
+            if ($prAuthLines.Count -gt 1) {
+                [Console]::Error.WriteLine("WORKFLOW GATE WARNING: Multiple PR authorization lines found ($($prAuthLines.Count)). State.md corruption — REPLACE semantics should keep exactly one. Using LAST line.")
+            }
+
+            if (-not $prAuthLine) {
+                [Console]::Error.WriteLine("WORKFLOW GATE: gh pr create blocked — no ## PR authorization line in state.md.")
+                [Console]::Error.WriteLine("")
+                [Console]::Error.WriteLine("A /forge-goal-driven workflow is active (nonce: $goalNonce).")
+                [Console]::Error.WriteLine("PR creation requires user authorization via AskUserQuestion.")
+                [Console]::Error.WriteLine("On user YES, REPLACE any existing ## PR authorization content with:")
+                [Console]::Error.WriteLine("  - [x] PR creation authorized — ``<ts>`` — nonce=``<n>`` — head=``<sha>``")
+                exit 2
+            }
+
+            $authNonce = ""
+            $authHead = ""
+            if ($prAuthLine -match 'nonce=`([^`]+)`') { $authNonce = $matches[1] }
+            if ($prAuthLine -match 'head=`([^`]+)`')  { $authHead = $matches[1] }
+
+            if ($authNonce -ne $goalNonce) {
+                [Console]::Error.WriteLine("WORKFLOW GATE: gh pr create blocked — PR authorization nonce mismatch.")
+                [Console]::Error.WriteLine("Session nonce:   $goalNonce")
+                [Console]::Error.WriteLine("Auth line nonce: $authNonce")
+                [Console]::Error.WriteLine("Stale authorization from a previous /forge-goal session. Re-authorize via AskUserQuestion.")
+                [Console]::Error.WriteLine("  - [x] PR creation authorized — ``<ts>`` — nonce=``<n>`` — head=``<sha>``")
+                exit 2
+            }
+
+            if (-not $headSha -or $authHead -ne $headSha) {
+                [Console]::Error.WriteLine("WORKFLOW GATE: gh pr create blocked — PR authorization HEAD mismatch.")
+                [Console]::Error.WriteLine("Current HEAD:   $headSha")
+                [Console]::Error.WriteLine("Auth line head: $authHead")
+                [Console]::Error.WriteLine("Commits added since authorization; re-authorize at the new HEAD.")
+                [Console]::Error.WriteLine("  - [x] PR creation authorized — ``<ts>`` — nonce=``<n>`` — head=``<sha>``")
+                exit 2
+            }
+
+            # All checks passed; fall through to the existing checklist guard
+        }
+    }
+}
+
 # --- Active workflow: check always-required quality gates ---
 # Extract checklist section (scoped to the Workflow block, so stray
 # `### Checklist` headings in migrated State content can't poison this).

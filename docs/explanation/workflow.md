@@ -157,6 +157,37 @@ How a feature goes from idea to merged PR.
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## `/forge-goal` Autonomous Loop (Layer 2)
+
+When the workflow's gate checkpoint passes (PRD-complete for `/new-feature`; Plan-Approved for `/fix-bug`), the workflow command offers an autonomous-loop kickoff. The user copies the printed `/goal <condition>` command into their next message; the agent then drives plan → plan-review → implement → code-review-loop → E2E → PR-ready without further phase-by-phase prompting.
+
+### Checkpoint placement asymmetry
+
+| Command              | Checkpoint    | Trigger                                                         |
+| -------------------- | ------------- | --------------------------------------------------------------- |
+| `/new-feature`       | PRD-Complete  | After Phase 1 PRD created, before Phase 2 Research              |
+| `/fix-bug` (complex) | Plan-Approved | After Phase 3.3 Plan Review Loop passes, before Phase 4 Execute |
+| `/fix-bug` (simple)  | None          | Simple fixes skip Phase 3 and have no plan file to drive from   |
+| `/quick-fix`         | None          | Trivial changes are not eligible for autonomous loop            |
+
+### What the loop does
+
+- Reads `.claude/local/state.md` each turn (the workflow checklist + `/goal session` nonce)
+- Surfaces evidence each turn via `hooks/build-evidence.sh` (Layer 1) — a JSON blob between `FORGE_GOAL_EVIDENCE_BEGIN/END` markers on STDERR
+- The native Anthropic `/goal` verifier reads the transcript on each Stop event and decides whether the completion condition holds
+- Stops only at the PR-creation gate (AskUserQuestion authorizes; the `check-workflow-gates` hook enforces nonce + HEAD match before `gh pr create` runs)
+- Invokes `/council` instead of pausing for the user on any other ambiguous decision
+
+### When NOT to use it
+
+- Trivial changes (`/quick-fix` flow) — autonomous loop is overkill
+- When you want to review each phase by hand
+- When `/goal` is unavailable on your Claude Code version (requires CC 2.1.139+)
+
+### Disabling it
+
+Decline the autonomous loop offer at the checkpoint and the workflow falls back to the standard phase-by-phase flow.
+
 ## Why This Workflow?
 
 Based on Boris Cherny's key insight:

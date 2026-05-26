@@ -447,20 +447,53 @@ Invoke `/superpowers:writing-plans`. Mirroring `/new-feature` 3.2 — respect `w
 
 If this fix changes any user-facing behavior (UI, API, flows, forms, navigation, permissions), design E2E use cases NOW — before implementation, not after.
 
-Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `rules/testing.md`. Each use case declares its **Interface** (API / UI / CLI / API+UI) based on the project-type matrix in `rules/testing.md` — and includes **Setup** (sanctioned method per the ARRANGE/VERIFY boundary), **Steps**, **Verification**, and **Persistence**.
+Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `rules/testing.md`. Each UC must include **Actor**, **Scenario**, **Interface**, **Intent**, **Setup**, **Steps**, **Verification**, and **Persistence** — see the required-shape checklist below. See `rules/testing.md` "GOOD vs BAD use cases" for canonical worked examples per API / UI / CLI.
 
-**Project type scope** (from `CLAUDE.md` `## E2E Configuration`):
+**Pick the interface from the feature surface, not the project type.** `CLAUDE.md ## E2E Configuration` tells you which interfaces the project EXPOSES — that is the capability envelope. The bug itself tells you which surface the user actually touches:
 
-- **fullstack:** API use cases + UI use cases (API-first ordering for execution)
-- **api:** API use cases only
-- **cli:** CLI use cases only
-- **hybrid:** declare per use case
+| Bug shape                                         | UC interface(s)                                    |
+| ------------------------------------------------- | -------------------------------------------------- |
+| Bug in a UI page, form, flow, or visual element   | **UI**                                             |
+| Bug in a **public/product** REST/GraphQL endpoint | **API**                                            |
+| Bug in a CLI command, flag, or output             | **CLI**                                            |
+| Bug spanning UI + API (auth, billing, etc.)       | **API + UI** (API-first ordering)                  |
+| Bug in an internal endpoint backing a UI page     | **UI** only (endpoint contract → integration test) |
+| Purely internal (no user-visible regression)      | E2E: N/A with justification                        |
 
-For bug fixes, think about:
+**Surface coverage audit — REQUIRED before writing UCs:**
 
-- What was the user doing when the bug occurred? Reproduce that as a use case.
-- After the fix, does the happy path still work?
-- Could the fix break any adjacent user flow?
+A bug can reproduce across multiple surfaces if the underlying capability is exposed via more than one interface. If you only verify the fix through the surface where you saw the bug, you may ship a fix that works in UI but leaves the same regression in CLI (or vice versa).
+
+Run this checklist:
+
+1. Read `CLAUDE.md ## E2E Configuration` and list every interface the project exposes.
+2. For EACH exposed interface, ask: "Could the user hit this bug through this interface today?"
+3. In the plan file's `#### E2E Use Cases` section, declare a **Surface coverage decision** sub-block listing every exposed interface with either:
+   - **Covered** — a UC for this surface exists below, OR
+   - **N/A — \<substantive justification\>** — see `rules/testing.md` "Multi-surface coverage" for acceptable vs unacceptable N/A reasons.
+
+**The disqualifying N/A justification** (surfaced 2026-05-18 from msai-v2 soak): _"CLI: N/A — no CLI changes in my diff."_ That describes the implementation, not the user-facing scope. If the project's CLI exposes the same capability area, the bug likely reproduces there too — verify it doesn't, or write a CLI UC.
+
+verify-e2e's Step 2c emits a `SURFACE_COVERAGE_WARNING` if UCs cover fewer surfaces than the project exposes; during an autonomous `/forge-goal` run, the warning triggers a `/council` consultation unless the Surface coverage decision sub-block pre-justified the omission.
+
+**Required UC shape — every UC must have these fields filled:**
+
+1. **Actor** — A specific role/situation. Bare `user` / `users` / `a user` is rejected by verify-e2e Step 2b as `MISSING_ACTOR`. Use `Account admin with billing permissions`, `Visitor`, `Signed-in customer`, `API integrator`, `Operator from the CLI`, etc.
+2. **Scenario** — 1-2 sentences: what the Actor was doing when the bug occurred + what they expected. Traceable to the bug report. No biography fluff (verify-e2e rejects as `SCENARIO_FLUFF`).
+3. **Interface** — per the bug-surface table above
+4. **Intent** — one sentence stating the journey the Actor takes that should now work after the fix
+5. **Setup** — sanctioned setup only. Must NOT perform the action under test (`CHEAT_SETUP`). Declare auth state; use a sanctioned auth path.
+6. **Steps** — at least 2 user actions that reproduce the original bug path
+7. **Verification** — surface-specific user-observable outcome. See `rules/testing.md` "Verification language — surface-specific". A bare status code / bare exit code / single element-visible check is `THIN_VERIFICATION`.
+8. **Persistence** — reload, re-request, or re-invoke and confirm the fix stuck. Missing = `MISSING_PERSISTENCE`.
+
+**Quick sanity check before saving:**
+
+- Could the **Intent** be quoted from the original bug report by the affected Actor? If not, you're testing a code path, not the user's experience.
+- Does **Verification** describe what the Actor would actually **observe** AND **do next** through the chosen interface, not just an assertion?
+- Does the **Interface** match the surface where the user actually hits the bug, per the table above?
+
+If any answer is no, rewrite the UC. verify-e2e Step 2b's hard gates above will reject malformed UCs as `FAIL_INVALID_USE_CASE` — better to fix it here than round-trip through an unchecked gate.
 
 **Minimum:** 1 use case that reproduces the original bug through the user's interface and verifies the fix.
 
@@ -533,6 +566,100 @@ Gather severity-tagged findings from all available reviewers. Use this rubric:
 - Do NOT proceed to Phase 4 until the plan is approved
 
 > **Why mandatory?** A wrong fix plan leads to wasted effort and potentially new bugs. Two independent reviewers checking the plan against the actual code catches things a single pass misses.
+
+---
+
+## Plan-Approved Checkpoint — Print `/goal` for Autonomous Loop
+
+> **Scope:** This checkpoint applies to **complex fixes only** (Phase 3 path for 3+ files or architectural changes). Simple fixes (1-2 files, no architectural impact) skip both Phase 3 and this autonomous-loop kickoff; they proceed directly through manual phase-by-phase execution.
+
+When the plan-review-loop passes and the plan is approved (Phase 3.3 exit criteria met), if you (the agent) judge `/forge-goal` would help here (the fix is substantial enough to warrant autonomous execution), you may offer the user the option to kick off the autonomous loop.
+
+### Steps
+
+1. **Generate a session nonce.** Run:
+
+   ```bash
+   uuidgen | tr 'A-Z' 'a-z'
+   ```
+
+   Capture the output (e.g. `5f1a2b3c-9d8e-4f6a-b7c8-1e2d3f4a5b6c`).
+
+2. **REPLACE any existing `## /goal session` and `## PR authorization` sections in `.claude/local/state.md`.** Use the Edit tool to find the existing `## /goal session` heading (if any) and replace the entire block — heading + table + any trailing blank lines up to the next `## ` heading — with the new session. Likewise, if `## PR authorization` has any existing content, clear it now (stale auth from a prior run must not persist). Then write the new `/goal session` block immediately AFTER `## Workflow` and BEFORE `## State`:
+
+   ```markdown
+   ## /goal session
+
+   | Field            | Value                    |
+   | ---------------- | ------------------------ |
+   | nonce            | <UUID-from-step-1>       |
+   | workflow_command | /fix-bug <bug-name>      |
+   | issued_at        | <ISO-8601-UTC-timestamp> |
+   ```
+
+   Use `date -u +%Y-%m-%dT%H:%M:%SZ` for the timestamp.
+
+   **If `## /goal session` does not exist yet**, insert the section (heading + table) in the correct position using the Edit tool's insert-before capability on the `## State` heading.
+
+3. **Print the `/goal` command for the user to copy-paste.** Format the message EXACTLY:
+
+   ```
+   ────────────────────────────────────────
+    Plan approved. Type this to begin the autonomous loop:
+   ────────────────────────────────────────
+
+   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
+
+   ────────────────────────────────────────
+    Or type "no" to continue manually phase-by-phase.
+   ```
+
+   Substitute `<NONCE>` with the value from step 1.
+
+   **Note:** `all_gates_green` is intentionally excluded from the condition. The `/fix-bug` checklist includes post-PR items like "PR reviews addressed" and "Branch finished" — those cannot be checked while the PR is still open, making `all_gates_green` unsatisfiable at stop time. The condition above instead uses `pr_ready=true` (which captures the key quality gates: reviewer clean, E2E fresh, PR auth) plus explicit `pr_state.state="OPEN"` and `pr_authorization.authorized=true` checks.
+
+4. **If the user types the `/goal` command**, you (the agent) enter autonomous mode per `rules/workflow.md` "Council During `/forge-goal` Autonomous Run" — pause for the PR-creation gate only, route all other doubts to `/council`.
+
+5. **If the user declines** (types "no" or anything other than the `/goal` command), continue the standard `/fix-bug` workflow phase-by-phase.
+
+### Critical reminders during the autonomous loop
+
+- **DO NOT** call `gh pr create` until you have run `AskUserQuestion` asking the user to authorize, and they answered YES, and you have REPLACED the `## PR authorization` section in state.md with the new authorization line (matching nonce + current HEAD SHA at the moment of authorization).
+- **DO NOT** call `/goal clear` after success — `/goal` auto-clears when the verifier confirms the condition.
+- **DO** track each code-review iteration by appending `- [x] Code review iteration <N> — codex clean — head=`<sha>`AND`- [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>` to `### Checklist` (state.md). The `reviewer_gate.clean_same_iteration` evidence only fires when BOTH appear for the same iteration AND at the current HEAD.
+- **DO** invoke `/council` whenever you would otherwise pause for the user (except PR creation). Apply the chairman's verdict; do not second-guess it.
+- **REPLACE, never append** when writing `/goal session` or `## PR authorization`. Appending creates stale duplicate entries that confuse Layer 1's parsers.
+
+### PR-create gate — AskUserQuestion modal text
+
+When you (the agent) are ready to run `gh pr create` during a `/forge-goal`-driven run, FIRST call `AskUserQuestion` with this exact modal:
+
+```
+Authorize PR creation?
+
+Branch <branch> is pushed and Forge gates are green. Summary of work:
+- Files changed: <count> (<top-3-by-line-count>)
+- Tests added/modified: <count>
+- Reviewer status: codex clean (iter <N>) + pr-toolkit clean (iter <N>)
+- E2E report: <report-path>
+- Council fires this run: <count>
+
+Create a PR to <base> using the title "<title>" and the summary above?
+- Yes: write authorization to state.md and run gh pr create
+- No: pause the workflow for your direction
+```
+
+On YES, REPLACE the entire `## PR authorization` section in `.claude/local/state.md` with exactly ONE line:
+
+```
+- [x] PR creation authorized — `<ISO-8601-UTC-timestamp>` — nonce=`<session nonce>` — head=`<current HEAD SHA>`
+```
+
+If `## PR authorization` does not exist yet, create it. If it exists with old content, replace all content (heading + old lines) with the heading + this one new line. Never append.
+
+Then run `gh pr create`. The PreToolUse guard (`check-workflow-gates.{sh,ps1}`) will verify the authorization line matches before allowing the command.
+
+On NO, append a blocker line to `## Blockers` in state.md and STOP the autonomous loop.
 
 ---
 
@@ -689,7 +816,10 @@ The verify-e2e agent tests as a real user: no database access, no internal endpo
 
 Simple fixes (1-2 files, non-high-impact) skip Phase 3 entirely — so no plan file exists. If you took the simple-fix path AND the change is user-facing:
 
-- Write a lightweight use case set inline (1 happy-path + 1 error case minimum) using the UC template from `rules/testing.md`
+- Write a lightweight use case set inline (1 happy-path + 1 error case minimum) using the UC template from `rules/testing.md` (Actor, Scenario, Interface, Intent, Setup, Steps, Verification, Persistence — see required-shape checklist below). Reference the "GOOD vs BAD use cases" section for canonical worked examples per API / UI / CLI.
+- **Pick the interface from where the user hits the bug, not the project default** — UI bug → UI UC, public/product API bug → API UC, CLI bug → CLI UC, internal endpoint backing a UI page → UI UC. Same interface-selection table as Phase 3.2b applies.
+- **Run the Surface coverage audit from Phase 3.2b** even on simple fixes. Read `CLAUDE.md ## E2E Configuration`; for EACH exposed interface (UI / API / CLI) ask "could the user hit this bug here?" In the staging file, add a **Surface coverage decision** sub-block listing every exposed interface as either `Covered` (UC below) or `N/A — <substantive justification>`. _"No CLI changes in my diff"_ is NOT a valid justification — that describes implementation, not user-facing scope. verify-e2e's Step 2c will emit `SURFACE_COVERAGE_WARNING` if an exposed surface lacks both a UC and a pre-justified N/A line.
+- **Apply the required UC shape from Phase 3.2b before saving** — every UC must have an `Actor:` (not bare "user"), a `Scenario:` (1-2 sentences, no biography fluff), `Intent`, `Interface`, `Setup` (NOT the action under test), at least 2 `Steps`, `Verification` with surface-appropriate user-observable language (UI: sees/appears/shows; CLI: stdout shows/next invocation lists; API: receives/follow-up returns — bare status / bare exit code / single element-visible is `THIN_VERIFICATION`), and `Persistence`. verify-e2e Step 2b's hard gates reject malformed UCs as `FAIL_INVALID_USE_CASE` — see `rules/testing.md` "E2E Use Case Design" + "GOOD vs BAD use cases".
 - Save to **`docs/plans/<bug-name>-use-cases.md`** as a staging file. **Start the file with a `#### E2E Use Cases` heading** so verify-e2e can extract the UCs correctly.
 - **Why a staging file, not tests/e2e/use-cases/ directly?** Writing directly to `tests/e2e/use-cases/` would cause Phase 5.4b regression mode to pick up the new unverified use case alongside accumulated ones. Staging in `docs/plans/` keeps the separation clean. Phase 6.2b then graduates the staged file after PASS.
 - Then proceed to Step 1
@@ -725,13 +855,27 @@ mkdir -p tests/e2e/reports
 
 **Step 4: Act on the verdict**
 
-The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`, inspect the per-UC classifications in the report body (`FAIL_BUG` / `FAIL_STALE` / `FAIL_INFRA`) to decide next action:
+The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`, inspect the per-UC classifications in the report body (`FAIL_BUG` / `FAIL_STALE` / `FAIL_INFRA` / `FAIL_INVALID_USE_CASE`) to decide next action:
 
-- **VERDICT: PASS** — Proceed to Phase 5.4b.
-- **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` in the body. Fix the issue in code, re-run verify-e2e. Do NOT check the box until PASS. (If the body has mixed `FAIL_BUG` + `FAIL_STALE`, fix the bugs first; stale UCs are addressed separately.)
-- **VERDICT: PARTIAL** — No `FAIL_BUG` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
+- **VERDICT: PASS** — Proceed to Phase 5.4b — **after** the SURFACE_COVERAGE_WARNING check below.
+- **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body. Do NOT check the box until PASS.
+  - `FAIL_BUG`: Fix the issue in the product code, re-run verify-e2e.
+  - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason code: `MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW` / `NOT_USER_JOURNEY` / `WRONG_INTERFACE`. Rewrite the offending UC in the plan file (or `docs/plans/<bug-name>-use-cases.md` for simple-fix) using the required-shape checklist from Phase 3.2b / Step 0 and the GOOD examples in `rules/testing.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
+  - If the body has mixed classifications, address `FAIL_INVALID_USE_CASE` first (verify-e2e can't meaningfully run an invalid UC), then `FAIL_BUG`, then `FAIL_STALE`.
+- **VERDICT: PARTIAL** — No `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
   - `FAIL_STALE`: update the stale use case file (interface or selector changed), re-run.
   - `FAIL_INFRA`: retry once manually; if still infra, report to user for decision.
+
+**Step 4b (REQUIRED before checking the gate, regardless of verdict): scan for SURFACE_COVERAGE_WARNING.**
+
+Read the persisted report file and look for any line containing `SURFACE_COVERAGE_WARNING`. This marker can appear in a PASS report — `VERDICT: PASS` means the UCs that ran all passed, but it does NOT mean coverage was complete. A PASS without this check is the bug v5.33 fixed (Codex P2-1, v5.33 review).
+
+If `SURFACE_COVERAGE_WARNING` is present:
+
+- **Interactive mode** (no active /goal session): Stop. Show the warning text to the user. Ask: "verify-e2e flagged a missing surface — `<X>`. Is that intentional? If yes, add a substantive N/A line to the Surface coverage decision sub-block (in the plan file, or `docs/plans/<bug-name>-use-cases.md` for simple-fix) and re-run. If no, add a UC for that surface and re-run."
+- **Autonomous /forge-goal mode** (`## /goal session` has a non-empty nonce): Do NOT just proceed. Invoke `/council` per `rules/workflow.md` "Council During `/forge-goal` Autonomous Run" with the question: "verify-e2e flagged surface `<X>` as uncovered with no pre-justified N/A. Is this intentional scope or a missed surface?" Apply the chairman's verdict — either add the UC + re-run, or add the substantive N/A line + re-run.
+
+Do NOT check the E2E gate box while a SURFACE_COVERAGE_WARNING is still present in the most recent report.
 
 **If purely internal (no user-facing impact):** Check the box with justification:
 `- [x] E2E verified — N/A: internal fix, no user-facing changes`
@@ -812,6 +956,9 @@ If no files (empty directory, or directory missing): check the box with `- [x] E
 - **FAIL_BUG (framework: spec failure; agent: FAIL_BUG verdict):** This fix broke something that previously worked. Fix it, then re-run 5.4b (and 5.4 if this fix has its own user-facing E2E scope).
 - **FAIL_STALE (agent only):** Update stale use case file and re-run.
 - **FAIL_INFRA / flake (both paths):** Retry once. If still failing, report to user for decision.
+- **FAIL_INVALID_USE_CASE (agent only):** two flavors in regression mode, both telling you to fix the UC (NOT product code):
+  - **Hard-SHAPE reasons** (`MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW`) are skipped in regression mode (v5.35 mode-gating) to avoid retroactively failing legacy UCs that predate v5.34's shape requirement. If one of these fires anyway, it's a graduation bug — a post-v5.34 UC reached `tests/e2e/use-cases/` without the new shape. Rewrite it to the v5.34 shape (see `rules/testing.md`), commit, re-run.
+  - **Judgment-call reasons** (`NOT_USER_JOURNEY`, `WRONG_INTERFACE`) **DO fire in regression mode by design.** This is the desired behavior: pulling forward old bad UCs (endpoint-shaped Intents, wrong-interface declarations) so they get cleaned up to the new standard. Treat each one as a real find — open the UC, rewrite it to a proper user-journey UC per `rules/testing.md`, commit, re-run. The point of the regression suite catching these isn't ceremony; it's that old code-shaped UCs were testing the wrong thing all along.
 
 **Note:** `pnpm exec playwright test` runs the binary directly — no `package.json` script is required. setup.sh does not modify `package.json`; use the binary invocation above.
 

@@ -463,6 +463,130 @@ rc15=$(printf '{"stop_hook_active":false}' | (cd "$S15" && bash "$HOOK_STATE") 2
 assert_equals "$rc15" "2" "CHANGELOG gate fires on master-default repo (exit 2)"
 assert_contains "$S15/.state-stderr" "CHANGELOG" \
     "stderr mentions CHANGELOG threshold"
+assert_contains "$S15/.state-stderr" "on branch vs master" \
+    "stderr wording reflects branch-vs-default-branch (not 'this session')"
+
+# ===========================================================================
+# Test 15b: check-state-updated.sh — CHANGELOG gate downgrades to advisory
+# (exit 0) when an OPEN PR already exists for the branch.
+#
+# Surfaced 2026-05-18 during /forge-goal v1.0 soak in msai-v2:
+# the per-turn exit-2 nag during CI wait label-prefixed the build-evidence
+# STDERR dump as "Stop hook error", flooding the transcript every Stop.
+# Once the PR is open the human reviewer carries the signal — gate becomes
+# advisory.
+# ===========================================================================
+start_test "check-state-updated.sh: open PR → CHANGELOG gate downgrades to advisory (exit 0)"
+
+S15B=$(scratch_dir state-pr-open-advisory)
+(
+    cd "$S15B" || exit 1
+    git init -q
+    git -c user.email=test@test -c user.name=test checkout -q -b main
+    git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "initial"
+    git -c user.email=test@test -c user.name=test checkout -q -b feature/x
+    mkdir -p src/a src/b
+    printf 'x' > src/a/file1.txt
+    printf 'x' > src/a/file2.txt
+    printf 'x' > src/b/file3.txt
+    printf 'x' > src/b/file4.txt
+    git add src/
+    git -c user.email=test@test -c user.name=test commit -q -m "feature work: 4 files"
+)
+
+mkdir -p "$S15B/.claude/local"
+cat > "$S15B/.claude/local/state.md" <<'CONT'
+## Workflow
+
+| Field     | Value |
+| --------- | ----- |
+| Command   | none  |
+
+## State
+
+### Done
+- Some work done
+
+### Now
+Working on feature/x
+
+### Next
+Nothing
+CONT
+
+# Build a fake `gh` on PATH that returns "OPEN" for `gh pr view --json state -q .state`.
+# Use a sibling stub dir so the real gh is shadowed only for this test.
+GH_STUB_DIR="$S15B/.bin"
+mkdir -p "$GH_STUB_DIR"
+cat > "$GH_STUB_DIR/gh" <<'STUB'
+#!/usr/bin/env bash
+# Stub matches the exact subcommand the hook uses.
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+    echo "OPEN"
+    exit 0
+fi
+exit 1
+STUB
+chmod +x "$GH_STUB_DIR/gh"
+
+rc15b=$(printf '{"stop_hook_active":false}' | (cd "$S15B" && PATH="$GH_STUB_DIR:$PATH" bash "$HOOK_STATE") 2>"$S15B/.state-stderr"; echo "$?")
+assert_equals "$rc15b" "0" "open PR → exit 0 (advisory, not blocking)"
+assert_contains "$S15B/.state-stderr" "CHANGELOG" \
+    "stderr still mentions CHANGELOG so the human sees the advisory"
+
+# ===========================================================================
+# Test 15c: regression guard — gh pr view probe MUST NOT fire on clean Stops.
+#
+# Surfaced by Codex review of v5.30 (P2): the first cut of the fix called
+# `gh pr view` unconditionally whenever gh was installed, adding an API call
+# to every Stop hook in every repo (~250ms+ on offline/slow networks). Probe
+# must be lazy: only run when CHANGELOG block would fire.
+#
+# Test strategy: wire a gh stub that writes a tripwire file if invoked. Run
+# the hook on a clean repo (no CHANGELOG block trigger). Assert: exit 0 and
+# tripwire file does NOT exist (i.e. stub was never called).
+# ===========================================================================
+start_test "check-state-updated.sh: gh pr view probe is lazy — not called on clean Stops"
+
+S15C=$(scratch_dir state-clean-stop-no-gh-probe)
+(
+    cd "$S15C" || exit 1
+    git init -q
+    git -c user.email=test@test -c user.name=test checkout -q -b main
+    git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "initial"
+    # NO feature branch with 4+ files. Working tree clean. CHANGELOG block will not fire.
+)
+
+mkdir -p "$S15C/.claude/local"
+cat > "$S15C/.claude/local/state.md" <<'CONT'
+## Workflow
+
+| Field     | Value |
+| --------- | ----- |
+| Command   | none  |
+
+## State
+
+### Done
+- Clean
+CONT
+
+# Tripwire stub: any invocation writes a marker file, then returns OPEN.
+TRIPWIRE="$S15C/.gh-was-called"
+GH_STUB_DIR_C="$S15C/.bin"
+mkdir -p "$GH_STUB_DIR_C"
+cat > "$GH_STUB_DIR_C/gh" <<STUB
+#!/usr/bin/env bash
+touch "$TRIPWIRE"
+echo "OPEN"
+exit 0
+STUB
+chmod +x "$GH_STUB_DIR_C/gh"
+
+rc15c=$(printf '{"stop_hook_active":false}' | (cd "$S15C" && PATH="$GH_STUB_DIR_C:$PATH" bash "$HOOK_STATE") 2>"$S15C/.state-stderr"; echo "$?")
+assert_equals "$rc15c" "0" "clean Stop → exit 0"
+assert_file_missing "$TRIPWIRE" \
+    "gh pr view probe is lazy — tripwire NOT touched on clean Stop"
 
 # ===========================================================================
 # Hard-cut test: state.md missing + legacy CONTINUITY.md present →
@@ -740,6 +864,624 @@ if command -v pwsh >/dev/null 2>&1; then
 else
     printf "  %s·%s skipped: pwsh not installed\n" "$C_DIM" "$C_RESET"
 fi
+
+# ===========================================================================
+# Test N: check-state-updated emits FORGE_GOAL_EVIDENCE markers even when
+# stop_hook_active=true.
+#
+# Regression guard for the bug where the early-return path (active /goal loop)
+# suppressed evidence emission entirely, defeating Layer 1 of /forge-goal.
+#
+# v5.32 architecture: build-evidence is registered as its own Stop hook
+# (BEFORE check-state-updated) in settings.template.json. It always exits 0
+# and writes evidence to STDERR regardless of stop_hook_active. This test
+# now invokes build-evidence directly with stop_hook_active=true to assert
+# evidence still emits inside an active /goal loop.
+# ===========================================================================
+start_test "build-evidence emits FORGE_GOAL_EVIDENCE markers even when stop_hook_active=true"
+
+HOOK_EVIDENCE_SH="$REPO_ROOT/hooks/build-evidence.sh"
+
+SN=$(scratch_dir checkstateupd-evidence)
+mkdir -p "$SN/.claude/local"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+   "$SN/.claude/local/state.md"
+
+OUT_N="$SN/.out"
+(
+    cd "$SN" || exit 1
+    INPUT='{"stop_hook_active":true,"transcript_path":"/tmp/x"}'
+    echo "$INPUT" | bash "$HOOK_EVIDENCE_SH" > "$OUT_N" 2>&1
+)
+
+assert_contains "$OUT_N" "FORGE_GOAL_EVIDENCE_BEGIN" \
+    "evidence begin marker emits despite stop_hook_active=true"
+assert_contains "$OUT_N" "FORGE_GOAL_EVIDENCE_END" \
+    "evidence end marker emits despite stop_hook_active=true"
+
+# ===========================================================================
+# Layer 2: PR-create authorization guard (Task 3)
+# These tests exercise the new /forge-goal guard in check-workflow-gates.sh.
+# Each test runs inside a subshell to prevent pwd leakage.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Test L2-1: /goal session active + no ## PR authorization → blocked (exit 2)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates blocks gh pr create when ## PR authorization missing during active /forge-goal"
+
+scratch=$(scratch_dir wgates-prauth-missing)
+mkdir -p "$scratch/.claude/local"
+# state.md has /goal session populated with non-empty nonce (forge-goal active)
+# but NO PR authorization line.
+cat > "$scratch/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+- [ ] PR authorized
+
+EOF
+
+(
+    cd "$scratch"
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "2" "gh pr create BLOCKED when no ## PR authorization line (exit 2)"
+assert_contains "$scratch/.out" "PR creation authorized" "hook output mentions the missing authorization"
+
+# ---------------------------------------------------------------------------
+# Test L2-2: /goal session active + ## PR authorization with matching nonce + HEAD → allowed (exit 0)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates allows gh pr create when ## PR authorization matches nonce + HEAD"
+
+scratch=$(scratch_dir wgates-prauth-match)
+mkdir -p "$scratch/.claude/local"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a; git add a; git commit -qm init
+    HEAD_SHA=$(git rev-parse HEAD)
+
+    cat > .claude/local/state.md <<EOF
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+- [x] PR authorized
+
+## PR authorization
+
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\` — head=\`$HEAD_SHA\`
+EOF
+
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "0" "gh pr create ALLOWED when nonce + HEAD match (exit 0)"
+
+# ---------------------------------------------------------------------------
+# Test L2-3: /goal session active + ## PR authorization with stale HEAD → blocked (exit 2)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates blocks gh pr create when ## PR authorization head mismatched"
+
+scratch=$(scratch_dir wgates-prauth-stalehead)
+mkdir -p "$scratch/.claude/local"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a; git add a; git commit -qm init
+    echo y > a; git add a; git commit -qm second  # advance HEAD past authorization point
+
+    cat > .claude/local/state.md <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] PR authorized
+
+## PR authorization
+
+- [x] PR creation authorized — `2026-05-16T10:15:00Z` — nonce=`aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` — head=`abc123def_stale_head`
+EOF
+
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "2" "gh pr create BLOCKED when authorization head doesn't match current HEAD (exit 2)"
+assert_contains "$scratch/.out" "PR creation authorized" "hook output references the stale authorization"
+
+# ---------------------------------------------------------------------------
+# Test L2-4: NO /goal session (no non-empty nonce) → guard is a no-op (existing checklist guard runs)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates skips PR-auth guard when no non-empty nonce in /goal session (legacy workflow path)"
+
+scratch=$(scratch_dir wgates-prauth-noforgegoal)
+mkdir -p "$scratch/.claude/local"
+# state.md WITHOUT ## /goal session — the existing checklist guard runs unchanged.
+cat > "$scratch/.claude/local/state.md" <<'EOF'
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — Ship          |
+| Next step | gh pr create      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+(
+    cd "$scratch"
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "0" "PR-auth guard skipped when no /forge-goal session active"
+
+# ---------------------------------------------------------------------------
+# Test L2-5 (P1.2 fix): empty /goal session nonce row → treated as INACTIVE
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates treats /goal session with empty nonce row as INACTIVE (no block)"
+
+scratch=$(scratch_dir wgates-prauth-emptynonce)
+mkdir -p "$scratch/.claude/local"
+# state.md has ## /goal session heading but nonce row has no value — should be INACTIVE.
+cat > "$scratch/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            |       |
+| workflow_command |       |
+| issued_at        |       |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — Ship          |
+| Next step | gh pr create      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+(
+    cd "$scratch"
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "0" "PR-auth guard INACTIVE when /goal session nonce is empty (exit 0)"
+
+# ---------------------------------------------------------------------------
+# Test L2-6 (P1.4 fix): stale-duplicate auth lines → guard uses LAST one
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates uses LAST PR authorization line when multiple present (stale-duplicate defense)"
+
+scratch=$(scratch_dir wgates-prauth-duplicate)
+mkdir -p "$scratch/.claude/local"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a; git add a; git commit -qm init
+    HEAD_SHA=$(git rev-parse HEAD)
+
+    cat > .claude/local/state.md <<EOF
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## PR authorization
+
+- [x] PR creation authorized — \`2026-05-16T09:00:00Z\` — nonce=\`stale-nonce-old-session\` — head=\`staleshastale\`
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\` — head=\`$HEAD_SHA\`
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "0" "guard uses LAST auth line (matching nonce+HEAD) and ALLOWS when last line is valid"
+
+# ---------------------------------------------------------------------------
+# Test L2-7 (P2 fix): nonce mismatch in auth line → guard blocks (exit 2)
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates blocks gh pr create when ## PR authorization nonce mismatches /goal session nonce (stale-session defense)"
+
+scratch=$(scratch_dir wgates-prauth-noncemis)
+mkdir -p "$scratch/.claude/local"
+(
+    cd "$scratch"
+    git init -q -b main >/dev/null 2>&1
+    git config user.email "t@t"
+    git config user.name "t"
+    echo x > a; git add a; git commit -qm init
+    HEAD_SHA=$(git rev-parse HEAD)
+
+    cat > .claude/local/state.md <<EOF
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | session-A-uuid |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — PR Ready      |
+| Next step | Authorize PR      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+
+## PR authorization
+
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`session-B-different\` — head=\`$HEAD_SHA\`
+EOF
+
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "2" "gh pr create BLOCKED when auth-line nonce doesn't match /goal session nonce (exit 2)"
+assert_contains "$scratch/.out" "nonce" "hook output mentions nonce mismatch"
+
+# ===========================================================================
+# Layer 2 — Task 8: stuck-detection soft warning
+# After 5 consecutive Stop calls with an identical progress_fingerprint,
+# check-state-updated.sh must emit FORGE_GOAL_STUCK_WARNING to STDERR.
+# Turns 1-4 must NOT emit the warning; turn 5 must.
+# ===========================================================================
+start_test "Layer 2 — check-state-updated emits FORGE_GOAL_STUCK_WARNING after 5 identical fingerprints"
+
+(
+    scratch=$(scratch_dir checkstate-stuck)
+    mkdir -p "$scratch/.claude/local" "$scratch/.claude/hooks"
+    cp "$REPO_ROOT/hooks/build-evidence.sh" "$scratch/.claude/hooks/build-evidence.sh"
+    chmod +x "$scratch/.claude/hooks/build-evidence.sh"
+
+    # state.md with /forge-goal active (non-empty nonce)
+    cat > "$scratch/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | test-nonce-stuck-detection |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 4 — Execute       |
+| Next step | Write code        |
+
+### Checklist
+
+- [ ] Item 1
+- [ ] Item 2
+EOF
+
+    # v5.32: fire BOTH Stop hooks per turn — build-evidence first (writes
+    # fingerprint side-channel), then check-state-updated (reads it for
+    # stuck-detection). This mirrors the real Stop hook ordering in
+    # settings.template.json after the split.
+    # stop_hook_active=true keeps the CHANGELOG gate quiet (scratch dir has
+    # no git repo). Same state.md every turn → same progress_fingerprint →
+    # stuck counter increments.
+    INPUT='{"stop_hook_active":true,"transcript_path":"/tmp/x"}'
+
+    (
+        cd "$scratch"
+        for i in 1 2 3 4 5; do
+            echo "$INPUT" | bash "$REPO_ROOT/hooks/build-evidence.sh" > /dev/null 2>&1
+            echo "$INPUT" | bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$scratch/.out.$i" 2>&1
+        done
+    )
+
+    # Turns 1-4 must NOT have the warning; turn 5 MUST.
+    assert_not_contains "$scratch/.out.1" "FORGE_GOAL_STUCK_WARNING" "no warning on turn 1"
+    assert_not_contains "$scratch/.out.2" "FORGE_GOAL_STUCK_WARNING" "no warning on turn 2"
+    assert_not_contains "$scratch/.out.3" "FORGE_GOAL_STUCK_WARNING" "no warning on turn 3"
+    assert_not_contains "$scratch/.out.4" "FORGE_GOAL_STUCK_WARNING" "no warning on turn 4"
+    assert_contains     "$scratch/.out.5" "FORGE_GOAL_STUCK_WARNING" "warning fires on turn 5 (identical fingerprint)"
+)
+
+# ===========================================================================
+# v5.32 Test A — Worktree CWD fix: build-evidence MUST read state.md from
+# the cwd in the stdin JSON, not from its own CWD.
+#
+# Surfaced 2026-05-18 in msai-v2 portfolio-backtest soak: evidence reported
+# session_nonce:null and phase:null even though the worktree's state.md was
+# populated. Root cause: CC's Stop hook runs with CWD=$CLAUDE_PROJECT_DIR
+# (the parent project in worktree sessions). build-evidence read state.md
+# relative to that CWD → wrong (or missing) state.md.
+#
+# Test strategy: create TWO scratch dirs. "Main" has empty/no state.md.
+# "Worktree" has a state.md with a recognizable nonce. Invoke build-evidence
+# WITH CWD=main but stdin.cwd=worktree → assert evidence contains the
+# worktree's nonce.
+# ===========================================================================
+start_test "v5.32 — build-evidence reads state.md from stdin.cwd, not its own CWD"
+
+V32A_MAIN=$(scratch_dir v532-main-repo)
+V32A_WORKTREE=$(scratch_dir v532-worktree)
+mkdir -p "$V32A_MAIN/.claude/local" "$V32A_WORKTREE/.claude/local"
+
+# Main repo has NO /goal session.
+cat > "$V32A_MAIN/.claude/local/state.md" <<'EOF'
+## Workflow
+
+| Field   | Value |
+| ------- | ----- |
+| Command | none  |
+EOF
+
+# Worktree has an ACTIVE /goal session with a recognizable nonce.
+cat > "$V32A_WORKTREE/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | v532-worktree-nonce-marker |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-18T10:00:00Z |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 4 — Execute       |
+| Next step | Write code        |
+
+### Checklist
+
+- [ ] Item 1
+EOF
+
+# Init both as git repos (build-evidence runs git commands too).
+( cd "$V32A_MAIN" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+( cd "$V32A_WORKTREE" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+
+# Invoke build-evidence from CWD=main, stdin.cwd=worktree. Assert evidence
+# carries the WORKTREE's nonce (proves cwd-redirect happened).
+OUT_V32A="$V32A_MAIN/.out"
+INPUT_V32A=$(printf '{"stop_hook_active":false,"cwd":"%s"}' "$V32A_WORKTREE")
+( cd "$V32A_MAIN" && echo "$INPUT_V32A" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32A.stdout" 2> "$OUT_V32A.stderr" )
+
+assert_contains "$OUT_V32A.stderr" "v532-worktree-nonce-marker" \
+    "build-evidence read state.md from stdin.cwd (worktree), not its own CWD (main)"
+
+# Negative control: same setup but no `cwd` in stdin → build-evidence reads
+# state.md from its own CWD (main repo) and the nonce should be null.
+OUT_V32A_FALLBACK="$V32A_MAIN/.out-fallback"
+INPUT_V32A_NOCWD='{"stop_hook_active":false}'
+( cd "$V32A_MAIN" && echo "$INPUT_V32A_NOCWD" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32A_FALLBACK.stdout" 2> "$OUT_V32A_FALLBACK.stderr" )
+if grep -q "v532-worktree-nonce-marker" "$OUT_V32A_FALLBACK.stderr"; then
+    fail "negative control failed: evidence picked up worktree nonce without stdin.cwd (should have read main repo's state.md)"
+else
+    pass "negative control: without stdin.cwd, evidence reads CWD's state.md (no worktree nonce leak)"
+fi
+
+# ===========================================================================
+# v5.32 Test B — Worktree CWD fix: check-state-updated stuck-detection MUST
+# also honor stdin.cwd so it reads the worktree's nonce + fingerprint file.
+# ===========================================================================
+start_test "v5.32 — check-state-updated stuck-detection honors stdin.cwd"
+
+V32B_MAIN=$(scratch_dir v532-main-repo-b)
+V32B_WORKTREE=$(scratch_dir v532-worktree-b)
+mkdir -p "$V32B_MAIN/.claude/local" "$V32B_WORKTREE/.claude/local"
+
+# Main has no /goal session.
+cat > "$V32B_MAIN/.claude/local/state.md" <<'EOF'
+## Workflow
+| Field   | Value |
+| ------- | ----- |
+| Command | none  |
+EOF
+
+# Worktree has active session.
+cat > "$V32B_WORKTREE/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | v532b-worktree-nonce |
+| workflow_command | /new-feature bar |
+| issued_at        | 2026-05-18T10:00:00Z |
+
+## Workflow
+
+| Field     | Value           |
+| --------- | --------------- |
+| Command   | /new-feature bar |
+| Phase     | 4 — Execute     |
+| Next step | Code            |
+
+### Checklist
+- [ ] X
+EOF
+
+( cd "$V32B_MAIN" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+( cd "$V32B_WORKTREE" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+
+INPUT_V32B=$(printf '{"stop_hook_active":true,"cwd":"%s"}' "$V32B_WORKTREE")
+
+# Fire 5 cycles: build-evidence + check-state-updated, both from CWD=main
+# with stdin.cwd=worktree. Stuck-detection should accumulate inside the
+# WORKTREE's .claude/local (not the main repo's).
+for i in 1 2 3 4 5; do
+    ( cd "$V32B_MAIN" && echo "$INPUT_V32B" | bash "$REPO_ROOT/hooks/build-evidence.sh" > /dev/null 2>&1 )
+    ( cd "$V32B_MAIN" && echo "$INPUT_V32B" | bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$V32B_MAIN/.out.$i" 2>&1 )
+done
+
+# Counter file MUST exist inside the worktree, NOT inside main.
+assert_file_exists "$V32B_WORKTREE/.claude/local/forge-goal-stuck-count" \
+    "stuck-counter file written to worktree (stdin.cwd target)"
+assert_file_missing "$V32B_MAIN/.claude/local/forge-goal-stuck-count" \
+    "stuck-counter file NOT written to main repo (proves cwd-redirect)"
+assert_contains "$V32B_MAIN/.out.5" "FORGE_GOAL_STUCK_WARNING" \
+    "stuck-warning fires on turn 5 even with stdin.cwd redirect"
+
+# ===========================================================================
+# v5.32 Test C (Codex P2-1 regression guard) — subdirectory cwd MUST be
+# normalized to the repo/worktree root.
+#
+# Scenario: CC session was launched from a subdirectory like `apps/web` or
+# `frontend/`. Stop hook stdin.cwd points there. If build-evidence just
+# cd's into that subdirectory, then relative reads of `.claude/local/state.md`
+# silently miss (the file lives at repo root). Fix: normalize via
+# `git -C "$cwd" rev-parse --show-toplevel` before cd.
+# ===========================================================================
+start_test "v5.32 — subdirectory stdin.cwd normalizes to repo root (P2-1)"
+
+V32C=$(scratch_dir v532-subdir-cwd)
+mkdir -p "$V32C/.claude/local" "$V32C/apps/web/src"
+
+cat > "$V32C/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value |
+| ---------------- | ----- |
+| nonce            | v532c-subdir-marker |
+| workflow_command | /new-feature foo |
+| issued_at        | 2026-05-18T10:00:00Z |
+
+## Workflow
+
+| Field     | Value           |
+| --------- | --------------- |
+| Command   | /new-feature foo |
+| Phase     | 4 — Execute     |
+| Next step | Code            |
+
+### Checklist
+- [ ] X
+EOF
+
+( cd "$V32C" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+
+# Invoke build-evidence with stdin.cwd pointing at the SUBDIRECTORY apps/web/src.
+# The hook must walk up via `git rev-parse --show-toplevel` to the repo root
+# before reading state.md.
+OUT_V32C="$V32C/.out"
+SUBDIR="$V32C/apps/web/src"
+INPUT_V32C=$(printf '{"stop_hook_active":false,"cwd":"%s"}' "$SUBDIR")
+echo "$INPUT_V32C" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32C.stdout" 2> "$OUT_V32C.stderr"
+
+assert_contains "$OUT_V32C.stderr" "v532c-subdir-marker" \
+    "build-evidence normalized subdirectory cwd to repo root and read state.md"
 
 # ===========================================================================
 # Report

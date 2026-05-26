@@ -41,6 +41,94 @@ def merge_objects(template_obj, user_obj):
     return added
 
 
+def _hook_key(h):
+    """Identity tuple for a hook (type, command, prompt). Two hooks with the
+    same key are considered the same command; the user-side instance is kept
+    over the template-side instance during merge."""
+    return (h.get("type"), h.get("command"), h.get("prompt"))
+
+
+def merge_hook_event(template_event, user_event):
+    """Deep-merge a single hook event (Stop, PreToolUse, etc.).
+
+    Each event is a list of matcher-blocks: [{"matcher": "...", "hooks": [...]}, ...].
+    For each template matcher-block:
+      1. Find the user block with the same matcher (or append the whole template
+         block if none exists).
+      2. Rebuild the user block's `hooks` list IN TEMPLATE ORDER, picking up the
+         user's version of each hook when present. Append any user-only hooks
+         (not in the template) at the end.
+
+    Why this matters: settings.json hook events ship with multiple parallel hooks
+    inside one matcher-block (e.g., Stop runs build-evidence + check-state-updated
+    in that order — build-evidence writes a fingerprint side-channel file that
+    check-state-updated reads, so REVERSING the order silently breaks
+    stuck-detection). The old shallow merge skipped existing events entirely; a
+    naive deep-merge that only appended new commands would put build-evidence at
+    the WRONG position when the user had only check-state-updated. We rebuild in
+    template order so the ordering invariant is preserved on --upgrade.
+
+    Returns list of human-readable change descriptions.
+    """
+    changes = []
+    for template_block in template_event:
+        matcher = template_block.get("matcher", "")
+        # Find user block with matching matcher
+        user_block = next(
+            (b for b in user_event if b.get("matcher", "") == matcher),
+            None,
+        )
+        if user_block is None:
+            # Whole new matcher-block — append
+            user_event.append(template_block)
+            changes.append(f"new matcher-block (matcher={matcher!r})")
+            continue
+        # Same matcher exists — rebuild `hooks` list in template order.
+        user_block.setdefault("hooks", [])
+        original_keys = [_hook_key(h) for h in user_block["hooks"]]
+        user_by_key = {_hook_key(h): h for h in user_block["hooks"]}
+        template_keys = {_hook_key(h) for h in template_block.get("hooks", [])}
+
+        new_hooks = []
+        for template_hook in template_block.get("hooks", []):
+            tk = _hook_key(template_hook)
+            if tk in user_by_key:
+                # Keep user's version (preserves any user customizations on the
+                # same command, e.g., extra fields we don't recognize).
+                new_hooks.append(user_by_key[tk])
+            else:
+                new_hooks.append(template_hook)
+                cmd_label = template_hook.get("command") or template_hook.get("type", "?")
+                changes.append(f"new hook in matcher={matcher!r}: {cmd_label}")
+
+        # Append any user-only hooks (commands the user added themselves that
+        # are NOT in the template). Preserves user customizations.
+        for user_hook in user_block["hooks"]:
+            if _hook_key(user_hook) not in template_keys:
+                new_hooks.append(user_hook)
+
+        # P2-2 (Codex v5.32 review): detect ORDER-ONLY changes. If the user
+        # already has both commands but in wrong order, the loop above rebuilds
+        # new_hooks correctly but no "new hook" change is recorded — main()
+        # then treats `changes == []` as "already up to date" and skips the
+        # write, leaving the bad order in place. Record an order change so the
+        # rebuilt list is actually persisted.
+        new_keys = [_hook_key(h) for h in new_hooks]
+        if new_keys != original_keys:
+            # Only record order changes that AREN'T already captured by a
+            # "new hook" addition above (avoid double-reporting).
+            additions = [k for k in new_keys if k not in original_keys]
+            if not additions:
+                changes.append(
+                    f"reordered hooks in matcher={matcher!r} to match template "
+                    f"(ordering invariant — e.g., build-evidence must run before "
+                    f"check-state-updated)"
+                )
+
+        user_block["hooks"] = new_hooks
+    return changes
+
+
 def merge_settings(template, user):
     """Merge settings.json: hooks, permissions, enabledPlugins."""
     changes = []
@@ -65,13 +153,19 @@ def merge_settings(template, user):
                 if added:
                     changes.append(f"  Added permissions.{key}: {', '.join(added)}")
 
-    # Merge hooks (add new hook events, skip existing)
+    # Merge hooks (deep-merge: new hook events OR new commands inside existing events).
     if "hooks" in template:
         if "hooks" not in user:
             user["hooks"] = {}
-        added = merge_objects(template["hooks"], user["hooks"])
-        if added:
-            changes.append(f"  Added hook events: {', '.join(added)}")
+        for event_name, template_event in template["hooks"].items():
+            if event_name not in user["hooks"]:
+                user["hooks"][event_name] = template_event
+                changes.append(f"  Added hook event: {event_name}")
+                continue
+            # Event exists in user — deep-merge matcher-blocks + commands.
+            event_changes = merge_hook_event(template_event, user["hooks"][event_name])
+            for ch in event_changes:
+                changes.append(f"  hooks.{event_name}: {ch}")
 
     return changes
 
