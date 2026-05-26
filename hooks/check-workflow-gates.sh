@@ -39,6 +39,12 @@ IS_SHIP=false
 echo "$COMMAND" | grep -qE '^\s*git\s+commit\b' && IS_SHIP=true
 echo "$COMMAND" | grep -qE '^\s*git\s+push\b' && IS_SHIP=true
 echo "$COMMAND" | grep -qE '^\s*gh\s+pr\s+create\b' && IS_SHIP=true
+# Ship verb AFTER a separator (&&, ||, ;, |). Without this, a leading-nonship
+# chain like `git status && git commit && git push` has IS_SHIP=false and exits
+# below BEFORE reaching the compound-command block — shipping an unreviewed HEAD
+# past every gate. Matching the trailing ship verb routes it into the compound
+# block, which then blocks it.
+echo "$COMMAND" | grep -qE '[&|;]+\s*(git\s+commit\b|git\s+push\b|gh\s+pr\s+create\b)' && IS_SHIP=true
 
 # Not a ship action — allow immediately
 $IS_SHIP || exit 0

@@ -1910,6 +1910,28 @@ assert_equals "$rc" "2" "compound commit && push is blocked"
 assert_contains "$S23G/.hook-stderr" "compound ship command" \
     "stderr names the compound-command rule"
 
+# Leading-NONSHIP chains must ALSO block — the ship verb appears after a
+# separator, so IS_SHIP must match it (regression guard: a leading non-ship
+# command must not let the chained ship verb skip the gate via exit 0).
+for leadcmd in \
+    "git status && git commit -m x && git push" \
+    "cd sub && git commit -m x" \
+    "true && git push" \
+    "echo hi && gh pr create --title t"; do
+    printf '{"tool_input":{"command":"%s"}}' "$leadcmd" \
+        | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23G/.hook-stderr"
+    rc=$?
+    assert_equals "$rc" "2" "leading-nonship chain blocked: $leadcmd"
+done
+
+# Non-ship commands (no ship verb anywhere) must still pass immediately.
+for safecmd in "git status" "npm test" "git log --oneline" "echo done && ls"; do
+    printf '{"tool_input":{"command":"%s"}}' "$safecmd" \
+        | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>/dev/null
+    rc=$?
+    assert_equals "$rc" "0" "non-ship command not gated: $safecmd"
+done
+
 start_test "plain 'git commit -m x' still works (single command, gates checked → exit 0)"
 
 S23H=$(scratch_dir wgate-plain)

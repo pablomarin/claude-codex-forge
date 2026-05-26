@@ -37,6 +37,12 @@ $isShip = $false
 if ($command -match '^\s*git\s+commit\b') { $isShip = $true }
 if ($command -match '^\s*git\s+push\b') { $isShip = $true }
 if ($command -match '^\s*gh\s+pr\s+create\b') { $isShip = $true }
+# Ship verb AFTER a separator (&&, ||, ;, |). Without this, a leading-nonship
+# chain like `git status && git commit && git push` has $isShip=$false and exits
+# below BEFORE reaching the compound-command block — shipping an unreviewed HEAD
+# past every gate. Matching the trailing ship verb routes it into the compound
+# block, which then blocks it.
+if ($command -match '[&|;]+\s*(git\s+commit\b|git\s+push\b|gh\s+pr\s+create\b)') { $isShip = $true }
 
 if (-not $isShip) { exit 0 }
 
