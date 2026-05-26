@@ -311,12 +311,11 @@ compute_plan_review_gate() {
         else
             echo "false|$n|$claimed_sha"
         fi
-    elif echo "$clean_line" | grep -q "codex unavailable, council-confirmed"; then
-        # council escape accepted; no plan_sha to bind to
-        echo "true|$n|"
     else
-        # Other variants (user-confirmed) don't propagate into FORGE_GOAL_EVIDENCE
-        # because /goal autonomous mode forbids user-confirmed (see workflow.md).
+        # Codex is mandatory: only a `codex clean` line with matching plan_sha
+        # sets clean_same_iteration=true. There is no "codex unavailable" escape.
+        # A plan-review N/A escape does NOT set it true — so /goal can't
+        # self-complete without real Codex evidence (mirrors e2e_report).
         echo "false||"
     fi
 }

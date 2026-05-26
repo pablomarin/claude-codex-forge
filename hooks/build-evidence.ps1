@@ -264,14 +264,11 @@ function Compute-PlanReviewGate {
             $result.matched_plan_sha = $claimedSha
         }
         return $result
-    } elseif ($cleanLine -match 'codex unavailable, council-confirmed') {
-        # council escape accepted; no plan_sha to bind to
-        $result.clean = $true
-        $result.matched_iteration = $n
-        return $result
     }
-    # Other variants (user-confirmed) don't propagate into FORGE_GOAL_EVIDENCE
-    # because /goal autonomous mode forbids user-confirmed.
+    # Codex is mandatory: only a `codex clean` line with matching plan_sha sets
+    # clean=true. There is no "codex unavailable" escape. A plan-review N/A
+    # escape does NOT set it true — so /goal can't self-complete without real
+    # Codex evidence (mirrors e2e_report).
     return $result
 }
 

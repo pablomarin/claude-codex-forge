@@ -40,6 +40,28 @@ if ($command -match '^\s*gh\s+pr\s+create\b') { $isShip = $true }
 
 if (-not $isShip) { exit 0 }
 
+# --- Block compound ship commands ---
+# A compound like `git commit -m x && git push` validates evidence against the
+# pre-commit HEAD, passes, then the chained push ships the new (unreviewed)
+# HEAD with no second gate check. Detect a ship verb AFTER a separator
+# (&&, ||, ;, |) and block — force the user to run each ship action
+# individually so every one gets its own gate evaluation.
+$compoundTail = $command -replace '^[^&|;]*[&|;]+', ''
+if ($compoundTail -ne $command) {
+    if ($compoundTail -match '(git\s+commit\b|git\s+push\b|gh\s+pr\s+create\b)') {
+        [Console]::Error.WriteLine("WORKFLOW GATE: compound ship command blocked.")
+        [Console]::Error.WriteLine("")
+        [Console]::Error.WriteLine("This command chains a ship action (git commit / git push / gh pr create)")
+        [Console]::Error.WriteLine("with another command via &&, ||, ;, or |. Each ship action must be run")
+        [Console]::Error.WriteLine("individually so the workflow gate can validate evidence against the exact")
+        [Console]::Error.WriteLine("HEAD being shipped. A chained 'git commit && git push' would ship a new,")
+        [Console]::Error.WriteLine("unreviewed HEAD past the gate.")
+        [Console]::Error.WriteLine("")
+        [Console]::Error.WriteLine("Run each ship action as its own command.")
+        exit 2
+    }
+}
+
 # --- Check for active workflow (post PR #2: state file is .claude/local/state.md) ---
 $stateFile = ".claude/local/state.md"
 
@@ -59,9 +81,13 @@ $content = Get-Content $stateFile -Raw -ErrorAction SilentlyContinue
 # `### Checklist` headings elsewhere in the file. A whole-file Select-String
 # with `-First 1` would pick the first match — which can be the stray, not the
 # canonical scaffold — and gate (or fail to gate) on bogus content.
+# CRLF normalize BEFORE splitting. A CRLF-encoded state.md (Windows checkout)
+# would leave trailing \r so `^## Workflow$` never matches → empty block →
+# hook bails exit 0 → ALL gates silently bypassed. Strip \r first (mirrors
+# build-evidence.ps1's Read-StateMdLines).
 $workflowBlockLines = @()
 $inWorkflow = $false
-foreach ($line in ($content -split "`n")) {
+foreach ($line in (($content -replace "`r", "") -split "`n")) {
     if ($line -match '^## Workflow$') { $inWorkflow = $true; continue }
     if ($inWorkflow -and $line -match '^## ') { break }
     if ($inWorkflow) { $workflowBlockLines += $line }
@@ -164,7 +190,10 @@ $unchecked = @()
 
 foreach ($line in $workflowBlockLines) {
     if ($line -match '^### Checklist') { $inChecklist = $true; continue }
-    if ($line -match '^## ' -and $inChecklist) { break }
+    # Stop at the next `### ` heading (not just `## `) — matches build-evidence
+    # scoping so evidence lines under a DIFFERENT `### ` subsection of
+    # `## Workflow` cannot satisfy the hook.
+    if ($line -match '^### ' -and $inChecklist) { break }
     # Gate on the 4 canonical pre-ship markers:
     #   Code review loop | Simplified | Verified (tests | E2E verified
     # Exclude non-gate items that share words:
@@ -272,15 +301,25 @@ $checklistLines = @()
 $inCl = $false
 foreach ($l in $workflowBlockLines) {
     if ($l -match '^### Checklist') { $inCl = $true; continue }
-    if ($l -match '^## ' -and $inCl) { break }
+    # Stop at the next `### ` heading (matches build-evidence scoping).
+    if ($l -match '^### ' -and $inCl) { break }
     if ($inCl) { $checklistLines += $l }
 }
+
+# N/A escape: any `[x] Plan review loop ... N/A:` line skips the evidence check
+# (mirrors the E2E verified — N/A: gate). Codex is mandatory; there is no
+# "codex unavailable" escape.
+$planNaLine = ($checklistLines `
+    | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Plan review loop' -and $_ -match 'N/A:' } `
+    | Select-Object -First 1)
 
 $planPassLine = ($checklistLines `
     | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Plan review loop \(\d+ iterations\) — PASS' } `
     | Select-Object -Last 1)
 
-if ($planPassLine) {
+if ($planNaLine) {
+    # N/A justification present — skip plan-review evidence check
+} elseif ($planPassLine) {
     if ($planPassLine -match 'Plan review loop \((\d+) iterations\)') {
         $planN = $matches[1]
     } else {
@@ -299,7 +338,16 @@ if ($planPassLine) {
         exit 2
     }
 
+    # Codex is mandatory: only `codex clean` (plan_sha bound) is accepted.
     if ($planClean -match 'codex clean') {
+        # Presence check BEFORE extraction (mirror .sh): a clean line missing
+        # plan=/plan_sha= tokens must hit "malformed", not a garbled missing-file error.
+        if ($planClean -notmatch 'plan=`[^`]+`.*plan_sha=`[^`]+`') {
+            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN clean line is malformed.")
+            [Console]::Error.WriteLine("Expected format: codex clean — plan=``<path>`` — plan_sha=``<sha256>`` — ts=``<ts>``")
+            [Console]::Error.WriteLine("Got: $planClean")
+            exit 2
+        }
         if ($planClean -match 'plan=`([^`]+)`') { $planPath = $matches[1] } else { $planPath = $null }
         if ($planClean -match 'plan_sha=`([^`]+)`') { $claimedSha = $matches[1].ToLower() } else { $claimedSha = $null }
         if (-not $planPath -or -not $claimedSha) {
@@ -318,27 +366,13 @@ if ($planPassLine) {
             [Console]::Error.WriteLine("  Actual ($planPath): $actualSha")
             exit 2
         }
-    } elseif ($planClean -match 'codex unavailable, user-confirmed') {
-        if (Get-Command codex -ErrorAction SilentlyContinue) {
-            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN claims 'codex unavailable, user-confirmed' but codex is available on this machine at gate time.")
-            exit 2
-        }
-    } elseif ($planClean -match 'codex unavailable, council-confirmed') {
-        # Require UUID-format council_nonce.
-        if ($planClean -match 'council_nonce=`([^`]+)`') {
-            $councilNonce = $matches[1]
-        } else {
-            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN council-confirmed escape missing council_nonce.")
-            exit 2
-        }
-        if ($councilNonce -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
-            [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN council_nonce malformed (expected UUID).")
-            [Console]::Error.WriteLine("Got: $councilNonce")
-            exit 2
-        }
     } else {
         [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN clean line variant not recognized.")
         [Console]::Error.WriteLine("Got: $planClean")
+        [Console]::Error.WriteLine("")
+        [Console]::Error.WriteLine("Codex is mandatory in this repo. Accepted forms (see rules/workflow.md):")
+        [Console]::Error.WriteLine("  - codex clean — plan=``<path>`` — plan_sha=``<sha>`` — ts=``<ts>``")
+        [Console]::Error.WriteLine("  - mark the loop N/A:  - [x] Plan review loop — N/A: <reason>")
         exit 2
     }
 }
@@ -350,6 +384,12 @@ if ($planPassLine) {
 # Canonical clean-line stem (test-contracts.sh parity check):
 #   Code review iteration N — codex clean — head=`<sha>`
 # ---------------------------------------------------------------------------
+# N/A escape: any `[x] Code review loop ... N/A:` line skips the evidence check.
+# Codex is mandatory; there is no "tool unavailable" escape.
+$codeNaLine = ($checklistLines `
+    | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Code review loop' -and $_ -match 'N/A:' } `
+    | Select-Object -First 1)
+
 $codePassLine = ($checklistLines `
     | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Code review loop \(\d+ iterations\) — PASS' } `
     | Select-Object -Last 1)
@@ -358,7 +398,9 @@ $headShaCode = (git rev-parse HEAD 2>$null)
 if ($headShaCode) { $headShaCode = ([string]$headShaCode).Trim() } else { $headShaCode = "" }
 
 # Degraded env (no git repo) → skip code-review evidence check entirely.
-if ($codePassLine -and $headShaCode) {
+if ($codeNaLine) {
+    # N/A justification present — skip code-review evidence check
+} elseif ($codePassLine -and $headShaCode) {
     if ($codePassLine -match 'Code review loop \((\d+) iterations\)') {
         $codeN = $matches[1]
     } else {
@@ -403,27 +445,12 @@ if ($codePassLine -and $headShaCode) {
 
         if ($line -match "$tool clean") {
             # clean variant — head already verified above
-        } elseif ($line -match "$tool unavailable, user-confirmed") {
-            # Hard reject if codex is actually available (codex side only).
-            if ($tool -eq 'codex' -and (Get-Command codex -ErrorAction SilentlyContinue)) {
-                [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN claims '$tool unavailable, user-confirmed' but codex is available on this machine at gate time.")
-                exit 2
-            }
-        } elseif ($line -match "$tool unavailable, council-confirmed") {
-            if ($line -match 'council_nonce=`([^`]+)`') {
-                $councilNonce = $matches[1]
-            } else {
-                [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN $tool council-confirmed escape missing council_nonce.")
-                exit 2
-            }
-            if ($councilNonce -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
-                [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN $tool council_nonce malformed (expected UUID).")
-                [Console]::Error.WriteLine("Got: $councilNonce")
-                exit 2
-            }
         } else {
             [Console]::Error.WriteLine("WORKFLOW GATE: Code review iteration $codeN $tool line variant not recognized.")
             [Console]::Error.WriteLine("Got: $line")
+            [Console]::Error.WriteLine("")
+            [Console]::Error.WriteLine("Codex is mandatory in this repo. Required: $tool clean — head=``<sha>``,")
+            [Console]::Error.WriteLine("or mark the loop N/A:  - [x] Code review loop — N/A: <reason>")
             exit 2
         }
     }
