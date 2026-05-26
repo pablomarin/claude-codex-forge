@@ -708,11 +708,10 @@ If available:
 
 Note: The `/codex` command's Design Review Mode uses its own fixed prompt — it may not return P0/P1/P2/P3 tags directly. After receiving Codex's output, classify each finding into P0/P1/P2/P3 using the severity rubric before evaluating exit criteria.
 
-If Codex is NOT available:
+Codex is mandatory in this repo (Claude × Codex dual-engine). If Codex is genuinely NOT available:
 
-- Present your own review findings plus a summary of the plan to the user
-- Ask: "Does this design approach look right before I start implementing?"
-- User confirmation replaces Codex as the second reviewer
+- A `/forge-goal`-driven `/goal` run HALTS — a human takes over. The loop cannot self-complete without real Codex evidence.
+- For degraded interactive use only, you may mark the loop N/A and proceed: `- [x] Plan review loop — N/A: <reason>` (caught by human reviewers at PR time). There is no "user-confirmed" or "council-confirmed" escape.
 
 **Step B — Collect findings and evaluate:**
 
@@ -740,12 +739,12 @@ Gather severity-tagged findings from all available reviewers. Use this rubric:
      `- [x] Plan review loop (<N> iterations) — PASS`
   4. Proceed to Phase 4.
 
-The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is checked without (2). The plan_sha binds the clean claim to the actual reviewed plan content — re-patching the plan after the clean line invalidates the gate.
+The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is checked without (2). The plan_sha binds the clean claim to the actual reviewed plan content — re-patching the plan after the clean line invalidates the gate. The only escape is `- [x] Plan review loop — N/A: <reason>`.
 
 **Rules:**
 
 - Do NOT check the box until all available reviewers report no P0/P1/P2 on the same pass
-- "Available reviewers" = Claude always + Codex if installed, or user if Codex unavailable
+- "Available reviewers" = Claude always + Codex (mandatory). If Codex is genuinely down, halt for a human (autonomous run) or mark the loop N/A (interactive)
 - Typically 2-3 iterations
 - Do NOT proceed to Phase 4 until the plan is approved
 
