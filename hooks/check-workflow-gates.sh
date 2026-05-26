@@ -408,4 +408,100 @@ if [ -n "$PLAN_PASS_LINE" ]; then
     fi
 fi
 
+# ---------------------------------------------------------------------------
+# Evidence-based gate for Code review loop PASS
+#
+# Mirrors the plan-review gate but binds to git HEAD (because code-review iters
+# commit fixes between rounds — HEAD changes are the natural freshness primitive).
+# Codex+PR-toolkit are BOTH required for the same iteration at the current HEAD,
+# matching the existing build-evidence.sh:compute_reviewer_gate semantics.
+#
+# Canonical clean-line stem (referenced by tests/template/test-contracts.sh
+# parity check): Code review iteration N — codex clean — head=`<sha>`
+# ---------------------------------------------------------------------------
+CODE_PASS_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+    | grep -E '^\s*-\s*\[x\]\s+Code review loop \([0-9]+ iterations\) — PASS' \
+    | tail -1)
+
+HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+# Degraded env (no git repo) → skip code-review evidence check entirely.
+# Mirrors existing E2E gate pattern at check-workflow-gates.sh:259-263.
+# The hook fires on git commit/push/gh pr create — if those work, HEAD exists.
+# If git is unavailable, the ship action itself can't succeed, so the gate is moot.
+if [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
+    CODE_N=$(echo "$CODE_PASS_LINE" | sed -E 's/.*Code review loop \(([0-9]+) iterations\).*/\1/')
+
+    # Validate codex side (last-line semantics — defensive against stale duplicates)
+    CODEX_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+        | grep -E "^\s*-\s*\[x\]\s+Code review iteration $CODE_N — codex " \
+        | tail -1)
+    TOOLKIT_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+        | grep -E "^\s*-\s*\[x\]\s+Code review iteration $CODE_N — pr-toolkit " \
+        | tail -1)
+
+    if [ -z "$CODEX_LINE" ] || [ -z "$TOOLKIT_LINE" ]; then
+        echo "WORKFLOW GATE: [x] Code review loop ($CODE_N iterations) — PASS lacks per-iter clean evidence." >&2
+        echo "" >&2
+        echo "Required: matching lines in state.md (### Checklist):" >&2
+        echo "  - [x] Code review iteration $CODE_N — codex clean — head=\`$HEAD_SHA\`" >&2
+        echo "  - [x] Code review iteration $CODE_N — pr-toolkit clean — head=\`$HEAD_SHA\`" >&2
+        echo "" >&2
+        echo "Run iter-$CODE_N reviewers + append both clean lines, OR uncheck the loop." >&2
+        exit 2
+    fi
+
+    # Per-line validation: head match required for ALL variants (clean + escapes),
+    # council_nonce required for council-confirmed escapes.
+    for tool_line in "codex:$CODEX_LINE" "pr-toolkit:$TOOLKIT_LINE"; do
+        TOOL=$(echo "$tool_line" | cut -d: -f1)
+        LINE=$(echo "$tool_line" | cut -d: -f2-)
+
+        # Every variant must carry head=`<sha>` matching current HEAD —
+        # prevents stale-HEAD shortcut via unavailable escapes.
+        LINE_HEAD=$(echo "$LINE" | sed -E 's/.*head=`([0-9a-f]+)`.*/\1/')
+        if ! echo "$LINE" | grep -qE 'head=`[0-9a-f]+`'; then
+            echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line missing head=\`<sha>\`." >&2
+            echo "Got: $LINE" >&2
+            exit 2
+        fi
+        if [ "$LINE_HEAD" != "$HEAD_SHA" ]; then
+            echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line is at a stale HEAD (head mismatch)." >&2
+            echo "  Line head:    $LINE_HEAD" >&2
+            echo "  Current head: $HEAD_SHA" >&2
+            echo "" >&2
+            echo "New commits landed since iter-$CODE_N. Re-run $TOOL at current head." >&2
+            exit 2
+        fi
+
+        if echo "$LINE" | grep -q "$TOOL clean"; then
+            : # clean variant — head already verified above
+        elif echo "$LINE" | grep -q "$TOOL unavailable, user-confirmed"; then
+            # Hard reject if the tool is actually available at gate time.
+            # (pr-toolkit availability isn't detectable at shell level; we trust
+            # user-confirmed for it. Codex catches the primary fakery vector.)
+            if [ "$TOOL" = "codex" ] && codex_available; then
+                echo "WORKFLOW GATE: Code review iteration $CODE_N claims '$TOOL unavailable, user-confirmed'" >&2
+                echo "but \`codex\` is available on this machine at gate time." >&2
+                exit 2
+            fi
+        elif echo "$LINE" | grep -q "$TOOL unavailable, council-confirmed"; then
+            # Council escape requires a UUID-format nonce
+            COUNCIL_NONCE=$(echo "$LINE" | sed -E 's/.*council_nonce=`([^`]+)`.*/\1/')
+            if ! echo "$LINE" | grep -qE 'council_nonce=`[^`]+`'; then
+                echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL council-confirmed escape missing council_nonce." >&2
+                exit 2
+            fi
+            if ! echo "$COUNCIL_NONCE" | grep -qE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+                echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL council_nonce malformed (expected UUID)." >&2
+                echo "Got: $COUNCIL_NONCE" >&2
+                exit 2
+            fi
+        else
+            echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line variant not recognized." >&2
+            echo "Got: $LINE" >&2
+            exit 2
+        fi
+    done
+fi
+
 exit 0
