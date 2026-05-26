@@ -217,6 +217,8 @@ function Compute-ReviewerGate {
 # checkbox, with plan_sha matching the sha256 of the referenced plan file.
 # Canonical clean-line stem (test-contracts.sh parity check):
 #   Plan review iteration N — codex clean — plan=`<path>` — plan_sha=`<sha>`
+# Canonical code stem (parity with Compute-ReviewerGate):
+#   Code review iteration N — codex clean — head=`<sha>`
 # ---------------------------------------------------------------------------
 function Compute-PlanReviewGate {
     $result = @{ clean = $false; matched_iteration = ""; matched_plan_sha = "" }
