@@ -88,3 +88,17 @@ If PR Toolkit unavailable: Codex alone is sufficient.
 If neither available: alert user, manual review + user sign-off.
 
 Never check a loop box until all available reviewers pass clean on the same iteration.
+
+**Per-iteration clean evidence (enforced by `check-workflow-gates` hook on ship actions):**
+
+For each loop, the agent MUST append a per-iteration clean line to `### Checklist` in `.claude/local/state.md`:
+
+- **Plan review:** `- [x] Plan review iteration <N> — codex clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\``
+- **Code review:** `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``AND`- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``
+
+The `[x] Plan review loop (N iterations) — PASS` / `[x] Code review loop (N iterations) — PASS` checkbox is checked ONLY AFTER all available reviewers report clean AND the per-iter line(s) are written. The hook blocks `git commit`, `git push`, and `gh pr create` if the loop checkbox is PASS without matching per-iter evidence.
+
+**Escape valves** (use only when the reviewer is genuinely unavailable):
+
+- `codex unavailable, user-confirmed` — rejected at gate time if `command -v codex` succeeds. Use only outside `/forge-goal` autonomous mode.
+- `codex unavailable, council-confirmed — council_nonce=<n>` — required during `/forge-goal` autonomous mode (no user-authority signal except PR-create).
