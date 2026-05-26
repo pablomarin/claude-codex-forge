@@ -282,6 +282,7 @@ fi
 setup_git_scratch() {
     local dir
     dir=$(scratch_dir e2e-evidence)
+    local head
     (
         cd "$dir" || exit 1
         git init -q --initial-branch=main
@@ -297,30 +298,49 @@ setup_git_scratch() {
         # — making the feature-branch tests no-ops.
         git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "feature work"
     )
-    echo "$dir"
+    # Capture the post-feature-commit HEAD so callers can bind per-iter
+    # Code-review clean lines to it (required by the v5.39 evidence gate).
+    head=$(cd "$dir" && git rev-parse HEAD)
+    echo "$dir|$head"
 }
 
 # Helper: inject an E2E verified [x] entry into the checklist template.
-CHECKLIST_E2E_CHECKED_NO_NA='- [x] Code review loop (1 iterations) — PASS
+# These are now functions (not constants) because the v5.39 code-review
+# evidence gate requires per-iter clean lines bound to the actual HEAD.
+checklist_e2e_checked_no_na() {
+    local head="$1"
+    cat <<EOF
+- [x] Code review loop (1 iterations) — PASS
+$(make_code_review_clean_lines 1 "$head")
 - [x] Simplified
 - [x] Verified (tests/lint/types)
-- [x] E2E verified via verify-e2e agent (Phase 5.4)'
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+}
 
-CHECKLIST_E2E_CHECKED_NA='- [x] Code review loop (1 iterations) — PASS
+checklist_e2e_checked_na() {
+    local head="$1"
+    cat <<EOF
+- [x] Code review loop (1 iterations) — PASS
+$(make_code_review_clean_lines 1 "$head")
 - [x] Simplified
 - [x] Verified (tests/lint/types)
-- [x] E2E verified — N/A: internal migration, no user-facing changes'
+- [x] E2E verified — N/A: internal migration, no user-facing changes
+EOF
+}
 
 # ===========================================================================
 # Test 9: [x] E2E verified without N/A + fresh report → exit 0
 # ===========================================================================
 start_test "[x] E2E verified + fresh report → exit 0 (evidence satisfied)"
 
-S9=$(setup_git_scratch)
+result=$(setup_git_scratch)
+S9=$(echo "$result" | cut -d'|' -f1)
+HEAD9=$(echo "$result" | cut -d'|' -f2)
 mkdir -p "$S9/tests/e2e/reports"
 # Create a report file AFTER branch-off (its mtime is > branch-off-ts)
 echo "# E2E report" > "$S9/tests/e2e/reports/2026-04-19-10-00-feature.md"
-rc=$(run_hook_sh "$S9" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S9" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD9")")
 assert_equals "$rc" "0" "fresh report present → hook passes"
 
 # ===========================================================================
@@ -328,9 +348,11 @@ assert_equals "$rc" "0" "fresh report present → hook passes"
 # ===========================================================================
 start_test "[x] E2E verified + no report → exit 2 (evidence missing)"
 
-S10=$(setup_git_scratch)
+result=$(setup_git_scratch)
+S10=$(echo "$result" | cut -d'|' -f1)
+HEAD10=$(echo "$result" | cut -d'|' -f2)
 # No tests/e2e/reports/ directory at all
-rc=$(run_hook_sh "$S10" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S10" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD10")")
 assert_equals "$rc" "2" "no reports dir → hook blocks"
 assert_contains "$S10/.hook-stderr" "no fresh report was found" \
     "stderr explains the evidence gap"
@@ -344,12 +366,14 @@ assert_contains "$S10/.hook-stderr" "E2E verified — N/A:" \
 # ===========================================================================
 start_test "[x] E2E verified + only stale reports → exit 2"
 
-S11=$(setup_git_scratch)
+result=$(setup_git_scratch)
+S11=$(echo "$result" | cut -d'|' -f1)
+HEAD11=$(echo "$result" | cut -d'|' -f2)
 mkdir -p "$S11/tests/e2e/reports"
 echo "# old report" > "$S11/tests/e2e/reports/2024-01-01-old.md"
 # Force mtime to 2024-01-01 — definitely before any branch-off we just made
 touch -t 202401010000.00 "$S11/tests/e2e/reports/2024-01-01-old.md"
-rc=$(run_hook_sh "$S11" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S11" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD11")")
 assert_equals "$rc" "2" "only stale reports → hook blocks"
 
 # ===========================================================================
@@ -357,9 +381,11 @@ assert_equals "$rc" "2" "only stale reports → hook blocks"
 # ===========================================================================
 start_test "[x] E2E verified — N/A: reason → exit 0 (N/A bypasses evidence check)"
 
-S12=$(setup_git_scratch)
+result=$(setup_git_scratch)
+S12=$(echo "$result" | cut -d'|' -f1)
+HEAD12=$(echo "$result" | cut -d'|' -f2)
 # No reports directory — N/A should bypass the evidence check entirely
-rc=$(run_hook_sh "$S12" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NA")
+rc=$(run_hook_sh "$S12" 'git commit -m x' "$(checklist_e2e_checked_na "$HEAD12")")
 assert_equals "$rc" "0" "N/A form skips evidence check even without a report"
 
 # ===========================================================================
@@ -373,10 +399,13 @@ S13=$(scratch_dir e2e-nomaster)
     git init -q --initial-branch=weird
     git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "initial"
 )
+# Capture the inline HEAD so the per-iter code-review clean line binds to it
+# (the v5.39 code-review evidence gate sees a real HEAD here).
+HEAD13=$(cd "$S13" && git rev-parse HEAD)
 # No main, no master. Hook can't compute merge-base; should skip evidence
 # rather than fail. User gets no protection here — documented as a
 # degraded env, not a policy violation.
-rc=$(run_hook_sh "$S13" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S13" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD13")")
 assert_equals "$rc" "0" "degraded env (no main/master) → hook passes with warning"
 
 # ===========================================================================
@@ -395,9 +424,11 @@ S14=$(scratch_dir e2e-on-main)
     git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "initial"
     # STAY on main — no feature branch checkout.
 )
+# Capture the inline HEAD so the per-iter code-review clean line binds to it.
+HEAD14=$(cd "$S14" && git rev-parse HEAD)
 # [x] E2E verified without N/A + no reports. Without the HEAD==branch-off
 # fix, this would block. With the fix, it should pass (skip evidence).
-rc=$(run_hook_sh "$S14" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S14" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD14")")
 assert_equals "$rc" "0" "on main directly → evidence check skipped (trunk-based workflow supported)"
 
 # ===========================================================================
