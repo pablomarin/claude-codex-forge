@@ -2,6 +2,10 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.39 — 2026-05-26
+
+**Enforce per-iteration clean evidence for Plan review + Code review loops.** The `check-workflow-gates` PreToolUse hook now blocks ship actions when `- [x] Plan review loop (N iterations) — PASS` or `- [x] Code review loop (N iterations) — PASS` is checked in state.md without matching per-iter clean lines for iteration N. Plan review binds to plan-file sha256 (`plan_sha`); code review binds to current HEAD. `codex unavailable, user-confirmed` escape is hard-rejected if codex is installed; `council-confirmed` escape with `council_nonce` is accepted in /forge-goal autonomous mode. `build-evidence` emits a new `plan_review_gate` field in FORGE_GOAL_EVIDENCE alongside the existing `reviewer_gate`. Closes the same-iteration-clean shortcut surfaced by the msai-v2 v5.38 /goal run (iter-6 had 2 P1 still pending; agent ticked PASS and skipped iter-7).
+
 ## 5.38 — 2026-05-25 · Whole-UC NOT_USER_JOURNEY + stale-text cleanup
 
 Codex final-pass on v5.34–v5.37 found one structural enforcement gap plus three stale-text sites. All addressed.
