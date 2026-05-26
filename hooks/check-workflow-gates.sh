@@ -47,7 +47,12 @@ fi
 # non-idiomatic ways to ship; missing them yields a non-block (exit 0), never a
 # crash. Robust shell-command parsing is out of scope for this gate. Pushes/PRs
 # also re-enter this hook at push/PR time against the stable HEAD.
-_ENVP='([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*'
+# env-assignment prefix: NAME=VALUE followed by whitespace, zero or more times.
+# VALUE may be bare, 'single-quoted', "double-quoted" (may contain spaces), or
+# empty — covering forms like `GIT_AUTHOR_NAME='Pablo Marin' git commit` and
+# `FOO= git push`. Double-quoted bash string: single quotes are literal, the
+# inner double quotes are escaped.
+_ENVP="([A-Za-z_][A-Za-z0-9_]*=('[^']*'|\"[^\"]*\"|[^[:space:]]*)[[:space:]]+)*"
 _GITOPT='([[:space:]]+-[cC][[:space:]]+[^[:space:]]+)*'
 _SHIP_VERB="${_ENVP}(git${_GITOPT}[[:space:]]+(commit|push)\b|gh[[:space:]]+pr[[:space:]]+create\b)"
 IS_SHIP=false

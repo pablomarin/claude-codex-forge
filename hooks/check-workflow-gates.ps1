@@ -45,7 +45,11 @@ if (-not $command) { exit 0 }
 # non-idiomatic ways to ship; missing them yields a non-block (exit 0), never a
 # crash. Robust shell-command parsing is out of scope for this gate. Pushes/PRs
 # also re-enter this hook at push/PR time against the stable HEAD.
-$envp = '([A-Za-z_][A-Za-z0-9_]*=\S+\s+)*'
+# env-assignment prefix: NAME=VALUE followed by whitespace, zero or more times.
+# VALUE may be bare, 'single-quoted', "double-quoted" (may contain spaces), or
+# empty — covering `GIT_AUTHOR_NAME='Pablo Marin' git commit` and `FOO= git push`.
+# Single-quoted PS string: literal single quotes are doubled ('').
+$envp = '([A-Za-z_][A-Za-z0-9_]*=(''[^'']*''|"[^"]*"|\S*)\s+)*'
 $gitopt = '(\s+-[cC]\s+\S+)*'
 $shipVerb = "$envp(git$gitopt\s+(commit|push)\b|gh\s+pr\s+create\b)"
 $isShip = $false

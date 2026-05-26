@@ -1952,8 +1952,17 @@ for shipform in \
     "git -c user.name=x commit -m y" \
     "git -C /repo push" \
     "ls && git -C sub commit -m y" \
-    "FOO=bar gh pr create --title t"; do
-    printf '{"tool_input":{"command":"%s"}}' "$shipform" \
+    "FOO=bar gh pr create --title t" \
+    "GIT_AUTHOR_NAME='Pablo Marin' git commit -m y" \
+    "GIT_COMMITTER_NAME=\"Pablo Marin\" git push" \
+    "FOO= git commit -m y" \
+    "A=1 B=2 git commit -m y"; do
+    # JSON-escape \ and " so a double-quoted env value (GIT_COMMITTER_NAME="...")
+    # produces VALID JSON — a raw " would otherwise break jq parsing and make
+    # COMMAND empty (a test artifact, not a hook result). Real Claude Code always
+    # sends properly-escaped JSON.
+    esc=$(printf '%s' "$shipform" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    printf '{"tool_input":{"command":"%s"}}' "$esc" \
         | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>/dev/null
     rc=$?
     assert_equals "$rc" "2" "env-prefix / git -C ship form detected + gated: $shipform"
@@ -1963,7 +1972,8 @@ done
 # including `git -C` with a non-ship subcommand and an env-prefixed non-ship.
 for safecmd in "git status" "npm test" "git log --oneline" "echo done && ls" \
     "git -C . status" "FOO=bar npm test"; do
-    printf '{"tool_input":{"command":"%s"}}' "$safecmd" \
+    esc=$(printf '%s' "$safecmd" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    printf '{"tool_input":{"command":"%s"}}' "$esc" \
         | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>/dev/null
     rc=$?
     assert_equals "$rc" "0" "non-ship command not gated: $safecmd"
