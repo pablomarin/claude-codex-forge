@@ -536,11 +536,10 @@ If available:
 
 Note: The `/codex` command's Design Review Mode uses its own fixed prompt — it may not return P0/P1/P2/P3 tags directly. After receiving Codex's output, classify each finding into P0/P1/P2/P3 using the severity rubric before evaluating exit criteria.
 
-If Codex is NOT available:
+Codex is mandatory in this repo (Claude × Codex dual-engine). If Codex is genuinely NOT available:
 
-- Present your own review findings plus a summary of the plan to the user
-- Ask: "Does this fix approach look right before I start implementing?"
-- User confirmation replaces Codex as the second reviewer
+- A `/forge-goal`-driven `/goal` run HALTS — a human takes over. The loop cannot self-complete without real Codex evidence.
+- For degraded interactive use only, you may mark the loop N/A and proceed: `- [x] Plan review loop — N/A: <reason>` (caught by human reviewers at PR time). There is no "user-confirmed" or "council-confirmed" escape.
 
 **Step B — Collect findings and evaluate:**
 
@@ -556,12 +555,24 @@ Gather severity-tagged findings from all available reviewers. Use this rubric:
 **Step C — Exit criteria:**
 
 - **P0/P1/P2 found by any reviewer →** Fix the plan, increment iteration counter in the state.md checklist (`Plan review loop (N iterations)`), go back to Step A.
-- **Only P3 or clean from all available reviewers on the same pass →** Check the box in state.md with final count: `- [x] Plan review loop (3 iterations) — PASS`. Proceed to Phase 4.
+- **Only P3 or clean from all available reviewers on the same pass →**
+  1. Compute `plan_sha`:
+     ```bash
+     PLAN_SHA=$(shasum -a 256 docs/plans/<name>.md 2>/dev/null | awk '{print $1}')
+     # Linux: PLAN_SHA=$(sha256sum docs/plans/<name>.md | awk '{print $1}')
+     ```
+  2. Append the per-iter clean line to `.claude/local/state.md` `### Checklist`:
+     `- [x] Plan review iteration <N> — codex clean — plan=\`docs/plans/<name>.md\` — plan_sha=\`<sha>\` — ts=\`<ISO8601>\``
+  3. Check the loop-complete box:
+     `- [x] Plan review loop (<N> iterations) — PASS`
+  4. Proceed to Phase 4.
+
+The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is checked without (2). The plan_sha binds the clean claim to the actual reviewed plan content — re-patching the plan after the clean line invalidates the gate. The only escape is `- [x] Plan review loop — N/A: <reason>`.
 
 **Rules:**
 
 - Do NOT check the box until all available reviewers report no P0/P1/P2 on the same pass
-- "Available reviewers" = Claude always + Codex if installed, or user if Codex unavailable
+- "Available reviewers" = Claude always + Codex (mandatory). If Codex is genuinely down, halt for a human (autonomous run) or mark the loop N/A (interactive)
 - Typically 2-3 iterations
 - Do NOT proceed to Phase 4 until the plan is approved
 
@@ -608,7 +619,7 @@ When the plan-review-loop passes and the plan is approved (Phase 3.3 exit criter
     Plan approved. Type this to begin the autonomous loop:
    ────────────────────────────────────────
 
-   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
+   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND plan_review_gate.clean_same_iteration=true AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
 
    ────────────────────────────────────────
     Or type "no" to continue manually phase-by-phase.
@@ -753,10 +764,8 @@ This runs 6 specialized agents: code-reviewer, silent-failure-hunter, pr-test-an
 
 **Tool availability:**
 
-- **Both available (normal):** Run Codex + PR Toolkit in parallel
-- **Codex unavailable:** PR Toolkit alone is sufficient
-- **PR Toolkit unavailable:** Codex alone is sufficient
-- **Neither available:** Alert user, perform manual review, get user sign-off
+- **Both available (normal):** Run Codex + PR Toolkit in parallel — the expected path. The ship gate requires BOTH a `codex clean` AND a `pr-toolkit clean` per-iter line at the current HEAD.
+- **Codex is mandatory** (this repo is Claude × Codex dual-engine). If Codex is unavailable: during a `/goal` autonomous run the loop HALTS and a human takes over — it cannot self-complete without real Codex evidence. In interactive mode a human may do manual review and mark the loop `- [x] Code review loop — N/A: <reason>` (caught at PR review). `build-evidence` does NOT count N/A as clean, so an N/A never satisfies `/goal` completion.
 
 **Step B — Collect findings and evaluate:**
 
@@ -765,7 +774,18 @@ Gather severity-tagged findings from all available reviewers. Use the same P0–
 **Step C — Exit criteria:**
 
 - **P0/P1/P2 found by any reviewer →** Fix the issues. If fixes are substantial (3+ files changed), re-run verify-app before next review iteration to catch regressions early. Increment counter in the state.md checklist (`Code review loop (N iterations)`), go back to Step A.
-- **Only P3 or clean from all available reviewers on the same pass →** Check the box in state.md with final count: `- [x] Code review loop (3 iterations) — PASS`. Proceed to 5.2.
+- **Only P3 or clean from all available reviewers on the same pass →** do all three:
+  1. Append the per-iter clean lines to `.claude/local/state.md` `### Checklist` (head = current `git rev-parse HEAD`):
+
+  ```
+  - [x] Code review iteration <N> — codex clean — head=`<sha>`
+  - [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>`
+  ```
+
+  2. Check the loop-complete box: `- [x] Code review loop (<N> iterations) — PASS`
+  3. Proceed to 5.2.
+
+The PreToolUse `check-workflow-gates` hook blocks ship actions if (2) is checked without (1). New commits since iter-N invalidate the head-bound lines — re-run reviewers at the new HEAD and append a fresh iteration row.
 
 **Rules:**
 

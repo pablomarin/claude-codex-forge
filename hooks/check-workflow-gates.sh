@@ -35,13 +35,59 @@ fi
 [ -z "$COMMAND" ] && exit 0
 
 # --- Only gate ship actions ---
+# Ship-verb detection tolerant of two common, fully-legitimate invocation forms
+# that a plain `^git commit` anchor misses:
+#   - env-assignment prefix:  GIT_AUTHOR_NAME=x git commit ...   /  FOO=bar git push
+#   - git global options:     git -C <dir> commit ...           /  git -c k=v push
+# matched at BOTH the command start AND after a separator (&&, ||, ;, |).
+#
+# KNOWN RESIDUAL (accepted, fail-safe — conscious scope decision 2026-05-26):
+# exotic wrappers — subshell `(git push)`, control-flow `if true; then git push; fi`,
+# and command-substitution `$(git push)` — are NOT matched here. They are rare,
+# non-idiomatic ways to ship; missing them yields a non-block (exit 0), never a
+# crash. Robust shell-command parsing is out of scope for this gate. Pushes/PRs
+# also re-enter this hook at push/PR time against the stable HEAD.
+# env-assignment prefix: NAME=VALUE followed by whitespace, zero or more times.
+# VALUE may be bare, 'single-quoted', "double-quoted" (may contain spaces), or
+# empty — covering forms like `GIT_AUTHOR_NAME='Pablo Marin' git commit` and
+# `FOO= git push`. Double-quoted bash string: single quotes are literal, the
+# inner double quotes are escaped.
+_ENVP="([A-Za-z_][A-Za-z0-9_]*=('[^']*'|\"[^\"]*\"|[^[:space:]]*)[[:space:]]+)*"
+_GITOPT='([[:space:]]+-[cC][[:space:]]+[^[:space:]]+)*'
+_SHIP_VERB="${_ENVP}(git${_GITOPT}[[:space:]]+(commit|push)\b|gh[[:space:]]+pr[[:space:]]+create\b)"
 IS_SHIP=false
-echo "$COMMAND" | grep -qE '^\s*git\s+commit\b' && IS_SHIP=true
-echo "$COMMAND" | grep -qE '^\s*git\s+push\b' && IS_SHIP=true
-echo "$COMMAND" | grep -qE '^\s*gh\s+pr\s+create\b' && IS_SHIP=true
+echo "$COMMAND" | grep -qE "^[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
+echo "$COMMAND" | grep -qE "[&|;]+[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
 
 # Not a ship action — allow immediately
 $IS_SHIP || exit 0
+
+# --- Block compound ship commands ---
+# A compound like `git commit -m x && git push` validates evidence against the
+# pre-commit HEAD, passes, then the chained push ships the new (unreviewed)
+# HEAD with no second gate check. Detect a ship verb that appears AFTER a
+# command separator (&&, ||, ;, |) and block — force the user to run each
+# ship action individually so every one gets its own gate evaluation.
+#
+# Heuristic: strip everything up to and including the FIRST separator, then
+# look for a ship verb in the remainder. Robust enough for the common case;
+# quoted separators inside a commit message are a rare false positive and a
+# false positive only asks the user to split the command (fail-safe).
+COMPOUND_TAIL=$(echo "$COMMAND" | sed -E 's/^[^&|;]*([&|;]+)//')
+if [ "$COMPOUND_TAIL" != "$COMMAND" ]; then
+    if echo "$COMPOUND_TAIL" | grep -qE "$_SHIP_VERB"; then
+        echo "WORKFLOW GATE: compound ship command blocked." >&2
+        echo "" >&2
+        echo "This command chains a ship action (git commit / git push / gh pr create)" >&2
+        echo "with another command via &&, ||, ;, or |. Each ship action must be run" >&2
+        echo "individually so the workflow gate can validate evidence against the exact" >&2
+        echo "HEAD being shipped. A chained 'git commit && git push' would ship a new," >&2
+        echo "unreviewed HEAD past the gate." >&2
+        echo "" >&2
+        echo "Run each ship action as its own command." >&2
+        exit 2
+    fi
+fi
 
 # --- Check for active workflow (post PR #2: state file is .claude/local/state.md) ---
 STATE_FILE=".claude/local/state.md"
@@ -60,7 +106,11 @@ fi
 # `### Checklist` headings elsewhere in the file. A whole-file grep with
 # `head -1` would pick the first match — which can be the stray, not the
 # canonical scaffold — and gate (or fail to gate) on bogus content.
-WORKFLOW_BLOCK=$(awk '/^## Workflow$/{flag=1;next} flag && /^## /{flag=0} flag' "$STATE_FILE" 2>/dev/null)
+# CRLF normalize BEFORE the awk anchors. A CRLF-encoded state.md (Windows
+# checkout) would leave a trailing \r so `^## Workflow$` never matches → empty
+# block → hook bails exit 0 → ALL gates silently bypassed. Strip \r first.
+WORKFLOW_BLOCK=$(tr -d '\r' < "$STATE_FILE" 2>/dev/null \
+    | awk '/^## Workflow$/{flag=1;next} flag && /^## /{flag=0} flag')
 
 # Use flexible whitespace matching — formatters may pad table cells
 WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -iE '\|\s*Command\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
@@ -88,7 +138,9 @@ WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -iE '\|\s*Command\s*\|' | head -1 |
 # When /forge-goal is NOT active, this guard is a no-op and the existing
 # checklist-completion guard below runs unchanged.
 # ---------------------------------------------------------------------------
-if echo "$COMMAND" | grep -qE '^[[:space:]]*gh[[:space:]]+pr[[:space:]]+create\b'; then
+# Env-prefix-aware (matches `FOO=bar gh pr create`) so the broadened IS_SHIP
+# detection above can't route an env-prefixed PR-create past this auth guard.
+if echo "$COMMAND" | grep -qE "^[[:space:]]*${_ENVP}gh[[:space:]]+pr[[:space:]]+create\b"; then
     if [ -f "$STATE_FILE" ]; then
         # CRLF normalize before awk anchors (matches Layer 1 parser pattern)
         GOAL_BLOCK=$(tr -d '\r' < "$STATE_FILE" \
@@ -160,10 +212,16 @@ if echo "$COMMAND" | grep -qE '^[[:space:]]*gh[[:space:]]+pr[[:space:]]+create\b
 fi
 
 # --- Active workflow: check always-required quality gates ---
-# Extract the Checklist section (between ### Checklist and next ## or ### heading
-# inside the Workflow block — staying scoped prevents stray "### Checklist"
-# headings in migrated State content from being picked up).
-CHECKLIST=$(echo "$WORKFLOW_BLOCK" | sed -n '/^### Checklist/,$p')
+# Extract the Checklist section: from `### Checklist` up to (but not including)
+# the NEXT `### ` heading inside the Workflow block. Stopping at the next `### `
+# (not just `## `) matches build-evidence's compute_reviewer_gate scoping — so
+# evidence lines under a DIFFERENT `### ` subsection of `## Workflow` cannot
+# satisfy the hook.
+CHECKLIST=$(echo "$WORKFLOW_BLOCK" | awk '
+    /^### Checklist/ { flag=1; next }
+    flag && /^### / { flag=0 }
+    flag { print }
+')
 
 # Only gate on the 4 pre-ship quality gates:
 #   "Code review loop" — code review must pass before shipping
@@ -279,6 +337,221 @@ if [ -n "$E2E_CHECKED_LINE" ] && ! echo "$E2E_CHECKED_LINE" | grep -qE 'N/A:'; t
         echo "See .claude/rules/testing.md for the full policy." >&2
         exit 2
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# Evidence-based gate for Plan review loop PASS
+#
+# The msai-v2 v5.38 /goal run violated this by ticking [x] Plan review loop
+# (6 iterations) — PASS while iter-6 still had 2 P1 findings. Patching the
+# plan and skipping iter-7 confirmation is exactly the discipline drift this
+# gate prevents.
+#
+# Required when checkbox is "- [x] Plan review loop (N iterations) — PASS":
+#   - a matching per-iter clean line for iteration N
+#   - the line's plan_sha matches sha256 of the referenced plan file
+#
+# Canonical clean-line stem (referenced by tests/template/test-contracts.sh
+# parity check): Plan review iteration N — codex clean — plan=`<path>`
+#
+# Codex is MANDATORY in this repo (Claude × Codex dual-engine). The ONLY escape
+# is an N/A justification on the loop line (mirrors the E2E verified — N/A:
+# gate). There is no "codex unavailable" escape: if Codex is genuinely down,
+# /goal halts and a human takes over.
+#
+# N/A escape: if the `Plan review loop (N iterations) — PASS` line OR a
+# dedicated `- [x] Plan review loop — N/A: <reason>` line carries `N/A:`, the
+# evidence check is skipped. Human reviewers catch lazy N/A justifications.
+#
+#   - No `[x] Plan review loop` at all → gate inert (simple-fix path)
+# ---------------------------------------------------------------------------
+# N/A escape: any `[x] Plan review loop ... N/A:` line skips the evidence check.
+PLAN_NA_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+    | grep -E '^\s*-\s*\[x\]\s+Plan review loop' \
+    | grep -E 'N/A:' \
+    | head -1)
+
+PLAN_PASS_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+    | grep -E '^\s*-\s*\[x\]\s+Plan review loop \([0-9]+ iterations\) — PASS' \
+    | tail -1)
+
+if [ -n "$PLAN_NA_LINE" ]; then
+    : # N/A justification present — skip plan-review evidence check
+elif [ -n "$PLAN_PASS_LINE" ]; then
+    # Extract N from "Plan review loop (N iterations) — PASS"
+    PLAN_N=$(echo "$PLAN_PASS_LINE" | sed -E 's/.*Plan review loop \(([0-9]+) iterations\).*/\1/')
+
+    # Find the per-iter clean line for iteration N (LAST matching line — defensive
+    # against stale duplicates, matches PR-authorization pattern at line 115-117).
+    PLAN_CLEAN=$(echo "$CHECKLIST" | tr -d '\r' \
+        | grep -E "^\s*-\s*\[x\]\s+Plan review iteration $PLAN_N — " \
+        | tail -1)
+
+    if [ -z "$PLAN_CLEAN" ]; then
+        echo "WORKFLOW GATE: [x] Plan review loop ($PLAN_N iterations) — PASS lacks per-iter clean evidence." >&2
+        echo "" >&2
+        echo "Required: a matching line in state.md (### Checklist):" >&2
+        echo "  - [x] Plan review iteration $PLAN_N — codex clean — plan=\`<plan-file>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
+        echo "" >&2
+        echo "Run iter-$PLAN_N reviewers and append the clean line, OR uncheck the loop" >&2
+        echo "and run another iteration. See rules/workflow.md Revision Loop Protocol." >&2
+        exit 2
+    fi
+
+    # Branch on the clean-line variant. Match the canonical delimited form
+    # (— codex clean —), not a bare substring, so "not-codex clean" can't pass.
+    # Codex is mandatory: only `codex clean`
+    # (plan_sha bound) is accepted. No "codex unavailable" escapes.
+    if echo "$PLAN_CLEAN" | grep -qF -- "— codex clean —"; then
+        # Presence check BEFORE sed extraction. `sed -E 's/.*plan=`...`.*/\1/'`
+        # returns the WHOLE line on no-match, so a clean line missing the
+        # plan=/plan_sha= tokens would slip past a non-empty check and hit a
+        # garbled "missing file" error. Guard explicitly (mirrors the code-review
+        # gate's `grep -qE 'head=`[0-9a-f]+`'` presence check).
+        if ! echo "$PLAN_CLEAN" | grep -qE 'plan=`[^`]+`.*plan_sha=`[^`]+`'; then
+            echo "WORKFLOW GATE: Plan review iteration $PLAN_N clean line is malformed." >&2
+            echo "Expected format: codex clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
+            echo "Got: $PLAN_CLEAN" >&2
+            exit 2
+        fi
+
+        # Extract plan path + claimed sha
+        PLAN_PATH=$(echo "$PLAN_CLEAN" | sed -E 's/.*plan=`([^`]+)`.*/\1/')
+        CLAIMED_SHA=$(echo "$PLAN_CLEAN" | sed -E 's/.*plan_sha=`([^`]+)`.*/\1/')
+
+        if [ -z "$PLAN_PATH" ] || [ -z "$CLAIMED_SHA" ]; then
+            echo "WORKFLOW GATE: Plan review iteration $PLAN_N clean line is malformed." >&2
+            echo "Expected format: codex clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
+            echo "Got: $PLAN_CLEAN" >&2
+            exit 2
+        fi
+
+        if [ ! -f "$PLAN_PATH" ]; then
+            echo "WORKFLOW GATE: Plan review evidence references missing file: $PLAN_PATH" >&2
+            exit 2
+        fi
+
+        if command -v shasum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(shasum -a 256 "$PLAN_PATH" | awk '{print $1}')
+        elif command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(sha256sum "$PLAN_PATH" | awk '{print $1}')
+        else
+            echo "WORKFLOW GATE: cannot verify plan_sha (no shasum or sha256sum command available)." >&2
+            echo "Install coreutils or perl-Digest::SHA, OR mark the gate N/A." >&2
+            exit 2
+        fi
+
+        # Normalize both sides to lowercase before compare. Get-FileHash in
+        # PowerShell returns uppercase by default; an agent writing the clean
+        # line from a PS host would otherwise mismatch our sha256sum output.
+        ACTUAL_SHA=$(echo "$ACTUAL_SHA" | tr 'A-Z' 'a-z')
+        CLAIMED_SHA=$(echo "$CLAIMED_SHA" | tr 'A-Z' 'a-z')
+
+        if [ "$ACTUAL_SHA" != "$CLAIMED_SHA" ]; then
+            echo "WORKFLOW GATE: Plan review iteration $PLAN_N plan_sha mismatch." >&2
+            echo "  Claimed (state.md): $CLAIMED_SHA" >&2
+            echo "  Actual ($PLAN_PATH): $ACTUAL_SHA" >&2
+            echo "" >&2
+            echo "The plan file changed since iter-$PLAN_N was reviewed. Re-run reviewers." >&2
+            exit 2
+        fi
+    else
+        echo "WORKFLOW GATE: Plan review iteration $PLAN_N clean line variant not recognized." >&2
+        echo "Got: $PLAN_CLEAN" >&2
+        echo "" >&2
+        echo "Codex is mandatory in this repo. Accepted forms (see rules/workflow.md):" >&2
+        echo "  - codex clean — plan=\`<path>\` — plan_sha=\`<sha>\` — ts=\`<ts>\`" >&2
+        echo "  - mark the loop N/A:  - [x] Plan review loop — N/A: <reason>" >&2
+        exit 2
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Evidence-based gate for Code review loop PASS
+#
+# Mirrors the plan-review gate but binds to git HEAD (because code-review iters
+# commit fixes between rounds — HEAD changes are the natural freshness primitive).
+# Codex+PR-toolkit are BOTH required for the same iteration at the current HEAD,
+# matching the existing build-evidence.sh:compute_reviewer_gate semantics.
+# Codex is mandatory — no "tool unavailable" escapes. The only escape is an
+# N/A justification on the loop line (mirrors the plan-review + E2E gates).
+#
+# Canonical clean-line stem (referenced by tests/template/test-contracts.sh
+# parity check): Code review iteration N — codex clean — head=`<sha>`
+# ---------------------------------------------------------------------------
+# N/A escape: any `[x] Code review loop ... N/A:` line skips the evidence check.
+CODE_NA_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+    | grep -E '^\s*-\s*\[x\]\s+Code review loop' \
+    | grep -E 'N/A:' \
+    | head -1)
+
+CODE_PASS_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+    | grep -E '^\s*-\s*\[x\]\s+Code review loop \([0-9]+ iterations\) — PASS' \
+    | tail -1)
+
+HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+# Degraded env (no git repo) → skip code-review evidence check entirely.
+# Mirrors existing E2E gate pattern at check-workflow-gates.sh:259-263.
+# The hook fires on git commit/push/gh pr create — if those work, HEAD exists.
+# If git is unavailable, the ship action itself can't succeed, so the gate is moot.
+if [ -n "$CODE_NA_LINE" ]; then
+    : # N/A justification present — skip code-review evidence check
+elif [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
+    CODE_N=$(echo "$CODE_PASS_LINE" | sed -E 's/.*Code review loop \(([0-9]+) iterations\).*/\1/')
+
+    # Validate codex side (last-line semantics — defensive against stale duplicates)
+    CODEX_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+        | grep -E "^\s*-\s*\[x\]\s+Code review iteration $CODE_N — codex " \
+        | tail -1)
+    TOOLKIT_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+        | grep -E "^\s*-\s*\[x\]\s+Code review iteration $CODE_N — pr-toolkit " \
+        | tail -1)
+
+    if [ -z "$CODEX_LINE" ] || [ -z "$TOOLKIT_LINE" ]; then
+        echo "WORKFLOW GATE: [x] Code review loop ($CODE_N iterations) — PASS lacks per-iter clean evidence." >&2
+        echo "" >&2
+        echo "Required: matching lines in state.md (### Checklist):" >&2
+        echo "  - [x] Code review iteration $CODE_N — codex clean — head=\`$HEAD_SHA\`" >&2
+        echo "  - [x] Code review iteration $CODE_N — pr-toolkit clean — head=\`$HEAD_SHA\`" >&2
+        echo "" >&2
+        echo "Run iter-$CODE_N reviewers + append both clean lines, OR uncheck the loop." >&2
+        exit 2
+    fi
+
+    # Per-line validation: head match required, then both must be `<tool> clean`.
+    # Codex is mandatory — no "tool unavailable" escapes.
+    for tool_line in "codex:$CODEX_LINE" "pr-toolkit:$TOOLKIT_LINE"; do
+        TOOL=$(echo "$tool_line" | cut -d: -f1)
+        LINE=$(echo "$tool_line" | cut -d: -f2-)
+
+        # Every line must carry head=`<sha>` matching current HEAD —
+        # binds the clean claim to the exact HEAD being shipped.
+        LINE_HEAD=$(echo "$LINE" | sed -E 's/.*head=`([0-9a-f]+)`.*/\1/')
+        if ! echo "$LINE" | grep -qE 'head=`[0-9a-f]+`'; then
+            echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line missing head=\`<sha>\`." >&2
+            echo "Got: $LINE" >&2
+            exit 2
+        fi
+        if [ "$LINE_HEAD" != "$HEAD_SHA" ]; then
+            echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line is at a stale HEAD (head mismatch)." >&2
+            echo "  Line head:    $LINE_HEAD" >&2
+            echo "  Current head: $HEAD_SHA" >&2
+            echo "" >&2
+            echo "New commits landed since iter-$CODE_N. Re-run $TOOL at current head." >&2
+            exit 2
+        fi
+
+        if echo "$LINE" | grep -qF -- "— $TOOL clean —"; then
+            : # clean variant — head already verified above
+        else
+            echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line variant not recognized." >&2
+            echo "Got: $LINE" >&2
+            echo "" >&2
+            echo "Codex is mandatory in this repo. Required: $TOOL clean — head=\`<sha>\`," >&2
+            echo "or mark the loop N/A:  - [x] Code review loop — N/A: <reason>" >&2
+            exit 2
+        fi
+    done
 fi
 
 exit 0

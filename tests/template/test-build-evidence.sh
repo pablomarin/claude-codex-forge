@@ -391,6 +391,41 @@ FP1=$(grep -o '"progress_fingerprint":"[a-f0-9]*"' "$scratch/.out1" | head -1)
 FP2=$(grep -o '"progress_fingerprint":"[a-f0-9]*"' "$scratch/.out2" | head -1)
 assert_equals "$FP1" "$FP2" "fingerprint stable across identical runs"
 
+start_test "build-evidence emits plan_review_gate.clean_same_iteration=true on clean plan-review evidence"
+
+scratch=$(scratch_dir bevidence-plan)
+mkdir -p "$scratch/.claude/local" "$scratch/docs/plans"
+echo "# Fake plan content" > "$scratch/docs/plans/x.md"
+PLAN_SHA=$( (cd "$scratch" && shasum -a 256 docs/plans/x.md 2>/dev/null || sha256sum docs/plans/x.md) | awk '{print $1}')
+
+sed "s/__PLAN_SHA__/$PLAN_SHA/g" \
+    "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/plan-review-clean-iter-3.md" \
+    > "$scratch/.claude/local/state.md"
+
+OUT="$scratch/.out"
+( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+
+assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":true' \
+    "plan_review_gate.clean_same_iteration is true when evidence is fresh"
+assert_contains "$OUT" '"matched_iteration":"3"' \
+    "matched_iteration is the loop PASS count"
+
+start_test "build-evidence: plan-review N/A line does NOT set plan_review_gate.clean_same_iteration=true"
+
+# Codex is mandatory: an N/A escape on the plan-review loop must NOT propagate a
+# clean gate (mirrors e2e_report). Only real `codex clean` + matching plan_sha
+# sets clean=true. This prevents /goal from self-completing without Codex evidence.
+scratch=$(scratch_dir bevidence-plan-na)
+mkdir -p "$scratch/.claude/local"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/plan-review-na.md" \
+   "$scratch/.claude/local/state.md"
+
+OUT="$scratch/.out"
+( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+
+assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":false' \
+    "plan_review_gate stays false on an N/A escape (no real Codex evidence)"
+
 # --- PowerShell parity smoke (only runs if pwsh is on PATH) ---
 if command -v pwsh >/dev/null 2>&1; then
     start_test "build-evidence.ps1 emits markers + valid JSON (Bash-driven smoke)"

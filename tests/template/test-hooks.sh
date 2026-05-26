@@ -282,6 +282,7 @@ fi
 setup_git_scratch() {
     local dir
     dir=$(scratch_dir e2e-evidence)
+    local head
     (
         cd "$dir" || exit 1
         git init -q --initial-branch=main
@@ -297,30 +298,49 @@ setup_git_scratch() {
         # — making the feature-branch tests no-ops.
         git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "feature work"
     )
-    echo "$dir"
+    # Capture the post-feature-commit HEAD so callers can bind per-iter
+    # Code-review clean lines to it (required by the v5.39 evidence gate).
+    head=$(cd "$dir" && git rev-parse HEAD)
+    echo "$dir|$head"
 }
 
 # Helper: inject an E2E verified [x] entry into the checklist template.
-CHECKLIST_E2E_CHECKED_NO_NA='- [x] Code review loop (1 iterations) — PASS
+# These are now functions (not constants) because the v5.39 code-review
+# evidence gate requires per-iter clean lines bound to the actual HEAD.
+checklist_e2e_checked_no_na() {
+    local head="$1"
+    cat <<EOF
+- [x] Code review loop (1 iterations) — PASS
+$(make_code_review_clean_lines 1 "$head")
 - [x] Simplified
 - [x] Verified (tests/lint/types)
-- [x] E2E verified via verify-e2e agent (Phase 5.4)'
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+}
 
-CHECKLIST_E2E_CHECKED_NA='- [x] Code review loop (1 iterations) — PASS
+checklist_e2e_checked_na() {
+    local head="$1"
+    cat <<EOF
+- [x] Code review loop (1 iterations) — PASS
+$(make_code_review_clean_lines 1 "$head")
 - [x] Simplified
 - [x] Verified (tests/lint/types)
-- [x] E2E verified — N/A: internal migration, no user-facing changes'
+- [x] E2E verified — N/A: internal migration, no user-facing changes
+EOF
+}
 
 # ===========================================================================
 # Test 9: [x] E2E verified without N/A + fresh report → exit 0
 # ===========================================================================
 start_test "[x] E2E verified + fresh report → exit 0 (evidence satisfied)"
 
-S9=$(setup_git_scratch)
+result=$(setup_git_scratch)
+S9=$(echo "$result" | cut -d'|' -f1)
+HEAD9=$(echo "$result" | cut -d'|' -f2)
 mkdir -p "$S9/tests/e2e/reports"
 # Create a report file AFTER branch-off (its mtime is > branch-off-ts)
 echo "# E2E report" > "$S9/tests/e2e/reports/2026-04-19-10-00-feature.md"
-rc=$(run_hook_sh "$S9" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S9" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD9")")
 assert_equals "$rc" "0" "fresh report present → hook passes"
 
 # ===========================================================================
@@ -328,9 +348,11 @@ assert_equals "$rc" "0" "fresh report present → hook passes"
 # ===========================================================================
 start_test "[x] E2E verified + no report → exit 2 (evidence missing)"
 
-S10=$(setup_git_scratch)
+result=$(setup_git_scratch)
+S10=$(echo "$result" | cut -d'|' -f1)
+HEAD10=$(echo "$result" | cut -d'|' -f2)
 # No tests/e2e/reports/ directory at all
-rc=$(run_hook_sh "$S10" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S10" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD10")")
 assert_equals "$rc" "2" "no reports dir → hook blocks"
 assert_contains "$S10/.hook-stderr" "no fresh report was found" \
     "stderr explains the evidence gap"
@@ -344,12 +366,14 @@ assert_contains "$S10/.hook-stderr" "E2E verified — N/A:" \
 # ===========================================================================
 start_test "[x] E2E verified + only stale reports → exit 2"
 
-S11=$(setup_git_scratch)
+result=$(setup_git_scratch)
+S11=$(echo "$result" | cut -d'|' -f1)
+HEAD11=$(echo "$result" | cut -d'|' -f2)
 mkdir -p "$S11/tests/e2e/reports"
 echo "# old report" > "$S11/tests/e2e/reports/2024-01-01-old.md"
 # Force mtime to 2024-01-01 — definitely before any branch-off we just made
 touch -t 202401010000.00 "$S11/tests/e2e/reports/2024-01-01-old.md"
-rc=$(run_hook_sh "$S11" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S11" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD11")")
 assert_equals "$rc" "2" "only stale reports → hook blocks"
 
 # ===========================================================================
@@ -357,9 +381,11 @@ assert_equals "$rc" "2" "only stale reports → hook blocks"
 # ===========================================================================
 start_test "[x] E2E verified — N/A: reason → exit 0 (N/A bypasses evidence check)"
 
-S12=$(setup_git_scratch)
+result=$(setup_git_scratch)
+S12=$(echo "$result" | cut -d'|' -f1)
+HEAD12=$(echo "$result" | cut -d'|' -f2)
 # No reports directory — N/A should bypass the evidence check entirely
-rc=$(run_hook_sh "$S12" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NA")
+rc=$(run_hook_sh "$S12" 'git commit -m x' "$(checklist_e2e_checked_na "$HEAD12")")
 assert_equals "$rc" "0" "N/A form skips evidence check even without a report"
 
 # ===========================================================================
@@ -373,10 +399,13 @@ S13=$(scratch_dir e2e-nomaster)
     git init -q --initial-branch=weird
     git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "initial"
 )
+# Capture the inline HEAD so the per-iter code-review clean line binds to it
+# (the v5.39 code-review evidence gate sees a real HEAD here).
+HEAD13=$(cd "$S13" && git rev-parse HEAD)
 # No main, no master. Hook can't compute merge-base; should skip evidence
 # rather than fail. User gets no protection here — documented as a
 # degraded env, not a policy violation.
-rc=$(run_hook_sh "$S13" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S13" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD13")")
 assert_equals "$rc" "0" "degraded env (no main/master) → hook passes with warning"
 
 # ===========================================================================
@@ -395,9 +424,11 @@ S14=$(scratch_dir e2e-on-main)
     git -c user.email=test@test -c user.name=test commit -q --allow-empty -m "initial"
     # STAY on main — no feature branch checkout.
 )
+# Capture the inline HEAD so the per-iter code-review clean line binds to it.
+HEAD14=$(cd "$S14" && git rev-parse HEAD)
 # [x] E2E verified without N/A + no reports. Without the HEAD==branch-off
 # fix, this would block. With the fix, it should pass (skip evidence).
-rc=$(run_hook_sh "$S14" 'git commit -m x' "$CHECKLIST_E2E_CHECKED_NO_NA")
+rc=$(run_hook_sh "$S14" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD14")")
 assert_equals "$rc" "0" "on main directly → evidence check skipped (trunk-based workflow supported)"
 
 # ===========================================================================
@@ -951,6 +982,24 @@ EXIT=$(cat "$scratch/.exit")
 assert_equals "$EXIT" "2" "gh pr create BLOCKED when no ## PR authorization line (exit 2)"
 assert_contains "$scratch/.out" "PR creation authorized" "hook output mentions the missing authorization"
 
+# Test L2-1b: env-prefixed `gh pr create` must ALSO hit the PR-auth guard.
+# Regression guard: the broadened IS_SHIP detection accepts `FOO=bar gh pr create`,
+# so the Layer-2 auth trigger must be env-prefix-aware too — otherwise an
+# env-prefixed PR-create with green gates + active /goal + no auth line would
+# fall through to the normal gates and ship without authorization.
+start_test "env-prefixed gh pr create still hits PR-auth guard (no auth line → exit 2)"
+
+(
+    cd "$scratch"
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"GH_TOKEN=x gh pr create --title test"}}'
+    OUT="$scratch/.out2"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit2"
+)
+EXIT=$(cat "$scratch/.exit2")
+assert_equals "$EXIT" "2" "env-prefixed gh pr create BLOCKED when no PR authorization (exit 2)"
+assert_contains "$scratch/.out2" "PR creation authorized" "env-prefixed PR-create routed into the auth guard"
+
 # ---------------------------------------------------------------------------
 # Test L2-2: /goal session active + ## PR authorization with matching nonce + HEAD → allowed (exit 0)
 # ---------------------------------------------------------------------------
@@ -1482,6 +1531,525 @@ echo "$INPUT_V32C" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32C.stdo
 
 assert_contains "$OUT_V32C.stderr" "v532c-subdir-marker" \
     "build-evidence normalized subdirectory cwd to repo root and read state.md"
+
+# ===========================================================================
+# v5.39 — Plan review + Code review per-iter clean evidence gate
+# Tests 16-24. Closes the same-iteration-clean shortcut surfaced by the
+# msai-v2 v5.38 /goal run (iter-6 P1 pending, agent ticked Plan review PASS).
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Test 16: [x] Plan review loop PASS without per-iter clean evidence → exit 2
+# ---------------------------------------------------------------------------
+start_test "[x] Plan review loop PASS + no per-iter evidence → exit 2"
+
+S16=$(scratch_dir wgate-plan-noev)
+mkdir -p "$S16/.claude/local"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/plan-review-pass-no-evidence.md" \
+   "$S16/.claude/local/state.md"
+cd "$S16"
+git init -q .
+git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S16/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "2" "Plan review PASS without evidence is blocked"
+assert_contains "$S16/.hook-stderr" "Plan review iteration" \
+    "stderr mentions Plan review iteration"
+assert_contains "$S16/.hook-stderr" "codex clean" \
+    "stderr names the required clean-line tool"
+
+# ---------------------------------------------------------------------------
+# Test 17: [x] Plan review loop PASS + valid evidence + matching plan_sha → exit 0
+# ---------------------------------------------------------------------------
+start_test "[x] Plan review loop PASS + valid plan_sha → exit 0"
+
+S17=$(scratch_dir wgate-plan-ok)
+mkdir -p "$S17/.claude/local" "$S17/docs/plans"
+echo "# Fake plan" > "$S17/docs/plans/fake-plan.md"
+
+# Compute the real plan_sha and head_sha (init repo + first commit).
+cd "$S17"
+git init -q . && git add -A && git -c user.email=test@test -c user.name=test commit -q -m init
+HEAD_SHA=$(git rev-parse HEAD)
+PLAN_SHA=$(shasum -a 256 docs/plans/fake-plan.md 2>/dev/null | awk '{print $1}')
+[ -z "$PLAN_SHA" ] && PLAN_SHA=$(sha256sum docs/plans/fake-plan.md | awk '{print $1}')
+
+# Materialize fixture with placeholders replaced.
+sed "s/__FAKE_PLAN_SHA__/$PLAN_SHA/g; s/__FAKE_HEAD_SHA__/$HEAD_SHA/g" \
+    "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/plan-review-pass-evidence-ok.md" \
+    > .claude/local/state.md
+
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S17/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "0" "Plan review PASS with valid evidence is allowed"
+
+# ---------------------------------------------------------------------------
+# Test 18: [x] Plan review loop PASS + WRONG plan_sha → exit 2
+# ---------------------------------------------------------------------------
+start_test "[x] Plan review loop PASS + stale plan_sha → exit 2"
+
+S18=$(scratch_dir wgate-plan-stale)
+mkdir -p "$S18/.claude/local" "$S18/docs/plans"
+echo "# Fake plan" > "$S18/docs/plans/fake-plan.md"
+cd "$S18"
+git init -q . && git add -A && git -c user.email=test@test -c user.name=test commit -q -m init
+cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/plan-review-pass-wrong-sha.md" \
+   .claude/local/state.md
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S18/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "2" "Plan review PASS with stale plan_sha is blocked"
+assert_contains "$S18/.hook-stderr" "plan_sha" \
+    "stderr mentions plan_sha mismatch"
+
+# ---------------------------------------------------------------------------
+# Test 19: [x] Code review loop PASS without per-iter clean lines → exit 2
+# ---------------------------------------------------------------------------
+start_test "[x] Code review loop PASS + no per-iter evidence → exit 2"
+
+S19=$(scratch_dir wgate-code-noev)
+mkdir -p "$S19/.claude/local"
+cd "$S19"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/code-review-pass-no-evidence.md" \
+   .claude/local/state.md
+echo '{"tool_input":{"command":"git push origin HEAD"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S19/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "2" "Code review PASS without evidence is blocked"
+assert_contains "$S19/.hook-stderr" "Code review iteration" \
+    "stderr names Code review iteration requirement"
+
+# ---------------------------------------------------------------------------
+# Test 20: [x] Code review loop PASS + matching codex+pr-toolkit at HEAD → exit 0
+# ---------------------------------------------------------------------------
+start_test "[x] Code review loop PASS + matching HEAD evidence → exit 0"
+
+S20=$(scratch_dir wgate-code-ok)
+mkdir -p "$S20/.claude/local"
+cd "$S20"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+HEAD_SHA=$(git rev-parse HEAD)
+sed "s/__FAKE_HEAD_SHA__/$HEAD_SHA/g" \
+    "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/code-review-pass-evidence-ok.md" \
+    > .claude/local/state.md
+echo '{"tool_input":{"command":"gh pr create --title test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S20/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "0" "Code review PASS with valid HEAD evidence is allowed"
+
+# ---------------------------------------------------------------------------
+# Test 21: [x] Code review loop PASS + STALE HEAD evidence → exit 2
+# ---------------------------------------------------------------------------
+start_test "[x] Code review loop PASS + stale HEAD evidence → exit 2"
+
+S21=$(scratch_dir wgate-code-stale)
+mkdir -p "$S21/.claude/local"
+cd "$S21"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+# Add a second commit so HEAD differs from the fixture's literal stale sha
+git -c user.email=test@test -c user.name=test commit --allow-empty -m second -q
+cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/code-review-pass-wrong-head.md" \
+   .claude/local/state.md
+echo '{"tool_input":{"command":"git commit -m next"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S21/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "2" "Code review PASS with stale HEAD is blocked"
+assert_contains "$S21/.hook-stderr" "head" "stderr mentions head mismatch"
+
+# ---------------------------------------------------------------------------
+# Test 22 (v5.40): N/A escape on Plan review loop → exit 0 (no evidence needed).
+# Codex is mandatory — the only escape is an N/A justification on the loop line.
+# ---------------------------------------------------------------------------
+start_test "[x] Plan review loop — N/A: reason → exit 0 (N/A bypasses evidence)"
+
+S22=$(scratch_dir wgate-plan-na)
+mkdir -p "$S22/.claude/local"
+cd "$S22"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+HEAD22=$(git rev-parse HEAD)
+# Plan review loop marked N/A — no per-iter clean line, no plan file needed.
+# (Code review loop still carries real per-iter evidence — only plan is N/A.)
+cat > .claude/local/state.md <<EOF
+## Workflow
+
+| Field   | Value                        |
+| ------- | ---------------------------- |
+| Command | /new-feature fixture-feature |
+| Phase   | 5 — Quality Gates            |
+
+### Checklist
+
+- [x] Plan review loop — N/A: simple 1-file fix, no plan
+- [x] Code review loop (1 iterations) — PASS
+- [x] Code review iteration 1 — codex clean — head=\`$HEAD22\`
+- [x] Code review iteration 1 — pr-toolkit clean — head=\`$HEAD22\`
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness work
+EOF
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S22/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+assert_equals "$rc" "0" "Plan review loop N/A skips per-iter evidence check"
+
+# ---------------------------------------------------------------------------
+# Test 23 (v5.40): N/A escape on Code review loop → exit 0 (no evidence needed).
+# ---------------------------------------------------------------------------
+start_test "[x] Code review loop — N/A: reason → exit 0 (N/A bypasses evidence)"
+
+S23=$(scratch_dir wgate-code-na)
+mkdir -p "$S23/.claude/local"
+cd "$S23"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+cat > .claude/local/state.md <<'EOF'
+## Workflow
+
+| Field   | Value                        |
+| ------- | ---------------------------- |
+| Command | /new-feature fixture-feature |
+| Phase   | 5 — Quality Gates            |
+
+### Checklist
+
+- [x] Code review loop — N/A: docs-only change
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness work
+EOF
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S23/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+assert_equals "$rc" "0" "Code review loop N/A skips per-iter evidence check"
+
+# ---------------------------------------------------------------------------
+# Test 23b (FIX 5): malformed plan clean line — plan= present but NO plan_sha=
+# → exit 2 with "malformed" (presence check fires before sed extraction).
+# ---------------------------------------------------------------------------
+start_test "[x] Plan review iteration with plan= but no plan_sha= → exit 2 (malformed)"
+
+S23B=$(scratch_dir wgate-plan-malformed)
+mkdir -p "$S23B/.claude/local" "$S23B/docs/plans"
+echo "# Fake plan" > "$S23B/docs/plans/fake-plan.md"
+cd "$S23B"
+git init -q . && git add -A && git -c user.email=test@test -c user.name=test commit -q -m init
+cat > .claude/local/state.md <<'EOF'
+## Workflow
+
+| Field   | Value                        |
+| ------- | ---------------------------- |
+| Command | /new-feature fixture-feature |
+| Phase   | 5 — Quality Gates            |
+
+### Checklist
+
+- [x] Plan review loop (2 iterations) — PASS
+- [x] Plan review iteration 2 — codex clean — plan=`docs/plans/fake-plan.md` — ts=`2026-05-26T17:00:00Z`
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness work
+EOF
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S23B/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+assert_equals "$rc" "2" "plan clean line missing plan_sha= is blocked"
+assert_contains "$S23B/.hook-stderr" "malformed" "stderr names the malformed line"
+
+# ---------------------------------------------------------------------------
+# Test 23c (FIX 6): plan file referenced by clean line is DELETED → exit 2
+# "missing file".
+# ---------------------------------------------------------------------------
+start_test "[x] Plan review iteration references deleted plan file → exit 2 (missing file)"
+
+S23C=$(scratch_dir wgate-plan-deleted)
+mkdir -p "$S23C/.claude/local"
+cd "$S23C"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+# Reference a plan file that does NOT exist on disk.
+cat > .claude/local/state.md <<'EOF'
+## Workflow
+
+| Field   | Value                        |
+| ------- | ---------------------------- |
+| Command | /new-feature fixture-feature |
+| Phase   | 5 — Quality Gates            |
+
+### Checklist
+
+- [x] Plan review loop (1 iterations) — PASS
+- [x] Plan review iteration 1 — codex clean — plan=`docs/plans/ghost.md` — plan_sha=`deadbeef` — ts=`2026-05-26T17:00:00Z`
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness work
+EOF
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S23C/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+assert_equals "$rc" "2" "deleted plan file is blocked"
+assert_contains "$S23C/.hook-stderr" "missing file" "stderr names the missing file"
+
+# ---------------------------------------------------------------------------
+# Test 23d (FIX 6): no git repo → code-review gate skipped (degraded env), but
+# the OTHER gates still apply. Here the checklist gates are all checked and
+# the Plan review loop is N/A, so the hook should exit 0 even with a
+# Code review loop PASS line whose evidence can't be HEAD-validated.
+# ---------------------------------------------------------------------------
+start_test "no git repo → code-review evidence skipped (degraded env), other gates still apply"
+
+S23D=$(scratch_dir wgate-nogit)
+mkdir -p "$S23D/.claude/local"
+# Deliberately NO `git init` — degraded environment.
+cat > "$S23D/.claude/local/state.md" <<'EOF'
+## Workflow
+
+| Field   | Value                        |
+| ------- | ---------------------------- |
+| Command | /new-feature fixture-feature |
+| Phase   | 5 — Quality Gates            |
+
+### Checklist
+
+- [x] Code review loop (1 iterations) — PASS
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness work
+EOF
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | (cd "$S23D" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23D/.hook-stderr"
+rc=$?
+assert_equals "$rc" "0" "no git repo → code-review evidence check skipped, checklist gates still pass"
+
+# Negative companion: in the same degraded env, an UNCHECKED required gate must
+# still BLOCK — proves the checklist gate is independent of git availability.
+start_test "no git repo → unchecked required gate still blocks (exit 2)"
+
+S23E=$(scratch_dir wgate-nogit-unchecked)
+mkdir -p "$S23E/.claude/local"
+cat > "$S23E/.claude/local/state.md" <<'EOF'
+## Workflow
+
+| Field   | Value                        |
+| ------- | ---------------------------- |
+| Command | /new-feature fixture-feature |
+| Phase   | 5 — Quality Gates            |
+
+### Checklist
+
+- [ ] Code review loop (1 iterations) — PASS
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness work
+EOF
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | (cd "$S23E" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23E/.hook-stderr"
+rc=$?
+assert_equals "$rc" "2" "no git repo → unchecked Code review loop still blocks"
+
+# ---------------------------------------------------------------------------
+# Test 23f (FIX 2): CRLF state.md with an UNCHECKED required gate → hook still
+# BLOCKS (exit 2). Pre-fix: a CRLF state.md left a trailing \r so the
+# `^## Workflow$` anchor never matched → empty WORKFLOW_BLOCK → hook bailed
+# exit 0 → ALL gates silently bypassed.
+# ---------------------------------------------------------------------------
+start_test "CRLF state.md with unchecked gate → hook still BLOCKS (exit 2)"
+
+S23F=$(scratch_dir wgate-crlf)
+mkdir -p "$S23F/.claude/local"
+# Build an LF state.md then convert to CRLF.
+cat > "$S23F/.state-lf.md" <<'EOF'
+## Workflow
+
+| Field   | Value                        |
+| ------- | ---------------------------- |
+| Command | /new-feature fixture-feature |
+| Phase   | 5 — Quality Gates            |
+
+### Checklist
+
+- [ ] Code review loop (1 iterations) — PASS
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness work
+EOF
+sed 's/$/\r/' "$S23F/.state-lf.md" > "$S23F/.claude/local/state.md"
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | (cd "$S23F" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23F/.hook-stderr"
+rc=$?
+assert_equals "$rc" "2" "CRLF state.md does NOT silently bypass gates (exit 2)"
+assert_contains "$S23F/.hook-stderr" "Code review loop" "stderr names the unchecked gate despite CRLF"
+
+# ---------------------------------------------------------------------------
+# Test 23g (FIX 3): compound ship command (git commit && git push) with
+# incomplete gates → exit 2 (blocked). And a plain `git commit -m x` with the
+# same incomplete gates also blocks via the normal gate (regression: plain
+# single commands still work as before).
+# ---------------------------------------------------------------------------
+start_test "compound ship command (commit && push) → exit 2 (blocked)"
+
+S23G=$(scratch_dir wgate-compound)
+mkdir -p "$S23G/.claude/local"
+cat > "$S23G/.claude/local/state.md" <<'EOF'
+## Workflow
+
+| Field   | Value                        |
+| ------- | ---------------------------- |
+| Command | /new-feature fixture-feature |
+| Phase   | 5 — Quality Gates            |
+
+### Checklist
+
+- [ ] Code review loop (1 iterations) — PASS
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness work
+EOF
+printf '{"tool_input":{"command":"git commit -m x && git push"}}' \
+    | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23G/.hook-stderr"
+rc=$?
+assert_equals "$rc" "2" "compound commit && push is blocked"
+assert_contains "$S23G/.hook-stderr" "compound ship command" \
+    "stderr names the compound-command rule"
+
+# Leading-NONSHIP chains must ALSO block — the ship verb appears after a
+# separator, so IS_SHIP must match it (regression guard: a leading non-ship
+# command must not let the chained ship verb skip the gate via exit 0).
+for leadcmd in \
+    "git status && git commit -m x && git push" \
+    "cd sub && git commit -m x" \
+    "true && git push" \
+    "echo hi && gh pr create --title t"; do
+    printf '{"tool_input":{"command":"%s"}}' "$leadcmd" \
+        | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23G/.hook-stderr"
+    rc=$?
+    assert_equals "$rc" "2" "leading-nonship chain blocked: $leadcmd"
+done
+
+# env-prefix + `git -C <dir>` ship forms must be DETECTED (were bypassing the
+# `^\s*git` anchor before — exit 0). With incomplete gates each must block (exit 2),
+# whether standalone or chained after a separator.
+for shipform in \
+    "GIT_AUTHOR_NAME=x git commit -m y" \
+    "FOO=bar git push" \
+    "git -C . commit -m y" \
+    "git -c user.name=x commit -m y" \
+    "git -C /repo push" \
+    "ls && git -C sub commit -m y" \
+    "FOO=bar gh pr create --title t" \
+    "GIT_AUTHOR_NAME='Pablo Marin' git commit -m y" \
+    "GIT_COMMITTER_NAME=\"Pablo Marin\" git push" \
+    "FOO= git commit -m y" \
+    "A=1 B=2 git commit -m y"; do
+    # JSON-escape \ and " so a double-quoted env value (GIT_COMMITTER_NAME="...")
+    # produces VALID JSON — a raw " would otherwise break jq parsing and make
+    # COMMAND empty (a test artifact, not a hook result). Real Claude Code always
+    # sends properly-escaped JSON.
+    esc=$(printf '%s' "$shipform" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    printf '{"tool_input":{"command":"%s"}}' "$esc" \
+        | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>/dev/null
+    rc=$?
+    assert_equals "$rc" "2" "env-prefix / git -C ship form detected + gated: $shipform"
+done
+
+# Non-ship commands (no ship verb anywhere) must still pass immediately —
+# including `git -C` with a non-ship subcommand and an env-prefixed non-ship.
+for safecmd in "git status" "npm test" "git log --oneline" "echo done && ls" \
+    "git -C . status" "FOO=bar npm test"; do
+    esc=$(printf '%s' "$safecmd" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    printf '{"tool_input":{"command":"%s"}}' "$esc" \
+        | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>/dev/null
+    rc=$?
+    assert_equals "$rc" "0" "non-ship command not gated: $safecmd"
+done
+
+start_test "plain 'git commit -m x' still works (single command, gates checked → exit 0)"
+
+S23H=$(scratch_dir wgate-plain)
+mkdir -p "$S23H/.claude/local"
+cd "$S23H"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+HEAD23H=$(git rev-parse HEAD)
+cat > .claude/local/state.md <<EOF
+## Workflow
+
+| Field   | Value                        |
+| ------- | ---------------------------- |
+| Command | /new-feature fixture-feature |
+| Phase   | 5 — Quality Gates            |
+
+### Checklist
+
+- [x] Code review loop (1 iterations) — PASS
+- [x] Code review iteration 1 — codex clean — head=\`$HEAD23H\`
+- [x] Code review iteration 1 — pr-toolkit clean — head=\`$HEAD23H\`
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness work
+EOF
+echo '{"tool_input":{"command":"git commit -m x"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S23H/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+assert_equals "$rc" "0" "plain single git commit with gates satisfied → exit 0 (not flagged as compound)"
+
+# ---------------------------------------------------------------------------
+# Test 24: PowerShell parity for the 6 workflow-gate-evidence fixtures.
+# Runs each fixture through run_hook_ps and asserts the exit code matches
+# the .sh expectation. Skipped if pwsh not installed.
+# (v5.40: the codex-unavailable-* fixtures were dropped — Codex is mandatory.)
+# ---------------------------------------------------------------------------
+start_test "PowerShell parity for evidence-gate fixtures (Tests 16-21)"
+
+if ! command -v pwsh >/dev/null 2>&1; then
+    pass "skipped (pwsh not installed)"
+else
+    for fixture in plan-review-pass-no-evidence plan-review-pass-evidence-ok \
+                   plan-review-pass-wrong-sha code-review-pass-no-evidence \
+                   code-review-pass-evidence-ok code-review-pass-wrong-head; do
+        SP=$(scratch_dir wgate-ps-$fixture)
+        mkdir -p "$SP/.claude/local" "$SP/docs/plans"
+        echo "# Fake plan" > "$SP/docs/plans/fake-plan.md"
+        cd "$SP"
+        git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+        if command -v shasum >/dev/null 2>&1; then
+            PSHA=$(shasum -a 256 docs/plans/fake-plan.md | awk '{print $1}')
+        else
+            PSHA=$(sha256sum docs/plans/fake-plan.md | awk '{print $1}')
+        fi
+        HSHA=$(git rev-parse HEAD)
+        sed "s/__FAKE_PLAN_SHA__/$PSHA/g; s/__FAKE_HEAD_SHA__/$HSHA/g" \
+            "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/${fixture}.md" \
+            > .claude/local/state.md
+        # Extract the checklist body for run_hook_ps. Use awk that handles EOF
+        # correctly (fixtures may end at EOF without a trailing `## State`).
+        checklist=$(awk '/^### Checklist/{p=1; next} /^## /{p=0} p' .claude/local/state.md)
+        rc_ps=$(run_hook_ps "$SP" 'git commit -m x' "$checklist")
+        # Mirror expected exit codes from the .sh tests
+        case "$fixture" in
+            *-evidence-ok) expected=0 ;;
+            *) expected=2 ;;
+        esac
+        assert_equals "$rc_ps" "$expected" ".ps1 parity for $fixture (expected $expected)"
+        cd "$REPO_ROOT"
+    done
+fi
 
 # ===========================================================================
 # Report

@@ -1687,6 +1687,34 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Contract: per-iter clean-line vocabulary parity across files
+# state.template.md, rules/workflow.md, commands/new-feature.md, commands/fix-bug.md,
+# hooks/check-workflow-gates.{sh,ps1}, hooks/build-evidence.{sh,ps1} must all
+# contain the identical canonical stem for the per-iter clean lines, either
+# in documentation prose or in error-message/comment text. The hooks use split
+# greps for matching (so the literal stem isn't in their PARSING code), but it
+# appears in their error messages and in the canonical-stem comment block of
+# compute_plan_review_gate.
+# ---------------------------------------------------------------------------
+start_test "Per-iter clean-line vocabulary parity"
+
+# Canonical stems — changing either side requires changing both files +
+# updating this contract.
+PLAN_STEM='Plan review iteration .* — codex clean — plan='
+CODE_STEM='Code review iteration .* — codex clean — head='
+
+ok=1
+for f in state.template.md rules/workflow.md commands/new-feature.md commands/fix-bug.md \
+         hooks/check-workflow-gates.sh hooks/check-workflow-gates.ps1 \
+         hooks/build-evidence.sh hooks/build-evidence.ps1; do
+    grep -qE "$PLAN_STEM" "$REPO_ROOT/$f" \
+        || { fail "$f missing canonical Plan review per-iter stem"; ok=0; }
+    grep -qE "$CODE_STEM" "$REPO_ROOT/$f" \
+        || { fail "$f missing canonical Code review per-iter stem"; ok=0; }
+done
+[ "$ok" = "1" ] && pass "8 files carry both canonical stems"
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 report "test-contracts.sh"

@@ -2,6 +2,10 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.39 — 2026-05-26
+
+**Enforce per-iteration clean evidence for Plan review + Code review loops.** The `check-workflow-gates` PreToolUse hook now blocks ship actions when `- [x] Plan review loop (N iterations) — PASS` or `- [x] Code review loop (N iterations) — PASS` is checked in state.md without matching per-iter clean lines for iteration N. Plan review binds to plan-file sha256 (`plan_sha`); code review binds to current HEAD. **Codex is mandatory** (this repo is Claude × Codex dual-engine) — there is no codex-unavailable auto-escape; the only ship escape is an N/A justification on the loop line (`- [x] Plan review loop — N/A: <reason>`), mirroring the existing E2E `N/A:` gate and caught by a human at PR review. `build-evidence` does NOT count N/A as clean evidence, so a `/forge-goal` autonomous run cannot self-complete without real Codex evidence — if Codex is unavailable, `/goal` halts and a human takes over. Also hardens the hook: CRLF-encoded state.md no longer silently bypasses gates (strips `\r` before the `## Workflow` anchor; ships a `.gitattributes`), and compound ship commands (`git commit && git push`, including leading-nonship chains like `git status && git commit && git push`) are blocked so an unreviewed HEAD can't be shipped past the gate. `build-evidence` emits a new `plan_review_gate` field in FORGE_GOAL_EVIDENCE alongside the existing `reviewer_gate`, and the `/goal` completion predicate now requires `plan_review_gate.clean_same_iteration=true`. Closes the same-iteration-clean shortcut surfaced by the msai-v2 v5.38 /goal run (iter-6 had 2 P1 still pending; agent ticked PASS and skipped iter-7).
+
 ## 5.38 — 2026-05-25 · Whole-UC NOT_USER_JOURNEY + stale-text cleanup
 
 Codex final-pass on v5.34–v5.37 found one structural enforcement gap plus three stale-text sites. All addressed.

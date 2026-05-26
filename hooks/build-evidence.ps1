@@ -181,9 +181,10 @@ function Compute-ReviewerGate {
                 $iter = $matches[1]
             } else { continue }
 
-            # Extract tool
-            if ($line -match 'codex clean') { $tool = "codex" }
-            elseif ($line -match 'pr-toolkit clean') { $tool = "pr-toolkit" }
+            # Extract tool — canonical delimited form only (— codex clean —),
+            # so "not-codex clean" can't pass.
+            if ($line -match '— codex clean —') { $tool = "codex" }
+            elseif ($line -match '— pr-toolkit clean —') { $tool = "pr-toolkit" }
             else { continue }
 
             # Extract head sha
@@ -206,6 +207,69 @@ function Compute-ReviewerGate {
             }
         }
     }
+    return $result
+}
+
+# ---------------------------------------------------------------------------
+# Compute-PlanReviewGate: returns @{clean=$false; matched_iteration="";
+#   matched_plan_sha=""}
+# Scoped to ## Workflow / ### Checklist. Requires a per-iter "codex clean"
+# line for the same iteration N as the "Plan review loop (N iterations) — PASS"
+# checkbox, with plan_sha matching the sha256 of the referenced plan file.
+# Canonical clean-line stem (test-contracts.sh parity check):
+#   Plan review iteration N — codex clean — plan=`<path>` — plan_sha=`<sha>`
+# Canonical code stem (parity with Compute-ReviewerGate):
+#   Code review iteration N — codex clean — head=`<sha>`
+# ---------------------------------------------------------------------------
+function Compute-PlanReviewGate {
+    $result = @{ clean = $false; matched_iteration = ""; matched_plan_sha = "" }
+    if (-not (Test-Path $StateMd)) { return $result }
+
+    $lines = Read-StateMdLines
+    $inWorkflow = $false
+    $inChecklist = $false
+    $checklist = @()
+    foreach ($line in $lines) {
+        if ($line -match '^## Workflow$') { $inWorkflow = $true; continue }
+        if ($inWorkflow -and $line -match '^## ') { $inWorkflow = $false; $inChecklist = $false; continue }
+        if (-not $inWorkflow) { continue }
+        if ($line -match '^### Checklist') { $inChecklist = $true; continue }
+        if ($line -match '^### ' -and $line -notmatch '^### Checklist') { $inChecklist = $false; continue }
+        if ($inChecklist) { $checklist += $line }
+    }
+
+    # LAST [x] Plan review loop (N iterations) — PASS line within scope
+    $passLine = ($checklist `
+        | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Plan review loop \(\d+ iterations\) — PASS' } `
+        | Select-Object -Last 1)
+    if (-not $passLine) { return $result }
+    if ($passLine -match 'Plan review loop \((\d+) iterations\)') { $n = $matches[1] } else { return $result }
+
+    # Matching per-iter clean line for iteration n (scoped lookup)
+    $cleanLine = ($checklist `
+        | Where-Object { $_ -match "^\s*-\s*\[x\]\s+Plan review iteration $n — " } `
+        | Select-Object -Last 1)
+    if (-not $cleanLine) { return $result }
+
+    if ($cleanLine -match '— codex clean —') {
+        if ($cleanLine -match 'plan=`([^`]+)`') { $planPath = $matches[1] } else { return $result }
+        if ($cleanLine -match 'plan_sha=`([^`]+)`') { $claimedSha = $matches[1].ToLower() } else { return $result }
+        if (-not (Test-Path $planPath)) { return $result }
+        $actualSha = (Get-FileHash -Algorithm SHA256 -Path $planPath).Hash.ToLower()
+        if ($actualSha -eq $claimedSha) {
+            $result.clean = $true
+            $result.matched_iteration = $n
+            $result.matched_plan_sha = $actualSha
+        } else {
+            $result.matched_iteration = $n
+            $result.matched_plan_sha = $claimedSha
+        }
+        return $result
+    }
+    # Codex is mandatory: only a `codex clean` line with matching plan_sha sets
+    # clean=true. There is no "codex unavailable" escape. A plan-review N/A
+    # escape does NOT set it true — so /goal can't self-complete without real
+    # Codex evidence (mirrors e2e_report).
     return $result
 }
 
@@ -393,6 +457,11 @@ $RgClean = if ($rg.clean) { "true" } else { "false" }
 $RgIter = $rg.matched_iteration
 $RgHead = $rg.matched_head
 
+$prg = Compute-PlanReviewGate
+$PrgClean = if ($prg.clean) { "true" } else { "false" }
+$PrgIter = $prg.matched_iteration
+$PrgSha = $prg.matched_plan_sha
+
 $pa = Parse-PRAuthorization -HeadSha $HeadSha -GoalNonce $GoalNonce
 $PaAuth = if ($pa.authorized) { "true" } else { "false" }
 $PaAt = $pa.authorized_at
@@ -496,6 +565,8 @@ $PhaseJson        = Build-JsonStringField "phase" $Phase
 $NextStepJson     = Build-JsonStringField "next_step" $NextStep
 $RgIterJson       = Build-JsonStringField "matched_iteration" $RgIter
 $RgHeadJson       = Build-JsonStringField "matched_head" $RgHead
+$PrgIterJson      = Build-JsonStringField "matched_iteration" $PrgIter
+$PrgShaJson       = Build-JsonStringField "matched_plan_sha" $PrgSha
 $PaAtJson         = Build-JsonStringField "authorized_at" $PaAt
 $PaHeadJson       = Build-JsonStringField "head_sha_at_authorization" $PaHead
 $PaNonceJson      = Build-JsonStringField "nonce_at_authorization" $PaNonce
@@ -536,6 +607,7 @@ $json = '{' +
     $WorkflowCmdJson + ',' +
     '"state":{' + $PhaseJson + ',' + $NextStepJson + ',"checklist_total":' + $TotalCount + ',"checklist_done":' + $DoneCount + '},' +
     '"reviewer_gate":{"clean_same_iteration":' + $RgClean + ',' + $RgIterJson + ',' + $RgHeadJson + '},' +
+    '"plan_review_gate":{"clean_same_iteration":' + $PrgClean + ',' + $PrgIterJson + ',' + $PrgShaJson + '},' +
     $BranchJson + ',' +
     $HeadShaJson + ',' +
     $TreeShaJson + ',' +

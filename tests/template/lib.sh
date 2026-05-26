@@ -223,3 +223,27 @@ run_setup() {
     (cd "$scratch" && "${REPO_ROOT}/setup.sh" "$@") >"$logfile" 2>&1
     return $?
 }
+
+# ---------------------------------------------------------------------------
+# Helper: generate the per-iter Code review clean lines for a given iter + head
+# Used by existing E2E-gate tests to remain compatible with the v5.39 gate.
+#
+# Usage: make_code_review_clean_lines <N> <head_sha>
+# Echoes 2 lines (one codex clean, one pr-toolkit clean) for iteration N.
+# ---------------------------------------------------------------------------
+make_code_review_clean_lines() {
+    local n="$1" head="$2"
+    printf -- '- [x] Code review iteration %s — codex clean — head=`%s`\n' "$n" "$head"
+    printf -- '- [x] Code review iteration %s — pr-toolkit clean — head=`%s`\n' "$n" "$head"
+}
+
+# ---------------------------------------------------------------------------
+# Helper: skip_test — record a no-op pass with a "skipped" message.
+# Used by conditional tests (e.g., codex-availability-dependent) so the test
+# count stays symmetric whether or not the precondition holds.
+# ---------------------------------------------------------------------------
+skip_test() {
+    local msg="${1:-skipped}"
+    PASS_COUNT=$((PASS_COUNT + 1))
+    printf "  %s·%s skipped: %s\n" "$C_DIM" "$C_RESET" "$msg"
+}

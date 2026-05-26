@@ -1,0 +1,7 @@
+# Enforce LF line endings on Markdown so the workflow-gate + build-evidence
+# hooks (which anchor on `^## Workflow$`, `### Checklist`, etc.) match on
+# downstream Windows checkouts. A CRLF state.md would otherwise fail the
+# `^## Workflow$` anchor and silently bypass every gate. The hooks also strip
+# \r defensively, but normalizing at checkout is the first line of defense.
+*.md text eol=lf
+state.md text eol=lf

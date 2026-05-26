@@ -75,7 +75,7 @@ Two revision loops enforce quality as a discipline protocol. Both follow the sam
 
 **Plan review loop** (Phase 3, when entered): Claude + Codex review the plan against actual code.
 Exit when: no P0/P1/P2 from all available reviewers on the same pass.
-If Codex unavailable: Claude + user confirmation is sufficient.
+Codex is mandatory (this repo is Claude × Codex dual-engine). If Codex is unavailable, `/goal` halts and a human takes over; the loop cannot self-complete without real Codex evidence. The only ship escape is `- [x] Plan review loop — N/A: <reason>` for degraded interactive use, caught at PR review.
 Note: `/fix-bug` skips Phase 3 for simple fixes (1-2 files) UNLESS the fix touches a high-impact surface (see canonical list in `references/peer-review-protocol.md`).
 
 **Approach comparison** (Phase 3, after brainstorming): Claude fills comparison table with fixed axes (Complexity, Blast Radius, Reversibility, Time to Validate, User/Correctness Risk). Contrarian/Codex validates the "default wins" claim. Council fires on OBJECT + high-impact surface. Spike first if cheapest falsifying test < 30 min.
@@ -83,8 +83,22 @@ If Codex unavailable: user validates skip.
 
 **Code review loop** (Phase 5): Codex + PR Review Toolkit review the implementation.
 Exit when: no P0/P1/P2 from all available reviewers on the same pass.
-If Codex unavailable: PR Toolkit alone is sufficient.
-If PR Toolkit unavailable: Codex alone is sufficient.
-If neither available: alert user, manual review + user sign-off.
+Codex is mandatory (this repo is Claude × Codex dual-engine). If Codex is unavailable, `/goal` halts and a human takes over; the loop cannot self-complete without real Codex evidence. The only ship escape is `- [x] Code review loop — N/A: <reason>` for degraded interactive use, caught at PR review.
 
 Never check a loop box until all available reviewers pass clean on the same iteration.
+
+**Per-iteration clean evidence (enforced by `check-workflow-gates` hook on ship actions):**
+
+For each loop, the agent MUST append a per-iteration clean line to `### Checklist` in `.claude/local/state.md`:
+
+- **Plan review:** `- [x] Plan review iteration <N> — codex clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\``
+- **Code review:** `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``AND`- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``
+
+The `[x] Plan review loop (N iterations) — PASS` / `[x] Code review loop (N iterations) — PASS` checkbox is checked ONLY AFTER all available reviewers report clean AND the per-iter line(s) are written. The hook blocks `git commit`, `git push`, and `gh pr create` if the loop checkbox is PASS without matching per-iter evidence.
+
+**The only escape is N/A.** Codex is mandatory — there is no "codex unavailable" escape. For degraded interactive use only, the loop may be marked N/A:
+
+- `- [x] Plan review loop — N/A: <reason>`
+- `- [x] Code review loop — N/A: <reason>`
+
+An N/A line skips the per-iter evidence check on ship actions (mirrors the `E2E verified — N/A:` gate) and is caught by human reviewers at PR time. An N/A escape does NOT set the evidence gate clean in `build-evidence` — so a `/forge-goal`-driven `/goal` cannot self-complete on N/A; it halts for a human if Codex is genuinely unavailable.
