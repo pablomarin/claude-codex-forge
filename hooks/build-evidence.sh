@@ -251,6 +251,76 @@ compute_reviewer_gate() {
     fi
 }
 
+compute_plan_review_gate() {
+    # Output: "clean_same_iteration|matched_iteration|matched_plan_sha"
+    # Canonical clean-line stem (referenced by tests/template/test-contracts.sh
+    # parity check): Plan review iteration N — codex clean — plan=`<path>` — plan_sha=`<sha>`
+    # Canonical code stem: Code review iteration N — codex clean — head=`<sha>`
+    # Scope extraction to ## Workflow / ### Checklist (mirror compute_reviewer_gate
+    # scoping above). A whole-file grep would pick up stray "Plan review iteration"
+    # lines in migrated content or in docs/CHANGELOG.md excerpts pasted into state.md.
+    [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
+
+    local checklist
+    checklist=$(tr -d '\r' < "$STATE_MD" | awk '
+        BEGIN { in_workflow=0; in_checklist=0 }
+        /^## Workflow$/        { in_workflow=1; next }
+        in_workflow && /^## /  { in_workflow=0; in_checklist=0 }
+        in_workflow && /^### Checklist/ { in_checklist=1; next }
+        in_workflow && /^### / && !/^### Checklist/ { in_checklist=0 }
+        in_workflow && in_checklist { print }
+    ')
+
+    # Find the LAST [x] Plan review loop (N iterations) — PASS line within scope
+    local pass_line
+    pass_line=$(echo "$checklist" \
+        | grep -E '^\s*-\s*\[x\]\s+Plan review loop \([0-9]+ iterations\) — PASS' \
+        | tail -1)
+    [ -z "$pass_line" ] && { echo "false||"; return 0; }
+
+    local n
+    n=$(echo "$pass_line" | sed -E 's/.*Plan review loop \(([0-9]+) iterations\).*/\1/')
+    [ -z "$n" ] && { echo "false||"; return 0; }
+
+    # Find matching per-iter clean line for iteration n (scoped lookup)
+    local clean_line
+    clean_line=$(echo "$checklist" \
+        | grep -E "^\s*-\s*\[x\]\s+Plan review iteration $n — " \
+        | tail -1)
+    [ -z "$clean_line" ] && { echo "false||"; return 0; }
+
+    # Match codex clean variant + verify plan_sha (read from file, hash, compare)
+    if echo "$clean_line" | grep -q "codex clean"; then
+        local plan_path claimed_sha actual_sha
+        plan_path=$(echo "$clean_line" | sed -E 's/.*plan=`([^`]+)`.*/\1/')
+        claimed_sha=$(echo "$clean_line" | sed -E 's/.*plan_sha=`([^`]+)`.*/\1/')
+        { [ -z "$plan_path" ] || [ -z "$claimed_sha" ]; } && { echo "false||"; return 0; }
+        [ ! -f "$plan_path" ] && { echo "false||"; return 0; }
+        if command -v shasum >/dev/null 2>&1; then
+            actual_sha=$(shasum -a 256 "$plan_path" | awk '{print $1}')
+        elif command -v sha256sum >/dev/null 2>&1; then
+            actual_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+        else
+            echo "false||"; return 0
+        fi
+        # Lowercase both sides before compare (matches Task 3/7 hash casing).
+        actual_sha=$(echo "$actual_sha" | tr 'A-Z' 'a-z')
+        claimed_sha=$(echo "$claimed_sha" | tr 'A-Z' 'a-z')
+        if [ "$actual_sha" = "$claimed_sha" ]; then
+            echo "true|$n|$actual_sha"
+        else
+            echo "false|$n|$claimed_sha"
+        fi
+    elif echo "$clean_line" | grep -q "codex unavailable, council-confirmed"; then
+        # council escape accepted; no plan_sha to bind to
+        echo "true|$n|"
+    else
+        # Other variants (user-confirmed) don't propagate into FORGE_GOAL_EVIDENCE
+        # because /goal autonomous mode forbids user-confirmed (see workflow.md).
+        echo "false||"
+    fi
+}
+
 parse_pr_authorization() {
     # Echo "authorized_bool|authorized_at|head_sha_at_auth|nonce_at_auth" or "false|||" if
     # section missing, HEAD_SHA empty, or GOAL_NONCE empty.
@@ -331,6 +401,13 @@ RG_REST="${RG_RESULT#*|}"
 RG_ITER="${RG_REST%%|*}"
 RG_HEAD="${RG_REST##*|}"
 
+# Parse plan-review gate (plan-review iteration rows in Checklist; plan_sha bound).
+PRG_RESULT=$(compute_plan_review_gate)
+PRG_CLEAN="${PRG_RESULT%%|*}"
+PRG_REST="${PRG_RESULT#*|}"
+PRG_ITER="${PRG_REST%%|*}"
+PRG_SHA="${PRG_REST##*|}"
+
 # Parse ## PR authorization section.
 PA_PARSED=$(parse_pr_authorization)
 PA_AUTH="${PA_PARSED%%|*}"
@@ -345,6 +422,8 @@ PHASE_JSON=$(json_str_field "phase" "$PHASE")
 NEXT_STEP_JSON=$(json_str_field "next_step" "$NEXT_STEP")
 RG_ITER_JSON=$(json_str_field "matched_iteration" "$RG_ITER")
 RG_HEAD_JSON=$(json_str_field "matched_head" "$RG_HEAD")
+PRG_ITER_JSON=$(json_str_field "matched_iteration" "$PRG_ITER")
+PRG_SHA_JSON=$(json_str_field "matched_plan_sha" "$PRG_SHA")
 PA_AT_JSON=$(json_str_field "authorized_at" "$PA_AT")
 PA_HEAD_JSON=$(json_str_field "head_sha_at_authorization" "$PA_HEAD")
 PA_NONCE_JSON=$(json_str_field "nonce_at_authorization" "$PA_NONCE")
@@ -451,6 +530,8 @@ E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
         "$PHASE_JSON" "$NEXT_STEP_JSON" "$TOTAL_COUNT" "$DONE_COUNT"
     printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s},' \
         "$RG_CLEAN" "$RG_ITER_JSON" "$RG_HEAD_JSON"
+    printf '"plan_review_gate":{"clean_same_iteration":%s,%s,%s},' \
+        "$PRG_CLEAN" "$PRG_ITER_JSON" "$PRG_SHA_JSON"
     printf '%s,' "$BRANCH_JSON"
     printf '%s,' "$HEAD_SHA_JSON"
     printf '%s,' "$TREE_SHA_JSON"
