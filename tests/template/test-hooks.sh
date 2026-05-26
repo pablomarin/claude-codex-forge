@@ -1592,6 +1592,67 @@ assert_equals "$rc" "2" "Plan review PASS with stale plan_sha is blocked"
 assert_contains "$S18/.hook-stderr" "plan_sha" \
     "stderr mentions plan_sha mismatch"
 
+# ---------------------------------------------------------------------------
+# Test 19: [x] Code review loop PASS without per-iter clean lines → exit 2
+# ---------------------------------------------------------------------------
+start_test "[x] Code review loop PASS + no per-iter evidence → exit 2"
+
+S19=$(scratch_dir wgate-code-noev)
+mkdir -p "$S19/.claude/local"
+cd "$S19"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/code-review-pass-no-evidence.md" \
+   .claude/local/state.md
+echo '{"tool_input":{"command":"git push origin HEAD"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S19/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "2" "Code review PASS without evidence is blocked"
+assert_contains "$S19/.hook-stderr" "Code review iteration" \
+    "stderr names Code review iteration requirement"
+
+# ---------------------------------------------------------------------------
+# Test 20: [x] Code review loop PASS + matching codex+pr-toolkit at HEAD → exit 0
+# ---------------------------------------------------------------------------
+start_test "[x] Code review loop PASS + matching HEAD evidence → exit 0"
+
+S20=$(scratch_dir wgate-code-ok)
+mkdir -p "$S20/.claude/local"
+cd "$S20"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+HEAD_SHA=$(git rev-parse HEAD)
+sed "s/__FAKE_HEAD_SHA__/$HEAD_SHA/g" \
+    "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/code-review-pass-evidence-ok.md" \
+    > .claude/local/state.md
+echo '{"tool_input":{"command":"gh pr create --title test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S20/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "0" "Code review PASS with valid HEAD evidence is allowed"
+
+# ---------------------------------------------------------------------------
+# Test 21: [x] Code review loop PASS + STALE HEAD evidence → exit 2
+# ---------------------------------------------------------------------------
+start_test "[x] Code review loop PASS + stale HEAD evidence → exit 2"
+
+S21=$(scratch_dir wgate-code-stale)
+mkdir -p "$S21/.claude/local"
+cd "$S21"
+git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+# Add a second commit so HEAD differs from the fixture's literal stale sha
+git -c user.email=test@test -c user.name=test commit --allow-empty -m second -q
+cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/code-review-pass-wrong-head.md" \
+   .claude/local/state.md
+echo '{"tool_input":{"command":"git commit -m next"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S21/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "2" "Code review PASS with stale HEAD is blocked"
+assert_contains "$S21/.hook-stderr" "head" "stderr mentions head mismatch"
+
 # ===========================================================================
 # Report
 # ===========================================================================
