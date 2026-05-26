@@ -1515,6 +1515,84 @@ assert_contains "$OUT_V32C.stderr" "v532c-subdir-marker" \
     "build-evidence normalized subdirectory cwd to repo root and read state.md"
 
 # ===========================================================================
+# v5.39 — Plan review + Code review per-iter clean evidence gate
+# Tests 16-24. Closes the same-iteration-clean shortcut surfaced by the
+# msai-v2 v5.38 /goal run (iter-6 P1 pending, agent ticked Plan review PASS).
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Test 16: [x] Plan review loop PASS without per-iter clean evidence → exit 2
+# ---------------------------------------------------------------------------
+start_test "[x] Plan review loop PASS + no per-iter evidence → exit 2"
+
+S16=$(scratch_dir wgate-plan-noev)
+mkdir -p "$S16/.claude/local"
+cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/plan-review-pass-no-evidence.md" \
+   "$S16/.claude/local/state.md"
+cd "$S16"
+git init -q .
+git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S16/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "2" "Plan review PASS without evidence is blocked"
+assert_contains "$S16/.hook-stderr" "Plan review iteration" \
+    "stderr mentions Plan review iteration"
+assert_contains "$S16/.hook-stderr" "codex clean" \
+    "stderr names the required clean-line tool"
+
+# ---------------------------------------------------------------------------
+# Test 17: [x] Plan review loop PASS + valid evidence + matching plan_sha → exit 0
+# ---------------------------------------------------------------------------
+start_test "[x] Plan review loop PASS + valid plan_sha → exit 0"
+
+S17=$(scratch_dir wgate-plan-ok)
+mkdir -p "$S17/.claude/local" "$S17/docs/plans"
+echo "# Fake plan" > "$S17/docs/plans/fake-plan.md"
+
+# Compute the real plan_sha and head_sha (init repo + first commit).
+cd "$S17"
+git init -q . && git add -A && git -c user.email=test@test -c user.name=test commit -q -m init
+HEAD_SHA=$(git rev-parse HEAD)
+PLAN_SHA=$(shasum -a 256 docs/plans/fake-plan.md 2>/dev/null | awk '{print $1}')
+[ -z "$PLAN_SHA" ] && PLAN_SHA=$(sha256sum docs/plans/fake-plan.md | awk '{print $1}')
+
+# Materialize fixture with placeholders replaced.
+sed "s/__FAKE_PLAN_SHA__/$PLAN_SHA/g; s/__FAKE_HEAD_SHA__/$HEAD_SHA/g" \
+    "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/plan-review-pass-evidence-ok.md" \
+    > .claude/local/state.md
+
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S17/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "0" "Plan review PASS with valid evidence is allowed"
+
+# ---------------------------------------------------------------------------
+# Test 18: [x] Plan review loop PASS + WRONG plan_sha → exit 2
+# ---------------------------------------------------------------------------
+start_test "[x] Plan review loop PASS + stale plan_sha → exit 2"
+
+S18=$(scratch_dir wgate-plan-stale)
+mkdir -p "$S18/.claude/local" "$S18/docs/plans"
+echo "# Fake plan" > "$S18/docs/plans/fake-plan.md"
+cd "$S18"
+git init -q . && git add -A && git -c user.email=test@test -c user.name=test commit -q -m init
+cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/plan-review-pass-wrong-sha.md" \
+   .claude/local/state.md
+echo '{"tool_input":{"command":"git commit -m test"}}' \
+    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S18/.hook-stderr"
+rc=$?
+cd "$REPO_ROOT"
+
+assert_equals "$rc" "2" "Plan review PASS with stale plan_sha is blocked"
+assert_contains "$S18/.hook-stderr" "plan_sha" \
+    "stderr mentions plan_sha mismatch"
+
+# ===========================================================================
 # Report
 # ===========================================================================
 report "test-hooks.sh"
