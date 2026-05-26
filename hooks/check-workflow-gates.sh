@@ -25,6 +25,10 @@
 
 INPUT=$(cat)
 
+codex_available() {
+    command -v codex >/dev/null 2>&1
+}
+
 # --- Parse command ---
 if command -v jq &> /dev/null; then
     COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
@@ -277,6 +281,129 @@ if [ -n "$E2E_CHECKED_LINE" ] && ! echo "$E2E_CHECKED_LINE" | grep -qE 'N/A:'; t
         echo '        - [x] E2E verified — N/A: <specific reason>' >&2
         echo "" >&2
         echo "See .claude/rules/testing.md for the full policy." >&2
+        exit 2
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Evidence-based gate for Plan review loop PASS
+#
+# The msai-v2 v5.38 /goal run violated this by ticking [x] Plan review loop
+# (6 iterations) — PASS while iter-6 still had 2 P1 findings. Patching the
+# plan and skipping iter-7 confirmation is exactly the discipline drift this
+# gate prevents.
+#
+# Required when checkbox is "- [x] Plan review loop (N iterations) — PASS":
+#   - a matching per-iter clean line for iteration N
+#   - the line's plan_sha matches sha256 of the referenced plan file
+#
+# Canonical clean-line stem (referenced by tests/template/test-contracts.sh
+# parity check): Plan review iteration N — codex clean — plan=`<path>`
+#
+# Escape valves (graceful failure modes):
+#   - "codex unavailable, user-confirmed" — rejected if `command -v codex`
+#     succeeds at gate time (prevents inventing consent)
+#   - "codex unavailable, council-confirmed — council_nonce=..." — accepted
+#     (council provides the human-judgment audit trail)
+#   - No `[x] Plan review loop` at all → gate inert (simple-fix path)
+# ---------------------------------------------------------------------------
+PLAN_PASS_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
+    | grep -E '^\s*-\s*\[x\]\s+Plan review loop \([0-9]+ iterations\) — PASS' \
+    | tail -1)
+
+if [ -n "$PLAN_PASS_LINE" ]; then
+    # Extract N from "Plan review loop (N iterations) — PASS"
+    PLAN_N=$(echo "$PLAN_PASS_LINE" | sed -E 's/.*Plan review loop \(([0-9]+) iterations\).*/\1/')
+
+    # Find the per-iter clean line for iteration N (LAST matching line — defensive
+    # against stale duplicates, matches PR-authorization pattern at line 115-117).
+    PLAN_CLEAN=$(echo "$CHECKLIST" | tr -d '\r' \
+        | grep -E "^\s*-\s*\[x\]\s+Plan review iteration $PLAN_N — " \
+        | tail -1)
+
+    if [ -z "$PLAN_CLEAN" ]; then
+        echo "WORKFLOW GATE: [x] Plan review loop ($PLAN_N iterations) — PASS lacks per-iter clean evidence." >&2
+        echo "" >&2
+        echo "Required: a matching line in state.md (### Checklist):" >&2
+        echo "  - [x] Plan review iteration $PLAN_N — codex clean — plan=\`<plan-file>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
+        echo "" >&2
+        echo "Run iter-$PLAN_N reviewers and append the clean line, OR uncheck the loop" >&2
+        echo "and run another iteration. See rules/workflow.md Revision Loop Protocol." >&2
+        exit 2
+    fi
+
+    # Branch on the clean-line variant
+    if echo "$PLAN_CLEAN" | grep -q "codex clean"; then
+        # Extract plan path + claimed sha
+        PLAN_PATH=$(echo "$PLAN_CLEAN" | sed -E 's/.*plan=`([^`]+)`.*/\1/')
+        CLAIMED_SHA=$(echo "$PLAN_CLEAN" | sed -E 's/.*plan_sha=`([^`]+)`.*/\1/')
+
+        if [ -z "$PLAN_PATH" ] || [ -z "$CLAIMED_SHA" ]; then
+            echo "WORKFLOW GATE: Plan review iteration $PLAN_N clean line is malformed." >&2
+            echo "Expected format: codex clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
+            echo "Got: $PLAN_CLEAN" >&2
+            exit 2
+        fi
+
+        if [ ! -f "$PLAN_PATH" ]; then
+            echo "WORKFLOW GATE: Plan review evidence references missing file: $PLAN_PATH" >&2
+            exit 2
+        fi
+
+        if command -v shasum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(shasum -a 256 "$PLAN_PATH" | awk '{print $1}')
+        elif command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(sha256sum "$PLAN_PATH" | awk '{print $1}')
+        else
+            echo "WORKFLOW GATE: cannot verify plan_sha (no shasum or sha256sum command available)." >&2
+            echo "Install coreutils or perl-Digest::SHA, OR mark the gate N/A." >&2
+            exit 2
+        fi
+
+        # Normalize both sides to lowercase before compare. Get-FileHash in
+        # PowerShell returns uppercase by default; an agent writing the clean
+        # line from a PS host would otherwise mismatch our sha256sum output.
+        ACTUAL_SHA=$(echo "$ACTUAL_SHA" | tr 'A-Z' 'a-z')
+        CLAIMED_SHA=$(echo "$CLAIMED_SHA" | tr 'A-Z' 'a-z')
+
+        if [ "$ACTUAL_SHA" != "$CLAIMED_SHA" ]; then
+            echo "WORKFLOW GATE: Plan review iteration $PLAN_N plan_sha mismatch." >&2
+            echo "  Claimed (state.md): $CLAIMED_SHA" >&2
+            echo "  Actual ($PLAN_PATH): $ACTUAL_SHA" >&2
+            echo "" >&2
+            echo "The plan file changed since iter-$PLAN_N was reviewed. Re-run reviewers." >&2
+            exit 2
+        fi
+    elif echo "$PLAN_CLEAN" | grep -q "codex unavailable, user-confirmed"; then
+        # Hard reject if codex is actually available at gate time
+        if codex_available; then
+            echo "WORKFLOW GATE: Plan review iteration $PLAN_N claims 'codex unavailable, user-confirmed'" >&2
+            echo "but \`codex\` is available on this machine at gate time." >&2
+            echo "" >&2
+            echo "Re-run the iter-$PLAN_N codex review OR re-mark with the real outcome." >&2
+            exit 2
+        fi
+        # codex genuinely unavailable → accept the user-confirmed escape
+    elif echo "$PLAN_CLEAN" | grep -q "codex unavailable, council-confirmed"; then
+        # Council escape requires a UUID-format nonce.
+        COUNCIL_NONCE=$(echo "$PLAN_CLEAN" | sed -E 's/.*council_nonce=`([^`]+)`.*/\1/')
+        if ! echo "$PLAN_CLEAN" | grep -qE 'council_nonce=`[^`]+`'; then
+            echo "WORKFLOW GATE: Plan review iteration $PLAN_N council-confirmed escape missing council_nonce." >&2
+            exit 2
+        fi
+        if ! echo "$COUNCIL_NONCE" | grep -qE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+            echo "WORKFLOW GATE: Plan review iteration $PLAN_N council_nonce malformed (expected UUID)." >&2
+            echo "Got: $COUNCIL_NONCE" >&2
+            exit 2
+        fi
+    else
+        echo "WORKFLOW GATE: Plan review iteration $PLAN_N clean line variant not recognized." >&2
+        echo "Got: $PLAN_CLEAN" >&2
+        echo "" >&2
+        echo "Accepted variants (see rules/workflow.md):" >&2
+        echo "  - codex clean — plan=\`<path>\` — plan_sha=\`<sha>\` — ts=\`<ts>\`" >&2
+        echo "  - codex unavailable, user-confirmed — ts=\`<ts>\`  (only if codex CLI not installed)" >&2
+        echo "  - codex unavailable, council-confirmed — council_nonce=\`<n>\` — ts=\`<ts>\`" >&2
         exit 2
     fi
 fi
