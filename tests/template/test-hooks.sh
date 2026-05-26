@@ -982,6 +982,24 @@ EXIT=$(cat "$scratch/.exit")
 assert_equals "$EXIT" "2" "gh pr create BLOCKED when no ## PR authorization line (exit 2)"
 assert_contains "$scratch/.out" "PR creation authorized" "hook output mentions the missing authorization"
 
+# Test L2-1b: env-prefixed `gh pr create` must ALSO hit the PR-auth guard.
+# Regression guard: the broadened IS_SHIP detection accepts `FOO=bar gh pr create`,
+# so the Layer-2 auth trigger must be env-prefix-aware too — otherwise an
+# env-prefixed PR-create with green gates + active /goal + no auth line would
+# fall through to the normal gates and ship without authorization.
+start_test "env-prefixed gh pr create still hits PR-auth guard (no auth line → exit 2)"
+
+(
+    cd "$scratch"
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"GH_TOKEN=x gh pr create --title test"}}'
+    OUT="$scratch/.out2"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit2"
+)
+EXIT=$(cat "$scratch/.exit2")
+assert_equals "$EXIT" "2" "env-prefixed gh pr create BLOCKED when no PR authorization (exit 2)"
+assert_contains "$scratch/.out2" "PR creation authorized" "env-prefixed PR-create routed into the auth guard"
+
 # ---------------------------------------------------------------------------
 # Test L2-2: /goal session active + ## PR authorization with matching nonce + HEAD → allowed (exit 0)
 # ---------------------------------------------------------------------------

@@ -123,7 +123,11 @@ if (-not $cmd -or $cmd -eq "none" -or $cmd -eq ([char]0x2014).ToString() -or $cm
 # PS 5.1 constraints: no ??, no Out-Null on STDERR, no pwsh spawn,
 # [Console]::Error.WriteLine for STDERR, CRLF normalize before regex.
 # ---------------------------------------------------------------------------
-if ($command -match '^\s*gh\s+pr\s+create\b') {
+# Env-prefix-aware (matches `FOO=bar gh pr create`) so the broadened ship
+# detection above can't route an env-prefixed PR-create past this auth guard.
+# $envp ends in `*` so this also matches the bare `gh pr create` form.
+$prCreatePattern = "^\s*${envp}gh\s+pr\s+create\b"
+if ($command -match $prCreatePattern) {
     if (Test-Path $stateFile) {
         # CRLF normalize, then scope to ## /goal session block
         $raw = Get-Content $stateFile -Raw -ErrorAction SilentlyContinue

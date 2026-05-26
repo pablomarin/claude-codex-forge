@@ -774,10 +774,14 @@ Gather severity-tagged findings from all available reviewers. Use the same P0–
 **Step C — Exit criteria:**
 
 - **P0/P1/P2 found by any reviewer →** Fix the issues. If fixes are substantial (3+ files changed), re-run verify-app before next review iteration to catch regressions early. Increment counter in the state.md checklist (`Code review loop (N iterations)`), go back to Step A.
-- **Only P3 or clean from all available reviewers on the same pass →**
+- **Only P3 or clean from all available reviewers on the same pass →** do all three:
   1. Append the per-iter clean lines to `.claude/local/state.md` `### Checklist` (head = current `git rev-parse HEAD`):
-     `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``
-`- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``
+
+  ```
+  - [x] Code review iteration <N> — codex clean — head=`<sha>`
+  - [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>`
+  ```
+
   2. Check the loop-complete box: `- [x] Code review loop (<N> iterations) — PASS`
   3. Proceed to 5.2.
 

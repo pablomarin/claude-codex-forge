@@ -133,7 +133,9 @@ WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -iE '\|\s*Command\s*\|' | head -1 |
 # When /forge-goal is NOT active, this guard is a no-op and the existing
 # checklist-completion guard below runs unchanged.
 # ---------------------------------------------------------------------------
-if echo "$COMMAND" | grep -qE '^[[:space:]]*gh[[:space:]]+pr[[:space:]]+create\b'; then
+# Env-prefix-aware (matches `FOO=bar gh pr create`) so the broadened IS_SHIP
+# detection above can't route an env-prefixed PR-create past this auth guard.
+if echo "$COMMAND" | grep -qE "^[[:space:]]*${_ENVP}gh[[:space:]]+pr[[:space:]]+create\b"; then
     if [ -f "$STATE_FILE" ]; then
         # CRLF normalize before awk anchors (matches Layer 1 parser pattern)
         GOAL_BLOCK=$(tr -d '\r' < "$STATE_FILE" \
