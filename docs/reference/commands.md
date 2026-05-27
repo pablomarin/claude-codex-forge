@@ -13,12 +13,25 @@ All slash commands and subagents available after setup.
 
 **Workflow commands guide the process.** `.claude/local/state.md` is read on demand by hooks (not auto-loaded), and the Stop hook reminds you to keep it current; `check-workflow-gates.sh` validates completion before commit/push/PR.
 
+### Autonomous loop (`/goal`)
+
+`/goal` is not a Forge command you install — it's Claude Code's built-in, invoked with a Forge-composed instruction. After the PRD is approved in `/new-feature` (or the plan in `/fix-bug`), the workflow **offers** you a ready-to-paste `/goal …` command. Paste it and the agent drives the rest of the lifecycle — plan → review → implement → review → verify → E2E → PR — autonomously, routing hard decisions to `/council` and stopping only at the PR-creation gate. It's **optional and PRD-gated**; declining keeps you in manual phase-by-phase mode. In either mode you watch and steer by typing in the prompt. Full behavior: [Autonomous Goal Mode](../explanation/autonomous-goal.md); the agent's autonomous-run rules live in `rules/workflow.md` ("Council During `/forge-goal` Autonomous Run").
+
 ## Decision Analysis
 
 | Command                | Purpose                       | Notes                                                                                                                                                                             |
 | ---------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/council <question>`  | Multi-perspective analysis    | 5 advisors (3 Claude + 2 Codex) + Codex chairman. See [The Engineering Council](../explanation/engineering-council.md) for personas, when it fires, and the minority-report rule. |
-| `/codex <instruction>` | Second opinion from Codex CLI | Code review, design review, or general                                                                                                                                            |
+| `/codex <instruction>` | Second opinion from Codex CLI | Four modes: Code Review, Design Review, General (all hermetic — read-only, no network), and **Investigate** (live-system access — see below).                                     |
+
+### `/codex` modes
+
+| Mode            | Sandbox / network                                                                 | Use for                                                                                                                                                                                                                                                                                                                                                    |
+| --------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Code Review     | `exec review`, hermetic (read-only, no network)                                   | Reviewing committed/uncommitted diffs                                                                                                                                                                                                                                                                                                                      |
+| Design Review   | `--sandbox read-only`, no network                                                 | Reviewing a plan/design before implementation                                                                                                                                                                                                                                                                                                              |
+| General         | `--sandbox read-only`, no network                                                 | A second opinion / analysis question                                                                                                                                                                                                                                                                                                                       |
+| **Investigate** | `--sandbox workspace-write` + network, repo-confined (never `danger-full-access`) | Debugging / reverse-engineering / data-spelunking against **live systems** — Codex runs queries, reaches DBs/APIs, executes. Read-only / non-mutating; Claude provisions it from the project's own connection surface; findings cross-verified. Works inside an autonomous `/goal` run. See [Codex Investigate Mode](../explanation/codex-investigate.md). |
 
 ## PRD Commands (Requirements)
 
