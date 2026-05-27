@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
-  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.40-blue?style=flat-square"></a>
+  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.41-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
   <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-required-orange?style=flat-square"></a>
@@ -37,6 +37,8 @@ Claude Codex Forge combines **Claude Code** and **OpenAI's Codex** into a single
 ## What you get
 
 - **Dual-agent review** — `/codex review` (independent second opinion) + `/council` (5-advisor panel with Codex chairman, see [explainer](docs/explanation/engineering-council.md)) catch issues one agent alone would miss. Two separately-trained models flag different concerns — disagreement is the signal.
+- **Codex Investigate mode** — review-mode Codex can only _read code_ in a hermetic sandbox. Investigate mode lets Claude hand Codex the context, env vars, and tools to actually _run things_ against your live systems — query a database, hit a cloud API, reproduce a bug — so two engines debug real state side by side. Safe by construction: repo-confined sandbox (never "dangerous" mode), read-only, credentials never in logs, every finding cross-verified. See [explainer](docs/explanation/codex-investigate.md).
+- **Autonomous goal mode** — write a sharp PRD, then paste one `/goal` command and the agent drives the entire feature — plan → review → implement → review → verify → E2E → PR — on its own, escalating hard calls to the Council instead of stopping to ask. Optional and PRD-gated; you watch and steer any time by typing in the prompt, and PR creation is the one gate that always waits for your yes. See [explainer](docs/explanation/autonomous-goal.md).
 - **Discipline by construction** — workflow commands bake in TDD, research-before-design, and E2E testing. Hooks block dangerous Bash, enforce state updates, and gate commit/push/PR on explicit quality markers.
 - **Continuous memory** — auto-memory persists locally across sessions and compaction (rescued by the `PreCompact` hook); `docs/adr/`, `docs/CHANGELOG.md`, and `docs/solutions/` travel with the repo so every architecture decision, root cause, and pattern compounds across weeks and teammates via git. Per-developer Workflow / Done / Now / Next state lives in gitignored `.claude/local/state.md` — read by hooks on demand, kept out of Claude's auto-loaded context.
 - **Team-scale by default** — one GitHub repo becomes the hub. Multiple developers run parallel Claude sessions via auto-created git worktrees, each isolated but with full project context.
@@ -103,29 +105,33 @@ One feature goes from idea to merged PR across 14 enforced phases — from PRD t
 See **[the full workflow diagram](docs/explanation/workflow.md)** for the complete view, or jump straight to:
 
 - **[Why a harness, not a template](docs/explanation/harness-philosophy.md)** — the two-agent design, discipline by construction, continuous memory
+- **[Autonomous goal mode](docs/explanation/autonomous-goal.md)** — paste one `/goal`, the agent drives PRD→PR; you watch and steer
+- **[Codex Investigate mode](docs/explanation/codex-investigate.md)** — give Codex real hands on live systems, safely
 - **[Commands reference](docs/reference/commands.md)** — every slash command and subagent
 - **[Hooks reference](docs/reference/hooks.md)** — seven hook events that keep discipline structural
 
 ## Documentation
 
-| Topic                                                              | What's inside                                                               |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| **[Getting Started](docs/getting-started.md)**                     | Prerequisites, 6-step install, verify setup                                 |
-| **[Setup Scenarios](docs/guides/setup-scenarios.md)**              | New project · existing project · upgrade                                    |
-| **[Customize Your Project](docs/guides/customize-project.md)**     | CLAUDE.md · `.claude/local/state.md` · optional MCPs · automated PR reviews |
-| **[Upgrading](docs/guides/upgrading.md)**                          | `--upgrade` mode, merge behavior, fresh-install alternative                 |
-| **[Parallel Development](docs/guides/parallel-sessions.md)**       | Multiple sessions via git worktrees                                         |
-| **[Playwright CI Bridge](docs/guides/playwright-ci-bridge.md)**    | `--with-playwright` scaffold for deterministic E2E in CI                    |
-| **[Commands Reference](docs/reference/commands.md)**               | All slash commands and subagents                                            |
-| **[Hooks Reference](docs/reference/hooks.md)**                     | Seven hook events + how they interact                                       |
-| **[Permissions & Security](docs/reference/permissions.md)**        | Deny / ask / skip rules                                                     |
-| **[File Structure](docs/reference/file-structure.md)**             | What setup creates and where                                                |
-| **[Creating Skills](docs/reference/creating-skills.md)**           | Author your own slash commands                                              |
-| **[Cheatsheet](docs/reference/cheatsheet.md)**                     | Copy-paste daily-workflow card                                              |
-| **[Workflow (full)](docs/explanation/workflow.md)**                | 14-phase diagram with rationale                                             |
-| **[Harness Philosophy](docs/explanation/harness-philosophy.md)**   | Why dual-agent, why discipline, why continuous memory                       |
-| **[Memory Architecture](docs/explanation/memory-architecture.md)** | Global + project + auto-memory layers                                       |
-| **[Troubleshooting](docs/troubleshooting.md)**                     | Memory · hooks · permissions · MCP · plugins · Codex                        |
+| Topic                                                               | What's inside                                                               |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **[Getting Started](docs/getting-started.md)**                      | Prerequisites, 6-step install, verify setup                                 |
+| **[Setup Scenarios](docs/guides/setup-scenarios.md)**               | New project · existing project · upgrade                                    |
+| **[Customize Your Project](docs/guides/customize-project.md)**      | CLAUDE.md · `.claude/local/state.md` · optional MCPs · automated PR reviews |
+| **[Upgrading](docs/guides/upgrading.md)**                           | `--upgrade` mode, merge behavior, fresh-install alternative                 |
+| **[Parallel Development](docs/guides/parallel-sessions.md)**        | Multiple sessions via git worktrees                                         |
+| **[Playwright CI Bridge](docs/guides/playwright-ci-bridge.md)**     | `--with-playwright` scaffold for deterministic E2E in CI                    |
+| **[Commands Reference](docs/reference/commands.md)**                | All slash commands and subagents                                            |
+| **[Hooks Reference](docs/reference/hooks.md)**                      | Seven hook events + how they interact                                       |
+| **[Permissions & Security](docs/reference/permissions.md)**         | Deny / ask / skip rules                                                     |
+| **[File Structure](docs/reference/file-structure.md)**              | What setup creates and where                                                |
+| **[Creating Skills](docs/reference/creating-skills.md)**            | Author your own slash commands                                              |
+| **[Cheatsheet](docs/reference/cheatsheet.md)**                      | Copy-paste daily-workflow card                                              |
+| **[Workflow (full)](docs/explanation/workflow.md)**                 | 14-phase diagram with rationale                                             |
+| **[Autonomous Goal Mode](docs/explanation/autonomous-goal.md)**     | `/goal` PRD→PR autonomy — optional, PRD-gated, watch-and-steer              |
+| **[Codex Investigate Mode](docs/explanation/codex-investigate.md)** | Give Codex live-system access (DB/cloud/API) safely; works inside `/goal`   |
+| **[Harness Philosophy](docs/explanation/harness-philosophy.md)**    | Why dual-agent, why discipline, why continuous memory                       |
+| **[Memory Architecture](docs/explanation/memory-architecture.md)**  | Global + project + auto-memory layers                                       |
+| **[Troubleshooting](docs/troubleshooting.md)**                      | Memory · hooks · permissions · MCP · plugins · Codex                        |
 
 ## Concrete guarantees
 
@@ -142,6 +148,7 @@ Recent releases:
 
 | Version | Date       | Highlights                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 5.41    | 2026-05-27 | Document **autonomous goal mode** and **Codex Investigate mode** as first-class features (were version-history-only): two "What you get" bullets, "How it works" links, Documentation-table rows, two new explainer docs (`autonomous-goal.md`, `codex-investigate.md`), and a `/codex` modes table + autonomous-`/goal` section in the commands reference. Docs-only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 5.40    | 2026-05-27 | Codex **Investigate mode** (`/codex` Section D) + `/council` live-state fact-finding: Claude provisions Codex with the project's real read-only creds + network to dig into live systems (DB/cloud/API), repo-confined sandbox, no user prompt (autonomous-`/goal`-safe), cross-verified. Capability-gated, sandbox-enforced. ADR 0007.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 5.39    | 2026-05-26 | Hook enforcement of per-iter clean evidence on Plan + Code review loop PASS checkboxes (plan_sha + HEAD binding); closes the v5.38 msai-v2 same-iter-clean shortcut.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 5.38    | 2026-05-25 | Whole-UC `NOT_USER_JOURNEY` trigger + stale-text cleanup. Codex final-pass on v5.34–v5.37 demonstrated a real escape route: an old UC with decent Intent prose ("Customer creates an order through the API") could slide through regression if its Steps were a single curl + Verification was bare status + Persistence was N/A — each individual hard gate is skipped in regression mode, but the _combination_ is "this isn't a journey at all." Step 2b judgment-call #7 now has TWO triggers: Intent shape (existing) AND whole-UC shape (new) — when Steps shallow + Verification bare + Persistence absent all combine, fires `NOT_USER_JOURNEY` in any mode. Plus three stale-text fixes: `rules/testing.md` Failure Classification table now lists all 9 reason codes (was out of sync); NOT_USER_JOURNEY no longer claims missing-Persistence (that's MISSING_PERSISTENCE); `commands/fix-bug.md:819` simple-fix parenthetical now lists all 8 fields. 392 assertions. |
