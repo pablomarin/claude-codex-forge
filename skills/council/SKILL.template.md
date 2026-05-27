@@ -47,6 +47,16 @@ git status --short
 
 Read any files referenced in the question. If an approach comparison table exists (auto-trigger mode), include it.
 
+### Live-state fact-finding (when a verdict hinges on real system/data state)
+
+If the question turns on actual system or data state — "is this migration safe given real row counts / distributions?", "does prod actually behave like X?" — gather **verified facts before advisors reason**, instead of having them speculate. Run a pre-council **Investigate pass** (see `/codex` Section D, "Investigate Mode") to dig into the live system. The same hard constraints apply, unchanged:
+
+- Repo-confined Codex sandbox (`--sandbox workspace-write`, never `danger-full-access`), read-only / non-mutating, credentials from `.env` never in argv/logs.
+- **Never prompt the user** — provision Codex from what Claude already has. This holds inside a `/forge-goal` `/goal` run, where council fires autonomously and `AskUserQuestion` is reserved solely for PR creation.
+- Independently cross-verify the finding before it enters the council as fact.
+
+Advisors then reason over **verified facts**, and the chairman cites the evidence packet in the verdict. Council itself never grants write access — fact-finding is strictly read-only.
+
 ## Step 2: Load Advisor Profiles
 
 Read `references/advisors.md` to get the 5 advisor personas and their engine assignments.

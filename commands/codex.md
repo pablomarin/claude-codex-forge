@@ -22,7 +22,8 @@ Analyze `$ARGUMENTS` to determine the mode:
 
 - **Code Review Mode**: Arguments match review-related keywords — "review code", "code review", "review changes", "review diff", "review PR", or bare "review"
 - **Design Review Mode**: Arguments reference a plan, design, or architecture — "review the plan", "review the design", "review architecture"
-- **General Mode**: Everything else (give opinion, analyze code, brainstorm, ask a question)
+- **Investigate Mode**: The task needs reach a hermetic sandbox denies — it requires ANY of: project credentials, network access, external systems (DB / cloud / API), live data, or non-hermetic execution. Detected by **capability-need, not by guessing intent** — e.g. "have Codex dig into the data", "give Codex DB access to find the cause", "let Codex actually run X against the live system". Check this BEFORE falling through to General.
+- **General Mode**: Everything else (give opinion, analyze code, brainstorm, ask a question) — stays hermetic (read-only, no network)
 
 ---
 
@@ -166,6 +167,106 @@ Display Codex's output verbatim to the user. Do not summarize or edit it.
 
 ---
 
+## D) Investigate Mode
+
+The ONLY mode that enables network + execution. A deliberate escalation — used
+when the task needs to reach real systems (debug, reverse-engineer, data-spelunk),
+so Codex can be a peer investigator with real hands on the data instead of reading
+code in a sandbox vacuum. It is never the default; the hermetic modes (A/B/C) stay
+read-only + no-network by contract.
+
+> **Decision rationale** (see `docs/adr/` for the ADR): Investigate is gated by
+> **capability-need, not task-type**, and its repo boundary is enforced by the
+> **Codex sandbox, not by prompt text** — because Codex itself may be steered by
+> malicious content in the data it reads.
+
+### Three hard constraints — NON-NEGOTIABLE
+
+1. **Sandbox-confined to the repo.** Launch with `--sandbox workspace-write`
+   `-c sandbox_workspace_write.network_access=true` and `-C "$(pwd)"`. NEVER
+   `--sandbox danger-full-access`. This flag — not a sentence in the prompt — is
+   what prevents prompt-injected writes to `~/.ssh`, shell profiles, or global
+   config. The boundary must be the sandbox because Codex may be injected by the
+   very data it inspects.
+2. **Never prompt the user.** YOU (Claude) provision Codex from what you already
+   have. The credentials are already in the project's `.env`/config; handing the
+   SAME read-only access to Codex is lateral, not a new escalation, so it needs no
+   fresh consent. Do NOT use `AskUserQuestion`. **This is critical inside a
+   `/forge-goal` `/goal` run** (`## /goal session` has a non-empty nonce): a prompt
+   would break the autonomous loop, where `AskUserQuestion` is reserved solely for
+   PR creation (see `rules/workflow.md`).
+3. **Read-only / never mutate** external systems — use the narrowest role available
+   (e.g. a SELECT-only DB role). This mode investigates; it never changes things. A
+   task that needs to mutate is implementation, not investigation — route it through
+   the normal `/new-feature` or `/fix-bug` workflow.
+
+### Step 1: Provision Codex with this project's connection surface
+
+YOU are the agent that already knows how this project reaches its systems. Equip
+Codex the way you would operate yourself — the mechanism is project-specific and
+you choose it: an MCP server, a project CLI, or a thin `.env`-sourced runner;
+whatever this repo uses. Rules:
+
+- **Credentials come from `.env`/config — NEVER in argv, the prompt, or anything
+  that lands in logs.** A small runner that reads `.env` itself is the safe pattern.
+- **Write the brief + any runner + Codex's output ONLY to a gitignored in-repo
+  path** (e.g. `.claude/local/investigate/`). The autonomous loop already writes
+  there without prompting, and it keeps everything inside the sandbox boundary.
+- **Write a brief** (`.claude/local/investigate/CONTEXT.md`): the question, allowed
+  data sources, forbidden actions, acceptance criteria, and the expected output
+  (finding + reproduction steps + uncertainty + next checks).
+
+### Step 2: Launch Codex with reach
+
+```bash
+mkdir -p .claude/local/investigate
+.claude/hooks/lib/codex-pty.sh exec \
+  -m "gpt-5.5" \
+  -c model_reasoning_effort="xhigh" \
+  -c service_tier="fast" \
+  -c web_search="live" \
+  --sandbox workspace-write \
+  -c sandbox_workspace_write.network_access=true \
+  --ephemeral \
+  -C "$(pwd)" \
+  --output-last-message .claude/local/investigate/finding.txt \
+  "$(cat .claude/local/investigate/CONTEXT.md)"
+```
+
+> **Pin the exact network/execution flags against `codex --help`** for your Codex
+> version. `--sandbox danger-full-access` removes sandboxing entirely (do NOT use —
+> it breaks constraint 1); `workspace-write` + `network_access=true` is the
+> repo-confined default that gives network without surrendering the filesystem
+> boundary.
+
+**Timeout: 1200000ms (20 minutes)** — investigations iterate; allow time. Run in
+the background and poll the output file if the dig is long.
+
+### Step 3: Cross-verify before trusting (MANDATORY)
+
+Codex's finding is a hypothesis until independently reproduced. Codex must return
+an **evidence packet**: hypothesis, exact queries/commands, parameters, row
+counts / checksums, before-after values, caveats. YOU then reproduce it
+independently — ideally with your own separately-written queries — and confirm:
+same sources, same filters/window, matching counts (or explained deltas), matching
+result within tolerance, plus one control/negative check. Only a finding with
+attached reproduction is trusted or acted on. **"Codex said so" is not
+verification.**
+
+### Step 4: Display + report
+
+Display Codex's finding verbatim, then state your independent verification result
+(reproduced / failed-to-reproduce / partial) BEFORE any recommendation.
+
+> **Accepted residual** (the Forge's threat model per `rules/security.md` is
+> single-user, local-only): read-only + network + credentials still carries
+> credit-burn, prompt-injection-via-inspected-data, and credential-exposure-via-
+> network exposure. This is NOT engineered around — Claude already carries the
+> identical exposure when it investigates directly. Do not add budget/egress
+> machinery for the single-user case.
+
+---
+
 ## Error Handling
 
 - **Codex not installed**: Tell the user to run `npm i -g @openai/codex` (or `brew install --cask codex` on macOS) and `codex login`
@@ -177,13 +278,14 @@ Display Codex's output verbatim to the user. Do not summarize or edit it.
 
 ## Quick Reference
 
-| Use case                   | Command pattern                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------ |
-| Review uncommitted changes | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --uncommitted`                     |
-| Review branch vs main      | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --base main --title "description"` |
-| Review a specific commit   | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --commit SHA`                      |
-| Review a design plan       | `.claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral "Review the plan..."` |
-| General second opinion     | `.claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral "Your question..."`   |
+| Use case                   | Command pattern                                                                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Review uncommitted changes | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --uncommitted`                                                                                                               |
+| Review branch vs main      | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --base main --title "description"`                                                                                           |
+| Review a specific commit   | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --commit SHA`                                                                                                                |
+| Review a design plan       | `.claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral "Review the plan..."`                                                                                           |
+| General second opinion     | `.claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral "Your question..."`                                                                                             |
+| Investigate (live systems) | `.claude/hooks/lib/codex-pty.sh exec --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral -C "$(pwd)" "$(cat .claude/local/investigate/CONTEXT.md)"` |
 
 ---
 
@@ -216,4 +318,8 @@ For other `-c` overrides not listed here, consult `codex --help` rather than imp
 
 ## Flags used by this command
 
-`--ephemeral`, `--sandbox read-only`, `--color never`, `--skip-git-repo-check`, `--uncommitted` / `--base <BRANCH>` / `--commit <SHA>` / `--title <STR>` (review-mode only). Do not introduce other flags inside `/codex` — they're not part of this command's contract.
+`--ephemeral`, `--sandbox read-only`, `--color never`, `--skip-git-repo-check`, `--uncommitted` / `--base <BRANCH>` / `--commit <SHA>` / `--title <STR>` (review-mode only).
+
+**Investigate mode only** (Section D): `--sandbox workspace-write`, `-c sandbox_workspace_write.network_access=true`, `-C "$(pwd)"`. `--sandbox danger-full-access` is explicitly forbidden — it breaks the repo-confined boundary that makes Investigate safe.
+
+Do not introduce other flags inside `/codex` — they're not part of this command's contract.
