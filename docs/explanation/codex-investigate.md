@@ -34,9 +34,11 @@ Giving an autonomous agent live access sounds risky — so the safety is structu
 
 Because Investigate mode **never prompts the user** — Claude provisions Codex from credentials it already holds, which is a lateral hand-off, not a new escalation — it runs cleanly inside an autonomous `/goal` session. The council can send Codex to gather _verified facts_ from the live system before advisors reason, instead of speculating. (`AskUserQuestion` stays reserved solely for the PR-creation gate, so nothing breaks the loop.)
 
-## How it triggers
+## How it triggers — and who chooses
 
-Investigate is **capability-gated, not task-typed** — you don't pick it by keyword. It engages when the task needs any of: project credentials, network, external systems (DB / cloud / API), live data, or non-hermetic execution. In practice you ask for it naturally: _"have Codex dig into the data"_, _"give Codex what it needs to find the cause"_, _"let Codex actually run the query."_ See the `/codex` Section D entry in the [Commands Reference](../reference/commands.md) for the exact mechanics.
+**Codex doesn't choose the mode. Claude does, from your request.** Codex (the subprocess) just receives a prompt and sandbox flags — it has no concept of "modes." The selection happens in Claude's `/codex` mode-detection: the hermetic modes (Code Review / Design Review / General) are routed by keyword and context, while Investigate is **capability-gated, not task-typed** — Claude doesn't match a magic word, it asks "does this task need something the sandbox denies?"
+
+Investigate engages when the task needs any of: project credentials, network, external systems (DB / cloud / API), live data, or non-hermetic execution. In practice you ask for it naturally — _"have Codex dig into the data"_, _"give Codex what it needs to find the cause"_, _"let Codex actually run the query"_ — and Claude recognizes the capability need and provisions Codex accordingly. A plain _"review this"_ never silently escalates to live access; the escalation only happens when the work genuinely can't be answered from source alone. See the `/codex` modes table in the [Commands Reference](../reference/commands.md) for the exact mechanics.
 
 ## Accepted residual
 

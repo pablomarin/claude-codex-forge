@@ -2,6 +2,10 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.42 — 2026-05-27
+
+**Document how `/codex` mode selection works** (FAQ developers were asking). Clarifies the premise: Codex doesn't pick the mode — Claude does, from your request. The hermetic modes (Code Review / Design Review / General) are keyword/context-routed; Investigate is **capability-routed, not keyword-triggered** (Claude enters it only when the task needs credentials / network / external systems / live data / execution, so a plain "review this" never silently escalates to live access). Improves existing docs only — adds a routing note above the `/codex` modes table in `docs/reference/commands.md` and expands the "How it triggers — and who chooses" section of `docs/explanation/codex-investigate.md`. No new files; docs-only.
+
 ## 5.41 — 2026-05-27
 
 **Document autonomous goal mode and Codex Investigate mode as first-class features.** Both shipped (v5.29 / v5.40) but lived only in the version-history table — a reader of the README would never know they existed. Now surfaced as headline capabilities: two new **"What you get"** bullets, two **"How it works"** links, two **Documentation**-table rows, and two new explainer docs — `docs/explanation/autonomous-goal.md` (optional + PRD-gated; Council decides without intervention; PR creation is the one human gate; **watch-and-steer by typing in the prompt** in both `/goal` and manual modes; the developer owns a bulletproof PRD) and `docs/explanation/codex-investigate.md` (why review-mode Codex can't run queries; how Claude provisions it with live-system access; why it's safe — repo-confined sandbox, never `danger-full-access`, read-only, cross-verified; works inside `/goal`). `docs/reference/commands.md` gains a `/codex` modes table (incl. Investigate, previously undocumented) and an autonomous-`/goal` subsection. Docs-only release.
