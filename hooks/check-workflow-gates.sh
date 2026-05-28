@@ -235,7 +235,14 @@ CHECKLIST=$(echo "$WORKFLOW_BLOCK" | awk '
 #   "E2E use cases designed" — Phase 3.2b, conditional on user-facing change
 #   "E2E regression passed" — Phase 5.4b, conditional on accumulated UCs
 #   "E2E use cases graduated" / "E2E specs graduated" — post-PASS housekeeping
-UNCHECKED=$(echo "$CHECKLIST" | grep '\- \[ \]' | grep -iE '(Code review loop|Simplified|Verified \(tests|E2E verified)' || true)
+# ANCHORED: the unchecked marker `- [ ]` must be at line start (modulo leading
+# whitespace) AND immediately followed by a gate stem. A two-stage match
+# (`grep '- [ ]' | grep <stem>`) false-positives twice: (1) a literal `- [ ]`
+# appearing in the *prose* of an already-[x] line (e.g. an N/A justification
+# reading "re-opens with `- [ ]` later") re-arms the gate, and (2) an unrelated
+# unchecked item whose prose merely mentions a gate name gets counted. Anchoring
+# the checkbox + stem together closes both. Keep this single anchored regex.
+UNCHECKED=$(echo "$CHECKLIST" | grep -iE '^[[:space:]]*- \[ \][[:space:]]+(Code review loop|Simplified|Verified \(tests|E2E verified)' || true)
 
 if [ -n "$UNCHECKED" ]; then
     UNCHECKED_COUNT=$(echo "$UNCHECKED" | wc -l | tr -d ' ')

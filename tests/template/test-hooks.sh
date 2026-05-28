@@ -245,6 +245,30 @@ rc=$(run_hook_sh "$S7" 'git push' "$CHECKLIST_NEAR_MISS")
 assert_equals "$rc" "0" "non-gate items don't trigger the gate"
 
 # ===========================================================================
+# Test 7b: a literal `- [ ]` inside an already-[x] gate line's PROSE must NOT
+# re-arm the gate. Field bug (mcpgateway, 2026-05-28): a docs-only checkpoint
+# commit marked the 4 gates `[x] — N/A: ... Re-opens with `- [ ]` later`, and
+# the unanchored two-stage match counted those checked lines as unchecked. The
+# anchored regex (checkbox + gate stem at line start) must exit 0 here.
+# ===========================================================================
+start_test "literal '- [ ]' in an [x] line's prose does NOT re-trigger the gate"
+
+CHECKLIST_PROSE_BRACKET='- [x] Code review loop — N/A: docs-only checkpoint. Re-opens with `- [ ]` when code begins.
+- [x] Simplified — N/A: no code. Re-opens with `- [ ]` when code begins.
+- [x] Verified (tests/lint/types) — N/A: no code. Re-opens with `- [ ]` when code begins.
+- [x] E2E verified — N/A: docs-only checkpoint. Re-opens with `- [ ]` when code begins.'
+
+S7b=$(scratch_dir hooks-prose-bracket)
+rc=$(run_hook_sh "$S7b" 'git commit -m "docs checkpoint"' "$CHECKLIST_PROSE_BRACKET")
+assert_equals "$rc" "0" "prose '- [ ]' inside [x] lines does not re-arm the gate (.sh)"
+
+if command -v pwsh >/dev/null 2>&1; then
+    S7bps=$(scratch_dir hooks-prose-bracket-ps)
+    rc=$(run_hook_ps "$S7bps" 'git commit -m "docs checkpoint"' "$CHECKLIST_PROSE_BRACKET")
+    assert_equals "$rc" "0" "prose '- [ ]' inside [x] lines does not re-arm the gate (.ps1 parity)"
+fi
+
+# ===========================================================================
 # Test 8: PowerShell parity — same fixtures, same expected exit codes
 # (skipped if pwsh not installed, so this doesn't break macOS/Linux CI
 # boxes without PowerShell)

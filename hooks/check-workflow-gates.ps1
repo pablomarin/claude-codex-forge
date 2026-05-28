@@ -222,7 +222,12 @@ foreach ($line in $workflowBlockLines) {
     #   "PR reviews addressed" (post-PR), "Plugins verified" (pre-flight),
     #   "Plan review loop" (design phase), "E2E use cases designed/graduated"
     #   (Phase 3.2b / 6.2b — conditional), "E2E regression passed" (Phase 5.4b).
-    if ($inChecklist -and $line -match '- \[ \]' -and $line -match '(Code review loop|Simplified|Verified \(tests|E2E verified)') {
+    # ANCHORED (mirrors check-workflow-gates.sh): the unchecked marker must be
+    # at line start AND immediately followed by a gate stem. A loose `- [ ]`
+    # match false-positives on a literal `- [ ]` inside an already-[x] line's
+    # prose (e.g. an N/A justification) and on unrelated unchecked items whose
+    # prose merely mentions a gate name. Keep this single anchored regex.
+    if ($inChecklist -and $line -match '^\s*- \[ \]\s+(Code review loop|Simplified|Verified \(tests|E2E verified)') {
         $unchecked += $line
     }
 }
