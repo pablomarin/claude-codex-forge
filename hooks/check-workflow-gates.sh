@@ -17,6 +17,11 @@
 # passed" stay advisory — the model decides if they apply. The E2E verified gate
 # has an explicit N/A escape: `- [x] E2E verified — N/A: <reason>`.
 #
+# No-code carve-out: a `git commit` that stages ONLY documentation skips the
+# code-quality gates for that commit WITHOUT mutating state.md (the gates stay
+# `- [ ]` so the real-code ship still enforces). Scope = commit only; push/PR
+# always enforce. See the "No-code carve-out" block below for the docs predicate.
+#
 # Input (JSON via stdin): {session_id, cwd, tool_name, tool_input: {command}}
 # Block: exit 2 + message on stderr
 # Allow: exit 0
@@ -55,9 +60,20 @@ fi
 _ENVP="([A-Za-z_][A-Za-z0-9_]*=('[^']*'|\"[^\"]*\"|[^[:space:]]*)[[:space:]]+)*"
 _GITOPT='([[:space:]]+-[cC][[:space:]]+[^[:space:]]+)*'
 _SHIP_VERB="${_ENVP}(git${_GITOPT}[[:space:]]+(commit|push)\b|gh[[:space:]]+pr[[:space:]]+create\b)"
+
+# Normalize command separators ONCE, BEFORE ship detection: real newlines, CRs,
+# AND (no-jq fallback) literal \n / \r escape sequences all become `;`. A
+# multi-line or escaped-multiline tool call (`echo ok<newline>git push`,
+# `git commit -m x\ngit push`) must surface its later ship verbs to BOTH the
+# ship-detection and the compound guard — else a second ship action slips through
+# ungated (Codex P1/P2). jq decodes \n → real newline; the grep fallback leaves
+# literal \n, so handle both. False positives (a literal `\n`/`;` inside a commit
+# message) only ask the user to split the command — fail-safe.
+COMMAND_NORM=$(printf '%s' "$COMMAND" | sed -E 's/\\[nr]/;/g' | tr '\n\r' ';;')
+
 IS_SHIP=false
-echo "$COMMAND" | grep -qE "^[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
-echo "$COMMAND" | grep -qE "[&|;]+[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
+echo "$COMMAND_NORM" | grep -qE "^[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
+echo "$COMMAND_NORM" | grep -qE "[&|;]+[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
 
 # Not a ship action — allow immediately
 $IS_SHIP || exit 0
@@ -73,8 +89,11 @@ $IS_SHIP || exit 0
 # look for a ship verb in the remainder. Robust enough for the common case;
 # quoted separators inside a commit message are a rare false positive and a
 # false positive only asks the user to split the command (fail-safe).
-COMPOUND_TAIL=$(echo "$COMMAND" | sed -E 's/^[^&|;]*([&|;]+)//')
-if [ "$COMPOUND_TAIL" != "$COMMAND" ]; then
+# Operates on COMMAND_NORM (built above), so newline-separated and escaped-
+# newline ship chains are treated as compound too — a docs-commit carve-out
+# below must not exit 0 and let a chained push ship unreviewed code (Codex P1).
+COMPOUND_TAIL=$(echo "$COMMAND_NORM" | sed -E 's/^[^&|;]*([&|;]+)//')
+if [ "$COMPOUND_TAIL" != "$COMMAND_NORM" ]; then
     if echo "$COMPOUND_TAIL" | grep -qE "$_SHIP_VERB"; then
         echo "WORKFLOW GATE: compound ship command blocked." >&2
         echo "" >&2
@@ -88,6 +107,33 @@ if [ "$COMPOUND_TAIL" != "$COMMAND" ]; then
         exit 2
     fi
 fi
+
+# --- Resolve repo context (bug d) ---
+# The hook reads state.md + runs git relative to its process CWD, which can be
+# the WRONG repo in worktree sessions. Fix: cd to the harness-provided stdin
+# `cwd` (the dir the command actually runs in — trustworthy, NOT parsed from the
+# command text), then normalize to the git worktree ROOT so state.md, git, and
+# all repo-relative reads resolve in the right repo.
+#
+# We deliberately do NOT parse `-C <dir>` out of the command for repo context.
+# Doing so reliably is impossible with regex — a `-C` can hide inside a quoted
+# `-m` message, a `-c key='… -C … '` config value, or a `gh --title`, and every
+# attempt opened a fail-open path (cd to a bogus dir → no state.md → exit 0 past
+# the gate). A `git -C <other> commit` is therefore evaluated against the session
+# cwd (the agent's working repo); that NEVER bypasses the cwd repo's gates, which
+# is the safe and correct behavior. (`git -C` is still recognized as a ship verb
+# by the detection above — only the repo-context resolution ignores it.)
+# Fail-safe: if cwd is absent / not a dir / not in a repo, stay in the current
+# CWD. Existing tests pass no `cwd`, so the process CWD governs as before.
+if command -v jq &> /dev/null; then
+    HOOK_CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
+else
+    HOOK_CWD=$(echo "$INPUT" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//;s/"$//')
+fi
+[ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ] && cd "$HOOK_CWD" 2>/dev/null || true
+# --show-toplevel is a no-op at the root and fails silently outside a repo.
+_TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null || true)
+[ -n "$_TOPLEVEL" ] && [ -d "$_TOPLEVEL" ] && cd "$_TOPLEVEL" 2>/dev/null || true
 
 # --- Check for active workflow (post PR #2: state file is .claude/local/state.md) ---
 STATE_FILE=".claude/local/state.md"
@@ -209,6 +255,87 @@ if echo "$COMMAND" | grep -qE "^[[:space:]]*${_ENVP}gh[[:space:]]+pr[[:space:]]+
             # All checks passed; fall through to the existing checklist guard
         fi
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# No-code carve-out (git commit only) — closes the integrity hole
+#
+# Before this existed, landing a docs-only checkpoint commit mid-workflow forced
+# the operator to mark the 4 ship gates `- [x] N/A`. Nothing ever re-opened them,
+# so the later real-code ship could pass with no review evidence. This carve-out
+# removes that dance: when a `git commit` stages ONLY documentation, skip the
+# code-quality gates for THIS commit WITHOUT writing anything to state.md — the
+# boxes stay `- [ ]`, so the real-code commit and the push/PR gate still enforce.
+#
+# Scope = `git commit` ONLY. push / gh pr create always enforce: their changed-
+# file base is unsafe to infer (`--base release/x`, missing upstream), and
+# because the carve-out never mutates state, any under-gating at commit time is
+# still caught at push/PR (boxes remain unchecked). That push/PR backstop is what
+# makes the residual edges below safe.
+#
+# docs predicate (path ∩ extension, fail-safe): curated doc basenames anywhere
+# (README*, CHANGELOG*, LICENSE*, NOTICE, AUTHORS, CONTRIBUTORS*, CONTRIBUTING*,
+# CODE_OF_CONDUCT*) OR a prose extension (.md/.mdx/.markdown/.rst) UNDER a docs/
+# dir. Everything else is code — incl. docs/foo.py, requirements.txt, and bare
+# *.md outside docs/ (so this repo's own commands/*.md, rules/*.md stay gated).
+# ---------------------------------------------------------------------------
+_is_doc_path() {
+    local p="$1" base
+    base="${p##*/}"
+    # Curated doc files: ONLY extensionless (e.g. LICENSE) or carrying a prose /
+    # .txt extension. A curated PREFIX with a code extension (README.py,
+    # CHANGELOG.sh) is NOT docs (Codex P2) — it must stay gated.
+    case "$base" in
+        README|CHANGELOG|LICENSE|NOTICE|AUTHORS|CONTRIBUTORS|CONTRIBUTING|CODE_OF_CONDUCT) return 0 ;;
+    esac
+    # Prefix glob is intentional: README-dev.md / CHANGELOG-2.md etc. are docs.
+    # It can only WIDEN the docs set, which is fail-safe here — the carve-out is
+    # commit-only, never mutates state, and is backstopped by the push/PR gate.
+    case "$base" in
+        README*|CHANGELOG*|LICENSE*|CONTRIBUTORS*|CONTRIBUTING*|CODE_OF_CONDUCT*)
+            case "$base" in
+                *.md|*.mdx|*.markdown|*.rst|*.txt) return 0 ;;
+            esac ;;
+    esac
+    # Under a docs/ dir AND a prose extension (.txt excluded here so
+    # docs/requirements.txt-style manifests stay gated).
+    case "$p" in
+        docs/*|*/docs/*)
+            case "$base" in
+                *.md|*.mdx|*.markdown|*.rst) return 0 ;;
+            esac ;;
+    esac
+    return 1
+}
+
+# Plain `git commit` only. Decline (→ enforce) when the command uses
+# -a/--all/--include/--only/--amend/-p/--patch/-i/--interactive: those commit
+# content NOT visible in `git diff --cached` at PreToolUse time, so the staged
+# diff can't prove docs-only.
+#
+# RESIDUAL (accepted, fail-safe): a bare pathspec commit (`git commit -m x src/y.py`,
+# docs staged) can't be reliably parsed apart from `-m`'s quoted value, so it may
+# skip the COMMIT gate. This is NOT a shipping hole: the carve-out never mutates
+# state.md, so the gate boxes stay `- [ ]` and the push/PR gate still blocks the
+# branch — the code is reviewed before it can ship. The interactive/-a/-amend
+# declines above cover the common "sweeps in extra content" modes.
+if echo "$COMMAND" | grep -qE "^[[:space:]]*${_ENVP}git${_GITOPT}[[:space:]]+commit\b" \
+   && ! echo "$COMMAND" | grep -qE '(^|[[:space:]])(-[a-zA-Z]*[apio][a-zA-Z]*|--all|--include|--only|--amend|--patch|--interactive)([[:space:]]|=|$)'; then
+    # --no-renames so a code→docs rename surfaces the old (code) path too.
+    STAGED_PATHS=$(git diff --cached --name-status --no-renames 2>/dev/null | awk -F'\t' 'NF>=2{print $2}')
+    if [ -n "$STAGED_PATHS" ]; then
+        _ALL_DOCS=1
+        while IFS= read -r _f; do
+            [ -z "$_f" ] && continue
+            _is_doc_path "$_f" || { _ALL_DOCS=0; break; }
+        done <<EOF
+$STAGED_PATHS
+EOF
+        if [ "$_ALL_DOCS" = "1" ]; then
+            exit 0  # docs-only commit — skip code-quality gates, NO state mutation
+        fi
+    fi
+    # Empty staged diff → can't prove docs-only → fall through and enforce (fail-safe).
 fi
 
 # --- Active workflow: check always-required quality gates ---
@@ -382,9 +509,30 @@ PLAN_PASS_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
     | grep -E '^\s*-\s*\[x\]\s+Plan review loop \([0-9]+ iterations\) — PASS' \
     | tail -1)
 
-if [ -n "$PLAN_NA_LINE" ]; then
-    : # N/A justification present — skip plan-review evidence check
-elif [ -n "$PLAN_PASS_LINE" ]; then
+# Any checked `Plan review loop` line — used to detect a checked line that is
+# neither a well-formed PASS nor an N/A escape (malformed, bug b).
+PLAN_CHECKED_ANY=$(echo "$CHECKLIST" | tr -d '\r' \
+    | grep -E '^\s*-\s*\[x\]\s+Plan review loop' \
+    | tail -1)
+
+# PASS-before-N/A (bug a): if a well-formed PASS line exists, its evidence is
+# ALWAYS required — a stale `N/A:` line can never mask it. Only when there is no
+# PASS line does an N/A escape apply. A checked loop line that is neither → block
+# as malformed (bug b: today such a line silently passes).
+if [ -n "$PLAN_PASS_LINE" ]; then
+    : # enforce evidence below (PASS wins over any N/A line)
+elif [ -n "$PLAN_NA_LINE" ]; then
+    : # N/A justification present and no PASS line — skip plan-review evidence check
+elif [ -n "$PLAN_CHECKED_ANY" ]; then
+    echo "WORKFLOW GATE: malformed '[x] Plan review loop' line." >&2
+    echo "A checked Plan review loop line must be either:" >&2
+    echo "  - [x] Plan review loop (N iterations) — PASS   (with per-iter evidence), OR" >&2
+    echo "  - [x] Plan review loop — N/A: <reason>" >&2
+    echo "Got: $PLAN_CHECKED_ANY" >&2
+    exit 2
+fi
+
+if [ -n "$PLAN_PASS_LINE" ]; then
     # Extract N from "Plan review loop (N iterations) — PASS"
     PLAN_N=$(echo "$PLAN_PASS_LINE" | sed -E 's/.*Plan review loop \(([0-9]+) iterations\).*/\1/')
 
@@ -496,14 +644,35 @@ CODE_PASS_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
     | grep -E '^\s*-\s*\[x\]\s+Code review loop \([0-9]+ iterations\) — PASS' \
     | tail -1)
 
+# Any checked `Code review loop` line — for malformed detection (bug b).
+CODE_CHECKED_ANY=$(echo "$CHECKLIST" | tr -d '\r' \
+    | grep -E '^\s*-\s*\[x\]\s+Code review loop' \
+    | tail -1)
+
 HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
 # Degraded env (no git repo) → skip code-review evidence check entirely.
 # Mirrors existing E2E gate pattern at check-workflow-gates.sh:259-263.
 # The hook fires on git commit/push/gh pr create — if those work, HEAD exists.
 # If git is unavailable, the ship action itself can't succeed, so the gate is moot.
-if [ -n "$CODE_NA_LINE" ]; then
-    : # N/A justification present — skip code-review evidence check
-elif [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
+#
+# PASS-before-N/A (bug a): a well-formed PASS line ALWAYS requires its evidence —
+# a stale `N/A:` line can never mask it. N/A applies only when there is no PASS
+# line (clear CODE_PASS_LINE so the evidence block below is skipped). A checked
+# loop line that is neither PASS nor N/A is malformed (bug b) → block.
+if [ -n "$CODE_PASS_LINE" ]; then
+    : # enforce evidence below (when git is available); PASS wins over any N/A
+elif [ -n "$CODE_NA_LINE" ]; then
+    CODE_PASS_LINE=""  # no PASS line — N/A escape applies; skip evidence
+elif [ -n "$CODE_CHECKED_ANY" ]; then
+    echo "WORKFLOW GATE: malformed '[x] Code review loop' line." >&2
+    echo "A checked Code review loop line must be either:" >&2
+    echo "  - [x] Code review loop (N iterations) — PASS   (with per-iter evidence), OR" >&2
+    echo "  - [x] Code review loop — N/A: <reason>" >&2
+    echo "Got: $CODE_CHECKED_ANY" >&2
+    exit 2
+fi
+
+if [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
     CODE_N=$(echo "$CODE_PASS_LINE" | sed -E 's/.*Code review loop \(([0-9]+) iterations\).*/\1/')
 
     # Validate codex side (last-line semantics — defensive against stale duplicates)

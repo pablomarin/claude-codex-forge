@@ -1536,6 +1536,52 @@ assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" 'if ($goalNonce)' \
     "PS guard checks non-empty goalNonce"
 
 # ---------------------------------------------------------------------------
+# Contract: workflow-gate-semantics — no-code carve-out present in BOTH hooks
+# (the carve-out closes the integrity hole; it must never drift to one platform)
+# ---------------------------------------------------------------------------
+start_test "carve-out — both hooks have the no-code carve-out + docs predicate"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "No-code carve-out" \
+    "check-workflow-gates.sh documents the no-code carve-out"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "No-code carve-out" \
+    "check-workflow-gates.ps1 documents the no-code carve-out"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "git diff --cached --name-status --no-renames" \
+    "Bash carve-out uses staged --name-status --no-renames (rename-safe)"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "git diff --cached --name-status --no-renames" \
+    "PS carve-out uses staged --name-status --no-renames (rename-safe)"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "_is_doc_path" \
+    "Bash carve-out has the _is_doc_path predicate"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "Test-IsDocPath" \
+    "PS carve-out has the Test-IsDocPath predicate"
+
+# ---------------------------------------------------------------------------
+# Contract: workflow-gate-semantics — malformed-loop-line block in BOTH hooks
+# ---------------------------------------------------------------------------
+start_test "malformed-gate — both hooks block a checked loop line that is neither PASS nor N/A"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "malformed '[x] Code review loop' line" \
+    "check-workflow-gates.sh blocks malformed Code review loop line"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "malformed '[x] Code review loop' line" \
+    "check-workflow-gates.ps1 blocks malformed Code review loop line"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "malformed '[x] Plan review loop' line" \
+    "check-workflow-gates.sh blocks malformed Plan review loop line"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "malformed '[x] Plan review loop' line" \
+    "check-workflow-gates.ps1 blocks malformed Plan review loop line"
+
+# ---------------------------------------------------------------------------
+# Contract: E2E checked-line scan is ANCHORED in both hooks (bug c parity)
+# The ps1 mirror previously scanned the whole workflow block with a loose match;
+# both must use the anchored `^\s*- [x] E2E verified` form. Static guard so a
+# pwsh-less environment still catches a regression of the PowerShell anchoring.
+# ---------------------------------------------------------------------------
+start_test "E2E scan — both hooks use the anchored '- [x] E2E verified' match"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  '^\s*- \[x\]\s+E2E verified' \
+    "check-workflow-gates.sh anchors the E2E checked-line scan"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" '^\s*- \[x\]\s+E2E verified' \
+    "check-workflow-gates.ps1 anchors the E2E checked-line scan (parity)"
+# And the ps1 scans the scoped checklist, not the whole workflow block, for E2E.
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" 'foreach ($line in $checklistLines)' \
+    "check-workflow-gates.ps1 scopes the E2E scan to the checklist"
+
+# ---------------------------------------------------------------------------
 # Contract: /forge-goal Layer 2 — stuck-detection in check-state-updated
 # ---------------------------------------------------------------------------
 start_test "Layer 2 — check-state-updated.{sh,ps1} have stuck-detection code"
