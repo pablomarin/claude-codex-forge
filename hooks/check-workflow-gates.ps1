@@ -17,6 +17,10 @@
 # The E2E verified gate has an explicit N/A escape:
 #   - [x] E2E verified — N/A: <reason>
 #
+# No-code carve-out: a `git commit` staging ONLY documentation skips the
+# code-quality gates for that commit WITHOUT mutating state.md (gates stay
+# `- [ ]` for the real-code ship). Scope = commit only; push/PR always enforce.
+#
 # Requirements: PowerShell 5.1+
 
 # Read hook input from stdin
@@ -52,9 +56,18 @@ if (-not $command) { exit 0 }
 $envp = '([A-Za-z_][A-Za-z0-9_]*=(''[^'']*''|"[^"]*"|\S*)\s+)*'
 $gitopt = '(\s+-[cC]\s+\S+)*'
 $shipVerb = "$envp(git$gitopt\s+(commit|push)\b|gh\s+pr\s+create\b)"
+
+# Normalize command separators ONCE, BEFORE ship detection (mirrors .sh): real
+# newlines, CRs, AND literal \n / \r escapes become `;`. PowerShell's `-match`
+# `^` is NOT multiline, so a multi-line tool input whose FIRST line is non-ship
+# (`echo ok<newline>git push`) would otherwise slip the non-ship fast path and
+# never reach the compound guard (Codex P1). Normalizing first surfaces later
+# ship verbs to both checks.
+$commandNorm = ($command -replace '\\[nr]', ';') -replace "[`r`n]", ';'
+
 $isShip = $false
-if ($command -match "^\s*$shipVerb") { $isShip = $true }
-if ($command -match "[&|;]+\s*$shipVerb") { $isShip = $true }
+if ($commandNorm -match "^\s*$shipVerb") { $isShip = $true }
+if ($commandNorm -match "[&|;]+\s*$shipVerb") { $isShip = $true }
 
 if (-not $isShip) { exit 0 }
 
@@ -64,8 +77,10 @@ if (-not $isShip) { exit 0 }
 # HEAD with no second gate check. Detect a ship verb AFTER a separator
 # (&&, ||, ;, |) and block — force the user to run each ship action
 # individually so every one gets its own gate evaluation.
-$compoundTail = $command -replace '^[^&|;]*[&|;]+', ''
-if ($compoundTail -ne $command) {
+# Operates on $commandNorm (built above) so newline-separated and escaped-newline
+# ship chains are treated as compound too (Codex P1).
+$compoundTail = $commandNorm -replace '^[^&|;]*[&|;]+', ''
+if ($compoundTail -ne $commandNorm) {
     if ($compoundTail -match $shipVerb) {
         [Console]::Error.WriteLine("WORKFLOW GATE: compound ship command blocked.")
         [Console]::Error.WriteLine("")
@@ -77,6 +92,32 @@ if ($compoundTail -ne $command) {
         [Console]::Error.WriteLine("")
         [Console]::Error.WriteLine("Run each ship action as its own command.")
         exit 2
+    }
+}
+
+# --- Resolve repo context (bug d, mirrors check-workflow-gates.sh) ---
+# cd to the harness-provided stdin `cwd` (the dir the command actually runs in —
+# trustworthy, NOT parsed from the command text), then normalize to the git
+# worktree ROOT so state.md, git, and all repo-relative reads resolve in the
+# right repo. We deliberately do NOT parse `-C <dir>` from the command for repo
+# context: a `-C` can hide in a quoted -m message / `-c key='… -C …'` value / gh
+# --title, so regex parsing opened fail-open paths. A `git -C <other> commit` is
+# evaluated against the session cwd (the agent's repo), which never bypasses that
+# repo's gates. (`git -C` is still recognized as a ship verb above.) Fail-safe:
+# cwd absent / not a dir / not in a repo → stay in CWD. Existing tests pass no
+# `cwd`, so the process CWD governs as before.
+if ($data.cwd) {
+    $hookCwd = [string]$data.cwd
+    if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
+        try { Set-Location -LiteralPath $hookCwd -ErrorAction Stop } catch {}
+    }
+}
+# --show-toplevel is a no-op at the root and fails silently outside a repo.
+$topLevel = (git rev-parse --show-toplevel 2>$null)
+if ($topLevel) {
+    $topLevel = ([string]$topLevel).Trim()
+    if ($topLevel -and (Test-Path -LiteralPath $topLevel -PathType Container)) {
+        try { Set-Location -LiteralPath $topLevel -ErrorAction Stop } catch {}
     }
 }
 
@@ -204,6 +245,59 @@ if ($command -match $prCreatePattern) {
     }
 }
 
+# ---------------------------------------------------------------------------
+# No-code carve-out (git commit only) — closes the integrity hole (mirrors .sh)
+# See check-workflow-gates.sh for the full rationale + scope decision. When a
+# `git commit` stages ONLY documentation, skip the code-quality gates for THIS
+# commit WITHOUT touching state.md (boxes stay [ ] for the real-code ship). Scope
+# = commit only; push/PR always enforce. Because state is never mutated, any
+# under-gating at commit is still caught at push/PR (boxes remain unchecked).
+# docs predicate (path ∩ extension, fail-safe): curated doc basenames anywhere,
+# OR a prose extension under a docs/ dir. Everything else is code.
+# ---------------------------------------------------------------------------
+function Test-IsDocPath {
+    param([string]$p)
+    $base = Split-Path -Leaf $p
+    # Curated doc files: extensionless, or curated prefix + prose/.txt extension.
+    # A curated prefix with a code extension (README.py) is NOT docs (Codex P2).
+    if ($base -match '^(README|CHANGELOG|LICENSE|NOTICE|AUTHORS|CONTRIBUTORS|CONTRIBUTING|CODE_OF_CONDUCT)$') {
+        return $true
+    }
+    if ($base -match '^(README|CHANGELOG|LICENSE|CONTRIBUTORS|CONTRIBUTING|CODE_OF_CONDUCT)' -and
+        $base -match '\.(md|mdx|markdown|rst|txt)$') {
+        return $true
+    }
+    # Under a docs/ dir AND a prose extension (.txt excluded here, mirrors .sh).
+    if ($p -match '(^|/)docs/' -and $base -match '\.(md|mdx|markdown|rst)$') {
+        return $true
+    }
+    return $false
+}
+
+# Plain `git commit` only. Decline (→ enforce) on -a/--all/--include/--only/
+# --amend/-p/--patch/-i/--interactive: those commit content NOT visible in
+# `git diff --cached` at PreToolUse time. (Bare-pathspec residual is neutralized
+# by the push/PR backstop — see the .sh comment.)
+if ($command -match "^\s*${envp}git${gitopt}\s+commit\b" -and
+    $command -notmatch '(^|\s)(-[a-zA-Z]*[apio][a-zA-Z]*|--all|--include|--only|--amend|--patch|--interactive)(\s|=|$)') {
+    # --no-renames so a code→docs rename surfaces the old (code) path too.
+    $stagedRaw = (git diff --cached --name-status --no-renames 2>$null)
+    $stagedPaths = @()
+    foreach ($l in @($stagedRaw)) {
+        if (-not $l) { continue }
+        $parts = $l -split "`t"
+        if ($parts.Count -ge 2) { $stagedPaths += $parts[1] }
+    }
+    if ($stagedPaths.Count -gt 0) {
+        $allDocs = $true
+        foreach ($f in $stagedPaths) {
+            if (-not (Test-IsDocPath $f)) { $allDocs = $false; break }
+        }
+        if ($allDocs) { exit 0 }  # docs-only commit — skip gates, NO state mutation
+    }
+    # Empty staged diff → can't prove docs-only → fall through and enforce (fail-safe).
+}
+
 # --- Active workflow: check always-required quality gates ---
 # Extract checklist section (scoped to the Workflow block, so stray
 # `### Checklist` headings in migrated State content can't poison this).
@@ -222,7 +316,12 @@ foreach ($line in $workflowBlockLines) {
     #   "PR reviews addressed" (post-PR), "Plugins verified" (pre-flight),
     #   "Plan review loop" (design phase), "E2E use cases designed/graduated"
     #   (Phase 3.2b / 6.2b — conditional), "E2E regression passed" (Phase 5.4b).
-    if ($inChecklist -and $line -match '- \[ \]' -and $line -match '(Code review loop|Simplified|Verified \(tests|E2E verified)') {
+    # ANCHORED (mirrors check-workflow-gates.sh): the unchecked marker must be
+    # at line start AND immediately followed by a gate stem. A loose `- [ ]`
+    # match false-positives on a literal `- [ ]` inside an already-[x] line's
+    # prose (e.g. an N/A justification) and on unrelated unchecked items whose
+    # prose merely mentions a gate name. Keep this single anchored regex.
+    if ($inChecklist -and $line -match '^\s*- \[ \]\s+(Code review loop|Simplified|Verified \(tests|E2E verified)') {
         $unchecked += $line
     }
 }
@@ -250,9 +349,21 @@ if ($unchecked.Count -gt 0) {
 # in tests/e2e/reports/ whose LastWriteTime is later than the branch-off
 # commit. Skips gracefully if git state prevents determining branch-off.
 # ---------------------------------------------------------------------------
+# Build $checklistLines (scoped to the ### Checklist subsection) ONCE here and
+# reuse for the E2E, plan-review, and code-review evidence gates below. The E2E
+# scan previously used $workflowBlockLines (the whole Workflow block) with an
+# unanchored match — fixed to scoped + anchored for parity with the .sh (bug c).
+$checklistLines = @()
+$inCl = $false
+foreach ($l in $workflowBlockLines) {
+    if ($l -match '^### Checklist') { $inCl = $true; continue }
+    if ($l -match '^### ' -and $inCl) { break }
+    if ($inCl) { $checklistLines += $l }
+}
+
 $e2eCheckedLine = $null
-foreach ($line in $workflowBlockLines) {
-    if ($line -match '- \[x\]\s+E2E verified') {
+foreach ($line in $checklistLines) {
+    if ($line -match '^\s*- \[x\]\s+E2E verified') {
         $e2eCheckedLine = $line
         break
     }
@@ -317,16 +428,7 @@ if ($e2eCheckedLine -and ($e2eCheckedLine -notmatch 'N/A:')) {
 # $checklistLines from $workflowBlockLines (different shape, same scope).
 # ---------------------------------------------------------------------------
 
-# Build $checklistLines from $workflowBlockLines (mirrors the .ps1 pattern at
-# lines 165-177 of the existing quality-gate scan).
-$checklistLines = @()
-$inCl = $false
-foreach ($l in $workflowBlockLines) {
-    if ($l -match '^### Checklist') { $inCl = $true; continue }
-    # Stop at the next `### ` heading (matches build-evidence scoping).
-    if ($l -match '^### ' -and $inCl) { break }
-    if ($inCl) { $checklistLines += $l }
-}
+# ($checklistLines was built once above the E2E gate and is reused here.)
 
 # N/A escape: any `[x] Plan review loop ... N/A:` line skips the evidence check
 # (mirrors the E2E verified — N/A: gate). Codex is mandatory; there is no
@@ -339,9 +441,28 @@ $planPassLine = ($checklistLines `
     | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Plan review loop \(\d+ iterations\) — PASS' } `
     | Select-Object -Last 1)
 
-if ($planNaLine) {
-    # N/A justification present — skip plan-review evidence check
-} elseif ($planPassLine) {
+# Any checked `Plan review loop` line — for malformed detection (bug b).
+$planCheckedAny = ($checklistLines `
+    | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Plan review loop' } `
+    | Select-Object -Last 1)
+
+# PASS-before-N/A (bug a) + malformed (bug b), mirrors .sh: a well-formed PASS
+# line always requires its evidence (stale N/A can't mask it); N/A applies only
+# when there is no PASS line; a checked line that is neither → block as malformed.
+if ($planPassLine) {
+    # enforce evidence below (PASS wins over any N/A line)
+} elseif ($planNaLine) {
+    # N/A and no PASS line — skip plan-review evidence check
+} elseif ($planCheckedAny) {
+    [Console]::Error.WriteLine("WORKFLOW GATE: malformed '[x] Plan review loop' line.")
+    [Console]::Error.WriteLine("A checked Plan review loop line must be either:")
+    [Console]::Error.WriteLine("  - [x] Plan review loop (N iterations) — PASS   (with per-iter evidence), OR")
+    [Console]::Error.WriteLine("  - [x] Plan review loop — N/A: <reason>")
+    [Console]::Error.WriteLine("Got: $planCheckedAny")
+    exit 2
+}
+
+if ($planPassLine) {
     if ($planPassLine -match 'Plan review loop \((\d+) iterations\)') {
         $planN = $matches[1]
     } else {
@@ -416,13 +537,30 @@ $codePassLine = ($checklistLines `
     | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Code review loop \(\d+ iterations\) — PASS' } `
     | Select-Object -Last 1)
 
+# Any checked `Code review loop` line — for malformed detection (bug b).
+$codeCheckedAny = ($checklistLines `
+    | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Code review loop' } `
+    | Select-Object -Last 1)
+
 $headShaCode = (git rev-parse HEAD 2>$null)
 if ($headShaCode) { $headShaCode = ([string]$headShaCode).Trim() } else { $headShaCode = "" }
 
 # Degraded env (no git repo) → skip code-review evidence check entirely.
-if ($codeNaLine) {
-    # N/A justification present — skip code-review evidence check
-} elseif ($codePassLine -and $headShaCode) {
+# PASS-before-N/A (bug a) + malformed (bug b), mirrors .sh.
+if ($codePassLine) {
+    # enforce below when git is available; PASS wins over any N/A
+} elseif ($codeNaLine) {
+    $codePassLine = ""  # no PASS line — N/A escape applies; skip evidence
+} elseif ($codeCheckedAny) {
+    [Console]::Error.WriteLine("WORKFLOW GATE: malformed '[x] Code review loop' line.")
+    [Console]::Error.WriteLine("A checked Code review loop line must be either:")
+    [Console]::Error.WriteLine("  - [x] Code review loop (N iterations) — PASS   (with per-iter evidence), OR")
+    [Console]::Error.WriteLine("  - [x] Code review loop — N/A: <reason>")
+    [Console]::Error.WriteLine("Got: $codeCheckedAny")
+    exit 2
+}
+
+if ($codePassLine -and $headShaCode) {
     if ($codePassLine -match 'Code review loop \((\d+) iterations\)') {
         $codeN = $matches[1]
     } else {

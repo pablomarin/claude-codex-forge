@@ -245,6 +245,30 @@ rc=$(run_hook_sh "$S7" 'git push' "$CHECKLIST_NEAR_MISS")
 assert_equals "$rc" "0" "non-gate items don't trigger the gate"
 
 # ===========================================================================
+# Test 7b: a literal `- [ ]` inside an already-[x] gate line's PROSE must NOT
+# re-arm the gate. Field bug (mcpgateway, 2026-05-28): a docs-only checkpoint
+# commit marked the 4 gates `[x] — N/A: ... Re-opens with `- [ ]` later`, and
+# the unanchored two-stage match counted those checked lines as unchecked. The
+# anchored regex (checkbox + gate stem at line start) must exit 0 here.
+# ===========================================================================
+start_test "literal '- [ ]' in an [x] line's prose does NOT re-trigger the gate"
+
+CHECKLIST_PROSE_BRACKET='- [x] Code review loop — N/A: docs-only checkpoint. Re-opens with `- [ ]` when code begins.
+- [x] Simplified — N/A: no code. Re-opens with `- [ ]` when code begins.
+- [x] Verified (tests/lint/types) — N/A: no code. Re-opens with `- [ ]` when code begins.
+- [x] E2E verified — N/A: docs-only checkpoint. Re-opens with `- [ ]` when code begins.'
+
+S7b=$(scratch_dir hooks-prose-bracket)
+rc=$(run_hook_sh "$S7b" 'git commit -m "docs checkpoint"' "$CHECKLIST_PROSE_BRACKET")
+assert_equals "$rc" "0" "prose '- [ ]' inside [x] lines does not re-arm the gate (.sh)"
+
+if command -v pwsh >/dev/null 2>&1; then
+    S7bps=$(scratch_dir hooks-prose-bracket-ps)
+    rc=$(run_hook_ps "$S7bps" 'git commit -m "docs checkpoint"' "$CHECKLIST_PROSE_BRACKET")
+    assert_equals "$rc" "0" "prose '- [ ]' inside [x] lines does not re-arm the gate (.ps1 parity)"
+fi
+
+# ===========================================================================
 # Test 8: PowerShell parity — same fixtures, same expected exit codes
 # (skipped if pwsh not installed, so this doesn't break macOS/Linux CI
 # boxes without PowerShell)
@@ -2049,6 +2073,246 @@ else
         assert_equals "$rc_ps" "$expected" ".ps1 parity for $fixture (expected $expected)"
         cd "$REPO_ROOT"
     done
+fi
+
+# ===========================================================================
+# No-code carve-out + sibling-bug tests (workflow-gate-semantics feature)
+# ===========================================================================
+
+# Active-workflow state.md with all 4 ship gates UNCHECKED → baseline is exit 2.
+# The carve-out (docs-only staged commit) is what flips it to exit 0.
+_carveout_state() {
+cat <<'EOF'
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature test |
+| Phase     | 5 — Quality Gates |
+| Next step | ship              |
+
+### Checklist
+
+- [ ] Code review loop (0 iterations) — iterate until no P0/P1/P2
+- [ ] Simplified
+- [ ] Verified (tests/lint/types)
+- [ ] E2E verified via verify-e2e agent (Phase 5.4)
+
+## State
+EOF
+}
+
+# git repo + unchecked-gate workflow + staged files, then run the .sh hook.
+# Echoes "<dir>|<exit>". Trailing args are paths to create + `git add`.
+_run_carveout_sh() {
+    local label="$1" cmd="$2"; shift 2
+    local dir; dir=$(scratch_dir "$label")
+    (
+        cd "$dir" || exit 1
+        git init -q --initial-branch=main >/dev/null 2>&1
+        git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1
+        mkdir -p .claude/local
+        _carveout_state > .claude/local/state.md
+        for spec in "$@"; do
+            mkdir -p "$(dirname "$spec")"
+            echo "content" > "$spec"
+            git add -- "$spec" >/dev/null 2>&1
+        done
+    )
+    printf '{"tool_input":{"command":"%s"}}' "$cmd" > "$dir/.hook-input.json"
+    (cd "$dir" && bash "$HOOK_SH" < "$dir/.hook-input.json") >/dev/null 2>"$dir/.hook-stderr"
+    echo "$dir|$?"
+}
+
+# --- carve-out: docs-only commit skips the gates (exit 0) ---
+start_test "carve-out: docs-only staged commit → exit 0 (gates skipped, no N/A dance)"
+R=$(_run_carveout_sh co-docs 'git commit -m x' docs/prds/feature.md)
+assert_equals "${R##*|}" "0" "docs-only staged commit is carved out"
+
+start_test "carve-out: README.md → exit 0; docs/sub CHANGELOG.md → exit 0"
+R=$(_run_carveout_sh co-readme 'git commit -m x' README.md); assert_equals "${R##*|}" "0" "top-level README.md is docs"
+R=$(_run_carveout_sh co-changelog 'git commit -m x' docs/CHANGELOG.md); assert_equals "${R##*|}" "0" "docs/CHANGELOG.md is docs"
+R=$(_run_carveout_sh co-multidoc 'git commit -m x' docs/a.md README.md); assert_equals "${R##*|}" "0" "multiple docs paths still docs-only"
+
+# --- carve-out is fail-safe: any non-doc path → enforce (exit 2) ---
+start_test "carve-out fail-safe: any code path enforces the gates (exit 2)"
+R=$(_run_carveout_sh co-mixed 'git commit -m x' docs/x.md src/y.py); assert_equals "${R##*|}" "2" "mixed docs+code → enforce"
+R=$(_run_carveout_sh co-reqs 'git commit -m x' requirements.txt); assert_equals "${R##*|}" "2" "requirements.txt is NOT docs (Codex P1-1)"
+R=$(_run_carveout_sh co-docspy 'git commit -m x' docs/example.py); assert_equals "${R##*|}" "2" "docs/example.py is NOT docs (under docs/ but code ext)"
+R=$(_run_carveout_sh co-docsjson 'git commit -m x' docs/config.json); assert_equals "${R##*|}" "2" "docs/config.json is NOT docs"
+R=$(_run_carveout_sh co-cmdmd 'git commit -m x' commands/new-feature.md); assert_equals "${R##*|}" "2" "bare *.md outside docs/ stays gated (Forge product markdown)"
+
+# --- carve-out edge cases ---
+start_test "carve-out edges: empty-staged / -a flag / push → enforce"
+R=$(_run_carveout_sh co-empty 'git commit -m x'); assert_equals "${R##*|}" "2" "empty staged diff → can't prove docs-only → enforce"
+R=$(_run_carveout_sh co-aflag 'git commit -am x' docs/x.md); assert_equals "${R##*|}" "2" "-a/--all declines carve-out → enforce"
+R=$(_run_carveout_sh co-push 'git push' docs/x.md); assert_equals "${R##*|}" "2" "git push is NOT carved out (commit-only scope)"
+
+# --- carve-out curated-name extension rules (Codex code-review P2) ---
+start_test "carve-out: curated doc names require prose/extensionless (README.py stays gated)"
+R=$(_run_carveout_sh co-readmepy 'git commit -m x' README.py); assert_equals "${R##*|}" "2" "README.py is code, NOT docs"
+R=$(_run_carveout_sh co-changelogsh 'git commit -m x' CHANGELOG.sh); assert_equals "${R##*|}" "2" "CHANGELOG.sh is code, NOT docs"
+R=$(_run_carveout_sh co-licenseext 'git commit -m x' LICENSE); assert_equals "${R##*|}" "0" "extensionless LICENSE is docs"
+R=$(_run_carveout_sh co-changelogtxt 'git commit -m x' CHANGELOG.txt); assert_equals "${R##*|}" "0" "CHANGELOG.txt is docs"
+R=$(_run_carveout_sh co-licensesdir 'git commit -m x' LICENSES/foo.py); assert_equals "${R##*|}" "2" "LICENSES/foo.py is code (curated prefix is on dir, not basename)"
+
+# --- carve-out: -p/-i/pathspec-ish modes decline (Codex code-review P2) ---
+start_test "carve-out: -p/--patch and -i/--interactive decline → enforce"
+R=$(_run_carveout_sh co-patch 'git commit -p -m x' docs/x.md); assert_equals "${R##*|}" "2" "-p (patch) declines carve-out"
+R=$(_run_carveout_sh co-interactive 'git commit --interactive -m x' docs/x.md); assert_equals "${R##*|}" "2" "--interactive declines carve-out"
+
+# --- security: a -C inside the commit MESSAGE must NOT redirect the repo (Codex P1) ---
+start_test "security: '-C <dir>' inside a -m message does NOT redirect the gate"
+# Repo A: active workflow, gates unchecked, a CODE file staged. Command embeds a
+# bogus '-C /tmp' inside the message. If the hook wrongly cd'd to /tmp (no
+# state.md) it would exit 0 (bypass). Correct behavior: enforce → exit 2.
+RC=$(scratch_dir cmsg-redirect)
+(cd "$RC" && git init -q --initial-branch=main >/dev/null 2>&1 \
+    && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1 \
+    && mkdir -p .claude/local && _carveout_state > .claude/local/state.md \
+    && mkdir -p src && echo y > src/app.py && git add -- src/app.py >/dev/null 2>&1)
+printf '{"tool_input":{"command":"git commit -m \\"msg -C /tmp end\\""}}' > "$RC/.hook-input.json"
+(cd "$RC" && bash "$HOOK_SH" < "$RC/.hook-input.json") >/dev/null 2>"$RC/.hook-stderr"
+assert_equals "$?" "2" "message-embedded -C does not redirect → code commit still enforced"
+
+# A -C inside an ENV-ASSIGNMENT value must NOT redirect either (Codex iter-2 P1).
+printf '{"tool_input":{"command":"FOO='"'"'note -C /tmp x'"'"' git commit -m y"}}' > "$RC/.hook-input.json"
+(cd "$RC" && bash "$HOOK_SH" < "$RC/.hook-input.json") >/dev/null 2>"$RC/.hook-stderr"
+assert_equals "$?" "2" "env-value -C does not redirect → code commit still enforced"
+
+# --- stdin cwd in a SUBDIR normalizes to the repo root for state.md (Codex iter-2 P1) ---
+start_test "cwd in a subdir normalizes to worktree root (state.md at root is enforced)"
+RD=$(scratch_dir gitc-subdir)
+(cd "$RD" && git init -q --initial-branch=main >/dev/null 2>&1 \
+    && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1 \
+    && mkdir -p .claude/local && _carveout_state > .claude/local/state.md \
+    && mkdir -p sub && echo y > sub/app.py && git add -- sub/app.py >/dev/null 2>&1)
+# stdin cwd points at the SUBDIR; the hook must normalize to the repo root and
+# read root/.claude/local/state.md (not sub/.claude/...). Without --show-toplevel
+# normalization it would miss state.md and exit 0 while git ships the root repo.
+printf '{"cwd":"%s/sub","tool_input":{"command":"git commit -m x"}}' "$RD" > "$RD/.hook-input.json"
+(cd / && bash "$HOOK_SH" < "$RD/.hook-input.json") >/dev/null 2>"$RD/.hook-stderr"
+assert_equals "$?" "2" "cwd=sub resolves to root state.md → unchecked gates enforced"
+
+# --- -o (short --only) declines the carve-out (Codex iter-2 P2) ---
+start_test "carve-out: -o (short --only) declines → enforce"
+R=$(_run_carveout_sh co-onlyshort 'git commit -o docs/x.md -m x' docs/x.md); assert_equals "${R##*|}" "2" "-o declines carve-out (commits worktree pathspec)"
+
+# --- newline-separated ship chains blocked as compound (Codex iter-3/4 P1) ---
+start_test "newline / escaped-newline ship chains are blocked (not carved out)"
+# docs staged + `git commit -m docs`<newline>`git push` in ONE tool call: must be
+# blocked as compound, NOT carved out (which would let the push ship ungated).
+RN=$(scratch_dir nl-compound)
+(cd "$RN" && git init -q --initial-branch=main >/dev/null 2>&1 \
+    && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1 \
+    && mkdir -p .claude/local && _carveout_state > .claude/local/state.md \
+    && mkdir -p docs && echo x > docs/a.md && git add -- docs/a.md >/dev/null 2>&1)
+# JSON "\n" → jq decodes to a real newline in the command.
+printf '{"tool_input":{"command":"git commit -m docs\\ngit push"}}' > "$RN/.hook-input.json"
+(cd "$RN" && bash "$HOOK_SH" < "$RN/.hook-input.json") >/dev/null 2>"$RN/.hook-stderr"
+assert_equals "$?" "2" "real-newline commit-then-push blocked as compound (carve-out does not exit 0)"
+assert_contains "$RN/.hook-stderr" "compound ship command blocked" "blocked by the compound guard"
+# Literal backslash-n (the no-jq fallback shape): JSON "\\n" → literal \n in the
+# command; COMMAND_NORM's sed must still treat it as a separator.
+printf '{"tool_input":{"command":"git commit -m docs\\\\ngit push"}}' > "$RN/.hook-input.json"
+(cd "$RN" && bash "$HOOK_SH" < "$RN/.hook-input.json") >/dev/null 2>"$RN/.hook-stderr"
+assert_equals "$?" "2" "literal-backslash-n commit-then-push also blocked as compound"
+
+# First line non-ship, second line ship → still detected + gated.
+RN2=$(scratch_dir nl-firstnonship)
+(cd "$RN2" && git init -q --initial-branch=main >/dev/null 2>&1 \
+    && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1 \
+    && mkdir -p .claude/local && _carveout_state > .claude/local/state.md)
+printf '{"tool_input":{"command":"echo ok\\ngit push"}}' > "$RN2/.hook-input.json"
+(cd "$RN2" && bash "$HOOK_SH" < "$RN2/.hook-input.json") >/dev/null 2>"$RN2/.hook-stderr"
+assert_equals "$?" "2" "non-ship first line + push second line is still gated"
+
+# --- carve-out does NOT mutate state.md (the whole point) ---
+start_test "carve-out: state.md is NOT mutated (gates stay [ ] for the real ship)"
+R=$(_run_carveout_sh co-nomutate 'git commit -m x' docs/x.md)
+CO_DIR="${R%|*}"
+assert_equals "${R##*|}" "0" "docs-only carve-out passed"
+if grep -q '^- \[ \] Code review loop' "$CO_DIR/.claude/local/state.md"; then
+    pass "Code review loop gate is still unchecked after carve-out"
+else
+    fail "carve-out mutated state.md — gate no longer '- [ ]'"
+fi
+
+# --- bug b: malformed checked loop line blocks (neither PASS nor N/A) ---
+start_test "malformed '[x] Code review loop' (no PASS, no N/A) → exit 2"
+MALFORMED_CODE='- [x] Code review loop
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness'
+S=$(scratch_dir malformed-code)
+rc=$(run_hook_sh "$S" 'git commit -m x' "$MALFORMED_CODE")
+assert_equals "$rc" "2" "malformed Code review loop line is blocked"
+assert_contains "$S/.hook-stderr" "malformed" "stderr names it malformed"
+
+start_test "malformed '[x] Plan review loop' (no PASS, no N/A) → exit 2"
+MALFORMED_PLAN='- [x] Code review loop — N/A: harness
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness
+- [x] Plan review loop'
+S=$(scratch_dir malformed-plan)
+rc=$(run_hook_sh "$S" 'git commit -m x' "$MALFORMED_PLAN")
+assert_equals "$rc" "2" "malformed Plan review loop line is blocked"
+
+# --- bug a: a stale N/A line can NOT mask a real PASS line (PASS wins) ---
+start_test "stale-N/A + PASS (no evidence) → PASS wins, evidence enforced (exit 2)"
+result=$(setup_git_scratch); SA=$(echo "$result" | cut -d'|' -f1)
+STALE_NA_PASS='- [x] Code review loop (1 iterations) — PASS
+- [x] Code review loop — N/A: stale leftover
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: harness'
+rc=$(run_hook_sh "$SA" 'git commit -m x' "$STALE_NA_PASS")
+assert_equals "$rc" "2" "PASS line's evidence is required despite a stale N/A line"
+assert_contains "$SA/.hook-stderr" "per-iter clean evidence" "blocks on missing evidence, not skipped via N/A"
+
+# --- bug d: stdin `cwd` governs repo context; `git -C` does NOT redirect it ---
+# Repo W: active workflow, gates UNCHECKED. The hook is invoked from a different
+# process CWD but with stdin cwd=W → it must cd to W and enforce W's gates. A
+# bogus `git -C /elsewhere` in the command must NOT redirect away from W.
+start_test "stdin cwd governs repo context (git -C does not redirect)"
+RW=$(scratch_dir gitc-cwd-w); RE=$(scratch_dir gitc-elsewhere)
+(cd "$RW" && git init -q --initial-branch=main >/dev/null 2>&1 \
+    && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1 \
+    && mkdir -p .claude/local && _carveout_state > .claude/local/state.md)
+# Invoked from RE, but stdin cwd points at RW (the agent's working repo).
+printf '{"cwd":"%s","tool_input":{"command":"git -C /nonexistent commit -m x"}}' "$RW" > "$RE/.hook-input.json"
+(cd "$RE" && bash "$HOOK_SH" < "$RE/.hook-input.json") >/dev/null 2>"$RE/.hook-stderr"
+assert_equals "$?" "2" "stdin cwd=W is honored (W's unchecked gates enforced); -C /nonexistent ignored"
+
+# --- PowerShell parity for the carve-out + sibling-bug behaviors ---
+start_test "PowerShell parity: carve-out + malformed + stale-N/A"
+if command -v pwsh >/dev/null 2>&1; then
+    # docs-only → 0
+    dir=$(scratch_dir co-ps-docs)
+    (cd "$dir" && git init -q --initial-branch=main >/dev/null 2>&1 \
+        && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1 \
+        && mkdir -p .claude/local && _carveout_state > .claude/local/state.md \
+        && mkdir -p docs/prds && echo x > docs/prds/f.md && git add -- docs/prds/f.md >/dev/null 2>&1)
+    printf '{"tool_input":{"command":"git commit -m x"}}' > "$dir/.hook-input.json"
+    (cd "$dir" && pwsh -NoProfile -File "$HOOK_PS" < "$dir/.hook-input.json") >/dev/null 2>&1
+    assert_equals "$?" "0" ".ps1 carves out docs-only commit"
+    # mixed → 2
+    dir=$(scratch_dir co-ps-mixed)
+    (cd "$dir" && git init -q --initial-branch=main >/dev/null 2>&1 \
+        && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1 \
+        && mkdir -p .claude/local && _carveout_state > .claude/local/state.md \
+        && mkdir -p docs src && echo x > docs/a.md && echo y > src/b.py \
+        && git add -- docs/a.md src/b.py >/dev/null 2>&1)
+    printf '{"tool_input":{"command":"git commit -m x"}}' > "$dir/.hook-input.json"
+    (cd "$dir" && pwsh -NoProfile -File "$HOOK_PS" < "$dir/.hook-input.json") >/dev/null 2>&1
+    assert_equals "$?" "2" ".ps1 enforces on mixed docs+code"
+    # malformed code-review → 2
+    S=$(scratch_dir malformed-code-ps)
+    rc=$(run_hook_ps "$S" 'git commit -m x' "$MALFORMED_CODE")
+    assert_equals "$rc" "2" ".ps1 blocks malformed Code review loop line"
+else
+    printf "  %s·%s skipped: pwsh not installed\n" "$C_DIM" "$C_RESET"
 fi
 
 # ===========================================================================
