@@ -126,6 +126,17 @@ copy_file() {
         return 1
     fi
 
+    # Self-copy guard: when setup.sh is run IN-PLACE (e.g. a forge maintainer
+    # dogfooding via `./setup.sh --upgrade` in the repo itself), SCRIPT_DIR ==
+    # repo root, so some copies resolve to the same file (e.g. docs/adr/*).
+    # `cp X X` errors "are identical" with a non-zero exit, and `set -e` would
+    # abort the whole installer mid-run. Same file → copying is a no-op, so skip.
+    # `-ef` detects same inode (handles symlinks/hardlinks) without a subprocess.
+    if [[ -e "$dest" ]] && [[ "$src" -ef "$dest" ]]; then
+        echo -e "  ${BLUE}○${NC} $desc already current (source and destination are the same file)"
+        return 0
+    fi
+
     if [[ -f "$dest" ]] && [[ "$FORCE" != true ]]; then
         echo -e "  ${BLUE}○${NC} $desc already exists (use -f to overwrite)"
         return 0
