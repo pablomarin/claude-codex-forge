@@ -10,7 +10,7 @@
 
 - **Codex CLI** installed: `npm i -g @openai/codex` or `brew install --cask codex`
 - **Codex authenticated**: `codex login` (requires ChatGPT Plus/Pro/Business or API key)
-- Verify: `codex --version` (requires v0.114.0+)
+- Verify: `codex --version` (requires **v0.124.0+** — every mode here captures the clean verdict with `--output-last-message`, stable since 0.124 per [openai/codex#4644](https://github.com/openai/codex/pull/4644))
 
 > **Use `.claude/hooks/lib/codex-pty.sh exec` for all Codex invocations** (Windows: `.claude/hooks/lib/codex-pty.ps1 exec`). Do not call bare `codex exec` from Claude Code.
 
@@ -48,6 +48,7 @@ Use `AskUserQuestion` with these options:
 > **NOTE:** The `exec review` subcommand does NOT accept `--sandbox` or `--color` flags (reviews are inherently read-only). These flags are only valid on `codex exec` (general mode).
 
 ```bash
+: > /tmp/codex_response.txt   # truncate any stale verdict (a failed run then yields an empty file, not a prior verdict). NOT `rm -f /tmp/...` — the bash-safety hook blocks `rm -f /<path>` as root-targeting.
 .claude/hooks/lib/codex-pty.sh exec review \
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
@@ -55,12 +56,15 @@ Use `AskUserQuestion` with these options:
   -c web_search="live" \
   -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production. If the PR body is a Developer Demo, verify every Mermaid diagram edge traces to a real file:line in its Evidence table — an unsupported or wrong diagram edge (Gate 2 / claimed-current-behavior) is a P1 finding; Gate-1 plan Briefing edges labeled planned/inferred are exempt." \
   --ephemeral \
-  [--uncommitted | --base main | --commit SHA]
+  --output-last-message /tmp/codex_response.txt \
+  [--uncommitted | --base main | --commit SHA] \
+  > /tmp/codex_response_full.txt 2>&1
 ```
 
 **If reviewing a branch**, add `--title` for context:
 
 ```bash
+: > /tmp/codex_response.txt   # truncate any stale verdict (a failed run then yields an empty file, not a prior verdict). NOT `rm -f /tmp/...` — the bash-safety hook blocks `rm -f /<path>` as root-targeting.
 .claude/hooks/lib/codex-pty.sh exec review \
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
@@ -68,15 +72,17 @@ Use `AskUserQuestion` with these options:
   -c web_search="live" \
   -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production. If the PR body is a Developer Demo, verify every Mermaid diagram edge traces to a real file:line in its Evidence table — an unsupported or wrong diagram edge (Gate 2 / claimed-current-behavior) is a P1 finding; Gate-1 plan Briefing edges labeled planned/inferred are exempt." \
   --ephemeral \
+  --output-last-message /tmp/codex_response.txt \
   --base main \
-  --title "feat: add user authentication"
+  --title "feat: add user authentication" \
+  > /tmp/codex_response_full.txt 2>&1
 ```
 
 **Timeout: 1200000ms (20 minutes)** — Codex reasoning can take time.
 
 ### Step 3: Display output
 
-Display Codex's output verbatim to the user. Do not summarize or edit it.
+`Read` the clean verdict from the `--output-last-message` file (`/tmp/codex_response.txt`) and display it verbatim. The full multi-MB transcript (banner + diff + reasoning) was redirected to `/tmp/codex_response_full.txt` and is deliberately NOT in your context — do not cat it into the conversation. If `/tmp/codex_response.txt` is absent or empty, Codex died mid-stream (a real failure, not a parsing problem): read `/tmp/codex_response_full.txt` to see what happened and tell the user Codex produced no final message — do NOT improvise a verdict. (This two-file pattern — clean OLM + forensic log — mirrors the council fix in `skills/council/references/peer-review-protocol.md`.)
 
 ---
 
@@ -99,6 +105,7 @@ Also check if there's a plan in the current conversation context. If the user sp
 ### Step 2: Run Codex exec with the plan
 
 ```bash
+: > /tmp/codex_response.txt   # truncate any stale verdict (a failed run then yields an empty file, not a prior verdict). NOT `rm -f /tmp/...` — the bash-safety hook blocks `rm -f /<path>` as root-targeting.
 .claude/hooks/lib/codex-pty.sh exec \
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
@@ -107,6 +114,7 @@ Also check if there's a plan in the current conversation context. If the user sp
   --sandbox read-only \
   --ephemeral \
   --color never \
+  --output-last-message /tmp/codex_response.txt \
   "Review the implementation plan in [plan file path]. Evaluate:
   1. ARCHITECTURE: Are there design flaws or over-engineering?
   2. RISK: What could go wrong? What edge cases are missing?
@@ -114,14 +122,15 @@ Also check if there's a plan in the current conversation context. If the user sp
   4. DEPENDENCIES: Are there breaking changes or version conflicts?
   5. TESTING: Is the plan testable? What's hard to test?
   Flag any concerns that should be addressed BEFORE implementation begins.
-  Note: If an Engineering Council already validated the approach, focus on implementation correctness rather than revisiting the strategic choice."
+  Note: If an Engineering Council already validated the approach, focus on implementation correctness rather than revisiting the strategic choice." \
+  > /tmp/codex_response_full.txt 2>&1
 ```
 
 **Timeout: 1200000ms (20 minutes)** — Codex reasoning can take time.
 
 ### Step 3: Display output
 
-Display Codex's output verbatim to the user. Do not summarize or edit it.
+`Read` the clean verdict from the `--output-last-message` file (`/tmp/codex_response.txt`) and display it verbatim. The full multi-MB transcript (banner + diff + reasoning) was redirected to `/tmp/codex_response_full.txt` and is deliberately NOT in your context — do not cat it into the conversation. If `/tmp/codex_response.txt` is absent or empty, Codex died mid-stream (a real failure, not a parsing problem): read `/tmp/codex_response_full.txt` to see what happened and tell the user Codex produced no final message — do NOT improvise a verdict. (This two-file pattern — clean OLM + forensic log — mirrors the council fix in `skills/council/references/peer-review-protocol.md`.)
 
 ---
 
@@ -148,6 +157,7 @@ If the user's instruction references a specific file, read that file to include 
 Construct the prompt by combining the user's instruction with the gathered context.
 
 ```bash
+: > /tmp/codex_response.txt   # truncate any stale verdict (a failed run then yields an empty file, not a prior verdict). NOT `rm -f /tmp/...` — the bash-safety hook blocks `rm -f /<path>` as root-targeting.
 .claude/hooks/lib/codex-pty.sh exec \
   -m "gpt-5.5" \
   -c model_reasoning_effort="xhigh" \
@@ -156,14 +166,16 @@ Construct the prompt by combining the user's instruction with the gathered conte
   --sandbox read-only \
   --ephemeral \
   --color never \
-  "{user's instruction with gathered context}"
+  --output-last-message /tmp/codex_response.txt \
+  "{user's instruction with gathered context}" \
+  > /tmp/codex_response_full.txt 2>&1
 ```
 
 **Timeout: 1200000ms (20 minutes)** — Codex reasoning can take time.
 
 ### Step 3: Display output
 
-Display Codex's output verbatim to the user. Do not summarize or edit it.
+`Read` the clean verdict from the `--output-last-message` file (`/tmp/codex_response.txt`) and display it verbatim. The full multi-MB transcript (banner + diff + reasoning) was redirected to `/tmp/codex_response_full.txt` and is deliberately NOT in your context — do not cat it into the conversation. If `/tmp/codex_response.txt` is absent or empty, Codex died mid-stream (a real failure, not a parsing problem): read `/tmp/codex_response_full.txt` to see what happened and tell the user Codex produced no final message — do NOT improvise a verdict. (This two-file pattern — clean OLM + forensic log — mirrors the council fix in `skills/council/references/peer-review-protocol.md`.)
 
 ---
 
@@ -278,14 +290,14 @@ Display Codex's finding verbatim, then state your independent verification resul
 
 ## Quick Reference
 
-| Use case                   | Command pattern                                                                                                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Review uncommitted changes | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --uncommitted`                                                                                                               |
-| Review branch vs main      | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --base main --title "description"`                                                                                           |
-| Review a specific commit   | `.claude/hooks/lib/codex-pty.sh exec review --ephemeral --commit SHA`                                                                                                                |
-| Review a design plan       | `.claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral "Review the plan..."`                                                                                           |
-| General second opinion     | `.claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral "Your question..."`                                                                                             |
-| Investigate (live systems) | `.claude/hooks/lib/codex-pty.sh exec --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral -C "$(pwd)" "$(cat .claude/local/investigate/CONTEXT.md)"` |
+| Use case                   | Command pattern                                                                                                                                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Review uncommitted changes | `: > /tmp/codex_response.txt; .claude/hooks/lib/codex-pty.sh exec review --ephemeral --output-last-message /tmp/codex_response.txt --uncommitted > /tmp/codex_response_full.txt 2>&1`                     |
+| Review branch vs main      | `: > /tmp/codex_response.txt; .claude/hooks/lib/codex-pty.sh exec review --ephemeral --output-last-message /tmp/codex_response.txt --base main --title "description" > /tmp/codex_response_full.txt 2>&1` |
+| Review a specific commit   | `: > /tmp/codex_response.txt; .claude/hooks/lib/codex-pty.sh exec review --ephemeral --output-last-message /tmp/codex_response.txt --commit SHA > /tmp/codex_response_full.txt 2>&1`                      |
+| Review a design plan       | `: > /tmp/codex_response.txt; .claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral --output-last-message /tmp/codex_response.txt "Review the plan..." > /tmp/codex_response_full.txt 2>&1` |
+| General second opinion     | `: > /tmp/codex_response.txt; .claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral --output-last-message /tmp/codex_response.txt "Your question..." > /tmp/codex_response_full.txt 2>&1`   |
+| Investigate (live systems) | `.claude/hooks/lib/codex-pty.sh exec --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral -C "$(pwd)" "$(cat .claude/local/investigate/CONTEXT.md)"`                      |
 
 ---
 
@@ -318,7 +330,7 @@ For other `-c` overrides not listed here, consult `codex --help` rather than imp
 
 ## Flags used by this command
 
-`--ephemeral`, `--sandbox read-only`, `--color never`, `--skip-git-repo-check`, `--uncommitted` / `--base <BRANCH>` / `--commit <SHA>` / `--title <STR>` (review-mode only).
+`--ephemeral`, `--sandbox read-only`, `--color never`, `--skip-git-repo-check`, `--output-last-message <file>` (capture the clean verdict; redirect stdout to a forensic log so the transcript stays out of Claude's context), `--uncommitted` / `--base <BRANCH>` / `--commit <SHA>` / `--title <STR>` (review-mode only).
 
 **Investigate mode only** (Section D): `--sandbox workspace-write`, `-c sandbox_workspace_write.network_access=true`, `-C "$(pwd)"`. `--sandbox danger-full-access` is explicitly forbidden — it breaks the repo-confined boundary that makes Investigate safe.
 
