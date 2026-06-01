@@ -84,6 +84,7 @@ If Codex unavailable: user validates skip.
 **Code review loop** (Phase 5): Codex + PR Review Toolkit review the implementation.
 Exit when: no P0/P1/P2 from all available reviewers on the same pass.
 Codex is mandatory (this repo is Claude × Codex dual-engine). If Codex is unavailable, `/goal` halts and a human takes over; the loop cannot self-complete without real Codex evidence. The only ship escape is `- [x] Code review loop — N/A: <reason>` for degraded interactive use, caught at PR review.
+Developer Demo honesty: when the PR body is a Developer Demo, an unsupported or wrong **diagram edge** — one that doesn't trace to a real `file:line` in the Evidence table (Gate 2 / claimed-current-behavior) — is a P1 finding. Gate-1 plan Briefing edges labeled `planned`/`inferred` are exempt.
 
 Never check a loop box until all available reviewers pass clean on the same iteration.
 

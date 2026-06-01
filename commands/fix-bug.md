@@ -443,6 +443,17 @@ Invoke `/superpowers:writing-plans`. Mirroring `/new-feature` 3.2 — respect `w
 /superpowers:writing-plans
 ```
 
+#### 3.2a Developer Briefing (Gate 1 — add to the plan file; complex-fix path only)
+
+After the plan is written, append a `## Developer Briefing` section to the plan file — a lean, product-owner-altitude summary the developer reads at plan approval (Gate 1). Keep it short; it does NOT duplicate the plan. Include:
+
+- **What I'll fix** — 1–3 plain-language sentences a non-developer understands.
+- **How it'll fit** — optionally ONE small Mermaid `flowchart`. The diagram is **OPTIONAL**: VS Code's built-in markdown preview does not render Mermaid, so lead with the text and treat the diagram as a bonus for GitHub/extension viewers.
+- **Planned file-map** — the files you expect to modify.
+- **Key decisions** — one-liners.
+
+This is pre-code and therefore speculative: label every forward-looking claim `[planned]` or `[inferred]`, and never assert unverified architecture as fact (per the Ground Your Claims rule). Gate-1 Briefing diagram edges are **exempt** from the Gate-2 `file:line` evidence requirement (the code doesn't exist yet) — back them with plan tasks instead. (Simple-fix path skips this — no plan file — but still produces the Gate-2 Developer Demo at Phase 6.4.)
+
 #### 3.2b Design E2E Use Cases (if user-facing)
 
 If this fix changes any user-facing behavior (UI, API, flows, forms, navigation, permissions), design E2E use cases NOW — before implementation, not after.
@@ -1091,13 +1102,56 @@ git push -u origin HEAD
 
 **Ask the user for confirmation before creating the PR:**
 
-> "Branch pushed. Would you like me to create a PR to main?"
+> "Branch pushed. Would you like me to create a PR to the repo's default branch?"
 
 **Wait for explicit user confirmation before proceeding.**
 
+<!-- DEV-DEMO-BEGIN — byte-identical across commands/new-feature.md and commands/fix-bug.md; enforced by tests/template/test-contracts.sh -->
+
+Build the PR body as a **Developer Demo** and create the PR with `--body-file` (not an inline `--body`). The Demo briefs the product owner on what shipped — like a senior teammate walking them through it, not a one-line summary.
+
+**Step 1 — resolve the base branch + file map** (run this fresh; shell state does NOT persist between these command blocks, so note the printed values for Step 3):
+
 ```bash
-gh pr create --base main --title "[PR title]" --body "[PR description]"
+ROOT="$(git rev-parse --show-toplevel)"
+LIB="$ROOT/.claude/hooks/lib/default-branch.sh"; [ ! -f "$LIB" ] && LIB="$ROOT/hooks/lib/default-branch.sh"
+DEFAULT_BRANCH=$(bash "$LIB" 2>/dev/null || echo main)
+BASE=$(git merge-base HEAD "origin/$DEFAULT_BRANCH" 2>/dev/null || git merge-base HEAD "$DEFAULT_BRANCH" 2>/dev/null || true)  # prefer origin (local default may be stale)
+echo "PR base branch: $DEFAULT_BRANCH"
+echo "Demo body path: $(git rev-parse --git-path pr-demo.md)"   # per-worktree, untracked — no collision across parallel sessions
+echo "--- File map (GENERATED, never hand-written) ---"
+if [ -n "$BASE" ]; then
+  git diff --name-status "$BASE"..HEAD
+else
+  echo "# no merge-base resolved — showing this branch's latest commit's files; widen the range if the PR spans multiple commits:"
+  git show --name-status --format= HEAD
+fi
 ```
+
+**Step 2 — write the Demo to the "Demo body path" printed in Step 1** (overwrite any prior content) with these six sections:
+
+1. **What changed** — 1–3 plain-language sentences a non-developer understands.
+2. **How it works** — the mechanism + **one** Mermaid diagram (`flowchart` for control/data flow, `sequenceDiagram` for call ordering, `erDiagram` ONLY if the schema changed). If there is genuinely nothing to draw, omit it with a one-line `> No diagram: <reason>` — never ship an empty or forced diagram.
+3. **Code tour** — entry point → key changed files in reading order → where the core invariant lives → where the tests are.
+4. **File map** — paste the Step 1 `git diff --name-status` output verbatim.
+5. **Verification** — real results: test counts (passed/failed), lint/type status, E2E verdict + report path (or the N/A reason).
+6. **Evidence** — one row per Mermaid node/edge, each citing the real `file:line` that backs it:
+
+   | Diagram item | Claim                 | Evidence             |
+   | ------------ | --------------------- | -------------------- |
+   | A → B        | what the edge asserts | `path/file.ext:LINE` |
+
+**Safe-Mermaid rules** (GitHub silently renders a malformed diagram as raw text): quote any node label containing `()[]{}#`, `:`, `/`, or emoji (e.g. `A["POST /api/v1/x"]`); never use a bare `end` as a node id; keep diagrams under ~15 nodes.
+
+**Honesty (Gate 2):** every diagram edge MUST trace to a real `file:line` in the Evidence table — an unsupported or wrong diagram edge is a P1 finding in code review (per the Ground Your Claims rule). State verified facts, not guesses.
+
+**Step 3 — create the PR** (substitute the "PR base branch" and "Demo body path" printed in Step 1, plus `[PR title]`; run as a standalone command so the workflow-gate sees it):
+
+```bash
+gh pr create --base "<PR base branch from Step 1>" --title "[PR title]" --body-file "<Demo body path from Step 1>"
+```
+
+<!-- DEV-DEMO-END -->
 
 **Show the user the PR URL.**
 

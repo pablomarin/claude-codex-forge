@@ -1785,6 +1785,50 @@ done
 [ "$ok" = "1" ] && pass "3 files carry the Ground Your Claims rule + link phrase"
 
 # ---------------------------------------------------------------------------
+# Contract: Developer Demo block parity + Gate-2 diagram-honesty rule
+# ---------------------------------------------------------------------------
+# The PR-body "Developer Demo" template is INLINED into both workflow commands
+# (not a separate templates/ file — that wouldn't ship downstream via setup.sh).
+# The two copies live between <!-- DEV-DEMO-BEGIN --> / <!-- DEV-DEMO-END -->
+# sentinels and MUST be byte-identical (same pattern as the DRIFT-PREFLIGHT
+# blocks). The block must carry its load-bearing stems, and the Gate-2
+# diagram-edge honesty rule must appear in commands/codex.md + rules/workflow.md.
+start_test "Developer Demo block parity (new-feature ↔ fix-bug) + Gate-2 honesty rule"
+
+extract_demo_block() {
+    awk '/<!-- DEV-DEMO-BEGIN/{f=1} f{print} /<!-- DEV-DEMO-END/{f=0}' "$1"
+}
+NF_DEMO=$(extract_demo_block "$REPO_ROOT/commands/new-feature.md")
+FB_DEMO=$(extract_demo_block "$REPO_ROOT/commands/fix-bug.md")
+
+ok=1
+[ -n "$NF_DEMO" ] || { fail "commands/new-feature.md missing the DEV-DEMO block (sentinels not found)"; ok=0; }
+[ -n "$FB_DEMO" ] || { fail "commands/fix-bug.md missing the DEV-DEMO block (sentinels not found)"; ok=0; }
+if [ -n "$NF_DEMO" ] && [ "$NF_DEMO" = "$FB_DEMO" ]; then
+    pass "Developer Demo block is byte-identical across both commands"
+else
+    fail "Developer Demo block differs between new-feature.md and fix-bug.md (must be byte-identical)"
+    ok=0
+fi
+
+# Load-bearing stems the inlined block must carry.
+for stem in "git diff --name-status" "git merge-base" "default-branch.sh" "body-file" "Evidence" "file:line" "Safe-Mermaid"; do
+    echo "$NF_DEMO" | grep -qF -- "$stem" || { fail "DEV-DEMO block missing required stem: $stem"; ok=0; }
+done
+
+# Gate-2 diagram-honesty rule must be present in both review surfaces, with its
+# load-bearing parts (not just the phrase): the rule names "diagram edge", binds
+# to "file:line" evidence, and is a "P1" finding.
+for surface in commands/codex.md rules/workflow.md; do
+    for token in "diagram edge" "file:line" "P1"; do
+        grep -qiF -- "$token" "$REPO_ROOT/$surface" \
+            || { fail "$surface missing Gate-2 honesty-rule token: $token"; ok=0; }
+    done
+done
+
+[ "$ok" = "1" ] && pass "DEV-DEMO block carries required stems + Gate-2 honesty rule present in codex.md & workflow.md"
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 report "test-contracts.sh"

@@ -53,7 +53,7 @@ Use `AskUserQuestion` with these options:
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   -c web_search="live" \
-  -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production." \
+  -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production. If the PR body is a Developer Demo, verify every Mermaid diagram edge traces to a real file:line in its Evidence table — an unsupported or wrong diagram edge (Gate 2 / claimed-current-behavior) is a P1 finding; Gate-1 plan Briefing edges labeled planned/inferred are exempt." \
   --ephemeral \
   [--uncommitted | --base main | --commit SHA]
 ```
@@ -66,7 +66,7 @@ Use `AskUserQuestion` with these options:
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   -c web_search="live" \
-  -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production." \
+  -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production. If the PR body is a Developer Demo, verify every Mermaid diagram edge traces to a real file:line in its Evidence table — an unsupported or wrong diagram edge (Gate 2 / claimed-current-behavior) is a P1 finding; Gate-1 plan Briefing edges labeled planned/inferred are exempt." \
   --ephemeral \
   --base main \
   --title "feat: add user authentication"
