@@ -143,6 +143,16 @@ cd frontend && pnpm test                   # Run frontend tests (only if the pro
 
 No "follow-up PRs" for known problems. No "v2" for things that should work in v1. If it's found, it's fixed — or the branch isn't ready.
 
+## Ground Your Claims Policy
+
+**State what you verified, not what you assume.** Before asserting anything about the code, read it — don't pattern-match from a name or from memory. Separate fact from inference, and say which:
+
+- Claims about code → cite the file you actually read (`file.py:42`)
+- Claims about behavior → run it, or label the claim unverified
+- Uncertain → say "I haven't checked X" instead of guessing fluently
+
+Confident guessing is a defect, the same caliber as a known bug left behind. When in doubt, check — or flag it.
+
 ## Detailed Rules
 
 All coding standards, workflow rules, and policies are in `.claude/rules/`.
