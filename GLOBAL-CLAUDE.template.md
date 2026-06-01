@@ -5,6 +5,12 @@
 
 ---
 
+## Ground Your Claims
+
+**State what you verified, not what you assume.** Before asserting anything about code or files, read them — don't pattern-match from a name or from memory. Separate fact from inference and say which: cite the `file:line` you actually read, run behavior before claiming it works, and say "I haven't checked X" rather than guessing fluently. Confident guessing is a defect. When in doubt, check — or flag it.
+
+---
+
 ## Memory Management
 
 **You have persistent memory.** Use it actively. Your auto memory directory persists across sessions.
@@ -34,6 +40,7 @@ Save to your auto memory (`MEMORY.md` or topic files) when you:
 ### Before Stopping
 
 Before each response where you've done substantial work, ask yourself:
+
 > "Did I learn anything worth remembering for next time?"
 
 If yes, update your auto memory. This is how you get smarter over time.

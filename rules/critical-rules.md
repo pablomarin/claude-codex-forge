@@ -11,3 +11,4 @@
 - **RESEARCH FIRST** - WebSearch/WebFetch/Context7 before implementing
 - **CHALLENGE ME** - Don't blindly agree
 - **NO BUGS LEFT BEHIND** - Never defer known issues "for later." Fix everything found during reviews, testing, and implementation before moving on. If a reviewer or tool flags an issue, it gets fixed in the same branch — no "follow-up PR" for known problems. This includes deployment, infrastructure, and configuration issues, not just code bugs.
+- **GROUND YOUR CLAIMS** - State what you verified vs. what you're inferring, and say which. Never assert about code you haven't actually read — read it first and cite `file:line`, or flag the claim as unchecked. When uncertain, say "I haven't checked X" instead of answering fluently. Confident guessing is a defect, the same caliber as a known bug left behind.
