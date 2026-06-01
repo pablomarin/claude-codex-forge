@@ -1829,6 +1829,50 @@ done
 [ "$ok" = "1" ] && pass "DEV-DEMO block carries required stems + Gate-2 honesty rule present in codex.md & workflow.md"
 
 # ---------------------------------------------------------------------------
+# Contract: /codex hermetic modes capture the verdict via --output-last-message
+# ---------------------------------------------------------------------------
+# `codex exec [review]` dumps a multi-MB transcript (banner + full diff +
+# reasoning) to stdout; the clean verdict is the LAST message. Without
+# `--output-last-message`, Claude has to hand-extract the verdict from megabytes
+# (the fragile pattern that caused a field misreport — see the council v5.27
+# two-file fix in skills/council/references/peer-review-protocol.md). Investigate
+# mode (D) already captures the OLM file; this asserts the three hermetic modes
+# (A Code Review / B Design Review / C General) do too.
+start_test "/codex hermetic modes (A/B/C) capture the verdict via --output-last-message"
+
+CODEX_MD="$REPO_ROOT/commands/codex.md"
+# Print the lines of a `## ` section, from its heading to the next `## ` heading.
+# index() is a LITERAL match — avoids regex trouble with the ")" in "## A) ...".
+codex_section() { awk -v s="$1" 'index($0,s){f=1;next} f&&/^## /{f=0} f' "$CODEX_MD"; }
+
+ok=1
+for mode in "## A) Code Review Mode" "## B) Design Review Mode" "## C) General Mode"; do
+    sec=$(codex_section "$mode")
+    # The clean verdict goes to an OLM file. Match flag+path adjacency (only the
+    # COMMAND has "--output-last-message /tmp/codex_response.txt"; the Step-3 prose
+    # says "the --output-last-message file (`/tmp/codex_response.txt`)" — flag and
+    # path non-adjacent) so a regression dropping the flag from the command is caught.
+    echo "$sec" | grep -qF -- "--output-last-message /tmp/codex_response.txt" \
+        || { fail "codex.md '$mode' command lacks --output-last-message /tmp/codex_response.txt (no clean verdict file)"; ok=0; }
+    # ...AND the verbose stdout is redirected to a forensic log so the multi-MB
+    # transcript never enters Claude's context (the half that actually achieves
+    # the goal — adding only --output-last-message still streams stdout to Claude).
+    # Match the EXACT redirect (only present in the command, not the Step-3 prose
+    # that merely names the forensic file) — so the test catches a regression that
+    # drops the redirect from the command while keeping the explanatory prose.
+    echo "$sec" | grep -qF -- "> /tmp/codex_response_full.txt 2>&1" \
+        || { fail "codex.md '$mode' command lacks the '> /tmp/codex_response_full.txt 2>&1' forensic redirect (stdout still dumped to Claude)"; ok=0; }
+done
+# The stale-OLM clear must use a hook-safe truncate (`: > /tmp/...`), NOT
+# `rm -f /tmp/...` — check-bash-safety.sh blocks `rm -[rf]* /<path>` as
+# root-targeting, which would block the /codex block at runtime.
+if grep -qE 'rm[[:space:]]+-[rf]*[[:space:]]+/tmp/codex_response' "$CODEX_MD"; then
+    fail "codex.md uses 'rm -f /tmp/codex_response*' — check-bash-safety blocks it; use ': > /tmp/...' truncate instead"
+else
+    pass "codex.md clears the stale OLM with a hook-safe truncate (no blocked 'rm -f /tmp/...')"
+fi
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 report "test-contracts.sh"
