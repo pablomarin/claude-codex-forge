@@ -707,6 +707,132 @@ test_fresh_install_banner_no_continuity_ref() {
     assert_not_contains "$log" "CONTINUITY.md" "fresh-install full output has zero CONTINUITY.md mentions (P1-A/P1-B guard)"
 }
 
+# ===========================================================================
+# Self-copy guard: copy_file must not abort under `set -e` when src and dest
+# are the same file. This happens when setup.sh is run IN-PLACE (e.g. a forge
+# maintainer dogfooding via `./setup.sh --upgrade` in the repo itself):
+# SCRIPT_DIR == repo root, so copies like docs/adr/template.md → docs/adr/
+# template.md become `cp X X`, which errors "are identical" with a non-zero
+# exit. setup.sh:7 has `set -e`, so without a guard the script silently dies
+# before the rules sync. Tests exercise the REAL copy_file extracted from
+# setup.sh so they track the shipped implementation.
+# ===========================================================================
+extract_copy_file() {
+    # Write a file containing just the copy_file function body, extracted
+    # verbatim from the real setup.sh.
+    local dest="$1"
+    awk '/^copy_file\(\) \{/,/^\}/' "$REPO_ROOT/setup.sh" > "$dest"
+    # Brittleness guard: the awk regex needs the exact `copy_file() {` line.
+    # A cosmetic reformat (extra space, brace on next line, rename) yields an
+    # empty extraction — fail with a clear message instead of letting the
+    # self-copy test report a misleading "guard missing".
+    [ -s "$dest" ] || fail "extract_copy_file: no 'copy_file() {' found in setup.sh — declaration style changed?"
+}
+
+# Source the extracted copy_file under `set -e` and invoke it with src/dest.
+# Echoes captured stdout, which contains SURVIVED iff copy_file returned without
+# tripping set -e (the regression signal). Shared by both bash guard tests so the
+# brittle `set -e` runner scaffold lives in exactly one place.
+run_copy_file_under_set_e() {
+    local work="$1" src="$2" dst="$3" fn="$4"
+    local runner="$work/runner.sh"
+    cat > "$runner" <<EOF
+set -e
+RED=''; GREEN=''; BLUE=''; NC=''
+FORCE=true
+source "$fn"
+copy_file "$src" "$dst" "case" >/dev/null
+echo SURVIVED
+EOF
+    bash "$runner" 2>/dev/null || true
+}
+
+test_copy_file_self_copy_guard() {
+    start_test "copy_file: self-copy under set -e does not abort (in-place dogfood regression)"
+
+    local work; work=$(scratch_dir selfcopy)
+    local fn="$work/copy_file_extracted.sh"
+    extract_copy_file "$fn"
+
+    local f="$work/same.txt"
+    echo "payload" > "$f"
+
+    local out; out=$(run_copy_file_under_set_e "$work" "$f" "$f" "$fn")
+
+    if [[ "$out" == *SURVIVED* ]]; then
+        pass "self-copy completes (set -e not tripped by 'cp: are identical')"
+    else
+        fail "self-copy aborted under set -e — copy_file lacks a same-file guard"
+    fi
+
+    assert_contains "$f" "payload" "self-copied file content left intact"
+}
+
+test_copy_file_normal_copy_still_works() {
+    start_test "copy_file: normal copy still works after self-copy guard"
+
+    local work; work=$(scratch_dir normalcopy)
+    local fn="$work/copy_file_extracted.sh"
+    extract_copy_file "$fn"
+
+    local src="$work/src.txt" dst="$work/dst.txt"
+    echo "hello" > "$src"
+
+    local out; out=$(run_copy_file_under_set_e "$work" "$src" "$dst" "$fn")
+
+    if [[ "$out" == *SURVIVED* ]]; then
+        pass "normal copy completes"
+    else
+        fail "normal copy aborted unexpectedly"
+    fi
+    assert_file_exists "$dst" "normal copy created the destination"
+    assert_contains "$dst" "hello" "normal copy produced correct content"
+}
+
+test_copy_file_ps1_self_copy_guard() {
+    # PowerShell parity for the self-copy guard (Copy-TemplateFile in setup.ps1).
+    # Follows the repo's pwsh-conditional-skip convention (see
+    # test-build-evidence.sh / test-default-branch.sh): runs only when pwsh is on
+    # PATH, otherwise records a skip. Under $ErrorActionPreference='Stop', an
+    # unguarded `Copy-Item X X` throws; the guard must short-circuit so the call
+    # completes. Extracts the REAL Copy-TemplateFile so the test tracks shipped code.
+    if ! command -v pwsh >/dev/null 2>&1; then
+        start_test "Copy-TemplateFile self-copy guard (skipped — pwsh not installed)"
+        pass "skipped (no pwsh)"
+        return
+    fi
+
+    start_test "Copy-TemplateFile: self-copy does not throw under ErrorActionPreference=Stop (ps1 parity)"
+
+    local work; work=$(scratch_dir pscopy)
+    local fn="$work/Copy-TemplateFile.ps1"
+    awk '/^function Copy-TemplateFile \{/,/^\}/' "$REPO_ROOT/setup.ps1" > "$fn"
+    [ -s "$fn" ] || fail "no 'function Copy-TemplateFile {' found in setup.ps1 — declaration style changed?"
+
+    local f="$work/same.txt"
+    echo "payload" > "$f"
+
+    local runner="$work/runner.ps1"
+    cat > "$runner" <<EOF
+\$ErrorActionPreference = 'Stop'
+function Write-Color { param([string]\$Text, [string]\$Color) }
+\$Force = \$true
+. "$fn"
+Copy-TemplateFile "$f" "$f" "self-copy" | Out-Null
+Write-Output "SURVIVED"
+EOF
+
+    local out
+    out=$(pwsh -NoProfile -File "$runner" 2>/dev/null) || true
+
+    if [[ "$out" == *SURVIVED* ]]; then
+        pass "ps1 self-copy completes (guard fired before Copy-Item self-copy)"
+    else
+        fail "ps1 self-copy threw — Copy-TemplateFile lacks a same-file guard"
+    fi
+    assert_contains "$f" "payload" "ps1 self-copied file content left intact"
+}
+
 test_state_md_installs
 test_gitignore_has_claude_local
 test_gitignore_idempotent
@@ -715,6 +841,9 @@ test_no_continuity_installed
 test_f_preserves_existing_continuity
 test_f_preserves_existing_state_md
 test_fresh_install_banner_no_continuity_ref
+test_copy_file_self_copy_guard
+test_copy_file_normal_copy_still_works
+test_copy_file_ps1_self_copy_guard
 
 # ===========================================================================
 # Report

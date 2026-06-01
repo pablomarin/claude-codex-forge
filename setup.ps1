@@ -107,6 +107,22 @@ function Copy-TemplateFile {
         return
     }
 
+    # Self-copy guard (parity with setup.sh copy_file): when run IN-PLACE
+    # (maintainer dogfooding via `.\setup.ps1 -Upgrade` in the repo), $ScriptDir
+    # == repo root, so some copies (e.g. docs\adr\*) resolve to the same file and
+    # Copy-Item onto itself throws. Same file → no-op, so skip. `-ceq` is
+    # case-sensitive because PowerShell `-eq` is not (avoids over-skipping
+    # case-only-distinct paths). This is path-identity, not inode-identity (a true
+    # check needs PS 7.1+ ResolveLinkTarget, absent on the 5.1 floor — ADR 0002);
+    # sufficient here because the repo's copies are plain files.
+    if ((Test-Path $Destination) -and
+        ((Resolve-Path $Source).Path -ceq (Resolve-Path $Destination).Path)) {
+        Write-Host "  " -NoNewline
+        Write-Color "o" "Blue"
+        Write-Host " $Description already current (source and destination are the same file)"
+        return
+    }
+
     if ((Test-Path $Destination) -and (-not $Force)) {
         Write-Host "  " -NoNewline
         Write-Color "o" "Blue"
