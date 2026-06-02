@@ -714,6 +714,41 @@ assert_contains "$SETUP_PS1" "$CLAUDE_VARIANT"         "setup.ps1 has only-CLAUD
 assert_contains "$SETUP_PS1" "$CONTINUITY_VARIANT_PS1" "setup.ps1 has only-CONTINUITY final variant"
 assert_not_contains "$SETUP_PS1" "$LEGACY_STRING"      "setup.ps1 removed legacy 'were not modified'"
 
+# (v-bis) Sentinel-aware "already migrated" banner (v5.48). Once a prior
+# --migrate / -Migrate has stamped the `<!-- forge:migrated DATE -->` sentinel into
+# CLAUDE.md, CONTINUITY.md is preserved on disk but redundant — the banner drops the
+# unsatisfiable "run --migrate" nag and points at removal (gated on the user
+# confirming the content landed; NOT an unconditional "safe to delete"). Detection is
+# gated on the CLAUDE.md sentinel only, so the migrated banner always implies CLAUDE.md
+# was preserved — there is no reachable "CONTINUITY-only migrated" variant. The date is
+# spliced via a guarded paren var (empty when the sentinel carries no valid date).
+MIGRATED_BOTH_SH="Your CLAUDE.md was preserved. CONTINUITY.md already migrated"
+MIGRATED_BOTH_PS1="Your CLAUDE.md was preserved. CONTINUITY.md already migrated"
+
+assert_contains "$SETUP_SH"  "$MIGRATED_BOTH_SH"  "setup.sh has migrated removal banner (5.48)"
+assert_contains "$SETUP_SH"  "content landed"     "setup.sh migrated banner gates removal on 'content landed' (5.48)"
+assert_contains "$SETUP_PS1" "$MIGRATED_BOTH_PS1" "setup.ps1 has migrated removal banner (5.48)"
+assert_contains "$SETUP_PS1" "content landed"     "setup.ps1 migrated banner gates removal on 'content landed' (5.48)"
+# Guard against re-introducing an unconditional "safe to delete" assertion: the
+# migrate helper can stamp the sentinel yet skip content (Codex P2, iter 3), so the
+# banner must NOT promise unverified deletion safety.
+assert_not_contains "$SETUP_SH"  "— safe to delete." "setup.sh banner does NOT assert unconditional safe-to-delete (5.48)"
+assert_not_contains "$SETUP_PS1" "— safe to delete." "setup.ps1 banner does NOT assert unconditional safe-to-delete (5.48)"
+
+# Both installers must detect the sentinel by the SAME bare prefix the migrate helper
+# writes (SENTINEL_PREFIX) — pinned across all three files so a future rename of the
+# wire-format string can't silently desync the installers from the helper and
+# re-introduce the unsatisfiable nag.
+MIGRATE_SH="$REPO_ROOT/scripts/migrate-continuity.sh"
+MIGRATE_PS1="$REPO_ROOT/scripts/migrate-continuity.ps1"
+assert_contains "$MIGRATE_SH"  "<!-- forge:migrated" "migrate-continuity.sh defines the forge:migrated sentinel prefix"
+assert_contains "$SETUP_SH"    "<!-- forge:migrated" "setup.sh detects the same forge:migrated prefix (5.48)"
+assert_contains "$SETUP_PS1"   "<!-- forge:migrated" "setup.ps1 detects the same forge:migrated prefix (5.48)"
+# Both must guard the date with a YYYY-MM-DD check so a malformed sentinel can't
+# splice a garbage date into the removal banner.
+assert_contains "$SETUP_SH"  '[0-9]{4}-[0-9]{2}-[0-9]{2}' "setup.sh guards the migrated date format (5.48)"
+assert_contains "$SETUP_PS1" '[0-9]{4}-[0-9]{2}-[0-9]{2}' "setup.ps1 guards the migrated date format (5.48)"
+
 # ---------------------------------------------------------------------------
 # Contract 4: CI template placeholder ↔ setup.sh substitution
 # ---------------------------------------------------------------------------

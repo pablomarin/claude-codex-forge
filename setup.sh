@@ -512,6 +512,37 @@ echo -e "${YELLOW}Copying configuration files...${NC}"
 if [[ -f "CLAUDE.md" ]]; then had_claude_md=true; else had_claude_md=false; fi
 if [[ -f "CONTINUITY.md" ]]; then had_continuity_md=true; else had_continuity_md=false; fi
 
+# Detect whether a prior `--migrate` already ran, so the upgrade banner can stop
+# nagging "run --migrate" — an unsatisfiable instruction once the migration helper
+# (scripts/migrate-continuity.sh) has stamped its `<!-- forge:migrated DATE -->`
+# sentinel, since re-running --migrate is then a no-op.
+#
+# Three deliberate choices, each mirrored in setup.ps1:
+#   1. Gate on the sentinel in CLAUDE.md *only* — the durable, git-committed bucket
+#      the migration's content (the Goal section etc.) lands in. A state.md-only
+#      marker does NOT count: state.md is gitignored and recreated blank on a fresh
+#      clone, so a marker there without a CLAUDE.md marker means the durable bucket
+#      was never written. When uncertain we fall through to the (idempotent) --migrate
+#      prompt, never the removal hint.
+#   2. The migrated FLAG keys on the bare prefix `<!-- forge:migrated` (grep -qF) —
+#      byte-identical to the helper's SENTINEL_PREFIX idempotency probe. The helper
+#      treats a date-less/space-less marker (e.g. `<!-- forge:migrated-->`) as already
+#      migrated, so requiring a date here would re-nag for exactly that marker.
+#   3. The DATE (display only) is extracted separately with a strict YYYY-MM-DD
+#      pattern; a malformed date stays empty so it is never spliced into the banner.
+# Case-sensitive grep mirrors the helper's lowercase marker (and setup.ps1's -CaseSensitive).
+continuity_migrated=false
+continuity_migrated_date=""
+continuity_migrated_paren=""   # " (DATE)" when a well-formed date was parsed; empty otherwise
+if [[ "$had_continuity_md" == true ]] && [[ -f CLAUDE.md ]] && grep -qF '<!-- forge:migrated' CLAUDE.md 2>/dev/null; then
+    continuity_migrated=true
+    migrated_marker=$(grep -hoE '<!-- forge:migrated [0-9]{4}-[0-9]{2}-[0-9]{2} -->' CLAUDE.md 2>/dev/null | head -1)
+    if [[ -n "$migrated_marker" ]]; then
+        continuity_migrated_date=$(printf '%s' "$migrated_marker" | sed -E 's/^<!-- forge:migrated[[:space:]]+//; s/[[:space:]]+-->$//')
+        continuity_migrated_paren=" (${continuity_migrated_date})"
+    fi
+fi
+
 if [[ "$had_claude_md" == true ]]; then
     echo -e "  ${BLUE}○${NC} CLAUDE.md already exists (never overwritten — user content)"
 else
@@ -924,7 +955,21 @@ if [[ "$UPGRADE" == true ]]; then
     # per-file inline drift hint at the same layer; replaced by the soft tip
     # at end of upgrade summary below.
     # PR #2 (continuity-split): legacy CONTINUITY.md migration prompt.
-    if [[ "$had_continuity_md" == true ]]; then
+    # Sentinel-aware (v5.48): once `--migrate` has run, CONTINUITY.md is preserved
+    # on disk but redundant — so we stop nagging "run --migrate" (re-running it is a
+    # no-op) and instead point at removal. We do NOT assert deletion is unconditionally
+    # safe: --migrate can stamp the sentinel yet skip content (e.g. a custom CLAUDE.md
+    # with no `## Project Overview` keeps the Goal only in CONTINUITY.md), so we tell
+    # the user to confirm the content landed before removing the file.
+    if [[ "$had_continuity_md" == true ]] && [[ "$continuity_migrated" == true ]]; then
+        echo -e "${GREEN}✓ CONTINUITY.md already migrated${continuity_migrated_paren}.${NC}"
+        echo "  Its content was migrated to CLAUDE.md (durable), docs/adr/ (decisions),"
+        echo "  and .claude/local/state.md (volatile). Once you've confirmed that content"
+        echo "  landed (and nothing references the file), CONTINUITY.md can be removed:"
+        echo ""
+        echo "    rm CONTINUITY.md"
+        echo ""
+    elif [[ "$had_continuity_md" == true ]]; then
         echo -e "${YELLOW}⚠ Legacy CONTINUITY.md detected.${NC}"
         echo "  PR #2 (continuity-split) replaces CONTINUITY.md with three artifacts:"
         echo "    - durable team-shared facts → CLAUDE.md"
@@ -939,7 +984,14 @@ if [[ "$UPGRADE" == true ]]; then
     fi
     # Replaces a pre-existing hardcoded claim that lied whenever the user had
     # deleted one of the files before running --upgrade.
-    if [[ "$had_claude_md" == true ]] && [[ "$had_continuity_md" == true ]]; then
+    # Sentinel-aware (v5.48): when CONTINUITY.md has already been migrated, the banner
+    # drops the unsatisfiable "run --migrate" suffix and points at removal — gated on
+    # confirming the content landed (see the legacy-prompt note above re: skipped Goal).
+    if [[ "$had_continuity_md" == true ]] && [[ "$continuity_migrated" == true ]]; then
+        # Sentinel found in CLAUDE.md ⟹ CLAUDE.md exists ⟹ had_claude_md is true, so
+        # there is no reachable "CONTINUITY-only, no CLAUDE.md" migrated variant.
+        echo -e "${GREEN}Upgrade done! Your CLAUDE.md was preserved. CONTINUITY.md already migrated${continuity_migrated_paren} — remove it once you've confirmed its content landed in the new structure.${NC}"
+    elif [[ "$had_claude_md" == true ]] && [[ "$had_continuity_md" == true ]]; then
         echo -e "${GREEN}Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved (run --migrate to move content to the new structure).${NC}"
     elif [[ "$had_claude_md" == true ]]; then
         echo -e "${GREEN}Upgrade done! Your CLAUDE.md was preserved (user content).${NC}"
