@@ -21,3 +21,6 @@ docs/ci-templates/
 # we don't want the scaffolded dir tracked. The template's own regression
 # suite lives in tests/template/, which IS tracked.
 tests/e2e/
+
+# Volatile per-developer workflow state (PR #2 / continuity-split)
+.claude/local/
