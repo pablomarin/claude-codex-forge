@@ -218,9 +218,13 @@ trap cleanup_scratch_dirs EXIT
 # ---------------------------------------------------------------------------
 run_setup() {
     # Usage: run_setup <scratch_dir> <output_log_path> <setup.sh args...>
+    # Confine HOME to a per-scratch fake home so setup's global writes (e.g. the
+    # machine-stamp ~/.claude/.forge-version) never touch the real test runner's
+    # ~/.claude. Tests that need to inspect the machine stamp read "$scratch/.fakehome".
     local scratch="$1" logfile="$2"
     shift 2
-    (cd "$scratch" && "${REPO_ROOT}/setup.sh" "$@") >"$logfile" 2>&1
+    mkdir -p "$scratch/.fakehome"
+    (cd "$scratch" && HOME="$scratch/.fakehome" "${REPO_ROOT}/setup.sh" "$@") >"$logfile" 2>&1
     return $?
 }
 
