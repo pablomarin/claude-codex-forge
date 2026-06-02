@@ -89,9 +89,9 @@ if ($source -eq "startup" -or $source -eq "resume") {
             $mineOlder = $false
             try { $mineOlder = ([version]("$mine.0") -lt [version]("$pin.0")) } catch {}
             if ($mineOlder) {
-                $context = "$context (this project pins Forge $pin; you're on $mine — don't run setup -Upgrade here unless you're the designated upgrader)"
+                $context = "$context (this project pins Forge $pin; you're on $mine — the project is on a newer Forge, so you may want to upgrade yours to match)"
             } else {
-                $context = "$context (this project pins Forge $pin; you're on $mine — fine to work; only upgrade the project as a deliberate PR)"
+                $context = "$context (this project pins Forge $pin; you're on $mine — your Forge is newer; running setup -Upgrade here would change the project to $mine, which other clones would pull)"
             }
         }
     }

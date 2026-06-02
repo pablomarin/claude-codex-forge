@@ -568,9 +568,9 @@ if [[ "$FORGE_VERSION" != "unknown" ]] \
     if [ "$((10#${FORGE_VERSION%%.*}))" -lt "$((10#${prev_forge_version%%.*}))" ] \
        || { [ "$((10#${FORGE_VERSION%%.*}))" -eq "$((10#${prev_forge_version%%.*}))" ] \
             && [ "$((10#${FORGE_VERSION#*.}))" -lt "$((10#${prev_forge_version#*.}))" ]; }; then
-        forge_drift_warn="⚠ This project was pinned to Forge $prev_forge_version; you're running $FORGE_VERSION. This run will DOWNGRADE the project's .claude/ to $FORGE_VERSION — stop unless you're the designated upgrader."
+        forge_drift_warn="ℹ This project's .claude/ was pinned to Forge $prev_forge_version; you're running $FORGE_VERSION. This run will DOWNGRADE the project's .claude/ to $FORGE_VERSION. That's a shared change — other clones of this repo will pull it."
     else
-        forge_drift_warn="⚠ This project was pinned to Forge $prev_forge_version; you're running $FORGE_VERSION. This run will UPGRADE the project's .claude/ to $FORGE_VERSION — if you're the designated upgrader, commit it as its own PR."
+        forge_drift_warn="ℹ This project's .claude/ was pinned to Forge $prev_forge_version; you're running $FORGE_VERSION. This run will UPGRADE the project's .claude/ to $FORGE_VERSION. That's a shared change — other clones of this repo will pull it."
     fi
     echo -e "${YELLOW}${forge_drift_warn}${NC}"
 fi

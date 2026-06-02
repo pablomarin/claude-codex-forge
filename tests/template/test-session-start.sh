@@ -338,24 +338,24 @@ seed_drift_repo() {
     echo "$repo"
 }
 
-# Machine OLDER than project pin → "don't run setup --upgrade".
-start_test "drift: machine older than project pin → upgrade-warning advisory"
+# Machine OLDER than project pin → factual "you may want to upgrade yours to match".
+start_test "drift: machine older than project pin → upgrade-yours advisory"
 R=$(seed_drift_repo "5.50" "5.40")
 OUTFILE=$(run_ss_drift "$R" "startup" "$(dirname "$R")/home")
 assert_contains "$OUTFILE" "this project pins Forge 5.50" "drift: names the project pin"
-assert_contains "$OUTFILE" "don't run setup --upgrade" "drift: older machine warned not to upgrade"
+assert_contains "$OUTFILE" "upgrade yours to match" "drift: older machine told the project is newer"
 
-# Machine NEWER than project pin → "fine to work; only upgrade as a PR".
+# Machine NEWER than project pin → factual "your Forge is newer".
 start_test "drift: machine newer than project pin → benign advisory"
 R=$(seed_drift_repo "5.40" "5.50")
 OUTFILE=$(run_ss_drift "$R" "startup" "$(dirname "$R")/home")
-assert_contains "$OUTFILE" "fine to work" "drift: newer machine told it's fine"
+assert_contains "$OUTFILE" "your Forge is newer" "drift: newer machine told its Forge is newer"
 
 # Numeric correctness: pin 5.50, machine 5.9 → 5.9 is OLDER (string compare would reverse).
 start_test "drift: 5.9 vs 5.50 ordered numerically (machine 5.9 is older)"
 R=$(seed_drift_repo "5.50" "5.9")
 OUTFILE=$(run_ss_drift "$R" "startup" "$(dirname "$R")/home")
-assert_contains "$OUTFILE" "don't run setup --upgrade" "drift: 5.9 correctly treated as older than 5.50"
+assert_contains "$OUTFILE" "upgrade yours to match" "drift: 5.9 correctly treated as older than 5.50"
 
 # Equal versions → no drift line.
 start_test "drift: equal versions → no advisory"
@@ -395,7 +395,18 @@ if command -v pwsh >/dev/null 2>&1; then
     ( cd "$repo" && printf '{"source":"startup","session_id":"t","cwd":"%s"}' "$repo" \
         | env HOME="$base/home" CLAUDE_PROJECT_DIR="$repo" pwsh -NoProfile -File ./.hooks/session-start.ps1 ) \
         > "$out" 2>"$repo/.session-err"
-    assert_contains "$out" "don't run setup -Upgrade" "pwsh drift: 5.9 correctly older than 5.50"
+    assert_contains "$out" "upgrade yours to match" "pwsh drift: 5.9 correctly older than 5.50"
+
+    # Newer-Forge direction (machine 5.50 > pin 5.40) — covers the ps1 else-branch so a
+    # stale/inverted newer-Forge string can't pass on parity (Codex review P3).
+    start_test "pwsh drift: machine newer than project pin → your-Forge-is-newer advisory"
+    printf '5.40\n' > "$repo/.claude/.forge-version"
+    printf '5.50\n' > "$base/home/.claude/.forge-version"
+    out2="$repo/.session-out2"
+    ( cd "$repo" && printf '{"source":"startup","session_id":"t","cwd":"%s"}' "$repo" \
+        | env HOME="$base/home" CLAUDE_PROJECT_DIR="$repo" pwsh -NoProfile -File ./.hooks/session-start.ps1 ) \
+        > "$out2" 2>"$repo/.session-err2"
+    assert_contains "$out2" "your Forge is newer" "pwsh drift: machine 5.50 newer than pin 5.40"
 fi
 
 report "test-session-start.sh"

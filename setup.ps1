@@ -596,9 +596,9 @@ if ($ForgeVersion -ne "unknown" -and ($prevForgeVersion -match '^\d+\.\d+$') -an
     $isDowngrade = $false
     try { $isDowngrade = ([version]("$ForgeVersion.0") -lt [version]("$prevForgeVersion.0")) } catch {}
     if ($isDowngrade) {
-        $forgeDriftWarn = "! This project was pinned to Forge $prevForgeVersion; you're running $ForgeVersion. This run will DOWNGRADE the project's .claude/ to $ForgeVersion - stop unless you're the designated upgrader."
+        $forgeDriftWarn = "i This project's .claude/ was pinned to Forge $prevForgeVersion; you're running $ForgeVersion. This run will DOWNGRADE the project's .claude/ to $ForgeVersion. That's a shared change - other clones of this repo will pull it."
     } else {
-        $forgeDriftWarn = "! This project was pinned to Forge $prevForgeVersion; you're running $ForgeVersion. This run will UPGRADE the project's .claude/ to $ForgeVersion - if you're the designated upgrader, commit it as its own PR."
+        $forgeDriftWarn = "i This project's .claude/ was pinned to Forge $prevForgeVersion; you're running $ForgeVersion. This run will UPGRADE the project's .claude/ to $ForgeVersion. That's a shared change - other clones of this repo will pull it."
     }
     Write-Color $forgeDriftWarn "Yellow"
 }

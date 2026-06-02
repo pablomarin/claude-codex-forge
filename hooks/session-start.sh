@@ -72,9 +72,9 @@ if [[ "$SOURCE" == "startup" || "$SOURCE" == "resume" ]]; then
             # validated X.Y; 10# forces base-10. "mine older" → warn against upgrading.
             if [ "$((10#${MINE%%.*}))" -lt "$((10#${PIN%%.*}))" ] \
                || { [ "$((10#${MINE%%.*}))" -eq "$((10#${PIN%%.*}))" ] && [ "$((10#${MINE#*.}))" -lt "$((10#${PIN#*.}))" ]; }; then
-                CONTEXT="$CONTEXT (this project pins Forge $PIN; you're on $MINE — don't run setup --upgrade here unless you're the designated upgrader)"
+                CONTEXT="$CONTEXT (this project pins Forge $PIN; you're on $MINE — the project is on a newer Forge, so you may want to upgrade yours to match)"
             else
-                CONTEXT="$CONTEXT (this project pins Forge $PIN; you're on $MINE — fine to work; only upgrade the project as a deliberate PR)"
+                CONTEXT="$CONTEXT (this project pins Forge $PIN; you're on $MINE — your Forge is newer; running setup --upgrade here would change the project to $MINE, which other clones would pull)"
             fi
         fi
     fi
