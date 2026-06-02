@@ -681,7 +681,7 @@ start_test "Test 12: continuity-split install assertions"
 # Verify state.template.md installs to .claude/local/state.md (fresh install).
 test_state_md_installs() {
     local scratch; scratch=$(scratch_dir state-md-install)
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
     if [ -f "$scratch/.claude/local/state.md" ]; then
         pass ".claude/local/state.md installed on fresh setup"
     else
@@ -704,7 +704,7 @@ test_state_md_installs() {
 # Verify .gitignore is mutated to include .claude/local/.
 test_gitignore_has_claude_local() {
     local scratch; scratch=$(scratch_dir gitignore-claude-local)
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
     if [ -f "$scratch/.gitignore" ] && grep -qxF ".claude/local/" "$scratch/.gitignore"; then
         pass ".claude/local/ present in .gitignore"
     else
@@ -715,8 +715,8 @@ test_gitignore_has_claude_local() {
 # Verify gitignore mutation is idempotent (second setup -f does not duplicate).
 test_gitignore_idempotent() {
     local scratch; scratch=$(scratch_dir gitignore-idempotent)
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
     local count
     count=$(grep -cxF ".claude/local/" "$scratch/.gitignore" 2>/dev/null || echo 0)
     assert_equals "$count" "1" ".claude/local/ entry is idempotent (one occurrence after -f rerun)"
@@ -725,7 +725,7 @@ test_gitignore_idempotent() {
 # Verify ADRs install.
 test_adrs_install() {
     local scratch; scratch=$(scratch_dir adrs-install)
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
     local all_ok=true
     for adr in template README 0001-volatile-state-not-auto-loaded 0002-bash-and-powershell-dual-platform 0003-template-distributed-no-build-step 0004-diataxis-docs-structure 0005-hard-platform-parity-rule; do
         if [ ! -f "$scratch/docs/adr/${adr}.md" ]; then
@@ -741,7 +741,7 @@ test_adrs_install() {
 # harness during the hard-cut transition; this check covers the *target* project).
 test_no_continuity_installed() {
     local scratch; scratch=$(scratch_dir no-continuity-installed)
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
     # Allow CONTINUITY.md to exist if setup still seeds it during transition; the
     # critical check is that it is NOT auto-imported by CLAUDE.md after PR #2.
     # Conservative assertion: no CONTINUITY.md in the freshly-set-up project after PR #2.
@@ -757,7 +757,7 @@ test_f_preserves_existing_continuity() {
     local scratch; scratch=$(scratch_dir f-preserves-continuity)
     echo "user content" > "$scratch/CONTINUITY.md"
     local before; before=$(hash_file "$scratch/CONTINUITY.md")
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
     if [ -f "$scratch/CONTINUITY.md" ]; then
         local after; after=$(hash_file "$scratch/CONTINUITY.md")
         assert_equals "$before" "$after" "existing CONTINUITY.md byte-preserved through -f"
@@ -772,12 +772,12 @@ test_f_preserves_existing_continuity() {
 test_f_preserves_existing_state_md() {
     local scratch; scratch=$(scratch_dir f-preserves-state-md)
     # Initial install creates state.md.
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
     # Simulate a developer populating state.md with real workflow content.
     echo "## USER WORKFLOW STATE SENTINEL" >> "$scratch/.claude/local/state.md"
     local before; before=$(hash_file "$scratch/.claude/local/state.md")
     # Re-run with -f. state.md must NOT be overwritten.
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
     if [ -f "$scratch/.claude/local/state.md" ]; then
         local after; after=$(hash_file "$scratch/.claude/local/state.md")
         assert_equals "$before" "$after" "existing .claude/local/state.md byte-preserved through -f"
@@ -792,7 +792,7 @@ test_f_preserves_existing_state_md() {
 test_fresh_install_banner_no_continuity_ref() {
     local scratch; scratch=$(scratch_dir fresh-banner-no-continuity)
     local log="$scratch/.setup.log"
-    ( cd "$scratch" && bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack > "$log" 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack > "$log" 2>&1 )
     # Extract the "What was created" block: from header until the next "Plugins"
     # header (the "What was created" block has interior blank lines, so a single
     # blank-line terminator is wrong). ANSI color codes and the trailing blank
@@ -950,6 +950,98 @@ EOF
     assert_contains "$f" "payload" "ps1 self-copied file content left intact"
 }
 
+# ===========================================================================
+# Forge version stamp (v5.51): committed .claude/.forge-version pin + machine
+# stamp + advisory drift warning (all advisory, fail-open, never blocks).
+# ===========================================================================
+test_forge_version_stamp() {
+    start_test "forge version stamp: pin + machine stamp + direction-aware advisory"
+    local EXPECT
+    EXPECT=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
+
+    # Fresh install → project pin AND machine stamp both equal the forge's version.
+    local S; S=$(scratch_dir fvstamp); make_project "$S" flat
+    run_setup "$S" "$S/.setup.log" -p FV -t python
+    assert_equals "$?" "0" "fv: fresh install exits 0"
+    assert_file_exists "$S/.claude/.forge-version" "fv: project pin written on fresh install"
+    assert_equals "$(cat "$S/.claude/.forge-version" 2>/dev/null)" "$EXPECT" "fv: project pin == CHANGELOG version"
+    assert_equals "$(cat "$S/.fakehome/.claude/.forge-version" 2>/dev/null)" "$EXPECT" "fv: machine stamp written under HOME"
+
+    # --upgrade with an OLDER pin → UPGRADE advisory, exits 0 (advisory), pin advances.
+    printf '0.1\n' > "$S/.claude/.forge-version"
+    run_setup "$S" "$S/.up.log" -p FV -t python --upgrade
+    assert_equals "$?" "0" "fv: --upgrade exits 0 (advisory only, never blocks)"
+    assert_contains "$S/.up.log" "UPGRADE the project" "fv: older pin → UPGRADE advisory shown"
+    assert_equals "$(cat "$S/.claude/.forge-version")" "$EXPECT" "fv: pin advanced after upgrade"
+
+    # -f with a NEWER pin → DOWNGRADE advisory (and -f, not just --upgrade, warns), exits 0.
+    printf '99.99\n' > "$S/.claude/.forge-version"
+    run_setup "$S" "$S/.dn.log" -p FV -t python -f
+    assert_equals "$?" "0" "fv: -f exits 0 (advisory only)"
+    assert_contains "$S/.dn.log" "DOWNGRADE the project" "fv: newer pin + -f → DOWNGRADE advisory shown"
+
+    # -f with an OLDER pin → UPGRADE advisory (proves -f reaches the UPGRADE branch,
+    # not just the --upgrade path).
+    printf '0.2\n' > "$S/.claude/.forge-version"
+    run_setup "$S" "$S/.fup.log" -p FV -t python -f
+    assert_contains "$S/.fup.log" "UPGRADE the project" "fv: older pin + -f → UPGRADE advisory shown"
+
+    # Malformed existing pin → NO advisory (the prev pin is validated as X.Y first).
+    printf 'garbage\n' > "$S/.claude/.forge-version"
+    run_setup "$S" "$S/.mal.log" -p FV -t python --upgrade
+    assert_not_contains "$S/.mal.log" "UPGRADE the project" "fv: malformed prev pin → no upgrade advisory (fail-open)"
+    assert_not_contains "$S/.mal.log" "DOWNGRADE the project" "fv: malformed prev pin → no downgrade advisory (fail-open)"
+
+    # Legacy-partial: machinery present (settings.json) but NO stamp, plain (non-force)
+    # rerun → must NOT fabricate a pin (it would lie about the actual on-disk version).
+    local L; L=$(scratch_dir fvlegacy); make_project "$L" flat
+    run_setup "$L" "$L/.seed.log" -p FV -t python
+    rm -f "$L/.claude/.forge-version"
+    run_setup "$L" "$L/.plain.log" -p FV -t python
+    assert_file_missing "$L/.claude/.forge-version" "fv: plain rerun on legacy machinery does NOT fabricate a pin"
+}
+
+# Extract + unit-test the real forge_version() parser (mirrors extract_copy_file).
+# Covers the validated-parse branch: a non-version top heading (e.g. "## [Unreleased]")
+# or a missing CHANGELOG must yield "unknown" — never echo the heading — so setup
+# skips stamping rather than poisoning the pin with garbage.
+test_forge_version_parse() {
+    start_test "forge_version(): validated parse → 'unknown' on non-version / missing CHANGELOG"
+    local work; work=$(scratch_dir fvparse)
+    local fn="$work/forge_version_extracted.sh"
+    awk '/^forge_version\(\) \{/,/^\}/' "$REPO_ROOT/setup.sh" > "$fn"
+    [ -s "$fn" ] || { fail "extract forge_version: no 'forge_version() {' in setup.sh — declaration changed?"; return; }
+
+    _run_fv() {  # $1 = SCRIPT_DIR to feed the function
+        local sd="$1" runner="$work/run.sh"
+        cat > "$runner" <<EOF
+SCRIPT_DIR="$sd"
+source "$fn"
+forge_version
+EOF
+        bash "$runner" 2>/dev/null
+    }
+
+    # Normal version heading → parsed.
+    mkdir -p "$work/good/docs"; printf '# Changelog\n\n## 7.3 — 2026-01-01\n' > "$work/good/docs/CHANGELOG.md"
+    assert_equals "$(_run_fv "$work/good")" "7.3" "forge_version: parses a normal '## 7.3' heading"
+
+    # Non-version TOP heading → unknown (only the first heading is inspected; we must
+    # NOT scan past "## [Unreleased]" to a stale older release — Codex code-review P2-1).
+    mkdir -p "$work/unrel/docs"; printf '# Changelog\n\n## [Unreleased]\n\n## 7.3 — x\n' > "$work/unrel/docs/CHANGELOG.md"
+    assert_equals "$(_run_fv "$work/unrel")" "unknown" "forge_version: non-version top heading → unknown (no scan-past)"
+
+    # Only non-version headings → unknown.
+    mkdir -p "$work/none/docs"; printf '# Changelog\n\n## [Unreleased]\n' > "$work/none/docs/CHANGELOG.md"
+    assert_equals "$(_run_fv "$work/none")" "unknown" "forge_version: no numeric top heading → unknown"
+
+    # Missing CHANGELOG → unknown (fail-open, no echo of garbage).
+    mkdir -p "$work/missing"
+    assert_equals "$(_run_fv "$work/missing")" "unknown" "forge_version: missing CHANGELOG → unknown"
+}
+
+test_forge_version_stamp
+test_forge_version_parse
 test_state_md_installs
 test_gitignore_has_claude_local
 test_gitignore_idempotent

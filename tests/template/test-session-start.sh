@@ -312,4 +312,90 @@ if command -v pwsh >/dev/null 2>&1; then
     assert_contains "$OUTFILE" "behind origin" "pwsh: warning present"
 fi
 
+# ===========================================================================
+# Forge version drift advisory (v5.51): project pin vs machine stamp.
+# Seeds .claude/.forge-version in the repo (pin) and in a fake HOME (machine),
+# runs the hook with HOME + CLAUDE_PROJECT_DIR controlled.
+# ===========================================================================
+# Runner: source, project pin, machine version → output file path.
+run_ss_drift() {
+    local repo="$1" src="$2" home="$3"
+    local out="$repo/.session-out"
+    ( cd "$repo" && printf '{"source":"%s","session_id":"t","cwd":"%s"}' "$src" "$repo" \
+        | env HOME="$home" CLAUDE_PROJECT_DIR="$repo" bash ./.hooks/session-start.sh ) \
+        > "$out" 2>"$repo/.session-err"
+    echo "$out"
+}
+# Build a minimal hook repo + seed both stamps. Args: pin machine → echoes repo path.
+seed_drift_repo() {
+    local pin="$1" machine="$2"
+    local base; base=$(scratch_dir drift)
+    local repo="$base/repo"; mkdir -p "$repo"; ( cd "$repo" && git init -q )
+    prepare_hook_repo "$repo"
+    mkdir -p "$repo/.claude" "$base/home/.claude"
+    [ -n "$pin" ] && printf '%s\n' "$pin" > "$repo/.claude/.forge-version"
+    [ -n "$machine" ] && printf '%s\n' "$machine" > "$base/home/.claude/.forge-version"
+    echo "$repo"
+}
+
+# Machine OLDER than project pin → "don't run setup --upgrade".
+start_test "drift: machine older than project pin → upgrade-warning advisory"
+R=$(seed_drift_repo "5.50" "5.40")
+OUTFILE=$(run_ss_drift "$R" "startup" "$(dirname "$R")/home")
+assert_contains "$OUTFILE" "this project pins Forge 5.50" "drift: names the project pin"
+assert_contains "$OUTFILE" "don't run setup --upgrade" "drift: older machine warned not to upgrade"
+
+# Machine NEWER than project pin → "fine to work; only upgrade as a PR".
+start_test "drift: machine newer than project pin → benign advisory"
+R=$(seed_drift_repo "5.40" "5.50")
+OUTFILE=$(run_ss_drift "$R" "startup" "$(dirname "$R")/home")
+assert_contains "$OUTFILE" "fine to work" "drift: newer machine told it's fine"
+
+# Numeric correctness: pin 5.50, machine 5.9 → 5.9 is OLDER (string compare would reverse).
+start_test "drift: 5.9 vs 5.50 ordered numerically (machine 5.9 is older)"
+R=$(seed_drift_repo "5.50" "5.9")
+OUTFILE=$(run_ss_drift "$R" "startup" "$(dirname "$R")/home")
+assert_contains "$OUTFILE" "don't run setup --upgrade" "drift: 5.9 correctly treated as older than 5.50"
+
+# Equal versions → no drift line.
+start_test "drift: equal versions → no advisory"
+R=$(seed_drift_repo "5.50" "5.50")
+OUTFILE=$(run_ss_drift "$R" "startup" "$(dirname "$R")/home")
+assert_not_contains "$OUTFILE" "this project pins Forge" "drift: no advisory when versions match"
+
+# Missing machine stamp → fail-open, no drift line, exit 0.
+start_test "drift: missing machine stamp → fail-open (no advisory)"
+R=$(seed_drift_repo "5.50" "")
+OUTFILE=$(run_ss_drift "$R" "startup" "$(dirname "$R")/home")
+assert_not_contains "$OUTFILE" "this project pins Forge" "drift: no advisory when machine stamp absent"
+assert_contains "$OUTFILE" "Current branch:" "drift: still emits normal context (fail-open)"
+
+# Malformed project pin → fail-open, no advisory (stamps validated as X.Y first).
+start_test "drift: malformed pin → fail-open (no advisory)"
+R=$(seed_drift_repo "garbage" "5.40")
+OUTFILE=$(run_ss_drift "$R" "startup" "$(dirname "$R")/home")
+assert_not_contains "$OUTFILE" "this project pins Forge" "drift: malformed pin → no advisory (fail-open)"
+assert_contains "$OUTFILE" "Current branch:" "drift: still emits normal context on malformed pin"
+
+# Gated to startup|resume: on compact, no drift line even with a real mismatch.
+start_test "drift: source=compact → no advisory (gated to startup|resume)"
+R=$(seed_drift_repo "5.50" "5.40")
+OUTFILE=$(run_ss_drift "$R" "compact" "$(dirname "$R")/home")
+assert_not_contains "$OUTFILE" "this project pins Forge" "drift: not shown on compact"
+
+# PowerShell parity (pwsh-gated): 5.9 machine vs 5.50 pin → numeric, machine older.
+if command -v pwsh >/dev/null 2>&1; then
+    start_test "pwsh drift: 5.9 vs 5.50 numeric (machine older → upgrade-warning)"
+    base=$(scratch_dir driftps); repo="$base/repo"; mkdir -p "$repo"; ( cd "$repo" && git init -q )
+    prepare_hook_repo_ps "$repo"
+    mkdir -p "$repo/.claude" "$base/home/.claude"
+    printf '5.50\n' > "$repo/.claude/.forge-version"
+    printf '5.9\n' > "$base/home/.claude/.forge-version"
+    out="$repo/.session-out"
+    ( cd "$repo" && printf '{"source":"startup","session_id":"t","cwd":"%s"}' "$repo" \
+        | env HOME="$base/home" CLAUDE_PROJECT_DIR="$repo" pwsh -NoProfile -File ./.hooks/session-start.ps1 ) \
+        > "$out" 2>"$repo/.session-err"
+    assert_contains "$out" "don't run setup -Upgrade" "pwsh drift: 5.9 correctly older than 5.50"
+fi
+
 report "test-session-start.sh"

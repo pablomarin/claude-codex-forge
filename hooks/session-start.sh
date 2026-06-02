@@ -55,6 +55,29 @@ if [[ "$SOURCE" == "startup" || "$SOURCE" == "resume" ]]; then
             fi
         fi
     fi
+
+    # Forge version drift (advisory): compare the project's pinned version
+    # (.claude/.forge-version, committed downstream) against THIS machine's version
+    # (~/.claude/.forge-version, written by setup). Direction-aware; fail-open under
+    # `set -u` (guard ${HOME:-} / ${CLAUDE_PROJECT_DIR:-}); never blocks.
+    PROJ="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo "")}"
+    if [[ -n "$PROJ" ]] && [[ -n "${HOME:-}" ]]; then
+        # Take only the first line + strip whitespace, then require a clean X.Y on
+        # BOTH sides — a malformed/multiline stamp fails open (no advisory) and can
+        # never inject a newline into the emitted context (Codex code-review P2-2).
+        PIN=$(head -1 "$PROJ/.claude/.forge-version" 2>/dev/null | tr -d '[:space:]')
+        MINE=$(head -1 "$HOME/.claude/.forge-version" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$PIN" =~ ^[0-9]+\.[0-9]+$ ]] && [[ "$MINE" =~ ^[0-9]+\.[0-9]+$ ]] && [[ "$PIN" != "$MINE" ]]; then
+            # Portable numeric compare (no GNU-only `sort -V`; Codex iter-3 P2). Both
+            # validated X.Y; 10# forces base-10. "mine older" → warn against upgrading.
+            if [ "$((10#${MINE%%.*}))" -lt "$((10#${PIN%%.*}))" ] \
+               || { [ "$((10#${MINE%%.*}))" -eq "$((10#${PIN%%.*}))" ] && [ "$((10#${MINE#*.}))" -lt "$((10#${PIN#*.}))" ]; }; then
+                CONTEXT="$CONTEXT (this project pins Forge $PIN; you're on $MINE — don't run setup --upgrade here unless you're the designated upgrader)"
+            else
+                CONTEXT="$CONTEXT (this project pins Forge $PIN; you're on $MINE — fine to work; only upgrade the project as a deliberate PR)"
+            fi
+        fi
+    fi
 fi
 
 # Emit JSON

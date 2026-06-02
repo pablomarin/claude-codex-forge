@@ -750,6 +750,39 @@ assert_contains "$SETUP_SH"  '[0-9]{4}-[0-9]{2}-[0-9]{2}' "setup.sh guards the m
 assert_contains "$SETUP_PS1" '[0-9]{4}-[0-9]{2}-[0-9]{2}' "setup.ps1 guards the migrated date format (5.48)"
 
 # ---------------------------------------------------------------------------
+# Contract: Forge version stamp + advisory drift warning (v5.51) — parity.
+# Both installers write `.claude/.forge-version` (project pin) + a machine stamp,
+# read the version from the CHANGELOG top line, and warn (advisory) on mismatch.
+# Both session-start hooks emit a direction-aware drift line. Advisory only:
+# the version logic must NOT introduce a blocking exit/throw. PowerShell must use
+# a numeric ([version]) compare, not a string compare (else 5.50 vs 5.9 reverses).
+# ---------------------------------------------------------------------------
+start_test "Forge version-stamp + drift advisory parity (setup + session-start, sh ↔ ps1)"
+SS_SH="$REPO_ROOT/hooks/session-start.sh"
+SS_PS1="$REPO_ROOT/hooks/session-start.ps1"
+fv_ok=1
+# Both installers reference the stamp file + read the CHANGELOG version line.
+for f in "$SETUP_SH" "$SETUP_PS1"; do
+    grep -qF -- ".forge-version" "$f" || { fail "$(basename "$f") missing .forge-version stamp write (5.51)"; fv_ok=0; }
+    grep -qF -- 'CHANGELOG.md' "$f"   || { fail "$(basename "$f") missing CHANGELOG version source (5.51)"; fv_ok=0; }
+done
+# Both session-start hooks carry the drift advisory (stable phrase) + read the stamp.
+for f in "$SS_SH" "$SS_PS1"; do
+    grep -qF -- "pins Forge" "$f"      || { fail "$(basename "$f") missing drift advisory phrase 'pins Forge' (5.51)"; fv_ok=0; }
+    grep -qF -- ".forge-version" "$f"  || { fail "$(basename "$f") missing .forge-version read (5.51)"; fv_ok=0; }
+done
+# PowerShell numeric compare (NOT string) in BOTH ps1 files — guards 5.50 vs 5.9.
+for f in "$SETUP_PS1" "$SS_PS1"; do
+    grep -qF -- "[version]" "$f" || { fail "$(basename "$f") must use a [version] numeric compare for the stamp (5.51)"; fv_ok=0; }
+done
+# Advisory-only guard: the drift hooks must never block — no real `exit 2` STATEMENT
+# (line-anchored so the "exit 2 is advisory" explanatory comment doesn't false-match).
+for f in "$SS_SH" "$SS_PS1"; do
+    grep -qE '^[[:space:]]*exit[[:space:]]+2([[:space:]]|$)' "$f" && { fail "$(basename "$f") has a real 'exit 2' — drift signal must stay advisory (5.51)"; fv_ok=0; }
+done
+[ "$fv_ok" = "1" ] && pass "version-stamp + drift advisory present in all 4 files, numeric PS compare, advisory-only"
+
+# ---------------------------------------------------------------------------
 # Contract 4: CI template placeholder ↔ setup.sh substitution
 # ---------------------------------------------------------------------------
 start_test "__PLAYWRIGHT_DIR__ placeholder ↔ setup.sh substitution"

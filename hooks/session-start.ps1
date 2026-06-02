@@ -74,6 +74,27 @@ if ($source -eq "startup" -or $source -eq "resume") {
             }
         }
     }
+
+    # Forge version drift (advisory) — mirror of session-start.sh. Compare the project
+    # pin vs this machine's stamp; direction via a [version] numeric compare (NOT string —
+    # 5.50 vs 5.9). Fail-open ($ErrorActionPreference is already SilentlyContinue); never blocks.
+    $proj = $env:CLAUDE_PROJECT_DIR
+    if (-not $proj) { try { $proj = (git rev-parse --show-toplevel 2>$null) } catch { $proj = "" } }
+    if ($proj -and $HOME) {
+        $pin = ""; $mine = ""
+        try { if (Test-Path (Join-Path $proj ".claude/.forge-version")) { $pin = (@(Get-Content (Join-Path $proj ".claude/.forge-version"))[0]).Trim() } } catch {}
+        try { if (Test-Path (Join-Path $HOME ".claude/.forge-version")) { $mine = (@(Get-Content (Join-Path $HOME ".claude/.forge-version"))[0]).Trim() } } catch {}
+        # Require a clean X.Y on BOTH sides — malformed/multiline fails open (no advisory).
+        if (($pin -match '^\d+\.\d+$') -and ($mine -match '^\d+\.\d+$') -and $pin -ne $mine) {
+            $mineOlder = $false
+            try { $mineOlder = ([version]("$mine.0") -lt [version]("$pin.0")) } catch {}
+            if ($mineOlder) {
+                $context = "$context (this project pins Forge $pin; you're on $mine — don't run setup -Upgrade here unless you're the designated upgrader)"
+            } else {
+                $context = "$context (this project pins Forge $pin; you're on $mine — fine to work; only upgrade the project as a deliberate PR)"
+            }
+        }
+    }
 }
 
 $output = @{
