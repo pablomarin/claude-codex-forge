@@ -526,6 +526,36 @@ Write-Color "Copying configuration files..." "Yellow"
 $hadClaude = Test-Path "CLAUDE.md"
 $hadContinuity = Test-Path "CONTINUITY.md"
 
+# Detect whether a prior -Migrate already ran. The migration helper
+# (scripts/migrate-continuity.ps1) stamps a `<!-- forge:migrated DATE -->` sentinel
+# into CLAUDE.md and .claude/local/state.md, and PRESERVES CONTINUITY.md
+# byte-for-byte. Without this check the upgrade banner nags "run -Migrate" forever
+# after a successful migration — an unsatisfiable instruction, since re-running
+# -Migrate is a no-op once the sentinel is present.
+#
+# Mirrors setup.sh: gate on the sentinel in CLAUDE.md *only* (the durable,
+# git-committed bucket), NOT a state.md-only marker (gitignored, recreated blank on
+# a fresh clone — claiming the file is removable off it could discard unmoved content).
+# The migrated FLAG keys on the bare prefix `<!-- forge:migrated` (-SimpleMatch),
+# byte-identical to the migrate helper's idempotency probe — so a date-less/space-less
+# marker still counts as migrated and we never reintroduce the unsatisfiable nag. The
+# DATE is extracted separately with a strict YYYY-MM-DD pattern; malformed → empty.
+# -CaseSensitive mirrors bash's case-sensitive grep and the lowercase marker.
+$continuityMigrated = $false
+$continuityMigratedDate = ""
+$continuityMigratedParen = ""   # " (DATE)" when a well-formed date was parsed; empty otherwise
+if ($hadContinuity -and (Test-Path "CLAUDE.md")) {
+    $prefix = Select-String -Path "CLAUDE.md" -Pattern '<!-- forge:migrated' -SimpleMatch -CaseSensitive -List 2>$null
+    if ($prefix) {
+        $continuityMigrated = $true
+        $dm = Select-String -Path "CLAUDE.md" -Pattern '<!-- forge:migrated ([0-9]{4}-[0-9]{2}-[0-9]{2}) -->' -CaseSensitive -List 2>$null
+        if ($dm) {
+            $continuityMigratedDate = $dm.Matches[0].Groups[1].Value
+            $continuityMigratedParen = " ($continuityMigratedDate)"
+        }
+    }
+}
+
 if ($hadClaude) {
     Write-Host "  " -NoNewline; Write-Color "o" "Blue"; Write-Host " CLAUDE.md already exists (never overwritten - user content)"
 } else {
@@ -1024,7 +1054,21 @@ if ($Upgrade) {
     # per-file inline drift hint at the same layer; replaced by the soft tip
     # at end of upgrade summary below.
     # PR #2 (continuity-split): legacy CONTINUITY.md migration prompt.
-    if ($hadContinuity) {
+    # Sentinel-aware (v5.48): once -Migrate has run, CONTINUITY.md is preserved on
+    # disk but redundant — so we stop nagging "run -Migrate" (re-running is a no-op)
+    # and point at removal. We do NOT assert deletion is unconditionally safe:
+    # -Migrate can stamp the sentinel yet skip content (a custom CLAUDE.md with no
+    # `## Project Overview` keeps the Goal only in CONTINUITY.md), so we tell the user
+    # to confirm the content landed before removing the file.
+    if ($hadContinuity -and $continuityMigrated) {
+        Write-Color "+ CONTINUITY.md already migrated$continuityMigratedParen." "Green"
+        Write-Host "  Its content was migrated to CLAUDE.md (durable), docs/adr/ (decisions),"
+        Write-Host "  and .claude/local/state.md (volatile). Once you've confirmed that content"
+        Write-Host "  landed (and nothing references the file), CONTINUITY.md can be removed:"
+        Write-Host ""
+        Write-Host "    Remove-Item CONTINUITY.md"
+        Write-Host ""
+    } elseif ($hadContinuity) {
         Write-Color "! Legacy CONTINUITY.md detected." "Yellow"
         Write-Host "  PR #2 (continuity-split) replaces CONTINUITY.md with three artifacts:"
         Write-Host "    - durable team-shared facts -> CLAUDE.md"
@@ -1039,7 +1083,14 @@ if ($Upgrade) {
     }
     # Replaces a pre-existing hardcoded claim that lied whenever the user had
     # deleted one of the files before running --upgrade.
-    if ($hadClaude -and $hadContinuity) {
+    # Sentinel-aware (v5.48): when CONTINUITY.md has already been migrated, the banner
+    # drops the unsatisfiable "run -Migrate" suffix and points at removal — gated on
+    # confirming the content landed (see the legacy-prompt note above re: skipped Goal).
+    if ($hadContinuity -and $continuityMigrated) {
+        # Sentinel found in CLAUDE.md => CLAUDE.md exists => $hadClaude is true, so
+        # there is no reachable "CONTINUITY-only, no CLAUDE.md" migrated variant.
+        Write-Color "Upgrade done! Your CLAUDE.md was preserved. CONTINUITY.md already migrated$continuityMigratedParen — remove it once you've confirmed its content landed in the new structure." "Green"
+    } elseif ($hadClaude -and $hadContinuity) {
         Write-Color "Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved (run -Migrate to move content to the new structure)." "Green"
     } elseif ($hadClaude) {
         Write-Color "Upgrade done! Your CLAUDE.md was preserved (user content)." "Green"

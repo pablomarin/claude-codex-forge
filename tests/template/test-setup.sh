@@ -334,6 +334,123 @@ assert_not_contains "$LOG8c" "Template may have drifted" \
     "UC2: -f does NOT contain legacy 'Template may have drifted' hint (5.17)"
 
 # ===========================================================================
+# Test 8b: --upgrade on an ALREADY-MIGRATED install — no unsatisfiable nag
+# Regression (v5.48): a repo that ran `--migrate` keeps CONTINUITY.md (the
+# migration preserves it byte-for-byte) and gains a `<!-- forge:migrated DATE -->`
+# sentinel in CLAUDE.md + .claude/local/state.md. Before the fix, every later
+# `--upgrade` re-nagged "run --migrate" — an unsatisfiable instruction, since
+# re-running --migrate is a no-op once the sentinel is present. The banner must
+# instead report the file is already migrated and point at removal (gated on
+# confirming the migrated content landed).
+# ===========================================================================
+start_test "Test 8b: --upgrade on already-migrated install (no migrate-nag)"
+
+S8M=$(scratch_dir upgrade-migrated)
+make_project "$S8M" frontend
+LOG8m_install="$S8M/.setup.install.log"
+LOG8m="$S8M/.setup.upgrade.log"
+
+run_setup "$S8M" "$LOG8m_install" -p "MigratedTest" -t fullstack
+assert_equals "$?" "0" "Test 8b: migrated-case initial install exits 0"
+
+# Simulate the exact post-migration state scripts/migrate-continuity.sh leaves:
+# the sentinel stamped into CLAUDE.md + state.md, CONTINUITY.md preserved on disk.
+MIGRATED_SENTINEL="<!-- forge:migrated 2026-04-28 -->"
+printf '\n%s\n' "$MIGRATED_SENTINEL" >> "$S8M/CLAUDE.md"
+printf '\n%s\n' "$MIGRATED_SENTINEL" >> "$S8M/.claude/local/state.md"
+printf '# Legacy notes\n\nOld task state.\n' > "$S8M/CONTINUITY.md"
+
+run_setup "$S8M" "$LOG8m" --upgrade
+assert_equals "$?" "0" "Test 8b: --upgrade on migrated install exits 0"
+
+# The core fix: no "run --migrate" nag once the sentinel is present.
+assert_not_contains "$LOG8m" "./setup.sh --migrate" \
+    "Test 8b: migrated install does NOT nag './setup.sh --migrate'"
+assert_not_contains "$LOG8m" "run --migrate to move content" \
+    "Test 8b: migrated install banner drops the 'run --migrate' suffix"
+# Instead it points the user at removing the now-redundant file, citing the date.
+assert_contains "$LOG8m" "already migrated" \
+    "Test 8b: migrated install reports CONTINUITY.md already migrated"
+assert_contains "$LOG8m" "content landed" \
+    "Test 8b: migrated install gates removal on confirming content landed"
+assert_contains "$LOG8m" "2026-04-28" \
+    "Test 8b: migrated install cites the migration date from the sentinel"
+
+# ===========================================================================
+# Test 8c: state.md-only sentinel is NOT enough to claim the file is migrated
+# Codex P2 (v5.48): the durable migration target is CLAUDE.md (git-committed).
+# state.md is gitignored and recreated blank on a fresh clone, so a marker found
+# only there does NOT prove the durable bucket was written. Such a partial state
+# must fall through to the (idempotent) --migrate prompt, never the removal
+# hint — pointing at removal could discard still-unmoved content.
+# ===========================================================================
+start_test "Test 8c: state.md-only sentinel does NOT trigger removal hint (Codex P2)"
+
+S8P=$(scratch_dir upgrade-partial)
+make_project "$S8P" frontend
+LOG8p_install="$S8P/.setup.install.log"
+LOG8p="$S8P/.setup.upgrade.log"
+
+run_setup "$S8P" "$LOG8p_install" -p "PartialTest" -t fullstack
+assert_equals "$?" "0" "Test 8c: partial-case initial install exits 0"
+
+# Marker ONLY in state.md; CLAUDE.md (durable bucket) has NO sentinel.
+printf '\n<!-- forge:migrated 2026-04-28 -->\n' >> "$S8P/.claude/local/state.md"
+printf '# Legacy notes\n\nUnmoved content.\n' > "$S8P/CONTINUITY.md"
+
+run_setup "$S8P" "$LOG8p" --upgrade
+assert_equals "$?" "0" "Test 8c: --upgrade on partial install exits 0"
+
+# Without a CLAUDE.md sentinel we must NOT claim the file was migrated/removable...
+assert_not_contains "$LOG8p" "content landed" \
+    "Test 8c: state.md-only marker does NOT point at removing CONTINUITY.md"
+assert_not_contains "$LOG8p" "already migrated" \
+    "Test 8c: state.md-only marker does NOT report 'already migrated'"
+# ...and we DO fall through to the (idempotent, harmless) --migrate prompt.
+assert_contains "$LOG8p" "./setup.sh --migrate" \
+    "Test 8c: state.md-only marker still prompts the --migrate path"
+
+# ===========================================================================
+# Test 8d: prefix-only / date-less sentinel — migrated, but no garbage in banner
+# The migrate helper's idempotency probe keys on the bare prefix `<!-- forge:migrated`
+# (SENTINEL_PREFIX), so a hand-edited space-less/date-less marker like
+# `<!-- forge:migrated-->` is "already migrated" to the helper — re-running --migrate
+# is a no-op. The upgrade detector must agree (Codex P3, iter 3): treat it as migrated
+# (suppress the --migrate nag) WITHOUT splicing a garbage date — no "(-->)" / "()"
+# artifact next to the destructive removal hint (Codex P2, iter 2).
+# ===========================================================================
+start_test "Test 8d: prefix-only date-less sentinel migrates without garbage in banner"
+
+S8D=$(scratch_dir upgrade-nodate)
+make_project "$S8D" frontend
+LOG8d_install="$S8D/.setup.install.log"
+LOG8d="$S8D/.setup.upgrade.log"
+
+run_setup "$S8D" "$LOG8d_install" -p "NoDateTest" -t fullstack
+assert_equals "$?" "0" "Test 8d: nodate-case initial install exits 0"
+
+# Prefix-only sentinel (no space, no date) in CLAUDE.md — the strict form the
+# migrate helper treats as migrated but a date-requiring detector would miss.
+printf '\n<!-- forge:migrated-->\n' >> "$S8D/CLAUDE.md"
+printf '# Legacy notes\n' > "$S8D/CONTINUITY.md"
+
+run_setup "$S8D" "$LOG8d" --upgrade
+assert_equals "$?" "0" "Test 8d: --upgrade on date-less sentinel exits 0"
+
+# Still recognized as migrated → no nag, points at removal...
+assert_not_contains "$LOG8d" "./setup.sh --migrate" \
+    "Test 8d: date-less sentinel does NOT nag './setup.sh --migrate'"
+assert_contains "$LOG8d" "already migrated" \
+    "Test 8d: date-less sentinel still reports 'already migrated'"
+assert_contains "$LOG8d" "content landed" \
+    "Test 8d: date-less sentinel still points at removal (gated on content landed)"
+# ...but with NO spliced-in garbage date.
+assert_not_contains "$LOG8d" "(-->)" \
+    "Test 8d: banner has no '(-->)' artifact from the date-less sentinel"
+assert_not_contains "$LOG8d" "migrated ()" \
+    "Test 8d: banner has no empty '()' artifact from the date-less sentinel"
+
+# ===========================================================================
 # Test 9: runtime preflight — warns but never blocks
 # ===========================================================================
 start_test "Test 9: runtime preflight is warn-only"
