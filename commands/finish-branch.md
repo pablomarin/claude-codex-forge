@@ -47,13 +47,33 @@ If the user says no or wants to wait — STOP HERE. They can run `/finish-branch
 ### 1.4 Merge the PR (only after user confirms)
 
 ```bash
-gh pr merge --squash --delete-branch
+gh pr merge "$BRANCH_NAME" --squash
 ```
 
 > **Why squash?** Keeps main history clean. Use `--merge` or `--rebase` if the user prefers.
-> The `--delete-branch` flag auto-deletes the remote branch on GitHub.
+>
+> **Why NOT `--delete-branch`?** `-d/--delete-branch` deletes the _local_ branch after
+> merging, which forces `gh` to switch this checkout off the head branch onto the base
+> branch. When you're in a worktree and the base branch (e.g. `main`) is checked out in
+> the primary worktree, that switch fails with `fatal: '<base>' is already used by
+worktree at <path>` — even though **the server-side merge already succeeded**. Phase 2
+> below already removes the worktree, deletes the local branch, AND deletes the remote
+> branch, so `--delete-branch` is redundant here. Dropping it makes the merge
+> worktree-safe.
 
-**If merge fails** (e.g., merge conflicts, required checks pending):
+**If `gh pr merge` prints a local git error** (e.g. `fatal: '<base>' is already used by
+worktree …`): the API merge almost certainly still landed. Do **not** retry the merge —
+verify and continue:
+
+```bash
+gh pr view "$BRANCH_NAME" --json state --jq '.state'
+```
+
+If it prints `MERGED`, proceed to Phase 2 (cleanup). Only treat it as a real failure if
+the state is still `OPEN`.
+
+**If merge fails for a real reason** (merge conflicts, required checks pending — state
+stays `OPEN`):
 
 - Tell the user what failed
 - STOP and let them resolve it
@@ -112,11 +132,27 @@ echo "✓ Deleted local branch: $BRANCH_NAME"
 git branch -D "$BRANCH_NAME"
 ```
 
-### 2.6 Delete remote branch (if not already deleted)
+### 2.6 Delete remote branch
+
+Since 1.4 no longer passes `--delete-branch`, the remote branch is still there — delete
+it here. **Run each line as its own command — do NOT chain with `&&`/`||`/`;`/`|`.** The
+Forge's `check-workflow-gates` hook blocks any compound command containing a `git push`
+(it can't validate evidence against a chained push), so a one-liner like
+`git push … || echo …` gets rejected at runtime.
+
+First check whether the remote branch still exists:
 
 ```bash
-git push origin --delete "$BRANCH_NAME" 2>/dev/null || echo "Remote branch already deleted (gh pr merge --delete-branch handled it)"
+git ls-remote --heads origin "$BRANCH_NAME"
 ```
+
+If that printed a ref line, delete it with a **bare** push (nothing before or after it):
+
+```bash
+git push origin --delete "$BRANCH_NAME"
+```
+
+If it printed nothing, the remote branch is already gone — skip the push.
 
 ### 2.7 Prune stale references
 
