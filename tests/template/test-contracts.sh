@@ -1864,6 +1864,31 @@ done
 [ "$ok" = "1" ] && pass "DEV-DEMO block carries required stems + Gate-2 honesty rule present in codex.md & workflow.md"
 
 # ---------------------------------------------------------------------------
+# Contract: plan-stage "spec-loss is P1" severity rule parity (v5.50)
+#
+# The plan-review gate keeps its strict no-P0/P1/P2 EXIT, but the severity
+# rubric is sharpened so plan omissions that could build the wrong feature are
+# P1 (not P2) — because subagents implement FROM the plan and Gate 2 is blind to
+# plan-level spec-loss. The rule must appear in all three plan-review surfaces
+# and must NOT silently relax the exit. Council-ratified (CHANGE-modified, the
+# Hawk/Contrarian-hardened subset that ships #4 only).
+# ---------------------------------------------------------------------------
+start_test "Plan-stage spec-loss=P1 rule parity (workflow ↔ new-feature ↔ fix-bug)"
+
+ok=1
+for surface in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
+    for token in "spec-loss is P1" "wrong feature to be built" "does **not** relax the exit"; do
+        grep -qF -- "$token" "$REPO_ROOT/$surface" \
+            || { fail "$surface missing plan-stage spec-loss token: $token"; ok=0; }
+    done
+done
+# Regression guard: the strict plan-review EXIT must remain no-P0/P1/P2 in the
+# rules (this change sharpens classification, it does NOT relax the gate).
+grep -qF -- "no P0/P1/P2 from all available reviewers on the same pass" "$REPO_ROOT/rules/workflow.md" \
+    || { fail "rules/workflow.md: plan-review exit criterion was relaxed (must stay no P0/P1/P2)"; ok=0; }
+[ "$ok" = "1" ] && pass "plan-stage spec-loss=P1 rule present in all 3 surfaces; strict exit preserved"
+
+# ---------------------------------------------------------------------------
 # Contract: /codex hermetic modes capture the verdict via --output-last-message
 # ---------------------------------------------------------------------------
 # `codex exec [review]` dumps a multi-MB transcript (banner + full diff +

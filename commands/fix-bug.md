@@ -563,6 +563,8 @@ Gather severity-tagged findings from all available reviewers. Use this rubric:
 | P2    | Poor — code smell, maintainability issue, unclear intent, missing test | Must fix before proceeding |
 | P3    | Nit — style, naming, minor suggestion                                  | May fix, does not block    |
 
+**Plan-stage severity — spec-loss is P1:** at the plan stage, an omission that could cause the **wrong feature to be built** is a **P1**, not a P2 — because implementation subagents build FROM the plan's task list + test stubs, so a gap propagates and Gate 2 (code review) can only see code that is internally consistent with the _incomplete_ plan (plan-level spec-loss is invisible downstream). Classify as P1: missing required behavior, missing edge-case handling, a missing acceptance criterion needed to disambiguate implementation, or a missing test stub for a known-important behavior. Pure wording, organization, or maintainability smell stays P2. This sharpens classification only — it does **not** relax the exit (still no P0/P1/P2 below).
+
 **Step C — Exit criteria:**
 
 - **P0/P1/P2 found by any reviewer →** Fix the plan, increment iteration counter in the state.md checklist (`Plan review loop (N iterations)`), go back to Step A.
