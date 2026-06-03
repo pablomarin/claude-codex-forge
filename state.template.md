@@ -134,3 +134,16 @@ You (Claude) are responsible for updating this file. The Stop hook reminds you o
    - `- [x] PR creation authorized — \`<ISO-8601 timestamp>\` — nonce=\`<session nonce>\` — head=\`<current HEAD SHA>\``
 3. The PR-create PreToolUse guard blocks `gh pr create` unless this line is present with a matching nonce AND head SHA.
 4. On re-authorization (user re-authorizes after new commits): REPLACE the existing auth line with the fresh one; do NOT append.
+
+**On worktree seed (`/new-feature` / `/fix-bug` Pre-Flight, when seeding from main):**
+
+The continuity narrative **round-trips** through main so it survives worktree teardown (it is otherwise gitignored and dies with the worktree). The **foldable** sections are `### Done` / `### Next` / `### Deferred` (under `## State`), plus `## Open Questions` and `## Blockers`. The **gate** sections (`## Workflow`, `## /goal session`, `## PR authorization`) NEVER travel — they stay worktree-local with their REPLACE/singleton semantics.
+
+1. A fresh worktree's foldable narrative is copied **verbatim** from main's `state.md`, with `### Now` cleared (a new feature has no active "Now").
+2. A narrative-only **seed snapshot** is written to `.claude/local/.state-seed-snapshot.md` (gitignored, worktree-local) — a record of main's foldable narrative at seed time, used by `/finish-branch` to detect divergence.
+
+**On `/finish-branch` (round-trip fold-back, BEFORE the worktree is removed):**
+
+1. Compare main's current foldable narrative to the seed snapshot.
+2. **Unchanged** → deterministically replace main's foldable sections with the worktree's; set main's `### Now` empty. Gate sections on main are left untouched.
+3. **Changed / snapshot missing / worktree state absent / structurally incomplete** → **loud safe-stop**: warn and do NOT overwrite; leave files intact for manual reconciliation. (No LLM merge — divergence is a safe-stop in this version.)
