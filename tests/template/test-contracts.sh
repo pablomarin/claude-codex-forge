@@ -1189,6 +1189,76 @@ elif [ "$nf_block" = "$fb_block" ]; then pass "STATE-INIT block byte-identical a
 else fail "STATE-INIT block diverges between new-feature.md and fix-bug.md"
 fi
 
+# ---------------------------------------------------------------------------
+# Contract: seed-on-create (state-continuity-roundtrip, v5.52)
+# STATE-INIT must emit SEED_FROM_MAIN; step 2b must seed the narrative + write
+# the seed snapshot via extract_foldable. Asserted in BOTH command files.
+# ---------------------------------------------------------------------------
+start_test "seed-on-create: SEED_FROM_MAIN sentinel + snapshot + extract_foldable present in both commands"
+for f in "$NF" "$FB"; do
+    bn=$(basename "$f")
+    assert_contains "$f" "SEED_FROM_MAIN"                          "$bn STATE-INIT emits SEED_FROM_MAIN"
+    assert_contains "$f" ".claude/local/.state-seed-snapshot.md"   "$bn references the seed snapshot path"
+    assert_contains "$f" "extract_foldable"                        "$bn defines/uses extract_foldable"
+    # Bind the promised seed behaviors (plan Unit 5): Now reset to empty + gate sections NOT seeded.
+    assert_contains "$f" "empty placeholder"                       "$bn seed resets Now to its empty placeholder"
+    assert_contains "$f" "gate sections are NOT seeded"            "$bn seed excludes gate sections"
+done
+
+# ---------------------------------------------------------------------------
+# Contract: guarded fold-back (state-continuity-roundtrip, v5.52)
+# finish-branch.md must fold narrative into main BEFORE worktree removal,
+# guarded by the seed snapshot, section-scoped, fail-loud on divergence.
+# ---------------------------------------------------------------------------
+FBR="$REPO_ROOT/commands/finish-branch.md"
+start_test "fold-back: guarded narrative fold present and ordered before worktree removal"
+assert_contains "$FBR" "extract_foldable"               "finish-branch defines/uses extract_foldable"
+assert_contains "$FBR" ".state-seed-snapshot.md"        "finish-branch reads the seed snapshot"
+assert_contains "$FBR" "## State"                       "finish-branch fold names the State narrative section"
+assert_contains "$FBR" "## Open Questions"              "finish-branch fold names Open Questions"
+assert_contains "$FBR" "## Blockers"                    "finish-branch fold names Blockers"
+# Ordering: the fold step text must appear BEFORE the `git worktree remove` line.
+fold_line=$(grep -n "Fold continuity narrative" "$FBR" | head -1 | cut -d: -f1)
+remove_line=$(grep -n "git worktree remove" "$FBR" | head -1 | cut -d: -f1)
+if [ -n "$fold_line" ] && [ -n "$remove_line" ] && [ "$fold_line" -lt "$remove_line" ]; then
+    pass "fold-back step precedes 'git worktree remove' ($fold_line < $remove_line)"
+else
+    fail "fold-back step must precede 'git worktree remove' (fold=$fold_line remove=$remove_line)"
+fi
+# Safety: fail-loud on divergence / missing, gate sections preserved, explicit STOP, structural guard.
+assert_contains "$FBR" "FOLD_DIVERGED"                  "finish-branch fold handles divergence"
+assert_contains "$FBR" "Do NOT replace"                 "finish-branch fold refuses overwrite on divergence"
+assert_contains "$FBR" "STOP cleanup"                   "finish-branch fold STOPs cleanup on safe-stop (no fall-through to worktree remove)"
+assert_contains "$FBR" "foldable_is_valid"              "finish-branch fold has the structural-validity guard"
+# Bind to the actual gate-exclusion clause, not a coincidental ## Workflow heading elsewhere in the file.
+assert_contains "$FBR" "Do NOT touch"                   "finish-branch fold action explicitly excludes the gate sections (Do NOT touch)"
+assert_contains "$FBR" "## /goal session"              "finish-branch fold names the gate sections it must not touch"
+
+# Byte-drift guard: the EXTRACT-FOLDABLE block must be identical (modulo indentation)
+# across new-feature.md step 2b, fix-bug.md step 2b, and finish-branch.md 2.2b — a silent
+# drift between the seed-snapshot extraction and the fold extraction breaks divergence detection.
+start_test "EXTRACT-FOLDABLE block identical (indent-normalized) across the three command files"
+norm_ef() { sed -n '/^[[:space:]]*# EXTRACT-FOLDABLE-BEGIN/,/^[[:space:]]*# EXTRACT-FOLDABLE-END/p' "$1" | sed 's/^[[:space:]]*//'; }
+ef_nf=$(norm_ef "$NF"); ef_fb=$(norm_ef "$FB"); ef_fbr=$(norm_ef "$FBR")
+if [ -z "$ef_nf" ]; then
+    fail "EXTRACT-FOLDABLE markers missing from new-feature.md"
+elif [ "$ef_nf" = "$ef_fb" ] && [ "$ef_nf" = "$ef_fbr" ]; then
+    pass "EXTRACT-FOLDABLE block identical (indent-normalized) across all three command files"
+else
+    fail "EXTRACT-FOLDABLE block drifted across command files"
+    diff <(printf '%s' "$ef_nf") <(printf '%s' "$ef_fbr") | head -10
+fi
+
+# Contract: state.template documents the round-trip (state-continuity-roundtrip, v5.52)
+start_test "state.template documents the continuity round-trip"
+STATE_TMPL="$REPO_ROOT/state.template.md"
+assert_contains "$STATE_TMPL" "seed snapshot"  "state.template documents the seed snapshot"
+assert_contains "$STATE_TMPL" "round-trip"     "state.template documents the round-trip"
+
+# Contract: ADR 0008 exists for state continuity round-trip (v5.52)
+start_test "ADR 0008 exists for state continuity round-trip"
+assert_file_exists "$REPO_ROOT/docs/adr/0008-state-continuity-round-trip.md" "ADR 0008 present"
+
 # AC-2b STATE-INIT block must NOT contain Bash writes under .claude/. The state.md
 # init was moved off `cp`/`mkdir` to Read+Write tool calls because Bash writes under
 # .claude/ unconditionally prompt (Claude Code built-in heuristic, regardless of
