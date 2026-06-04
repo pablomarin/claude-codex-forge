@@ -535,6 +535,53 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Contract 3c: cache-delete permissions (ask-tier-cache-deletes, v5.53)
+#
+# The general recursive-delete rail (`Bash(rm -rf:*)` in ask) MUST stay — it is
+# what stops an autonomous /goal loop from self-approving a recursive delete.
+# Alongside it, three EXACT-match allows (no `:*` suffix — a prefix allow like
+# `rm -rf .mypy_cache:*` would also match `rm -rf .mypy_cache /`, riding
+# trailing arguments through the allow) let known-safe tool-cache deletes pass
+# without stalling autonomous runs. Both settings templates must agree.
+# ---------------------------------------------------------------------------
+start_test "cache-delete permissions — exact allows + rm -rf rail intact in both settings templates"
+if command -v python3 >/dev/null 2>&1; then
+    for f in "$UNIX_SETTINGS" "$WIN_SETTINGS"; do
+        perm_out=$(python3 -c "
+import json
+with open('$f') as fh:
+    s = json.load(fh)
+p = s.get('permissions', {})
+allow = p.get('allow', [])
+ask = p.get('ask', [])
+checks = [
+    ('Bash(rm -rf .mypy_cache)' in allow,   'allow-mypy-exact'),
+    ('Bash(rm -rf .pytest_cache)' in allow, 'allow-pytest-exact'),
+    ('Bash(rm -rf .ruff_cache)' in allow,   'allow-ruff-exact'),
+    (not any(r.startswith('Bash(rm -rf .') and r.endswith(':*)') for r in allow), 'no-prefix-cache-allow'),
+    ('Bash(rm -rf:*)' in ask,               'ask-rail-intact'),
+]
+for okv, name in checks:
+    print(('OK' if okv else 'BAD') + ' ' + name)
+")
+        bn=$(basename "$f")
+        if echo "$perm_out" | grep -q "^BAD"; then
+            fail "$bn cache-delete permission contract violated: $(echo "$perm_out" | grep '^BAD' | tr '\n' ' ')"
+        else
+            pass "$bn has the 3 exact cache-delete allows, no prefix cache allows, and the rm -rf ask rail"
+        fi
+    done
+else
+    pass "python3 not available — cache-delete permission test skipped (not a failure)"
+fi
+
+# The rules guidance must exist so agents reach for flags, not rm -rf.
+assert_contains "$REPO_ROOT/rules/python-style.md" "mypy --no-incremental"  "python-style documents the mypy cache flag"
+assert_contains "$REPO_ROOT/rules/python-style.md" "pytest --cache-clear"   "python-style documents the pytest cache flag"
+assert_contains "$REPO_ROOT/rules/python-style.md" "ruff check --no-cache"  "python-style documents the ruff cache flag"
+assert_contains "$REPO_ROOT/rules/workflow.md" "Ask-tier commands stall autonomous runs" "workflow.md warns that ask-tier commands stall /goal runs"
+
+# ---------------------------------------------------------------------------
 # Contract 6: E2E verified gate — canonical marker vocabulary
 #
 # The "E2E verified" gate string is the single source of truth for the

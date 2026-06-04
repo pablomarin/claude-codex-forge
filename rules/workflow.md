@@ -55,6 +55,8 @@ When a `/forge-goal`-driven `/goal` is active (`## /goal session` is populated i
 
 **Audit:** Each council invocation during an autonomous run is durable in the conversation transcript — the agent's response naming the council outcome and the applied action is the record. No separate audit log file.
 
+**Ask-tier commands stall autonomous runs.** Any `rm -rf` / `rm -r` is ask-tier in Forge settings (`Bash(rm -rf:*)` / `Bash(rm -r:*)`) — a `/goal` loop and its subagents CANNOT self-approve the permission prompt, so the run silently hangs until a human notices. Never construct an ask-tier command when a prompt-free alternative exists: tool cache flags (`mypy --no-incremental`, `pytest --cache-clear`, `ruff check --no-cache` — see `rules/python-style.md`), `: >` truncate instead of `rm` for temp files. If a recursive delete is genuinely unavoidable, say so explicitly before running it so the pause is expected, not silent.
+
 ## Severity Rubric
 
 | Level | Meaning                                                                | Action                     |
