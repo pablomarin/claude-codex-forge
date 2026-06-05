@@ -662,7 +662,7 @@ When the plan-review-loop passes and the plan is approved (Phase 3.3 exit criter
     Plan approved. Type this to begin the autonomous loop:
    ────────────────────────────────────────
 
-   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND plan_review_gate.clean_same_iteration=true AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
+   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Exception: a convergence-breaker halt is human-only — write the Blockers line and STOP; never substitute /council. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND plan_review_gate.clean_same_iteration=true AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
 
    ────────────────────────────────────────
     Or type "no" to continue manually phase-by-phase.
@@ -680,8 +680,8 @@ When the plan-review-loop passes and the plan is approved (Phase 3.3 exit criter
 
 - **DO NOT** call `gh pr create` until you have run `AskUserQuestion` asking the user to authorize, and they answered YES, and you have REPLACED the `## PR authorization` section in state.md with the new authorization line (matching nonce + current HEAD SHA at the moment of authorization).
 - **DO NOT** call `/goal clear` after success — `/goal` auto-clears when the verifier confirms the condition.
-- **DO** track each code-review iteration by appending `- [x] Code review iteration <N> — codex clean — head=`<sha>`AND`- [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>` to `### Checklist` (state.md). The `reviewer_gate.clean_same_iteration` evidence only fires when BOTH appear for the same iteration AND at the current HEAD.
-- **DO** invoke `/council` whenever you would otherwise pause for the user (except PR creation). Apply the chairman's verdict; do not second-guess it.
+- **DO** track each code-review iteration with a scoped clean PAIR appended to `### Checklist` (state.md) — see the certification model in `rules/workflow.md` ("Certification + scoped re-reviews"). The first clean pass is **certification**, recorded as a `scope=full` pair: `- [x] Code review iteration <N> — codex clean — scope=full — base=`<merge-base-sha>` — head=`<sha>`AND`- [x] Code review iteration <N> — pr-toolkit clean — scope=full — base=`<merge-base-sha>` — head=`<sha>`. Post-certification re-reviews use the `scope=delta` pair (`base=`<last-clean-head>``), the `scope=mechanical`re-stamp single line, or a`scope=full`pair after a rebase. The`reviewer_gate.clean_same_iteration`evidence only fires when BOTH appear for the same iteration AND at the current HEAD. (Back-compat: the legacy pre-v5.54 form`- [x] Code review iteration <N> — codex clean — head=`<sha>`is accepted ONLY as first-pass certification evidence; new workflows MUST use the scoped grammar.)
+- **DO** invoke `/council` whenever you would otherwise pause for the user (except PR creation). Apply the chairman's verdict; do not second-guess it. Exception: a convergence-breaker halt is human-only — write the Blockers line and STOP; never substitute /council.
 - **REPLACE, never append** when writing `/goal session` or `## PR authorization`. Appending creates stale duplicate entries that confuse Layer 1's parsers.
 
 ### PR-create gate — AskUserQuestion modal text
@@ -818,17 +818,34 @@ Gather severity-tagged findings from all available reviewers. Use the same P0–
 
 - **P0/P1/P2 found by any reviewer →** Fix the issues. If fixes are substantial (3+ files changed), re-run verify-app before next review iteration to catch regressions early. Increment counter in the state.md checklist (`Code review loop (N iterations)`), go back to Step A.
 - **Only P3 or clean from all available reviewers on the same pass →** do all three:
-  1. Append the per-iter clean lines to `.claude/local/state.md` `### Checklist` (head = current `git rev-parse HEAD`):
+  1. Append the per-iter clean lines to `.claude/local/state.md` `### Checklist` (head = current `git rev-parse HEAD`). Scoped evidence is a COHERENT PAIR — both engines, same scope, same base, same head (a mixed pair is rejected by the gate). Use the form that matches the iteration (full grammar + dispatch in `rules/workflow.md` "Certification + scoped re-reviews"):
+
+  Full pair (certification — the first clean pass — or full re-review after a rebase):
 
   ```
-  - [x] Code review iteration <N> — codex clean — head=`<sha>`
-  - [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>`
+  - [x] Code review iteration <N> — codex clean — scope=full — base=`<merge-base-sha>` — head=`<sha>`
+  - [x] Code review iteration <N> — pr-toolkit clean — scope=full — base=`<merge-base-sha>` — head=`<sha>`
+  ```
+
+  Delta pair (post-certification re-review of the PR-owned delta):
+
+  ```
+  - [x] Code review iteration <N> — codex clean — scope=delta — base=`<last-clean-head>` — head=`<sha>`
+  - [x] Code review iteration <N> — pr-toolkit clean — scope=delta — base=`<last-clean-head>` — head=`<sha>`
+  ```
+
+  Single lines (no reviewer pair):
+
+  ```
+  - [x] Code review iteration <N> — mechanical re-stamp — scope=mechanical — base=`<last-clean-head>` — head=`<sha>`
+  - [x] Code review iteration <N> — codex deep-pass clean — scope=full — base=`<merge-base-sha>` — head=`<sha>`
+  - [x] Post-certification tail adjudicated by human — <decision> — head=`<sha>` — ts=`<ISO8601>`
   ```
 
   2. Check the loop-complete box: `- [x] Code review loop (<N> iterations) — PASS`
   3. Proceed to 5.2.
 
-The PreToolUse `check-workflow-gates` hook blocks ship actions if (2) is checked without (1). New commits since iter-N invalidate the head-bound lines — re-run reviewers at the new HEAD and append a fresh iteration row.
+The PreToolUse `check-workflow-gates` hook blocks ship actions if (2) is checked without (1). The loop runs FULL-scope reviews until the first clean pass — **certification** — then scopes re-reviews to the PR-owned delta: run `git fetch origin --quiet`, then the scope helper (`bash "$RS" .claude/local/state.md`), and dispatch per `SCOPE_REQUIRED` (`mechanical` re-stamp / `delta` pair / `full` after a rebase). Upstream commits merged from the default branch are NEVER findings targets — only interaction-analysis input. See `rules/workflow.md` "Certification + scoped re-reviews" for the fetch-freshness rule, the `git log --first-parent`/`--remerge-diff` dispatch, the interaction-surface halt, the deep pass, and the convergence breaker.
 
 **Rules:**
 

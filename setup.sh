@@ -657,6 +657,9 @@ mkdir -p .claude/hooks/lib
 copy_file "$SCRIPT_DIR/hooks/lib/default-branch.sh" ".claude/hooks/lib/default-branch.sh" ".claude/hooks/lib/default-branch.sh (default-branch detection helper)"
 chmod +x .claude/hooks/lib/default-branch.sh 2>/dev/null || true
 copy_file "$SCRIPT_DIR/hooks/lib/default-branch.ps1" ".claude/hooks/lib/default-branch.ps1" ".claude/hooks/lib/default-branch.ps1 (PowerShell mirror)"
+copy_file "$SCRIPT_DIR/hooks/lib/review-scope.sh" ".claude/hooks/lib/review-scope.sh" ".claude/hooks/lib/review-scope.sh (review scope/breaker helper, v5.54)"
+chmod +x .claude/hooks/lib/review-scope.sh 2>/dev/null || true
+copy_file "$SCRIPT_DIR/hooks/lib/review-scope.ps1" ".claude/hooks/lib/review-scope.ps1" ".claude/hooks/lib/review-scope.ps1 (PowerShell mirror)"
 # codex-pty shim — work around openai/codex#19945 (silent empty exit when codex
 # exec runs without a controlling TTY). Both .sh + .ps1 + helper.py ship for
 # cross-platform parity (ADR 0005).

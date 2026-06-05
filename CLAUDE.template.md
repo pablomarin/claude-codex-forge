@@ -131,6 +131,20 @@ cd frontend && pnpm test                   # Run frontend tests (only if the pro
 
 ---
 
+## Review Configuration
+
+<!-- Optional. Controls the v5.54 review-certification deep pass.
+     Default (section absent or deep_pass: all): every feature gets one
+     deliberate full-scope Codex native review at first certification. -->
+
+deep_pass: all <!-- all | high-impact-only -->
+
+<!-- When high-impact-only, list the surfaces that trigger the deep pass
+     (canonical list: references/peer-review-protocol.md): -->
+<!-- high_impact_surfaces: schema/migration, public API contract, auth/permissions, payment/billing, config defaults, rollout/deployment, architecture boundaries -->
+
+---
+
 ## No Bugs Left Behind Policy
 
 **NEVER defer known issues "for later."** When a review, test, or tool flags an issue — fix it in the same branch before moving on. This applies to:

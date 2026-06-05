@@ -57,6 +57,24 @@ if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
 $StateMd = ".claude/local/state.md"
 
 # ---------------------------------------------------------------------------
+# v5.54 scoped-review-certification (ADR 0009): resolve the scope helper the SAME
+# way the gate does — installed path first, then forge-internal source path — and
+# DOT-SOURCE it so Invoke-ReviewScope is in scope. Do NOT call-operator the script
+# (its standalone entrypoint would `exit` the hook) and do NOT spawn a separate
+# pwsh interpreter (the repo ships against powershell.exe 5.1 per the
+# default-branch.ps1 contract). Helper absence → fail-open (0/"ok"; only
+# self-contained evidence forms validate — see Compute-ReviewerGate).
+$ReviewScopePs1 = Join-Path (Get-Location) ".claude\hooks\lib\review-scope.ps1"
+if (-not (Test-Path -LiteralPath $ReviewScopePs1)) {
+    $ReviewScopePs1 = Join-Path (Get-Location) "hooks\lib\review-scope.ps1"
+}
+$ReviewScopeAvailable = $false
+if (Test-Path -LiteralPath $ReviewScopePs1) {
+    . $ReviewScopePs1
+    $ReviewScopeAvailable = $true
+}
+
+# ---------------------------------------------------------------------------
 # Helper: Unix epoch time (PS 5.1 compatible)
 # ---------------------------------------------------------------------------
 function Get-UnixTime {
@@ -151,9 +169,39 @@ function Parse-Workflow {
 }
 
 # ---------------------------------------------------------------------------
+# Get-ChecklistLines: ## Workflow / ### Checklist lines (CRLF-normalized).
+# ---------------------------------------------------------------------------
+function Get-ChecklistLines {
+    $lines = Read-StateMdLines
+    $inWorkflow = $false
+    $inChecklist = $false
+    $out = @()
+    foreach ($line in $lines) {
+        if ($line -match '^## Workflow$') { $inWorkflow = $true; continue }
+        if ($inWorkflow -and $line -match '^## ') { $inWorkflow = $false; $inChecklist = $false; continue }
+        if (-not $inWorkflow) { continue }
+        if ($line -match '^### Checklist') { $inChecklist = $true; continue }
+        if ($line -match '^### ' -and $line -notmatch '^### Checklist') { $inChecklist = $false; continue }
+        if ($inChecklist) { $out += $line }
+    }
+    return $out
+}
+
+# ---------------------------------------------------------------------------
 # Compute-ReviewerGate: returns @{clean=$false; matched_iteration=""; matched_head=""}
-# Scoped to ## Workflow / ### Checklist. Requires codex clean AND pr-toolkit
-# clean for the SAME iteration at the matching HEAD sha.
+#
+# v5.54 (ADR 0009): applies the SAME helper-backed validation as the ship gate
+# (check-workflow-gates.ps1) so /goal readiness is never a weaker parser. For the
+# latest iteration N at the current head, accept ONLY:
+#   * legacy pair  — when RS_PRIOR says CERTIFIED:no (certifies; never rebinds)
+#   * scoped pair  — delimiter-bound scope=full|delta, coherent (same scope+base,
+#                    base=/head= present); delta → base == RS_PRIOR LAST_CLEAN_HEAD
+#                    AND RS_PRIOR ANCESTOR_OK:yes AND NOT SCOPE_REQUIRED:full;
+#                    full → base == recomputed default-ref merge-base for head
+#   * mechanical   — base == RS_PRIOR LAST_CLEAN_HEAD AND RS_PRIOR CERTIFIED:yes
+#                    AND RS_PRIOR SCOPE_REQUIRED:mechanical
+# Helper absence → reject chain-dependent claims (delta, mechanical); accept only
+# self-contained forms (legacy pair, or scope=full pair at the current head).
 # ---------------------------------------------------------------------------
 function Compute-ReviewerGate {
     param([string]$HeadSha)
@@ -161,52 +209,140 @@ function Compute-ReviewerGate {
     if ([string]::IsNullOrEmpty($HeadSha)) { return $result }
     if (-not (Test-Path $StateMd)) { return $result }
 
-    $lines = Read-StateMdLines
-    $inWorkflow = $false
-    $inChecklist = $false
-    # Track per-iteration which tools have cleared (using a hashtable keyed by "iter|tool")
+    $checklist = Get-ChecklistLines
+
+    # Latest iteration N at the current head — mechanical row, or codex+pr-toolkit
+    # pair both at head=$HeadSha. Mechanical wins ties.
+    $mechN = $null
+    $pairN = $null
     $seen = @{}
-
-    foreach ($line in $lines) {
-        if ($line -match '^## Workflow$') { $inWorkflow = $true; continue }
-        if ($inWorkflow -and $line -match '^## ') { $inWorkflow = $false; $inChecklist = $false; continue }
-        if (-not $inWorkflow) { continue }
-
-        if ($line -match '^### Checklist') { $inChecklist = $true; continue }
-        if ($line -match '^### ' -and $line -notmatch '^### Checklist') { $inChecklist = $false; continue }
-
-        if ($inChecklist -and $line -match '^\- \[x\]\s+Code review iteration \d+ — ') {
-            # Extract iteration number
-            if ($line -match 'iteration (\d+)') {
-                $iter = $matches[1]
-            } else { continue }
-
-            # Extract tool — canonical delimited form only (— codex clean —),
-            # so "not-codex clean" can't pass.
-            if ($line -match '— codex clean —') { $tool = "codex" }
-            elseif ($line -match '— pr-toolkit clean —') { $tool = "pr-toolkit" }
-            else { continue }
-
-            # Extract head sha
-            if ($line -match 'head=`([0-9a-f]+)`') {
-                $sha = $matches[1]
-            } else { continue }
-
-            if ($sha -ne $HeadSha) { continue }
-
-            $key = "$iter|$tool"
-            $seen[$key] = $true
-
-            $codexKey = "$iter|codex"
-            $tkKey = "$iter|pr-toolkit"
-            if ($seen.ContainsKey($codexKey) -and $seen.ContainsKey($tkKey)) {
-                $result.clean = $true
-                $result.matched_iteration = $iter
-                $result.matched_head = $HeadSha
-                return $result
-            }
+    foreach ($line in $checklist) {
+        if ($line -notmatch '^\s*-\s*\[x\]\s+Code review iteration (\d+) — ') { continue }
+        $iter = [int]$matches[1]
+        if ($line -cmatch "Code review iteration $iter — mechanical re-stamp — scope=mechanical — " `
+            -and $line -match 'head=`([0-9a-f]+)`' -and $matches[1] -eq $HeadSha) {
+            if (($null -eq $mechN) -or ($iter -gt $mechN)) { $mechN = $iter }
+            continue
+        }
+        if ($line -match '— codex deep-pass clean —') { continue }
+        if ($line -match '— codex clean —') { $tool = 'codex' }
+        elseif ($line -match '— pr-toolkit clean —') { $tool = 'pr-toolkit' }
+        else { continue }
+        if ($line -match 'head=`([0-9a-f]+)`') { $sha = $matches[1] } else { continue }
+        if ($sha -ne $HeadSha) { continue }
+        $seen["$iter|$tool"] = $true
+        if ($seen.ContainsKey("$iter|codex") -and $seen.ContainsKey("$iter|pr-toolkit")) {
+            if (($null -eq $pairN) -or ($iter -gt $pairN)) { $pairN = $iter }
         }
     }
+
+    $n = $null
+    if (($null -ne $mechN) -and (($null -eq $pairN) -or ($mechN -ge $pairN))) { $n = $mechN }
+    elseif ($null -ne $pairN) { $n = $pairN }
+    else { return $result }
+
+    # RS_PRIOR: helper state EXCLUDING iteration N's rows (--before $n).
+    $rsPrior = @()
+    if ($ReviewScopeAvailable) { $rsPrior = Invoke-ReviewScope $StateMd ([int]$n) }
+    $priorCertified = ($rsPrior | Where-Object { $_ -eq 'CERTIFIED:yes' } | Measure-Object).Count
+    $priorCleanHead = ""
+    foreach ($l in $rsPrior) { if ($l -match '^LAST_CLEAN_HEAD:(.*)$') { $priorCleanHead = $matches[1] } }
+
+    # --- Mechanical branch ---
+    $mLine = ($checklist `
+        | Where-Object { $_ -cmatch "^\s*-\s*\[x\]\s+Code review iteration $n — mechanical re-stamp — scope=mechanical — " -and $_ -match 'head=`([0-9a-f]+)`' } `
+        | Where-Object { ([regex]::Match($_, 'head=`([0-9a-f]+)`')).Groups[1].Value -eq $HeadSha } `
+        | Select-Object -Last 1)
+    if ($mLine) {
+        $mBase = ""
+        if ($mLine -match 'base=`([0-9a-f]+)`') { $mBase = $matches[1] }
+        if ((-not $ReviewScopeAvailable) -or ($priorCertified -eq 0) -or (-not $mBase) -or ($mBase -ne $priorCleanHead)) {
+            return $result
+        }
+        $priorMechanical = ($rsPrior | Where-Object { $_ -eq 'SCOPE_REQUIRED:mechanical' } | Select-Object -First 1)
+        if (-not $priorMechanical) { return $result }
+        $result.clean = $true; $result.matched_iteration = [string]$n; $result.matched_head = $HeadSha
+        return $result
+    }
+
+    # --- Engine-pair branch ---
+    $codexLine = ($checklist `
+        | Where-Object { $_ -match "^\s*-\s*\[x\]\s+Code review iteration $n — codex " -and $_ -notmatch '— codex deep-pass' } `
+        | Select-Object -Last 1)
+    $toolkitLine = ($checklist `
+        | Where-Object { $_ -match "^\s*-\s*\[x\]\s+Code review iteration $n — pr-toolkit " } `
+        | Select-Object -Last 1)
+    if (-not $codexLine -or -not $toolkitLine) { return $result }
+
+    $cScope = ""; $cBase = ""; $tScope = ""; $tBase = ""
+    foreach ($pair in @(@{ tool = 'codex'; line = $codexLine }, @{ tool = 'pr-toolkit'; line = $toolkitLine })) {
+        $tool = $pair.tool
+        $line = $pair.line
+        if ($line -cmatch 'scope=') {
+            if ($line -cnotmatch 'scope=(full|delta)(\s|$)') { return $result }
+            if ($line -notmatch 'base=`[0-9a-f]+`') { return $result }
+            $lScope = ([regex]::Match($line, 'scope=(full|delta)(\s|$)')).Groups[1].Value
+            $lBase = ([regex]::Match($line, 'base=`([0-9a-f]+)`')).Groups[1].Value
+        } else {
+            # Scope-less LEGACY pair: valid ONLY as certification evidence.
+            if ($priorCertified -gt 0) { return $result }
+            $lScope = "legacy"; $lBase = ""
+        }
+        if ($tool -eq 'codex') { $cScope = $lScope; $cBase = $lBase }
+        else { $tScope = $lScope; $tBase = $lBase }
+    }
+    if (($cScope -ne $tScope) -or ($cBase -ne $tBase)) { return $result }
+
+    if ($cScope -eq 'delta') {
+        if ((-not $ReviewScopeAvailable) -or ($priorCertified -eq 0) -or (-not $priorCleanHead) -or ($cBase -ne $priorCleanHead)) {
+            return $result
+        }
+        $priorAncestorOk = ($rsPrior | Where-Object { $_ -eq 'ANCESTOR_OK:yes' } | Select-Object -First 1)
+        $priorScopeFull = ($rsPrior | Where-Object { $_ -eq 'SCOPE_REQUIRED:full' } | Select-Object -First 1)
+        if ((-not $priorAncestorOk) -or $priorScopeFull) { return $result }
+    } elseif ($cScope -eq 'full') {
+        # Self-contained: base must be the TRUE merge-base for head (same default-ref
+        # resolution as the helper / gate — no RS needed).
+        # Deliberately re-derived here rather than emitted by the helper: the
+        # consumers stay self-contained validators (a helper-output change can
+        # never silently weaken the full-base check).
+        $gateLibDir = Split-Path -Parent $ReviewScopePs1
+        $gateDb = 'main'
+        $dbHelper = Join-Path $gateLibDir 'default-branch.ps1'
+        if (Test-Path -LiteralPath $dbHelper) {
+            . $dbHelper
+            $db = Get-DefaultBranch
+            if ($db) { $gateDb = $db }
+        }
+        $gateRef = $gateDb
+        & git rev-parse --verify "origin/$gateDb" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $gateRef = "origin/$gateDb" }
+        $gateMb = (& git merge-base $gateRef $HeadSha 2>$null | Select-Object -First 1)
+        if (-not $gateMb -or ($cBase -ne $gateMb)) { return $result }
+    }
+    # legacy (scope-less, uncertified) reaches here as self-contained → accept.
+    $result.clean = $true; $result.matched_iteration = [string]$n; $result.matched_head = $HeadSha
+    return $result
+}
+
+# ---------------------------------------------------------------------------
+# Compute-BreakerFields: full-state helper run (NOT --before). Returns
+# @{rounds=0; breaker='ok'; breaker_ok=$true}. Helper absence → 0/'ok'/$true.
+# breaker_ok is $false ONLY when the helper says BOTH tripped AND unadjudicated.
+# ---------------------------------------------------------------------------
+function Compute-BreakerFields {
+    $result = @{ rounds = 0; breaker = 'ok'; breaker_ok = $true }
+    if (-not $ReviewScopeAvailable) { return $result }
+    if (-not (Test-Path $StateMd)) { return $result }
+    $rsOut = Invoke-ReviewScope $StateMd 999999
+    $brk = 'ok'; $adj = 'no'
+    foreach ($l in $rsOut) {
+        if ($l -match '^POST_CERT_ROUNDS:(\d+)$') { $result.rounds = [int]$matches[1] }
+        elseif ($l -match '^BREAKER:(.*)$') { $brk = $matches[1] }
+        elseif ($l -match '^ADJUDICATED:(.*)$') { $adj = $matches[1] }
+    }
+    if ($brk -eq 'tripped') { $result.breaker = 'tripped' }
+    if (($brk -eq 'tripped') -and ($adj -eq 'no')) { $result.breaker_ok = $false }
     return $result
 }
 
@@ -457,6 +593,12 @@ $RgClean = if ($rg.clean) { "true" } else { "false" }
 $RgIter = $rg.matched_iteration
 $RgHead = $rg.matched_head
 
+# Convergence breaker fields (full-state helper run).
+$brkFields = Compute-BreakerFields
+$PostCertRounds = $brkFields.rounds
+$Breaker = $brkFields.breaker
+$BreakerOk = $brkFields.breaker_ok
+
 $prg = Compute-PlanReviewGate
 $PrgClean = if ($prg.clean) { "true" } else { "false" }
 $PrgIter = $prg.matched_iteration
@@ -481,7 +623,7 @@ if ((-not [string]::IsNullOrEmpty($HeadSha)) -and ($PrHeadOid -eq $HeadSha)) {
 }
 
 $PrReady = "false"
-if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $RgClean -eq "true" -and $E2eFresh -eq "true" -and $PaAuth -eq "true") {
+if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $RgClean -eq "true" -and $E2eFresh -eq "true" -and $PaAuth -eq "true" -and $BreakerOk) {
     $PrReady = "true"
 }
 
@@ -606,7 +748,7 @@ $json = '{' +
     $SessionNonceJson + ',' +
     $WorkflowCmdJson + ',' +
     '"state":{' + $PhaseJson + ',' + $NextStepJson + ',"checklist_total":' + $TotalCount + ',"checklist_done":' + $DoneCount + '},' +
-    '"reviewer_gate":{"clean_same_iteration":' + $RgClean + ',' + $RgIterJson + ',' + $RgHeadJson + '},' +
+    '"reviewer_gate":{"clean_same_iteration":' + $RgClean + ',' + $RgIterJson + ',' + $RgHeadJson + ',"post_cert_rounds":' + $PostCertRounds + ',"breaker":"' + $Breaker + '"},' +
     '"plan_review_gate":{"clean_same_iteration":' + $PrgClean + ',' + $PrgIterJson + ',' + $PrgShaJson + '},' +
     $BranchJson + ',' +
     $HeadShaJson + ',' +

@@ -60,6 +60,16 @@ fi
 STATE_MD=".claude/local/state.md"
 
 # ---------------------------------------------------------------------------
+# v5.54 scoped-review-certification (ADR 0009): resolve the scope helper the
+# SAME way the gate does — installed path first, then the forge-internal source
+# path. We are already cd'd to the repo/worktree root above, so the relative
+# paths resolve against $_TOPLEVEL. Helper absence → fail-open (0/"ok", and
+# only self-contained evidence forms validate — see compute_reviewer_gate).
+# ---------------------------------------------------------------------------
+RS=".claude/hooks/lib/review-scope.sh"
+[ -f "$RS" ] || RS="hooks/lib/review-scope.sh"
+
+# ---------------------------------------------------------------------------
 # Git state queries (read-only, best-effort — failures produce empty strings)
 # ---------------------------------------------------------------------------
 HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
@@ -204,54 +214,178 @@ parse_workflow() {
 compute_reviewer_gate() {
     # Args: $1 = current HEAD sha
     # Output: "clean_same_iteration|matched_iteration|matched_head"
+    #
+    # v5.54 (ADR 0009): /goal readiness must apply the SAME helper-backed
+    # validation as the ship gate (check-workflow-gates.sh ~L699-866) — otherwise
+    # /goal self-completes on stale-base delta or mechanical-over-code evidence the
+    # gate would block. For the latest iteration N at the current head we accept:
+    #   * legacy pair  — only when RS_PRIOR says CERTIFIED:no (certifies; never rebinds)
+    #   * scoped pair  — delimiter-bound scope=full|delta, coherent (same scope+base,
+    #                    base=/head= present); delta → base == RS_PRIOR LAST_CLEAN_HEAD
+    #                    AND RS_PRIOR ANCESTOR_OK:yes AND NOT SCOPE_REQUIRED:full;
+    #                    full → base == recomputed default-ref merge-base for head
+    #   * mechanical   — base == RS_PRIOR LAST_CLEAN_HEAD AND RS_PRIOR CERTIFIED:yes
+    #                    AND RS_PRIOR SCOPE_REQUIRED:mechanical
+    # Helper absence → chain-dependent claims (delta, mechanical) CANNOT validate
+    # (reject); accept ONLY self-contained forms (legacy pair, or scope=full pair at
+    # the current head) — mirroring the gate.
     local head_sha="$1"
     [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
     [ -z "$head_sha" ] && { echo "false||"; return 0; }
 
-    # Single awk pass: scope to ## Workflow / ### Checklist, extract reviewer rows
-    # matching head_sha, track per-iteration which tools cleared. When both
-    # codex AND pr-toolkit have cleared the same iteration at head_sha, emit
-    # the iteration number and stop. Output: "<iter>" or empty.
-    local matched
-    # CRLF normalize BEFORE awk anchors (Codex P1.7 from plan-review).
-    matched=$(tr -d '\r' < "$STATE_MD" | awk -v head="$head_sha" '
+    # CRLF-normalized ## Workflow / ### Checklist scope (mirror the gate parser).
+    local checklist
+    checklist=$(tr -d '\r' < "$STATE_MD" | awk '
         BEGIN { in_workflow=0; in_checklist=0 }
         /^## Workflow$/        { in_workflow=1; next }
         in_workflow && /^## /  { in_workflow=0; in_checklist=0 }
         in_workflow && /^### Checklist/ { in_checklist=1; next }
         in_workflow && /^### / && !/^### Checklist/ { in_checklist=0 }
-        in_workflow && in_checklist && /^- \[x\][[:space:]]+Code review iteration [0-9]+ — / {
-            # Parse: - [x] Code review iteration <iter> — <tool> clean — head=`<sha>`
+        in_workflow && in_checklist { print }
+    ')
+
+    # Latest iteration N at the current head — either a mechanical re-stamp row, or
+    # a codex+pr-toolkit pair both carrying head=$head_sha. Mechanical takes priority
+    # (it IS the evidence by design — no engine pair). Pick the highest such N.
+    local mech_n pair_n n
+    mech_n=$(echo "$checklist" \
+        | grep -E "^\s*-\s*\[x\]\s+Code review iteration [0-9]+ — mechanical re-stamp — scope=mechanical — " \
+        | grep -F "head=\`${head_sha}\`" \
+        | sed -E 's/.*iteration ([0-9]+).*/\1/' | sort -n | tail -1)
+    pair_n=$(echo "$checklist" | awk -v head="$head_sha" '
+        /^- \[x\][[:space:]]+Code review iteration [0-9]+ — / {
             line=$0
-            if (match(line, /iteration [0-9]+/)) {
-                iter=substr(line, RSTART+10, RLENGTH-10)
-            } else { next }
-            # Match the canonical delimited variant only; a bare substring would
-            # let "not-codex clean" pass. (No apostrophes in this awk comment:
-            # the program is single-quoted, an apostrophe would terminate it.)
+            if (match(line, /iteration [0-9]+/)) { iter=substr(line, RSTART+10, RLENGTH-10) } else { next }
+            if (line ~ /— codex deep-pass clean —/) { next }   # deep-pass is a separate tool
             if (line ~ /— codex clean —/)           { tool="codex" }
             else if (line ~ /— pr-toolkit clean —/) { tool="pr-toolkit" }
             else { next }
-            if (match(line, /head=`[0-9a-f]+`/)) {
-                sha=substr(line, RSTART+6, RLENGTH-7)
-            } else { next }
+            if (match(line, /head=`[0-9a-f]+`/)) { sha=substr(line, RSTART+6, RLENGTH-7) } else { next }
             if (sha != head) { next }
+            seen[iter "|" tool]=1
+            if (seen[iter "|codex"] && seen[iter "|pr-toolkit"]) { print iter }
+        }' | sort -n | tail -1)
 
-            # Track via flat key (no assoc arrays — Bash 3.2 / gawk-portable)
-            key=iter "|" tool
-            seen[key]=1
-
-            codex_key=iter "|codex"
-            tk_key=iter "|pr-toolkit"
-            if (seen[codex_key] && seen[tk_key]) { print iter; exit 0 }
-        }
-    ')
-
-    if [ -n "$matched" ]; then
-        echo "true|${matched}|${head_sha}"
+    # Mechanical wins ties (it cannot coexist with a pair for the same N by design;
+    # if both exist pick the larger N, mechanical on a tie).
+    if [ -n "$mech_n" ] && { [ -z "$pair_n" ] || [ "$mech_n" -ge "$pair_n" ]; }; then
+        n="$mech_n"
+    elif [ -n "$pair_n" ]; then
+        n="$pair_n"
     else
-        echo "false||"
+        echo "false||"; return 0
     fi
+
+    # RS_PRIOR: helper state EXCLUDING iteration N's rows — the chain this iteration
+    # must validate against (same --before $N call the gate makes). Empty when the
+    # helper is absent (fail-open path below rejects chain-dependent claims).
+    local rs_prior prior_certified prior_clean_head
+    rs_prior=$([ -f "$RS" ] && bash "$RS" "$STATE_MD" --before "$n" 2>/dev/null || echo "")
+    prior_certified=$(echo "$rs_prior" | grep -c "CERTIFIED:yes" || true)
+    prior_clean_head=$(echo "$rs_prior" | sed -n 's/^LAST_CLEAN_HEAD://p')
+
+    # --- Mechanical branch ---
+    local mline
+    mline=$(echo "$checklist" \
+        | grep -E "^\s*-\s*\[x\]\s+Code review iteration $n — mechanical re-stamp — scope=mechanical — " \
+        | grep -F "head=\`${head_sha}\`" | tail -1)
+    if [ -n "$mline" ]; then
+        local m_base
+        m_base=$(echo "$mline" | sed -E 's/.*base=`([0-9a-f]+)`.*/\1/')
+        # Chain-dependent: helper required. Base = prior clean head, prior CERTIFIED,
+        # and recomputation (RS_PRIOR) must itself say mechanical is allowed.
+        if [ ! -f "$RS" ] || [ "$prior_certified" -eq 0 ] \
+           || [ -z "$m_base" ] || [ "$m_base" != "$prior_clean_head" ] \
+           || ! echo "$mline" | grep -qE 'base=`[0-9a-f]+`'; then
+            echo "false||"; return 0
+        fi
+        if ! echo "$rs_prior" | grep -q "SCOPE_REQUIRED:mechanical"; then
+            echo "false||"; return 0
+        fi
+        echo "true|${n}|${head_sha}"; return 0
+    fi
+
+    # --- Engine-pair branch ---
+    local codex_line toolkit_line
+    codex_line=$(echo "$checklist" \
+        | grep -E "^\s*-\s*\[x\]\s+Code review iteration $n — codex " \
+        | grep -v -- "— codex deep-pass" | tail -1)
+    toolkit_line=$(echo "$checklist" \
+        | grep -E "^\s*-\s*\[x\]\s+Code review iteration $n — pr-toolkit " | tail -1)
+    [ -n "$codex_line" ] && [ -n "$toolkit_line" ] || { echo "false||"; return 0; }
+
+    # Collect per-line scope/base + validate the PAIR (coherence) — mirror the gate.
+    local c_scope c_base t_scope t_base tool_line tool line l_scope l_base
+    c_scope=""; c_base=""; t_scope=""; t_base=""
+    for tool_line in "codex:$codex_line" "pr-toolkit:$toolkit_line"; do
+        tool="${tool_line%%:*}"; line="${tool_line#*:}"
+        if echo "$line" | grep -q "scope="; then
+            # Delimiter-bound value: scope=fullish must NOT pass as full.
+            echo "$line" | grep -qE "scope=(full|delta)([[:space:]]|$)" || { echo "false||"; return 0; }
+            echo "$line" | grep -qE 'base=`[0-9a-f]+`' || { echo "false||"; return 0; }
+            l_scope=$(echo "$line" | sed -E 's/.*scope=(full|delta)([[:space:]]|$).*/\1/')
+            l_base=$(echo "$line" | sed -E 's/.*base=`([0-9a-f]+)`.*/\1/')
+        else
+            # Scope-less LEGACY pair: valid ONLY as certification evidence — i.e.
+            # when no certification existed before this iteration (never rebinds).
+            if [ "$prior_certified" -gt 0 ]; then echo "false||"; return 0; fi
+            l_scope="legacy"; l_base=""
+        fi
+        if [ "$tool" = "codex" ]; then c_scope="$l_scope"; c_base="$l_base"
+        else t_scope="$l_scope"; t_base="$l_base"; fi
+    done
+    [ "$c_scope" = "$t_scope" ] && [ "$c_base" = "$t_base" ] || { echo "false||"; return 0; }
+
+    if [ "$c_scope" = "delta" ]; then
+        # Chain-dependent: helper required + base chain + ancestry intact.
+        if [ ! -f "$RS" ] || [ "$prior_certified" -eq 0 ] || [ -z "$prior_clean_head" ] \
+           || [ "$c_base" != "$prior_clean_head" ]; then
+            echo "false||"; return 0
+        fi
+        if ! echo "$rs_prior" | grep -q "ANCESTOR_OK:yes" \
+           || echo "$rs_prior" | grep -q "SCOPE_REQUIRED:full"; then
+            echo "false||"; return 0
+        fi
+    elif [ "$c_scope" = "full" ]; then
+        # Self-contained: base must be the TRUE merge-base for head (recompute via
+        # the same default-ref resolution as the helper / gate — no RS needed).
+        # Deliberately re-derived here rather than emitted by the helper: the
+        # consumers stay self-contained validators (a helper-output change can
+        # never silently weaken the full-base check).
+        local gate_db gate_ref gate_mb
+        gate_db=$(bash "${RS%/*}/default-branch.sh" 2>/dev/null || echo main)
+        gate_ref="$gate_db"
+        git rev-parse --verify "origin/$gate_db" >/dev/null 2>&1 && gate_ref="origin/$gate_db"
+        gate_mb=$(git merge-base "$gate_ref" "$head_sha" 2>/dev/null || echo "")
+        if [ -z "$gate_mb" ] || [ "$c_base" != "$gate_mb" ]; then
+            echo "false||"; return 0
+        fi
+    fi
+    # legacy (scope-less, uncertified) reaches here as self-contained → accept.
+    echo "true|${n}|${head_sha}"
+}
+
+# compute_breaker_fields — full-state helper run (NOT --before): emits the breaker
+# state used both for the JSON fields and the pr_ready suppression. Sets globals
+# POST_CERT_ROUNDS, BREAKER, BREAKER_OK. Helper absence → 0/"ok"/true (fail-open).
+compute_breaker_fields() {
+    POST_CERT_ROUNDS=0
+    BREAKER="ok"
+    BREAKER_OK="true"
+    [ -f "$RS" ] && [ -f "$STATE_MD" ] || return 0
+    local rs_out rounds brk adj
+    rs_out=$(bash "$RS" "$STATE_MD" 2>/dev/null || echo "")
+    rounds=$(echo "$rs_out" | sed -n 's/^POST_CERT_ROUNDS://p' | tail -1)
+    brk=$(echo "$rs_out" | sed -n 's/^BREAKER://p' | tail -1)
+    adj=$(echo "$rs_out" | sed -n 's/^ADJUDICATED://p' | tail -1)
+    [ -n "$rounds" ] && POST_CERT_ROUNDS="$rounds"
+    [ "$brk" = "tripped" ] && BREAKER="tripped"
+    # BREAKER_OK is false ONLY when the helper says BOTH tripped AND unadjudicated.
+    # A current-head human adjudication line (ADJUDICATED:yes) clears the block.
+    if [ "$brk" = "tripped" ] && [ "$adj" = "no" ]; then
+        BREAKER_OK="false"
+    fi
+    return 0
 }
 
 compute_plan_review_gate() {
@@ -404,6 +538,10 @@ RG_REST="${RG_RESULT#*|}"
 RG_ITER="${RG_REST%%|*}"
 RG_HEAD="${RG_REST##*|}"
 
+# Convergence breaker fields (full-state helper run). Sets POST_CERT_ROUNDS,
+# BREAKER, BREAKER_OK (false only when tripped AND unadjudicated).
+compute_breaker_fields
+
 # Parse plan-review gate (plan-review iteration rows in Checklist; plan_sha bound).
 PRG_RESULT=$(compute_plan_review_gate)
 PRG_CLEAN="${PRG_RESULT%%|*}"
@@ -446,7 +584,7 @@ PR_HEAD_MATCH="false"
 PR_READY="false"
 if [ "$PR_OPEN" = "true" ] && [ "$PR_HEAD_MATCH" = "true" ] && \
    [ "$RG_CLEAN" = "true" ] && [ "$E2E_FRESH" = "true" ] && \
-   [ "$PA_AUTH" = "true" ]; then
+   [ "$PA_AUTH" = "true" ] && [ "$BREAKER_OK" = "true" ]; then
     PR_READY="true"
 fi
 
@@ -531,8 +669,8 @@ E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
     printf '%s,' "$WORKFLOW_CMD_JSON"
     printf '"state":{%s,%s,"checklist_total":%d,"checklist_done":%d},' \
         "$PHASE_JSON" "$NEXT_STEP_JSON" "$TOTAL_COUNT" "$DONE_COUNT"
-    printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s},' \
-        "$RG_CLEAN" "$RG_ITER_JSON" "$RG_HEAD_JSON"
+    printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s,"post_cert_rounds":%d,"breaker":"%s"},' \
+        "$RG_CLEAN" "$RG_ITER_JSON" "$RG_HEAD_JSON" "$POST_CERT_ROUNDS" "$BREAKER"
     printf '"plan_review_gate":{"clean_same_iteration":%s,%s,%s},' \
         "$PRG_CLEAN" "$PRG_ITER_JSON" "$PRG_SHA_JSON"
     printf '%s,' "$BRANCH_JSON"
