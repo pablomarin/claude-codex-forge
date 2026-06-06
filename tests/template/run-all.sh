@@ -21,7 +21,7 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-build-evidence.sh"
     "$REPO_ROOT/tests/template/test-contracts.sh"
     "$REPO_ROOT/tests/template/test-state-roundtrip.sh"
-    "$REPO_ROOT/tests/template/test-review-scope.sh"
+    "$REPO_ROOT/tests/template/test-review-breaker.sh"
     "$REPO_ROOT/tests/template/test-merge-settings.sh"
     "$REPO_ROOT/tests/template/test-hooks.sh"
     "$REPO_ROOT/tests/template/test-default-branch.sh"

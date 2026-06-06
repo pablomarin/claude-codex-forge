@@ -426,68 +426,46 @@ OUT="$scratch/.out"
 assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":false' \
     "plan_review_gate stays false on an N/A escape (no real Codex evidence)"
 
+
 # ===========================================================================
-# Task 6: scoped-review-certification — reviewer_gate helper-backed validation
-# + breaker fields (post_cert_rounds / breaker) + breaker→pr_ready wiring.
-#
-# These build REAL scratch git repos (pattern: test-review-scope.sh Level 2)
-# with the helpers installed under .claude/hooks/lib/ — the dual-path the hook
-# resolves RS from. build-evidence must apply the SAME helper-backed validation
+# Convergence breaker (v5.54, ADR 0009) — post_cert_rounds / breaker fields +
+# the breaker→pr_ready suppression. These build REAL scratch git repos with the
+# review-breaker.sh helper installed under .claude/hooks/lib/ (the dual-path the
+# hook resolves RS from). build-evidence must apply the SAME helper-backed breaker
 # as the ship gate, so /goal readiness is never a weaker parser.
 # ===========================================================================
 
-# bev_scope_repo: scratch repo with main + feat branch (mirrors build_repo in
-# test-review-scope.sh). Sets R. .claude/ MUST be gitignored so add -A on both
-# branches never tracks the helper/state and clobbers it on checkout.
+# bev_scope_repo: scratch repo with main + feat branch + one feature commit. Sets
+# R. .claude/ MUST be gitignored so `add -A` on either branch never tracks the
+# helper/state and clobbers them on checkout.
 bev_scope_repo() {
-    R="$(scratch_dir bev-scope)"
+    R="$(scratch_dir bev-brk)"
     git -C "$R" init -q -b main
     git -C "$R" config user.email t@t.t; git -C "$R" config user.name t
-    mkdir -p "$R/src" "$R/docs"
+    mkdir -p "$R/src"
     echo ".claude/" > "$R/.gitignore"
-    echo "base" > "$R/src/app.py"; echo "# doc" > "$R/docs/CHANGELOG.md"
+    echo "base" > "$R/src/app.py"
     git -C "$R" add -A; git -C "$R" commit -qm base
     git -C "$R" checkout -qb feat
     echo "feature" >> "$R/src/app.py"
     git -C "$R" add -A; git -C "$R" commit -qm feat1
 }
 
-# bev_install_helpers <repo>: copy the scope helper + default-branch sibling into
-# the scratch repo's .claude/hooks/lib/ (the dual-path resolution path). Without
-# this, every case silently exercises the fail-open path.
-bev_install_helpers() {
+# bev_install_helper <repo>: copy ONLY review-breaker.sh into the scratch repo's
+# .claude/hooks/lib/ (the dual-path resolution path). The helper does not source
+# default-branch.sh, so it is not copied. Without this, every case silently
+# exercises the fail-open path.
+bev_install_helper() {
     local r="$1"
     mkdir -p "$r/.claude/hooks/lib"
-    cp "$REPO_ROOT/hooks/lib/review-scope.sh" "$r/.claude/hooks/lib/"
-    cp "$REPO_ROOT/hooks/lib/default-branch.sh" "$r/.claude/hooks/lib/"
+    cp "$REPO_ROOT/hooks/lib/review-breaker.sh" "$r/.claude/hooks/lib/"
 }
 
-# bev_state <repo> <checklist-body>: write an active ## Workflow state.md whose
-# ### Checklist is the supplied body.
-bev_state() {
-    local r="$1" body="$2"
-    mkdir -p "$r/.claude/local"
-    { echo "## Workflow"; echo
-      echo "| Field | Value |"
-      echo "| Command | /new-feature x |"
-      echo
-      echo "### Checklist"; echo
-      printf '%s\n' "$body"
-    } > "$r/.claude/local/state.md"
-}
-
-# bev_run <repo>: run build-evidence.sh inside the repo, capture JSON to GATE_OUT.
-# (gh absent → pr_state.exists=false, which is fine for clean_same_iteration /
-# breaker / post_cert_rounds assertions.)
-bev_run() {
-    GATE_OUT="$1/.bev.out"
-    ( cd "$1" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$GATE_OUT" 2>&1
-}
-
-# bev_run_fullgreen <repo>: run build-evidence with a gh stub returning an OPEN
-# PR at the current HEAD + a fresh E2E report. Used by the breaker cases that
-# must show pr_ready=false WITH all other gates satisfied. Caller must have
-# placed a valid PR-authorization line at HEAD in state.md already.
+# bev_run_fullgreen <repo>: run build-evidence with a gh stub returning an OPEN PR
+# at the current HEAD + a fresh E2E report. Used by the breaker cases that must
+# show pr_ready=false WITH all OTHER gates satisfied. Caller must have placed a
+# legacy clean pair at HEAD (RG_CLEAN) + a /goal session + PR-authorization line at
+# HEAD (PA_AUTH) in state.md already.
 bev_run_fullgreen() {
     local r="$1"
     mkdir -p "$r/bin"
@@ -511,163 +489,39 @@ STUB
     ( cd "$r" && PATH="$r/bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$GATE_OUT" 2>&1
 }
 
-# --- Positive 1: valid mechanical re-stamp (docs-only) after certification → clean
-start_test "bev scoped: valid mechanical chain after certification → clean_same_iteration true"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-echo "note" >> "$R/docs/CHANGELOG.md"; git -C "$R" add -A; git -C "$R" commit -qm docs
-H2="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (2 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 2 — mechanical re-stamp — scope=mechanical — base=\`${H}\` — head=\`${H2}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":true' "docs-only mechanical chain → clean"
+# bev_breaker_state <repo> <head> <extra>: active ## Workflow whose breaker is
+# tripped (loop 5, certifying legacy pair at iteration 1 at HEAD → post_cert_rounds
+# = 4 > limit), with a /goal session + PR-authorization line at HEAD. The certifying
+# pair at HEAD also makes the legacy reviewer_gate clean (RG_CLEAN). $3 is appended
+# inside the checklist (e.g. an adjudication line).
+bev_breaker_state() {
+    local r="$1" h="$2" extra="$3"
+    local nonce="00000000-0000-0000-0000-000000000099"
+    mkdir -p "$r/.claude/local"
+    { echo "## Workflow"; echo
+      echo "| Field | Value |"
+      echo "| Command | /new-feature x |"
+      echo
+      echo "### Checklist"; echo
+      echo "- [ ] Code review loop (5 iterations) — iterate until no P0/P1/P2"
+      echo "- [x] Code review iteration 1 — codex clean — head=\`${h}\`"
+      echo "- [x] Code review iteration 1 — pr-toolkit clean — head=\`${h}\`"
+      [ -n "$extra" ] && printf '%s\n' "$extra"
+      echo
+      echo "## /goal session"; echo
+      echo "| Field | Value |"
+      echo "| nonce | ${nonce} |"
+      echo "| workflow_command | /new-feature x |"
+      echo
+      echo "- [x] PR creation authorized — \`2026-06-06T00:00:00Z\` — nonce=\`${nonce}\` — head=\`${h}\`"
+    } > "$r/.claude/local/state.md"
+}
 
-# --- Positive 2: scoped delta pair, valid chain → clean
-start_test "bev scoped: valid delta pair chain → clean_same_iteration true"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-echo "fix" >> "$R/src/app.py"; git -C "$R" add -A; git -C "$R" commit -qm fix
-H2="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (2 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 2 — codex clean — scope=delta — base=\`${H}\` — head=\`${H2}\`
-- [x] Code review iteration 2 — pr-toolkit clean — scope=delta — base=\`${H}\` — head=\`${H2}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":true' "valid delta chain → clean"
-
-# --- Positive 3: a deep-pass row alongside the certifying pair does not poison the gate
-start_test "bev scoped: deep-pass row does not poison reviewer_gate → clean_same_iteration true"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-bev_state "$R" "- [x] Code review loop (1 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — codex deep-pass clean — scope=full — base=\`${B}\` — head=\`${H}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":true' "deep-pass row alongside the pair stays clean"
-
-# --- Negative: deep-pass-only codex side (no `codex clean` row) does not satisfy the gate
-start_test "bev scoped: deep-pass-only codex side → clean_same_iteration false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-bev_state "$R" "- [x] Code review loop (1 iterations) — PASS
-- [x] Code review iteration 1 — codex deep-pass clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "deep-pass alone is not the codex loop review → not clean"
-
-# --- Negative: delta base ≠ prior clean head → false
-start_test "bev scoped: delta base ≠ prior clean head → clean_same_iteration false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-echo "fix" >> "$R/src/app.py"; git -C "$R" add -A; git -C "$R" commit -qm fix
-H2="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (2 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 2 — codex clean — scope=delta — base=\`${B}\` — head=\`${H2}\`
-- [x] Code review iteration 2 — pr-toolkit clean — scope=delta — base=\`${B}\` — head=\`${H2}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "wrong-base delta → not clean"
-
-# --- Negative: post-cert REBASE (amend) + delta from old clean head → false
-start_test "bev scoped: post-cert amend + delta from stale head → clean_same_iteration false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-git -C "$R" commit -q --amend -m rewritten
-H2="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (2 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 2 — codex clean — scope=delta — base=\`${H}\` — head=\`${H2}\`
-- [x] Code review iteration 2 — pr-toolkit clean — scope=delta — base=\`${H}\` — head=\`${H2}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "rebase fail-closed → not clean"
-
-# --- Negative (delayed poisoning): cert → amend → forged delta → later delta chained from forged head
-start_test "bev scoped: delayed poisoning (forged delta then later delta chained from it) → false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-git -C "$R" commit -q --amend -m rewritten
-H2="$(git -C "$R" rev-parse HEAD)"
-echo "more" >> "$R/src/app.py"; git -C "$R" add -A; git -C "$R" commit -qm more
-H3="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (3 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 2 — codex clean — scope=delta — base=\`${H}\` — head=\`${H2}\`
-- [x] Code review iteration 2 — pr-toolkit clean — scope=delta — base=\`${H}\` — head=\`${H2}\`
-- [x] Code review iteration 3 — codex clean — scope=delta — base=\`${H2}\` — head=\`${H3}\`
-- [x] Code review iteration 3 — pr-toolkit clean — scope=delta — base=\`${H2}\` — head=\`${H3}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "forged-chain delta → not clean"
-
-# --- Negative: full pair base ≠ merge-base → false
-start_test "bev scoped: full pair base ≠ merge-base → clean_same_iteration false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (1 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${H}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${H}\` — head=\`${H}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "full base≠merge-base → not clean"
-
-# --- Negative: mechanical over a CODE delta (recompute says delta) → false
-start_test "bev scoped: mechanical over code delta → clean_same_iteration false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-echo "fix" >> "$R/src/app.py"; git -C "$R" add -A; git -C "$R" commit -qm "code fix"
-H2="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (2 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 2 — mechanical re-stamp — scope=mechanical — base=\`${H}\` — head=\`${H2}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "mechanical-over-code → not clean"
-
-# --- Negative: scope=fullish (unknown value, valid prefix) → false
-start_test "bev scoped: scope=fullish unknown value → clean_same_iteration false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-bev_state "$R" "- [x] Code review loop (1 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=fullish — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=fullish — base=\`${B}\` — head=\`${H}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "scope=fullish → not clean"
-
-# --- Negative: legacy pair at a new head AFTER a scoped certification → false
-start_test "bev scoped: legacy pair after scoped certification → clean_same_iteration false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-echo "fix" >> "$R/src/app.py"; git -C "$R" add -A; git -C "$R" commit -qm fix
-H2="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (2 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 2 — codex clean — head=\`${H2}\`
-- [x] Code review iteration 2 — pr-toolkit clean — head=\`${H2}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "post-cert legacy pair → not clean"
-
-# --- Breaker: loop counter 5, cert at 1 → breaker tripped + pr_ready false (all other gates green)
+# --- Breaker: loop 5 / cert 1 → breaker tripped + pr_ready false (all gates green)
 start_test "bev breaker: post-cert rounds > limit → breaker tripped AND pr_ready false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-NONCE="00000000-0000-0000-0000-000000000099"
-bev_state "$R" "- [ ] Code review loop (5 iterations) — iterate until no P0/P1/P2
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`"
-# Append /goal session + PR-authorization so the full-green path can satisfy auth.
-{ echo; echo "## /goal session"; echo
-  echo "| Field | Value |"
-  echo "| nonce | ${NONCE} |"
-  echo "| workflow_command | /new-feature x |"
-  echo
-  echo "- [x] PR creation authorized — \`2026-06-05T00:00:00Z\` — nonce=\`${NONCE}\` — head=\`${H}\`"
-} >> "$R/.claude/local/state.md"
+bev_scope_repo; bev_install_helper "$R"
+H="$(git -C "$R" rev-parse HEAD)"
+bev_breaker_state "$R" "$H" ""
 bev_run_fullgreen "$R"
 assert_contains "$GATE_OUT" '"breaker":"tripped"' "loop 5 − cert 1 = 4 > 3 → tripped"
 assert_contains "$GATE_OUT" '"post_cert_rounds":4' "post_cert_rounds = 4"
@@ -675,74 +529,47 @@ assert_contains "$GATE_OUT" '"pr_ready":false' "tripped breaker suppresses pr_re
 
 # --- Breaker + adjudication at CURRENT head → pr_ready no longer suppressed
 start_test "bev breaker: adjudication at current head unblocks pr_ready"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-NONCE="00000000-0000-0000-0000-000000000099"
-bev_state "$R" "- [ ] Code review loop (5 iterations) — iterate until no P0/P1/P2
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${H}\` — ts=\`2026-06-05T00:00:00Z\`"
-{ echo; echo "## /goal session"; echo
-  echo "| Field | Value |"
-  echo "| nonce | ${NONCE} |"
-  echo "| workflow_command | /new-feature x |"
-  echo
-  echo "- [x] PR creation authorized — \`2026-06-05T00:00:00Z\` — nonce=\`${NONCE}\` — head=\`${H}\`"
-} >> "$R/.claude/local/state.md"
+bev_scope_repo; bev_install_helper "$R"
+H="$(git -C "$R" rev-parse HEAD)"
+bev_breaker_state "$R" "$H" \
+    "- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${H}\` — ts=\`2026-06-06T00:00:00Z\`"
 bev_run_fullgreen "$R"
 assert_contains "$GATE_OUT" '"breaker":"tripped"' "breaker still reports tripped (raw count)"
 assert_contains "$GATE_OUT" '"pr_ready":true' "current-head adjudication clears the breaker suppression"
 
 # --- Breaker + adjudication at STALE head → still suppressed
 start_test "bev breaker: adjudication at STALE head keeps pr_ready false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
+bev_scope_repo; bev_install_helper "$R"
+H="$(git -C "$R" rev-parse HEAD)"
 STALE="0000000000000000000000000000000000000000"
-NONCE="00000000-0000-0000-0000-000000000099"
-bev_state "$R" "- [ ] Code review loop (5 iterations) — iterate until no P0/P1/P2
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${STALE}\` — ts=\`2026-06-05T00:00:00Z\`"
-{ echo; echo "## /goal session"; echo
-  echo "| Field | Value |"
-  echo "| nonce | ${NONCE} |"
-  echo "| workflow_command | /new-feature x |"
-  echo
-  echo "- [x] PR creation authorized — \`2026-06-05T00:00:00Z\` — nonce=\`${NONCE}\` — head=\`${H}\`"
-} >> "$R/.claude/local/state.md"
+bev_breaker_state "$R" "$H" \
+    "- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${STALE}\` — ts=\`2026-06-06T00:00:00Z\`"
 bev_run_fullgreen "$R"
+assert_contains "$GATE_OUT" '"breaker":"tripped"' "breaker reports tripped"
 assert_contains "$GATE_OUT" '"pr_ready":false' "stale-head adjudication does not clear the breaker"
 
-# --- Negative (chain poisoning): fabricated mechanical-over-code, later delta chained from it → false
-start_test "bev scoped: fabricated mechanical-over-code poisons later delta chain → false"
-bev_scope_repo; bev_install_helpers "$R"
-H="$(git -C "$R" rev-parse HEAD)"; B="$(git -C "$R" merge-base main "$H")"
-echo "fix" >> "$R/src/app.py"; git -C "$R" add -A; git -C "$R" commit -qm "code fix"
-H2="$(git -C "$R" rev-parse HEAD)"
-echo "more" >> "$R/src/app.py"; git -C "$R" add -A; git -C "$R" commit -qm "more code"
-H3="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (3 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — scope=full — base=\`${B}\` — head=\`${H}\`
-- [x] Code review iteration 2 — mechanical re-stamp — scope=mechanical — base=\`${H}\` — head=\`${H2}\`
-- [x] Code review iteration 3 — codex clean — scope=delta — base=\`${H2}\` — head=\`${H3}\`
-- [x] Code review iteration 3 — pr-toolkit clean — scope=delta — base=\`${H2}\` — head=\`${H3}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "poisoned mechanical breaks later delta chain"
-
-# --- Helper absent: no installed helper, no source fallback (scratch repo has no hooks/) → fields 0/ok, legacy still computes
-start_test "bev scoped: helper absent → post_cert_rounds 0 / breaker ok, legacy pair still clean"
-bev_scope_repo   # NOTE: bev_install_helpers intentionally NOT called.
-# Scratch repo lives in $TMPDIR, outside the forge tree: $_TOPLEVEL is the scratch
-# repo, so neither .claude/hooks/lib/review-scope.sh nor the hooks/lib/ source
+# --- Helper absent: no installed helper, no source fallback (scratch repo outside
+#     the forge tree) → fields 0/ok, legacy reviewer_gate still computes clean.
+start_test "bev breaker: helper absent → post_cert_rounds 0 / breaker ok, legacy pair still clean"
+bev_scope_repo   # NOTE: bev_install_helper intentionally NOT called.
+# Scratch repo lives in $TMPDIR, outside the forge tree: $TOPLEVEL is the scratch
+# repo, so neither .claude/hooks/lib/review-breaker.sh nor the hooks/lib/ source
 # fallback exists here. build-evidence must fail open: 0/"ok" fields, and a
-# self-contained legacy pair at HEAD still computes clean.
+# self-contained legacy pair at HEAD still computes the reviewer_gate clean.
 H="$(git -C "$R" rev-parse HEAD)"
-bev_state "$R" "- [x] Code review loop (1 iterations) — PASS
-- [x] Code review iteration 1 — codex clean — head=\`${H}\`
-- [x] Code review iteration 1 — pr-toolkit clean — head=\`${H}\`"
-bev_run "$R"
-assert_contains "$GATE_OUT" '"post_cert_rounds":0' "helper absent → post_cert_rounds 0"
+mkdir -p "$R/.claude/local"
+{ echo "## Workflow"; echo
+  echo "| Field | Value |"
+  echo "| Command | /new-feature x |"
+  echo
+  echo "### Checklist"; echo
+  echo "- [x] Code review loop (1 iterations) — PASS"
+  echo "- [x] Code review iteration 1 — codex clean — head=\`${H}\`"
+  echo "- [x] Code review iteration 1 — pr-toolkit clean — head=\`${H}\`"
+} > "$R/.claude/local/state.md"
+GATE_OUT="$R/.bev.out"
+( cd "$R" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$GATE_OUT" 2>&1
+assert_contains "$GATE_OUT" '"post_cert_rounds":0' "helper absent → post_cert_rounds 0 (fail-open)"
 assert_contains "$GATE_OUT" '"breaker":"ok"' "helper absent → breaker ok (fail-open)"
 assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":true' "helper absent → legacy pair still computes clean"
 

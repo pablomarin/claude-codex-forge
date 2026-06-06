@@ -669,29 +669,29 @@ SRC_HASH=$(hash_file "$REPO_ROOT/hooks/lib/default-branch.sh")
 assert_hash_equals "$S11/.claude/hooks/lib/default-branch.sh" "$SRC_HASH" \
     "installed default-branch.sh matches source (hash-identical)"
 
-# review-scope.sh — same three assertions (installed, executable, hash-identical)
-assert_file_exists "$S11/.claude/hooks/lib/review-scope.sh" \
-    ".claude/hooks/lib/review-scope.sh installed"
+# review-breaker.sh — same three assertions (installed, executable, hash-identical)
+assert_file_exists "$S11/.claude/hooks/lib/review-breaker.sh" \
+    ".claude/hooks/lib/review-breaker.sh installed"
 
-if [[ -x "$S11/.claude/hooks/lib/review-scope.sh" ]]; then
-    pass ".claude/hooks/lib/review-scope.sh is executable"
+if [[ -x "$S11/.claude/hooks/lib/review-breaker.sh" ]]; then
+    pass ".claude/hooks/lib/review-breaker.sh is executable"
 else
-    fail ".claude/hooks/lib/review-scope.sh is NOT executable"
+    fail ".claude/hooks/lib/review-breaker.sh is NOT executable"
 fi
 
-SRC_HASH_RS=$(hash_file "$REPO_ROOT/hooks/lib/review-scope.sh")
-assert_hash_equals "$S11/.claude/hooks/lib/review-scope.sh" "$SRC_HASH_RS" \
-    "installed review-scope.sh matches source (hash-identical)"
+SRC_HASH_RS=$(hash_file "$REPO_ROOT/hooks/lib/review-breaker.sh")
+assert_hash_equals "$S11/.claude/hooks/lib/review-breaker.sh" "$SRC_HASH_RS" \
+    "installed review-breaker.sh matches source (hash-identical)"
 
-# review-scope.ps1 — PowerShell mirror is shipped by setup.sh too (dot-sourced by
+# review-breaker.ps1 — PowerShell mirror is shipped by setup.sh too (dot-sourced by
 # the .ps1 gate hooks on Windows). Assert presence + hash-identical (not +x: .ps1
 # files are not chmod'd by setup.sh).
-assert_file_exists "$S11/.claude/hooks/lib/review-scope.ps1" \
-    ".claude/hooks/lib/review-scope.ps1 installed"
+assert_file_exists "$S11/.claude/hooks/lib/review-breaker.ps1" \
+    ".claude/hooks/lib/review-breaker.ps1 installed"
 
-SRC_HASH_RSPS=$(hash_file "$REPO_ROOT/hooks/lib/review-scope.ps1")
-assert_hash_equals "$S11/.claude/hooks/lib/review-scope.ps1" "$SRC_HASH_RSPS" \
-    "installed review-scope.ps1 matches source (hash-identical)"
+SRC_HASH_RSPS=$(hash_file "$REPO_ROOT/hooks/lib/review-breaker.ps1")
+assert_hash_equals "$S11/.claude/hooks/lib/review-breaker.ps1" "$SRC_HASH_RSPS" \
+    "installed review-breaker.ps1 matches source (hash-identical)"
 
 # Note: setup.ps1 (Windows installer) installs default-branch.ps1; setup.sh
 # (Unix installer) installs only default-branch.sh. The cross-installer parity

@@ -1932,13 +1932,7 @@ start_test "Per-iter clean-line vocabulary parity"
 # Canonical stems — changing either side requires changing both files +
 # updating this contract.
 PLAN_STEM='Plan review iteration .* — codex clean — plan='
-# v5.54: relaxed to a scope-agnostic prefix. The legacy head-adjacent form
-# (`codex clean — head=`) survives ONLY in back-compat examples and hook error
-# messages; the full canonical SCOPED forms (scope=full|delta|mechanical with
-# base=/head=) are pinned by the scoped-review-certification (v5.54) block at the
-# end of this file. Do NOT re-tighten this to `— head=` — that would re-pin a
-# contradictory canonical grammar.
-CODE_STEM='Code review iteration .* — codex clean — '
+CODE_STEM='Code review iteration .* — codex clean — head='
 
 ok=1
 for f in state.template.md rules/workflow.md commands/new-feature.md commands/fix-bug.md \
@@ -2087,182 +2081,131 @@ if grep -qE 'rm[[:space:]]+-[rf]*[[:space:]]+/tmp/codex_response' "$CODEX_MD"; t
 else
     pass "codex.md clears the stale OLM with a hook-safe truncate (no blocked 'rm -f /tmp/...')"
 fi
+# ===========================================================================
+# convergence-breaker (v5.54, ADR 0009)
+#
+# Pins the breaker-only ship: the helper twins exist + their constant is mirrored
+# to prose; the human-only adjudication stem is byte-shared across its sites; the
+# PS hooks dot-source (never subprocess) the dual-mode helper; the installer ships
+# both twins; and the /goal council carve-out + count-preserving-N/A prose ship in
+# the commands + workflow.
+# ===========================================================================
+start_test "convergence-breaker: helper twins exist"
+assert_file_exists "$REPO_ROOT/hooks/lib/review-breaker.sh"  "review-breaker.sh ships"
+assert_file_exists "$REPO_ROOT/hooks/lib/review-breaker.ps1" "review-breaker.ps1 ships (PS twin)"
 
-# ---------------------------------------------------------------------------
-# Contract: scoped-review-certification (v5.54) — grammar + constant + prose
-# ---------------------------------------------------------------------------
-start_test "scoped-review-certification: grammar + constant + prose pinned"
-RSH="$REPO_ROOT/hooks/lib/review-scope.sh"
-assert_file_exists "$RSH" "review-scope.sh helper present"
-assert_file_exists "$REPO_ROOT/hooks/lib/review-scope.ps1" "review-scope.ps1 parity twin present"
-assert_contains "$RSH" "POST_CERT_REVIEW_ROUND_LIMIT=3" "canonical breaker constant"
-# All three docs carry the scoped grammar literal.
-for f in "$REPO_ROOT/rules/workflow.md" "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md"; do
-    assert_contains "$f" "scope=full" "$(basename "$f") carries scoped grammar"
-done
-# The helper name + breaker constant live canonically in rules/workflow.md; the
-# commands DELEGATE to it ("scope helper" + a "See rules/workflow.md" pointer +
-# the convergence-breaker carve-out), so they don't repeat the literal tokens.
-assert_contains "$REPO_ROOT/rules/workflow.md" "review-scope"                 "workflow.md points at the scope helper"
-assert_contains "$REPO_ROOT/rules/workflow.md" "POST_CERT_REVIEW_ROUND_LIMIT" "workflow.md names the breaker constant"
-for f in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md"; do
-    assert_contains "$f" "scope helper" "$(basename "$f") delegates to the scope helper"
-done
-assert_contains "$REPO_ROOT/rules/workflow.md" "deep-pass"                          "deep pass pinned"
-assert_contains "$REPO_ROOT/rules/workflow.md" "retried at the SAME scope"          "scoped retries pinned"
-assert_contains "$REPO_ROOT/rules/workflow.md" "adjudicated by human"               "adjudication line pinned"
-assert_contains "$REPO_ROOT/rules/workflow.md" "HALT for the human"                 "/goal halt-for-human pinned"
-
-# --- Evidence-line grammar: the five exact stems, pinned in BOTH canonical docs ---
-# (state.template.md Update Rules + rules/workflow.md must show the literal forms the
-# hooks parse — drift between docs and parser grammar is the bug class this pins out.)
-for stem in \
-    "codex clean — scope=full" \
-    "pr-toolkit clean — scope=full" \
-    "codex clean — scope=delta" \
-    "pr-toolkit clean — scope=delta" \
-    "mechanical re-stamp — scope=mechanical" \
-    "codex deep-pass clean — scope=full" \
-    "Post-certification tail adjudicated by human"; do
-    assert_contains "$REPO_ROOT/state.template.md"  "$stem" "template pins stem: $stem"
-    assert_contains "$REPO_ROOT/rules/workflow.md"  "$stem" "workflow.md pins stem: $stem"
-done
-for doc in "$REPO_ROOT/state.template.md" "$REPO_ROOT/rules/workflow.md"; do
-    # Markdown escapes the code-span backtick, so the on-disk form is base=\` / head=\`.
-    assert_contains "$doc" 'base=\`'  "$(basename "$doc") grammar carries base="
-    assert_contains "$doc" 'head=\`'  "$(basename "$doc") grammar carries head="
-done
-
-# --- No surviving legacy INSTRUCTIONS: any doc line still showing the old
-# head-only form (clean — head= with no scope) must be explicitly labeled
-# legacy/back-compat. Unlabeled occurrences re-teach the pre-v5.54 grammar.
-for doc in "$REPO_ROOT/state.template.md" "$REPO_ROOT/rules/workflow.md" \
-           "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md" \
-           "$REPO_ROOT/hooks/check-workflow-gates.sh" "$REPO_ROOT/hooks/check-workflow-gates.ps1"; do
-    bn=$(basename "$doc")
-    # Catch variableized diagnostic forms too ($TOOL/$tool interpolations in hooks).
-    # Exempt explicit legacy/back-compat labels. ALSO exempt the gate hooks'
-    # "Canonical clean-line stem ... parity check" anchor comments — those
-    # DOCUMENT the stem the test keys on, they do not INSTRUCT the agent to use
-    # the old form. The anchor label sits on the matched line OR the line just
-    # above it (the comment wraps), so check a 1-line lookbehind too.
-    LABEL_RE='legacy|back-compat|parity check|Canonical clean-line stem'
-    BAD=""
-    while IFS=: read -r ln _; do
-        [ -z "$ln" ] && continue
-        # matched line itself labeled?
-        sed -n "${ln}p" "$doc" | grep -qiE "$LABEL_RE" && continue
-        # immediately-preceding line labeled (wrapped anchor comment)?
-        if [ "$ln" -gt 1 ]; then
-            sed -n "$((ln-1))p" "$doc" | grep -qiE "$LABEL_RE" && continue
-        fi
-        BAD="$BAD ${ln}:$(sed -n "${ln}p" "$doc")"
-    done < <(grep -nE '(\$TOOL|\$tool|codex|pr-toolkit) clean — head=' "$doc" | cut -d: -f1)
-    BAD="${BAD# }"
-    if [ -z "$BAD" ]; then
-        pass "$bn: no unlabeled legacy head-only evidence instructions"
+start_test "convergence-breaker: POST_CERT_REVIEW_ROUND_LIMIT=3 canonical in the helper + name mirrored to prose"
+# The numeric definition lives in the .sh helper; the .ps1 twin mirrors it.
+if grep -qE 'POST_CERT_REVIEW_ROUND_LIMIT=3' "$REPO_ROOT/hooks/lib/review-breaker.sh"; then
+    pass "review-breaker.sh defines POST_CERT_REVIEW_ROUND_LIMIT=3"
+else
+    fail "review-breaker.sh missing POST_CERT_REVIEW_ROUND_LIMIT=3"
+fi
+if grep -qE 'POST_CERT_REVIEW_ROUND_LIMIT = 3' "$REPO_ROOT/hooks/lib/review-breaker.ps1"; then
+    pass "review-breaker.ps1 mirrors POST_CERT_REVIEW_ROUND_LIMIT = 3"
+else
+    fail "review-breaker.ps1 missing POST_CERT_REVIEW_ROUND_LIMIT = 3"
+fi
+# The literal constant name must appear in the prose that documents the breaker.
+for f in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
+    if grep -qF "POST_CERT_REVIEW_ROUND_LIMIT" "$REPO_ROOT/$f"; then
+        pass "$(basename "$f") names the POST_CERT_REVIEW_ROUND_LIMIT constant"
     else
-        fail "$bn still teaches unlabeled legacy head-only evidence lines: $BAD"
+        fail "$(basename "$f") missing the literal POST_CERT_REVIEW_ROUND_LIMIT constant name"
     fi
 done
 
-# --- Breaker is human-only: the /goal council instruction carries the carve-out
-# in BOTH sites per command file (the printed /goal string AND the critical-
-# reminder DO-bullet) — one contradictory leftover site must fail the contract.
-for f in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md" "$REPO_ROOT/rules/workflow.md"; do
-    assert_contains "$f" "convergence-breaker" "$(basename "$f") names the breaker exception"
+start_test "convergence-breaker: human-only adjudication stem shared across its sites"
+# The exact stem the human records to release a tripped breaker. The agent NEVER
+# writes it; every site that emits/parses it must use the identical phrase, so an
+# edit to one fails CI until the others follow.
+ADJ_STEM='Post-certification tail adjudicated by human'
+for f in state.template.md rules/workflow.md \
+         hooks/check-workflow-gates.sh hooks/check-workflow-gates.ps1; do
+    if grep -qF "$ADJ_STEM" "$REPO_ROOT/$f"; then
+        pass "$(basename "$f") carries the adjudication stem"
+    else
+        fail "$(basename "$f") missing the adjudication stem '$ADJ_STEM'"
+    fi
 done
-for f in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md"; do
+
+start_test "convergence-breaker: PS hooks dot-source the dual-mode helper (never subprocess)"
+# review-breaker.ps1 is dual-mode: the function Invoke-ReviewBreaker RETURNS the
+# sentinels and the consumer hooks must dot-source it (`. $ReviewBreakerPs1`) +
+# CALL the function. A script-style invocation (`& $ReviewBreakerPs1`) or
+# `pwsh -File` would let the helper's standalone `exit` terminate the calling hook
+# mid-validation (the cross-launcher 5.1 hazard documented in default-branch.ps1).
+if grep -qF 'Invoke-ReviewBreaker' "$REPO_ROOT/hooks/lib/review-breaker.ps1"; then
+    pass "review-breaker.ps1 defines the dual-mode Invoke-ReviewBreaker function"
+else
+    fail "review-breaker.ps1 missing the dual-mode Invoke-ReviewBreaker function"
+fi
+for f in hooks/check-workflow-gates.ps1 hooks/build-evidence.ps1; do
     bn=$(basename "$f")
-    CNT=$(grep -c "never substitute /council" "$f" || true)
+    if grep -qF 'Invoke-ReviewBreaker' "$REPO_ROOT/$f"; then
+        pass "$bn calls Invoke-ReviewBreaker"
+    else
+        fail "$bn does not call Invoke-ReviewBreaker"
+    fi
+    if grep -qF '. $ReviewBreakerPs1' "$REPO_ROOT/$f"; then
+        pass "$bn dot-sources the helper (. \$ReviewBreakerPs1)"
+    else
+        fail "$bn does not dot-source the helper (. \$ReviewBreakerPs1)"
+    fi
+    if grep -qF '& $ReviewBreakerPs1' "$REPO_ROOT/$f"; then
+        fail "$bn invokes the helper script-style (& \$ReviewBreakerPs1) — standalone exit can kill the hook"
+    else
+        pass "$bn does not subprocess the helper (no & \$ReviewBreakerPs1)"
+    fi
+    if grep -qF 'pwsh -File' "$REPO_ROOT/$f"; then
+        fail "$bn runs the helper via 'pwsh -File' — not cross-launcher safe (powershell.exe 5.1)"
+    else
+        pass "$bn does not run the helper via 'pwsh -File'"
+    fi
+done
+
+start_test "convergence-breaker: installer twins ship both helper files"
+for inst in setup.sh setup.ps1; do
+    for twin in review-breaker.sh review-breaker.ps1; do
+        if grep -qF "$twin" "$REPO_ROOT/$inst"; then
+            pass "$inst references $twin"
+        else
+            fail "$inst does not ship $twin"
+        fi
+    done
+done
+
+start_test "convergence-breaker: /goal council carve-out + convergence-breaker prose ship in commands + workflow"
+# The breaker is human-only: the /goal council instruction carries the carve-out
+# in BOTH sites per command file (the printed /goal string AND the critical-
+# reminder DO-bullet) — `never substitute /council` must appear >= 2 per command.
+for f in commands/new-feature.md commands/fix-bug.md; do
+    bn=$(basename "$f")
+    CNT=$(grep -c "never substitute /council" "$REPO_ROOT/$f" || true)
     if [ "$CNT" -ge 2 ]; then
         pass "$bn carries the breaker carve-out at both /goal sites ($CNT)"
     else
         fail "$bn breaker carve-out missing from a /goal site (found $CNT, need >=2)"
     fi
 done
-
-# --- Deep-pass configuration surface ships with the template ---
-assert_contains "$REPO_ROOT/CLAUDE.template.md" "## Review Configuration" "template ships the Review Configuration section"
-assert_contains "$REPO_ROOT/CLAUDE.template.md" "deep_pass:"              "template documents the deep_pass key"
-assert_contains "$REPO_ROOT/CLAUDE.template.md" "high-impact-only"        "template documents the narrowing value"
-
-# --- PS hooks invoke the helper in-interpreter (PS 5.1 contract — never pwsh -File),
-# --- via the dual-mode function (script-style & could exit the hook mid-validation) ---
-assert_contains "$REPO_ROOT/hooks/lib/review-scope.ps1" "Invoke-ReviewScope" "ps1 helper is dual-mode (function defined)"
-for f in "$REPO_ROOT/hooks/check-workflow-gates.ps1" "$REPO_ROOT/hooks/build-evidence.ps1"; do
-    bn=$(basename "$f")
-    assert_contains "$f" "Invoke-ReviewScope"     "$bn calls the dot-sourced function"
-    assert_contains "$f" '. $ReviewScopePs1'      "$bn dot-sources the helper"
-    if grep -qF '& $ReviewScopePs1' "$f"; then
-        fail "$bn invokes the helper script-style (& \$ReviewScopePs1) — standalone exit can kill the hook"
+for f in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
+    if grep -qF "convergence-breaker" "$REPO_ROOT/$f"; then
+        pass "$(basename "$f") names the convergence-breaker exception"
     else
-        pass "$bn: no script-style & invocation"
-    fi
-    if grep -q "pwsh -File" "$f"; then
-        fail "$bn spawns pwsh -File (breaks stock Windows PowerShell 5.1)"
-    else
-        pass "$bn: no pwsh -File spawn"
+        fail "$(basename "$f") missing 'convergence-breaker'"
     fi
 done
 
-# --- Installers ship the helper (downstream repos otherwise never receive it) ---
-assert_contains "$REPO_ROOT/setup.sh"  "review-scope.sh"  "setup.sh installs review-scope.sh"
-assert_contains "$REPO_ROOT/setup.sh"  "review-scope.ps1" "setup.sh installs review-scope.ps1"
-assert_contains "$REPO_ROOT/setup.ps1" "review-scope.ps1" "setup.ps1 installs review-scope.ps1"
-assert_contains "$REPO_ROOT/setup.ps1" "review-scope.sh"  "setup.ps1 installs review-scope.sh"
+start_test "convergence-breaker: count-preserving N/A rule documented in workflow.md"
+# An N/A escape after certification must KEEP the iteration count — the
+# `(N iterations) — N/A:` form — or it reads as breaker-counter erasure and trips
+# the breaker (helper fail-closed). The rule prose must show that form.
+if grep -qE 'iterations\) — N/A:' "$REPO_ROOT/rules/workflow.md"; then
+    pass "workflow.md documents the count-preserving '(N iterations) — N/A:' form"
+else
+    fail "workflow.md missing the count-preserving '(N iterations) — N/A:' rule"
+fi
 
-# --- Docs-predicate parity: helper's is_docs() mirrors the gate's _is_doc_path() ---
-# Pin the distinctive curated-basename case pattern byte-identically in both files.
-DOCS_CASE='README|CHANGELOG|LICENSE|NOTICE|AUTHORS|CONTRIBUTORS|CONTRIBUTING|CODE_OF_CONDUCT)'
-assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh" "$DOCS_CASE" "gate has curated docs case"
-assert_contains "$RSH"                                      "$DOCS_CASE" "helper mirrors curated docs case"
-
-# --- Helper parser grammar: the regexes the helper row-parser keys on ---
-for frag in "scope=(full|delta|mechanical)" "— codex deep-pass clean" "Code review loop \\(" "--before"; do
-    assert_contains "$RSH" "$frag" "review-scope.sh parser keys on: $frag"
-done
-
-# --- Parser-grammar parity: the regex/match fragments must exist verbatim in BOTH hooks ---
-for frag in "scope=(full|delta)" "scope=mechanical" "SCOPE_REQUIRED:mechanical" "Post-certification tail adjudicated by human" "POST_CERT_ROUNDS" "BREAKER:tripped"; do
-    assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "$frag" "sh gate parses: $frag"
-    assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "$frag" "ps1 gate parses: $frag"
-done
-assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "mechanical claim rejected" "sh gate recomputes mechanical claims"
-assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "mechanical claim rejected" "ps1 gate recomputes mechanical claims"
-for frag in "post_cert_rounds" "breaker"; do
-    assert_contains "$REPO_ROOT/hooks/build-evidence.sh"  "$frag" "build-evidence exposes: $frag"
-    assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" "$frag" "ps1 build-evidence exposes: $frag"
-done
-# Breaker wired into readiness (pr_ready=false while tripped)
-assert_contains "$REPO_ROOT/hooks/build-evidence.sh"  'BREAKER_OK' "sh pr_ready ANDs the breaker"
-assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" 'BreakerOk'  "ps1 pr_ready ANDs the breaker"
-# Helper sentinel vocabulary present in BOTH helper twins (full emit set)
-for s in "CERTIFIED:" "LAST_CLEAN_HEAD:" "ANCESTOR_OK:" "PR_OWNED_DELTA:" "UPSTREAM_FILES:" "SCOPE_REQUIRED:" "POST_CERT_ROUNDS:" "BREAKER:" "ADJUDICATED:"; do
-    assert_contains "$RSH" "$s" "review-scope.sh emits $s"
-    assert_contains "$REPO_ROOT/hooks/lib/review-scope.ps1" "$s" "review-scope.ps1 emits $s"
-done
-assert_contains "$REPO_ROOT/commands/codex.md" "developer_instructions" "codex.md documents the interaction-clause injection"
-# Discriminating pins for the NEW scoped-delta dispatch row (iter-14 P2 —
-# 'developer_instructions' already exists in today's codex.md, so it alone
-# cannot prove the row was added):
-assert_contains "$REPO_ROOT/commands/codex.md" "Scoped delta review"          "codex.md carries the scoped-delta row"
-assert_contains "$REPO_ROOT/commands/codex.md" "last-clean-head"              "codex.md scoped row names the delta base"
-assert_contains "$REPO_ROOT/commands/codex.md" "NOT findings targets"         "codex.md scoped row carries the upstream-not-findings clause"
-assert_contains "$REPO_ROOT/rules/workflow.md" "Scoped delta review: findings are limited to" "delta dispatch scope statement pinned (PR-owned semantics)"
-assert_contains "$REPO_ROOT/rules/workflow.md" "NOT findings targets" "upstream-not-findings clause pinned"
-assert_contains "$REPO_ROOT/rules/workflow.md" "git log --first-parent" "PR-owned commit-list derivation pinned (merges INCLUDED)"
-assert_contains "$REPO_ROOT/rules/workflow.md" "remerge-diff"          "merge-resolution evidence pinned"
-assert_contains "$REPO_ROOT/rules/workflow.md" "interaction surface cannot be bounded" "unbounded/high-impact interaction halt pinned"
-assert_contains "$REPO_ROOT/rules/workflow.md" "git fetch origin --quiet" "pre-scope freshness fetch pinned"
-assert_contains "$REPO_ROOT/rules/workflow.md" "mechanical is off the table" "fetch-failure mechanical lockout pinned"
-
-# --- PowerShell helper parity (iter-7 P2): constant + docs predicate anchors ---
-assert_contains "$REPO_ROOT/hooks/lib/review-scope.ps1" "POST_CERT_REVIEW_ROUND_LIMIT" "ps1 names the breaker constant"
-assert_contains "$REPO_ROOT/hooks/lib/review-scope.ps1" "= 3"                          "ps1 breaker limit is 3"
-for anchor in "CODE_OF_CONDUCT" "docs/" ".mdx"; do
-    assert_contains "$REPO_ROOT/hooks/lib/review-scope.ps1" "$anchor" "ps1 docs predicate carries: $anchor"
-done
 
 # ---------------------------------------------------------------------------
 # Report

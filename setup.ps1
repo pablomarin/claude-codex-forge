@@ -727,8 +727,8 @@ $libDir = ".claude\hooks\lib"
 if (-not (Test-Path $libDir)) { New-Item -ItemType Directory -Path $libDir -Force | Out-Null }
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "default-branch.ps1") "$libDir\default-branch.ps1" "$libDir\default-branch.ps1 (default-branch detection helper, PowerShell)"
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "default-branch.sh") "$libDir\default-branch.sh" "$libDir\default-branch.sh (default-branch detection helper, bash — used by commands/*.md preflight)"
-Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "review-scope.sh") "$libDir\review-scope.sh" "$libDir\review-scope.sh (review scope/breaker helper, bash — used by gate hooks + commands)"
-Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "review-scope.ps1") "$libDir\review-scope.ps1" "$libDir\review-scope.ps1 (review scope/breaker helper, v5.54)"
+Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "review-breaker.sh") "$libDir\review-breaker.sh" "$libDir\review-breaker.sh (review-loop convergence breaker, v5.54)"
+Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "review-breaker.ps1") "$libDir\review-breaker.ps1" "$libDir\review-breaker.ps1 (review-loop convergence breaker, v5.54)"
 # codex-pty shim — work around openai/codex#19945 (silent empty exit when codex
 # exec runs without a controlling TTY). Both .ps1 + .sh + helper.py ship for
 # cross-platform parity (ADR 0005).

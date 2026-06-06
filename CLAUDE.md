@@ -165,8 +165,8 @@ Templates in the root are **source of truth**. `setup.sh` copies them to target 
 | `hooks/*`                                 | `.claude/hooks/*` in target project                                                                                         |
 | `hooks/lib/default-branch.sh`             | `.claude/hooks/lib/default-branch.sh` in target project                                                                     |
 | `hooks/lib/default-branch.ps1`            | `.claude/hooks/lib/default-branch.ps1` in target project                                                                    |
-| `hooks/lib/review-scope.sh`               | `.claude/hooks/lib/review-scope.sh` in target project                                                                       |
-| `hooks/lib/review-scope.ps1`              | `.claude/hooks/lib/review-scope.ps1` in target project                                                                      |
+| `hooks/lib/review-breaker.sh`             | `.claude/hooks/lib/review-breaker.sh` in target project                                                                     |
+| `hooks/lib/review-breaker.ps1`            | `.claude/hooks/lib/review-breaker.ps1` in target project                                                                    |
 | `hooks/lib/codex-pty.sh`                  | `.claude/hooks/lib/codex-pty.sh` in target project                                                                          |
 | `hooks/lib/codex-pty.ps1`                 | `.claude/hooks/lib/codex-pty.ps1` in target project                                                                         |
 | `hooks/lib/codex-pty-helper.py`           | `.claude/hooks/lib/codex-pty-helper.py` in target project                                                                   |

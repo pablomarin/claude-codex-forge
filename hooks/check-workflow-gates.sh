@@ -264,14 +264,14 @@ fi
 # ADJUDICATED is the helper's own head-bound detection of the human adjudication
 # line (single-sourced parser). For non-workflow repos / uncertified branches the
 # helper emits BREAKER:ok, so this block is inert.
-RS="$_TOPLEVEL/.claude/hooks/lib/review-scope.sh"
-[ ! -f "$RS" ] && RS="$_TOPLEVEL/hooks/lib/review-scope.sh"
+RS="$_TOPLEVEL/.claude/hooks/lib/review-breaker.sh"
+[ ! -f "$RS" ] && RS="$_TOPLEVEL/hooks/lib/review-breaker.sh"
 BRK_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 if [ -n "$BRK_HEAD" ] && [ -f "$RS" ] && [ -f "$STATE_FILE" ]; then
     RS_OUT2=$(bash "$RS" "$STATE_FILE" 2>/dev/null)
     if echo "$RS_OUT2" | grep -q "BREAKER:tripped" && echo "$RS_OUT2" | grep -q "ADJUDICATED:no"; then
         echo "WORKFLOW GATE: convergence breaker — POST_CERT_REVIEW_ROUND_LIMIT exceeded." >&2
-        echo "$RS_OUT2" | grep -E "POST_CERT_ROUNDS|LAST_CLEAN_HEAD" >&2
+        echo "$RS_OUT2" | grep -E "POST_CERT_ROUNDS" >&2
         echo "" >&2
         echo "The review loop is not converging. STOP and surface the open tail" >&2
         echo "(severities + in-delta vs certified-unchanged) to the human. Ship is" >&2
@@ -699,174 +699,59 @@ fi
 if [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
     CODE_N=$(echo "$CODE_PASS_LINE" | sed -E 's/.*Code review loop \(([0-9]+) iterations\).*/\1/')
 
-    # --- v5.54 scoped-review-certification (ADR 0009) ---------------------------
-    # $RS was resolved by the convergence-breaker block above (installed path,
-    # then forge-internal source path). A mechanical re-stamp row CAN satisfy
-    # iteration N WITHOUT an engine pair — it is the evidence by design — so
-    # compute MECH_LINE FIRST and gate the legacy pair checks on its absence.
-    MECH_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
-        | grep -E "^\s*-\s*\[x\]\s+Code review iteration $CODE_N — mechanical re-stamp — scope=mechanical — " | tail -1)
-
-    # Prior-chain context: helper computed EXCLUDING the current iteration's rows,
-    # so LAST_CLEAN_HEAD/CERTIFIED describe the state this iteration must chain from.
-    RS_PRIOR=$([ -f "$RS" ] && bash "$RS" "$STATE_FILE" --before "$CODE_N" 2>/dev/null || echo "")
-    PRIOR_CERTIFIED=$(echo "$RS_PRIOR" | grep -c "CERTIFIED:yes" || true)
-    PRIOR_CLEAN_HEAD=$(echo "$RS_PRIOR" | sed -n 's/^LAST_CLEAN_HEAD://p')
-
-    # Validate codex side (last-line semantics — defensive against stale duplicates).
-    # Exclude the deliberate deep-pass row (`— codex deep-pass clean —`): it is a
-    # SEPARATE tool recorded at the same iteration and must not be tailed into the
-    # `— codex clean —` variant check (false-block on the certified happy path).
+    # Validate codex side (last-line semantics — defensive against stale duplicates)
     CODEX_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
         | grep -E "^\s*-\s*\[x\]\s+Code review iteration $CODE_N — codex " \
-        | grep -v -- "— codex deep-pass" \
         | tail -1)
     TOOLKIT_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
         | grep -E "^\s*-\s*\[x\]\s+Code review iteration $CODE_N — pr-toolkit " \
         | tail -1)
 
-    # The engine pair is required ONLY when there is no mechanical re-stamp for
-    # this iteration. When MECH_LINE exists, the mechanical line IS the evidence
-    # (validated in the scoped branch below) and the pair is absent by design.
-    if [ -z "$MECH_LINE" ]; then
-        if [ -z "$CODEX_LINE" ] || [ -z "$TOOLKIT_LINE" ]; then
-            echo "WORKFLOW GATE: [x] Code review loop ($CODE_N iterations) — PASS lacks per-iter clean evidence." >&2
+    if [ -z "$CODEX_LINE" ] || [ -z "$TOOLKIT_LINE" ]; then
+        echo "WORKFLOW GATE: [x] Code review loop ($CODE_N iterations) — PASS lacks per-iter clean evidence." >&2
+        echo "" >&2
+        echo "Required: matching lines in state.md (### Checklist):" >&2
+        echo "  - [x] Code review iteration $CODE_N — codex clean — head=\`$HEAD_SHA\`" >&2
+        echo "  - [x] Code review iteration $CODE_N — pr-toolkit clean — head=\`$HEAD_SHA\`" >&2
+        echo "" >&2
+        echo "Run iter-$CODE_N reviewers + append both clean lines, OR uncheck the loop." >&2
+        exit 2
+    fi
+
+    # Per-line validation: head match required, then both must be `<tool> clean`.
+    # Codex is mandatory — no "tool unavailable" escapes.
+    for tool_line in "codex:$CODEX_LINE" "pr-toolkit:$TOOLKIT_LINE"; do
+        TOOL=$(echo "$tool_line" | cut -d: -f1)
+        LINE=$(echo "$tool_line" | cut -d: -f2-)
+
+        # Every line must carry head=`<sha>` matching current HEAD —
+        # binds the clean claim to the exact HEAD being shipped.
+        LINE_HEAD=$(echo "$LINE" | sed -E 's/.*head=`([0-9a-f]+)`.*/\1/')
+        if ! echo "$LINE" | grep -qE 'head=`[0-9a-f]+`'; then
+            echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line missing head=\`<sha>\`." >&2
+            echo "Got: $LINE" >&2
+            exit 2
+        fi
+        if [ "$LINE_HEAD" != "$HEAD_SHA" ]; then
+            echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line is at a stale HEAD (head mismatch)." >&2
+            echo "  Line head:    $LINE_HEAD" >&2
+            echo "  Current head: $HEAD_SHA" >&2
             echo "" >&2
-            echo "Required: matching lines in state.md (### Checklist):" >&2
-            echo "  - [x] Code review iteration $CODE_N — codex clean — scope=full — base=\`<merge-base>\` — head=\`$HEAD_SHA\`" >&2
-            echo "  - [x] Code review iteration $CODE_N — pr-toolkit clean — scope=full — base=\`<merge-base>\` — head=\`$HEAD_SHA\`" >&2
-            echo "  (legacy form codex clean — head=\`<sha>\` is back-compat — certification only)" >&2
-            echo "" >&2
-            echo "Run iter-$CODE_N reviewers + append both clean lines, OR uncheck the loop." >&2
+            echo "New commits landed since iter-$CODE_N. Re-run $TOOL at current head." >&2
             exit 2
         fi
 
-        # Per-line validation: head match required, then both must be `<tool> clean`.
-        # Codex is mandatory — no "tool unavailable" escapes.
-        for tool_line in "codex:$CODEX_LINE" "pr-toolkit:$TOOLKIT_LINE"; do
-            TOOL=$(echo "$tool_line" | cut -d: -f1)
-            LINE=$(echo "$tool_line" | cut -d: -f2-)
-
-            # Every line must carry head=`<sha>` matching current HEAD —
-            # binds the clean claim to the exact HEAD being shipped.
-            LINE_HEAD=$(echo "$LINE" | sed -E 's/.*head=`([0-9a-f]+)`.*/\1/')
-            if ! echo "$LINE" | grep -qE 'head=`[0-9a-f]+`'; then
-                echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line missing head=\`<sha>\`." >&2
-                echo "Got: $LINE" >&2
-                exit 2
-            fi
-            if [ "$LINE_HEAD" != "$HEAD_SHA" ]; then
-                echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line is at a stale HEAD (head mismatch)." >&2
-                echo "  Line head:    $LINE_HEAD" >&2
-                echo "  Current head: $HEAD_SHA" >&2
-                echo "" >&2
-                echo "New commits landed since iter-$CODE_N. Re-run $TOOL at current head." >&2
-                exit 2
-            fi
-
-            if echo "$LINE" | grep -qF -- "— $TOOL clean —"; then
-                : # clean variant — head already verified above
-            else
-                echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line variant not recognized." >&2
-                echo "Got: $LINE" >&2
-                echo "" >&2
-                echo "Codex is mandatory in this repo. Required: $TOOL clean — scope=full — base=\`<merge-base>\` — head=\`<sha>\`," >&2
-                echo "or the legacy form $TOOL clean — head=\`<sha>\` (legacy back-compat — certification only)," >&2
-                echo "or mark the loop N/A:  - [x] Code review loop — N/A: <reason>" >&2
-                exit 2
-            fi
-        done
-    fi
-
-    if [ -n "$MECH_LINE" ]; then
-        # A mechanical re-stamp claims no review was needed. NEVER trust it —
-        # it requires an existing certification, a correct chain base, AND the
-        # helper's own recomputation agreeing for the current head.
-        M_HEAD=$(echo "$MECH_LINE" | sed -E 's/.*head=`([0-9a-f]+)`.*/\1/')
-        M_BASE=$(echo "$MECH_LINE" | sed -E 's/.*base=`([0-9a-f]+)`.*/\1/')
-        if [ ! -f "$RS" ] || [ "$M_HEAD" != "$HEAD_SHA" ] || [ "$PRIOR_CERTIFIED" -eq 0 ] \
-           || [ -z "$M_BASE" ] || [ "$M_BASE" != "$PRIOR_CLEAN_HEAD" ]; then
-            echo "WORKFLOW GATE: mechanical re-stamp invalid (requires certification, base=prior clean head \`${PRIOR_CLEAN_HEAD:-<none>}\`, head=current HEAD)." >&2
-            echo "Got: $MECH_LINE" >&2; exit 2
+        if echo "$LINE" | grep -qF -- "— $TOOL clean —"; then
+            : # clean variant — head already verified above
+        else
+            echo "WORKFLOW GATE: Code review iteration $CODE_N $TOOL line variant not recognized." >&2
+            echo "Got: $LINE" >&2
+            echo "" >&2
+            echo "Codex is mandatory in this repo. Required: $TOOL clean — head=\`<sha>\`," >&2
+            echo "or mark the loop N/A:  - [x] Code review loop — N/A: <reason>" >&2
+            exit 2
         fi
-        # Recompute with the CURRENT iteration's rows EXCLUDED (--before $CODE_N,
-        # i.e. $RS_PRIOR) — a full-state run would let the mechanical row advance
-        # LAST_CLEAN_HEAD to its own head and validate itself (Codex iter-2 P1).
-        if ! echo "$RS_PRIOR" | grep -q "SCOPE_REQUIRED:mechanical"; then
-            echo "WORKFLOW GATE: mechanical claim rejected — recomputation says a review is required:" >&2
-            echo "$RS_PRIOR" | grep -E "PR_OWNED_DELTA|UPSTREAM_FILES|SCOPE_REQUIRED|ANCESTOR_OK" >&2
-            echo "Run the required review scope and record real evidence." >&2; exit 2
-        fi
-    else
-        # Engine-pair path (existing loop already validated head + clean variant).
-        # Collect per-line scope/base, then validate the PAIR — both engines must
-        # have reviewed the SAME thing (iter-3 P1: a mixed full/delta pair, or two
-        # delta lines with different bases, is not a coherent review round).
-        C_SCOPE=""; C_BASE=""; T_SCOPE=""; T_BASE=""
-        for tool_line in "codex:$CODEX_LINE" "pr-toolkit:$TOOLKIT_LINE"; do
-            TOOL=$(echo "$tool_line" | cut -d: -f1)
-            LINE=$(echo "$tool_line" | cut -d: -f2-)
-            if echo "$LINE" | grep -q "scope="; then
-                # Any scoped line must carry a well-formed base (full grammar).
-                # Delimiter-bound value: scope=fullish must NOT pass as full.
-                echo "$LINE" | grep -qE "scope=(full|delta)([[:space:]]|$)" || {
-                    echo "WORKFLOW GATE: unknown scope value on iteration $CODE_N line." >&2
-                    echo "Got: $LINE" >&2; exit 2; }
-                echo "$LINE" | grep -qE 'base=`[0-9a-f]+`' || {
-                    echo "WORKFLOW GATE: scoped iteration $CODE_N line missing base=\`<sha>\`." >&2
-                    echo "Got: $LINE" >&2; exit 2; }
-                L_SCOPE=$(echo "$LINE" | sed -E 's/.*scope=(full|delta)([[:space:]]|$).*/\1/')
-                L_BASE=$(echo "$LINE" | sed -E 's/.*base=`([0-9a-f]+)`.*/\1/')
-            else
-                # Scope-less LEGACY pair: valid ONLY as certification evidence —
-                # i.e., when no certification existed before this iteration. After
-                # certification, every re-review must be scoped (spec: legacy lines
-                # "never satisfy a rebind").
-                if [ "$PRIOR_CERTIFIED" -gt 0 ]; then
-                    echo "WORKFLOW GATE: post-certification evidence must be scoped (scope=full|delta or a mechanical re-stamp)." >&2
-                    echo "Got legacy scope-less line: $LINE" >&2; exit 2
-                fi
-                L_SCOPE="legacy"; L_BASE=""
-            fi
-            if [ "$TOOL" = "codex" ]; then C_SCOPE="$L_SCOPE"; C_BASE="$L_BASE"
-            else T_SCOPE="$L_SCOPE"; T_BASE="$L_BASE"; fi
-        done
-        if [ "$C_SCOPE" != "$T_SCOPE" ] || [ "$C_BASE" != "$T_BASE" ]; then
-            echo "WORKFLOW GATE: incoherent reviewer pair on iteration $CODE_N — both engines must review the same scope from the same base." >&2
-            echo "  codex:      scope=$C_SCOPE base=${C_BASE:-<none>}" >&2
-            echo "  pr-toolkit: scope=$T_SCOPE base=${T_BASE:-<none>}" >&2; exit 2
-        fi
-        if [ "$C_SCOPE" = "delta" ]; then
-            if [ "$PRIOR_CERTIFIED" -eq 0 ] || [ -z "$PRIOR_CLEAN_HEAD" ] || [ "$C_BASE" != "$PRIOR_CLEAN_HEAD" ]; then
-                echo "WORKFLOW GATE: scope=delta base chain broken on iteration $CODE_N." >&2
-                echo "  Claimed base: $C_BASE   Prior clean head: ${PRIOR_CLEAN_HEAD:-<none>}" >&2
-                echo "A delta review must chain from the previous clean evidence head." >&2; exit 2
-            fi
-            # A delta claim is only as good as the identity computation behind it:
-            # after a rebase/amend the helper says ANCESTOR_OK:no + SCOPE_REQUIRED:full —
-            # a forged delta from the old clean head must not pass (iter-4 P1).
-            if ! echo "$RS_PRIOR" | grep -q "ANCESTOR_OK:yes" \
-               || echo "$RS_PRIOR" | grep -q "SCOPE_REQUIRED:full"; then
-                echo "WORKFLOW GATE: scope=delta rejected — recomputation requires a FULL review here:" >&2
-                echo "$RS_PRIOR" | grep -E "ANCESTOR_OK|SCOPE_REQUIRED|LAST_CLEAN_HEAD" >&2
-                echo "(history was rewritten or identity is unestablishable — fail-closed to full)" >&2; exit 2
-            fi
-        elif [ "$C_SCOPE" = "full" ]; then
-            # A scope=full base must be the TRUE merge-base for the current head
-            # (same DEFAULT_REF resolution as review-scope.sh — fabrication guard).
-            # Deliberately re-derived here rather than emitted by the helper: the
-            # consumers stay self-contained validators (a helper-output change can
-            # never silently weaken the full-base check).
-            GATE_DB=$(bash "${RS%/*}/default-branch.sh" 2>/dev/null || echo main)
-            GATE_REF="$GATE_DB"
-            git rev-parse --verify "origin/$GATE_DB" >/dev/null 2>&1 && GATE_REF="origin/$GATE_DB"
-            GATE_MB=$(git merge-base "$GATE_REF" "$HEAD_SHA" 2>/dev/null || echo "")
-            if [ -z "$GATE_MB" ] || [ "$C_BASE" != "$GATE_MB" ]; then
-                echo "WORKFLOW GATE: scope=full base on iteration $CODE_N is not the merge-base for this head." >&2
-                echo "  Claimed base: $C_BASE   Merge-base($GATE_REF, HEAD): ${GATE_MB:-<unresolvable>}" >&2; exit 2
-            fi
-        fi
-    fi
+    done
 fi
 
 exit 0

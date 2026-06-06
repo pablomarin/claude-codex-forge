@@ -112,19 +112,14 @@ You (Claude) are responsible for updating this file. The Stop hook reminds you o
 
 **On code-review iteration completion (during a `/forge-goal`-driven run):**
 
-1. Append scoped checklist line(s) to `### Checklist` capturing the iteration number, tool, scope, base, and HEAD SHA. Scoped evidence is a COHERENT PAIR — both engines, same scope, same base, same head (a mixed pair is rejected by the gate). The first clean pass is **certification** (a `scope=full` pair); post-certification re-reviews scope to the PR-owned delta. Full grammar and dispatch model live in `rules/workflow.md` "Certification + scoped re-reviews". The seven canonical forms:
-   - `- [x] Code review iteration <N> — codex clean — scope=full — base=\`<merge-base-sha>\` — head=\`<sha>\``
-   - `- [x] Code review iteration <N> — pr-toolkit clean — scope=full — base=\`<merge-base-sha>\` — head=\`<sha>\``
-   - `- [x] Code review iteration <N> — codex clean — scope=delta — base=\`<last-clean-head>\` — head=\`<sha>\``
-   - `- [x] Code review iteration <N> — pr-toolkit clean — scope=delta — base=\`<last-clean-head>\` — head=\`<sha>\``
-   - `- [x] Code review iteration <N> — mechanical re-stamp — scope=mechanical — base=\`<last-clean-head>\` — head=\`<sha>\`` (no reviewer ran — valid only when the gate's recomputation agrees)
-   - `- [x] Code review iteration <N> — codex deep-pass clean — scope=full — base=\`<merge-base-sha>\` — head=\`<sha>\``(informational — never substitutes for the loop's`codex clean` row)
-   - `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\`` (HUMAN-only — unblocks a tripped convergence breaker; the agent NEVER writes this on its own initiative)
-   - Back-compat (legacy pre-v5.54 form, accepted only as certification evidence): `- [x] Code review iteration <N> — codex clean — head=\`<sha>\`` — new workflows MUST use the scoped grammar above.
-2. For a `scope=full` or `scope=delta` PAIR, both `codex clean` AND `pr-toolkit clean` must be present for the SAME iteration AND at the SAME current HEAD for the `reviewer_gate.clean_same_iteration` evidence to be true.
+1. Append a checklist line to `### Checklist` capturing the iteration number, tool, and HEAD SHA:
+   - `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``
+   - `- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``
+2. Both `codex clean` AND `pr-toolkit clean` must be present for the SAME iteration AND at the SAME current HEAD for the `reviewer_gate.clean_same_iteration` evidence to be true.
 3. If a fix changes HEAD, re-run reviewers and append a NEW iteration row; do NOT mutate existing rows.
-4. **Convergence breaker / adjudication:** more than POST_CERT_REVIEW_ROUND_LIMIT (=3) rounds past certification, or a fix round that introduces a new P0/P1 in its own delta → STOP. In a `/goal` run, write a `## Blockers` line and HALT for the human (council may be invoked BY the human only — never as the autonomous risk-acceptor). The gate hook blocks ship while the breaker is tripped until the human appends the `Post-certification tail adjudicated by human` line above.
-5. **N/A is count-preserving after certification:** if the loop line carries an iteration count, an N/A escape must keep it — `- [x] Code review loop (<N> iterations) — N/A: <reason>`; a count-less `Code review loop — N/A:` line after certification reads as breaker-counter erasure and trips the breaker (helper fail-closed).
+4. **Convergence breaker (v5.54):** after the first both-engines-clean iteration (certification), more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
+   - `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\``
+   The line is head-bound; the agent never writes it on its own initiative. If the loop line carries an iteration count, an N/A escape must KEEP it (`- [x] Code review loop (<N> iterations) — N/A: <reason>`) — a count-less `Code review loop — N/A:` after certification reads as counter erasure and trips the breaker.
 
 **On plan-review iteration completion (during any complex-fix workflow):**
 
