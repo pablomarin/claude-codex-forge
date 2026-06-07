@@ -117,6 +117,9 @@ You (Claude) are responsible for updating this file. The Stop hook reminds you o
    - `- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``
 2. Both `codex clean` AND `pr-toolkit clean` must be present for the SAME iteration AND at the SAME current HEAD for the `reviewer_gate.clean_same_iteration` evidence to be true.
 3. If a fix changes HEAD, re-run reviewers and append a NEW iteration row; do NOT mutate existing rows.
+4. **Convergence breaker (v5.54):** after the first both-engines-clean iteration (certification), more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
+   - `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\``
+   The line is head-bound; the agent never writes it on its own initiative. If the loop line carries an iteration count, an N/A escape must KEEP it (`- [x] Code review loop (<N> iterations) — N/A: <reason>`) — a count-less `Code review loop — N/A:` after certification reads as counter erasure and trips the breaker.
 
 **On plan-review iteration completion (during any complex-fix workflow):**
 

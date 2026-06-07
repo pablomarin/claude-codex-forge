@@ -426,6 +426,153 @@ OUT="$scratch/.out"
 assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":false' \
     "plan_review_gate stays false on an N/A escape (no real Codex evidence)"
 
+
+# ===========================================================================
+# Convergence breaker (v5.54, ADR 0009) — post_cert_rounds / breaker fields +
+# the breaker→pr_ready suppression. These build REAL scratch git repos with the
+# review-breaker.sh helper installed under .claude/hooks/lib/ (the dual-path the
+# hook resolves RS from). build-evidence must apply the SAME helper-backed breaker
+# as the ship gate, so /goal readiness is never a weaker parser.
+# ===========================================================================
+
+# bev_scope_repo: scratch repo with main + feat branch + one feature commit. Sets
+# R. .claude/ MUST be gitignored so `add -A` on either branch never tracks the
+# helper/state and clobbers them on checkout.
+bev_scope_repo() {
+    R="$(scratch_dir bev-brk)"
+    git -C "$R" init -q -b main
+    git -C "$R" config user.email t@t.t; git -C "$R" config user.name t
+    mkdir -p "$R/src"
+    echo ".claude/" > "$R/.gitignore"
+    echo "base" > "$R/src/app.py"
+    git -C "$R" add -A; git -C "$R" commit -qm base
+    git -C "$R" checkout -qb feat
+    echo "feature" >> "$R/src/app.py"
+    git -C "$R" add -A; git -C "$R" commit -qm feat1
+}
+
+# bev_install_helper <repo>: copy ONLY review-breaker.sh into the scratch repo's
+# .claude/hooks/lib/ (the dual-path resolution path). The helper does not source
+# default-branch.sh, so it is not copied. Without this, every case silently
+# exercises the fail-open path.
+bev_install_helper() {
+    local r="$1"
+    mkdir -p "$r/.claude/hooks/lib"
+    cp "$REPO_ROOT/hooks/lib/review-breaker.sh" "$r/.claude/hooks/lib/"
+}
+
+# bev_run_fullgreen <repo>: run build-evidence with a gh stub returning an OPEN PR
+# at the current HEAD + a fresh E2E report. Used by the breaker cases that must
+# show pr_ready=false WITH all OTHER gates satisfied. Caller must have placed a
+# legacy clean pair at HEAD (RG_CLEAN) + a /goal session + PR-authorization line at
+# HEAD (PA_AUTH) in state.md already.
+bev_run_fullgreen() {
+    local r="$1"
+    mkdir -p "$r/bin"
+    local head; head="$(git -C "$r" rev-parse HEAD)"
+    cat > "$r/bin/gh" <<STUB
+#!/usr/bin/env bash
+if [ "\$1" != "pr" ] || [ "\$2" != "view" ]; then echo "{}"; exit 0; fi
+echo "{\"number\":42,\"url\":\"https://x/pr/42\",\"state\":\"OPEN\",\"headRefOid\":\"${head}\",\"baseRefName\":\"main\",\"headRefName\":\"feat\"}"
+STUB
+    chmod +x "$r/bin/gh"
+    # Fresh E2E report (mtime later than branch-off).
+    mkdir -p "$r/tests/e2e/reports"
+    local boff_ts future
+    boff_ts="$(git -C "$r" log -1 --format=%ct "$(git -C "$r" merge-base main HEAD)")"
+    future=$(( boff_ts + 120 ))
+    echo "report" > "$r/tests/e2e/reports/r.md"
+    if touch -t "$(date -d "@$future" +%Y%m%d%H%M.%S 2>/dev/null)" "$r/tests/e2e/reports/r.md" 2>/dev/null; then :
+    elif touch -t "$(date -r "$future" +%Y%m%d%H%M.%S 2>/dev/null)" "$r/tests/e2e/reports/r.md" 2>/dev/null; then :
+    else sleep 2 && touch "$r/tests/e2e/reports/r.md"; fi
+    GATE_OUT="$r/.bev.out"
+    ( cd "$r" && PATH="$r/bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$GATE_OUT" 2>&1
+}
+
+# bev_breaker_state <repo> <head> <extra>: active ## Workflow whose breaker is
+# tripped (loop 5, certifying legacy pair at iteration 1 at HEAD → post_cert_rounds
+# = 4 > limit), with a /goal session + PR-authorization line at HEAD. The certifying
+# pair at HEAD also makes the legacy reviewer_gate clean (RG_CLEAN). $3 is appended
+# inside the checklist (e.g. an adjudication line).
+bev_breaker_state() {
+    local r="$1" h="$2" extra="$3"
+    local nonce="00000000-0000-0000-0000-000000000099"
+    mkdir -p "$r/.claude/local"
+    { echo "## Workflow"; echo
+      echo "| Field | Value |"
+      echo "| Command | /new-feature x |"
+      echo
+      echo "### Checklist"; echo
+      echo "- [ ] Code review loop (5 iterations) — iterate until no P0/P1/P2"
+      echo "- [x] Code review iteration 1 — codex clean — head=\`${h}\`"
+      echo "- [x] Code review iteration 1 — pr-toolkit clean — head=\`${h}\`"
+      [ -n "$extra" ] && printf '%s\n' "$extra"
+      echo
+      echo "## /goal session"; echo
+      echo "| Field | Value |"
+      echo "| nonce | ${nonce} |"
+      echo "| workflow_command | /new-feature x |"
+      echo
+      echo "- [x] PR creation authorized — \`2026-06-06T00:00:00Z\` — nonce=\`${nonce}\` — head=\`${h}\`"
+    } > "$r/.claude/local/state.md"
+}
+
+# --- Breaker: loop 5 / cert 1 → breaker tripped + pr_ready false (all gates green)
+start_test "bev breaker: post-cert rounds > limit → breaker tripped AND pr_ready false"
+bev_scope_repo; bev_install_helper "$R"
+H="$(git -C "$R" rev-parse HEAD)"
+bev_breaker_state "$R" "$H" ""
+bev_run_fullgreen "$R"
+assert_contains "$GATE_OUT" '"breaker":"tripped"' "loop 5 − cert 1 = 4 > 3 → tripped"
+assert_contains "$GATE_OUT" '"post_cert_rounds":4' "post_cert_rounds = 4"
+assert_contains "$GATE_OUT" '"pr_ready":false' "tripped breaker suppresses pr_ready even with all gates green"
+
+# --- Breaker + adjudication at CURRENT head → pr_ready no longer suppressed
+start_test "bev breaker: adjudication at current head unblocks pr_ready"
+bev_scope_repo; bev_install_helper "$R"
+H="$(git -C "$R" rev-parse HEAD)"
+bev_breaker_state "$R" "$H" \
+    "- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${H}\` — ts=\`2026-06-06T00:00:00Z\`"
+bev_run_fullgreen "$R"
+assert_contains "$GATE_OUT" '"breaker":"tripped"' "breaker still reports tripped (raw count)"
+assert_contains "$GATE_OUT" '"pr_ready":true' "current-head adjudication clears the breaker suppression"
+
+# --- Breaker + adjudication at STALE head → still suppressed
+start_test "bev breaker: adjudication at STALE head keeps pr_ready false"
+bev_scope_repo; bev_install_helper "$R"
+H="$(git -C "$R" rev-parse HEAD)"
+STALE="0000000000000000000000000000000000000000"
+bev_breaker_state "$R" "$H" \
+    "- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${STALE}\` — ts=\`2026-06-06T00:00:00Z\`"
+bev_run_fullgreen "$R"
+assert_contains "$GATE_OUT" '"breaker":"tripped"' "breaker reports tripped"
+assert_contains "$GATE_OUT" '"pr_ready":false' "stale-head adjudication does not clear the breaker"
+
+# --- Helper absent: no installed helper, no source fallback (scratch repo outside
+#     the forge tree) → fields 0/ok, legacy reviewer_gate still computes clean.
+start_test "bev breaker: helper absent → post_cert_rounds 0 / breaker ok, legacy pair still clean"
+bev_scope_repo   # NOTE: bev_install_helper intentionally NOT called.
+# Scratch repo lives in $TMPDIR, outside the forge tree: $TOPLEVEL is the scratch
+# repo, so neither .claude/hooks/lib/review-breaker.sh nor the hooks/lib/ source
+# fallback exists here. build-evidence must fail open: 0/"ok" fields, and a
+# self-contained legacy pair at HEAD still computes the reviewer_gate clean.
+H="$(git -C "$R" rev-parse HEAD)"
+mkdir -p "$R/.claude/local"
+{ echo "## Workflow"; echo
+  echo "| Field | Value |"
+  echo "| Command | /new-feature x |"
+  echo
+  echo "### Checklist"; echo
+  echo "- [x] Code review loop (1 iterations) — PASS"
+  echo "- [x] Code review iteration 1 — codex clean — head=\`${H}\`"
+  echo "- [x] Code review iteration 1 — pr-toolkit clean — head=\`${H}\`"
+} > "$R/.claude/local/state.md"
+GATE_OUT="$R/.bev.out"
+( cd "$R" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$GATE_OUT" 2>&1
+assert_contains "$GATE_OUT" '"post_cert_rounds":0' "helper absent → post_cert_rounds 0 (fail-open)"
+assert_contains "$GATE_OUT" '"breaker":"ok"' "helper absent → breaker ok (fail-open)"
+assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":true' "helper absent → legacy pair still computes clean"
+
 # --- PowerShell parity smoke (only runs if pwsh is on PATH) ---
 if command -v pwsh >/dev/null 2>&1; then
     start_test "build-evidence.ps1 emits markers + valid JSON (Bash-driven smoke)"

@@ -257,6 +257,30 @@ if echo "$COMMAND" | grep -qE "^[[:space:]]*${_ENVP}gh[[:space:]]+pr[[:space:]]+
     fi
 fi
 
+# --- Convergence breaker (hook-enforced backstop; ADR 0009) ---
+# Placement: BEFORE the docs-only commit carve-out and OUTSIDE the PASS-evidence
+# branch — neither a docs-only staged diff, a `Code review loop — N/A:` escape,
+# nor an unchecked loop line may bypass it. Runs on every gated ship action.
+# ADJUDICATED is the helper's own head-bound detection of the human adjudication
+# line (single-sourced parser). For non-workflow repos / uncertified branches the
+# helper emits BREAKER:ok, so this block is inert.
+RS="$_TOPLEVEL/.claude/hooks/lib/review-breaker.sh"
+[ ! -f "$RS" ] && RS="$_TOPLEVEL/hooks/lib/review-breaker.sh"
+BRK_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+if [ -n "$BRK_HEAD" ] && [ -f "$RS" ] && [ -f "$STATE_FILE" ]; then
+    RS_OUT2=$(bash "$RS" "$STATE_FILE" 2>/dev/null)
+    if echo "$RS_OUT2" | grep -q "BREAKER:tripped" && echo "$RS_OUT2" | grep -q "ADJUDICATED:no"; then
+        echo "WORKFLOW GATE: convergence breaker — POST_CERT_REVIEW_ROUND_LIMIT exceeded." >&2
+        echo "$RS_OUT2" | grep -E "POST_CERT_ROUNDS" >&2
+        echo "" >&2
+        echo "The review loop is not converging. STOP and surface the open tail" >&2
+        echo "(severities + in-delta vs certified-unchanged) to the human. Ship is" >&2
+        echo "blocked until the human records:" >&2
+        echo "  - [x] Post-certification tail adjudicated by human — <decision> — head=\`$BRK_HEAD\` — ts=\`<ISO8601>\`" >&2
+        exit 2
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # No-code carve-out (git commit only) — closes the integrity hole
 #

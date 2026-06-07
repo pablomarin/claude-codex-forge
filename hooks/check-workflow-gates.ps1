@@ -245,6 +245,46 @@ if ($command -match $prCreatePattern) {
     }
 }
 
+# --- Convergence breaker (hook-enforced backstop; ADR 0009) ---
+# Placement: BEFORE the docs-only commit carve-out and OUTSIDE the PASS-evidence
+# branch — neither a docs-only staged diff, a `Code review loop — N/A:` escape,
+# nor an unchecked loop line may bypass it. Runs on every gated ship action.
+# ADJUDICATED is the helper's own head-bound detection of the human adjudication
+# line (single-sourced parser). For non-workflow repos / uncertified branches the
+# helper emits BREAKER:ok, so this block is inert.
+#
+# Helper invocation (PS 5.1 contract — mirrors review-breaker.ps1's dual-mode note):
+# DOT-SOURCE the helper and CALL the function — `. $ReviewBreakerPs1` then
+# `Invoke-ReviewBreaker $stateFile`. Do NOT call-operator the script (its
+# standalone entrypoint could `exit` the hook mid-validation) and do NOT spawn a
+# separate pwsh interpreter (the repo ships against powershell.exe 5.1). The
+# function RETURNS the sentinel lines (string array) and never calls `exit` when
+# dot-sourced.
+$ReviewBreakerPs1 = Join-Path $topLevel ".claude\hooks\lib\review-breaker.ps1"
+if (-not (Test-Path -LiteralPath $ReviewBreakerPs1)) {
+    $ReviewBreakerPs1 = Join-Path $topLevel "hooks\lib\review-breaker.ps1"
+}
+$brkHead = ""
+try { $brkHead = ((git rev-parse HEAD 2>$null) -join "").Trim() } catch {}
+if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $stateFile)) {
+    . $ReviewBreakerPs1
+    $rsOut2 = Invoke-ReviewBreaker $stateFile
+    $brkTripped = ($rsOut2 | Where-Object { $_ -eq 'BREAKER:tripped' } | Select-Object -First 1)
+    $adjNo = ($rsOut2 | Where-Object { $_ -eq 'ADJUDICATED:no' } | Select-Object -First 1)
+    if ($brkTripped -and $adjNo) {
+        [Console]::Error.WriteLine("WORKFLOW GATE: convergence breaker — POST_CERT_REVIEW_ROUND_LIMIT exceeded.")
+        foreach ($l in ($rsOut2 | Where-Object { $_ -match '^POST_CERT_ROUNDS' })) {
+            [Console]::Error.WriteLine($l)
+        }
+        [Console]::Error.WriteLine("")
+        [Console]::Error.WriteLine("The review loop is not converging. STOP and surface the open tail")
+        [Console]::Error.WriteLine("(severities + in-delta vs certified-unchanged) to the human. Ship is")
+        [Console]::Error.WriteLine("blocked until the human records:")
+        [Console]::Error.WriteLine("  - [x] Post-certification tail adjudicated by human — <decision> — head=``$brkHead`` — ts=``<ISO8601>``")
+        exit 2
+    }
+}
+
 # ---------------------------------------------------------------------------
 # No-code carve-out (git commit only) — closes the integrity hole (mirrors .sh)
 # See check-workflow-gates.sh for the full rationale + scope decision. When a

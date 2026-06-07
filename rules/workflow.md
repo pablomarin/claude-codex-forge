@@ -49,6 +49,7 @@ When a `/forge-goal`-driven `/goal` is active (`## /goal session` is populated i
 
 - Normal plan-review-loop iterations (Claude + Codex back-and-forth on the plan) — these stay as today's reviewer iteration flow
 - Normal code-review-loop iterations (Codex + PR-toolkit + Claude fix cycles)
+- A convergence-breaker (non-convergence) halt — human-only by design: write the Blockers line and stop; council may be invoked BY the human afterward, never as the autonomous risk-acceptor.
 - Any moment that doesn't actually require human-level judgment
 
 **Council failure handling:** If `/council` itself fails (network, advisor timeout, missing chairman verdict), the autonomous loop pauses and writes a blocker line to `.claude/local/state.md` (`## Blockers`). The user takes over.
@@ -89,6 +90,18 @@ If Codex unavailable: user validates skip.
 Exit when: no P0/P1/P2 from all available reviewers on the same pass.
 Codex is mandatory (this repo is Claude × Codex dual-engine). If Codex is unavailable, `/goal` halts and a human takes over; the loop cannot self-complete without real Codex evidence. The only ship escape is `- [x] Code review loop — N/A: <reason>` for degraded interactive use, caught at PR review.
 Developer Demo honesty: when the PR body is a Developer Demo, an unsupported or wrong **diagram edge** — one that doesn't trace to a real `file:line` in the Evidence table (Gate 2 / claimed-current-behavior) — is a P1 finding. Gate-1 plan Briefing edges labeled `planned`/`inferred` are exempt.
+
+**Convergence breaker (v5.54).** The code-review loop gets a hard stopping rule so it can never grind unbounded after a clean result:
+
+1. **Certification** = the first iteration where BOTH engines record clean evidence at the same head.
+2. **Round counting** = the `Code review loop (N iterations)` counter line is authoritative (rounds with findings write no clean rows but DO bump the counter). Rounds past certification = `N − certification iteration`.
+3. **Trip condition** = more than `POST_CERT_REVIEW_ROUND_LIMIT` (= 3, canonical in `hooks/lib/review-breaker.sh`) rounds past certification. The `check-workflow-gates` hook then blocks `git commit` / `git push` / `gh pr create` — the breaker check runs on EVERY gated ship action, before the docs-only commit carve-out, so neither an N/A escape nor a docs-only commit bypasses it.
+4. **Release** = ONLY a human records, in `### Checklist`:
+   `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\``
+   The line is head-bound (a new commit invalidates it) and the agent NEVER writes it on its own initiative. In a `/goal` run the breaker halts for the human — never substitute `/council`.
+5. **N/A is count-preserving after certification:** if the loop line carries an iteration count, an N/A escape must keep it — `- [x] Code review loop (<N> iterations) — N/A: <reason>`. A count-less `Code review loop — N/A:` line after certification reads as counter erasure and trips the breaker (fail-closed).
+
+**Recovery / diagnosis:** to see why the breaker tripped, run the helper directly — `bash .claude/hooks/lib/review-breaker.sh .claude/local/state.md` — it prints `CERTIFIED / POST_CERT_ROUNDS / BREAKER / ADJUDICATED`. To release a legitimate block, surface the open findings to the human and let THEM write the adjudication line above. There is nothing else to configure or disable: an untripped breaker is inert, and an uncertified branch can never trip it.
 
 Never check a loop box until all available reviewers pass clean on the same iteration.
 

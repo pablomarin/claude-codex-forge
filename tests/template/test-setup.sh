@@ -669,6 +669,30 @@ SRC_HASH=$(hash_file "$REPO_ROOT/hooks/lib/default-branch.sh")
 assert_hash_equals "$S11/.claude/hooks/lib/default-branch.sh" "$SRC_HASH" \
     "installed default-branch.sh matches source (hash-identical)"
 
+# review-breaker.sh — same three assertions (installed, executable, hash-identical)
+assert_file_exists "$S11/.claude/hooks/lib/review-breaker.sh" \
+    ".claude/hooks/lib/review-breaker.sh installed"
+
+if [[ -x "$S11/.claude/hooks/lib/review-breaker.sh" ]]; then
+    pass ".claude/hooks/lib/review-breaker.sh is executable"
+else
+    fail ".claude/hooks/lib/review-breaker.sh is NOT executable"
+fi
+
+SRC_HASH_RS=$(hash_file "$REPO_ROOT/hooks/lib/review-breaker.sh")
+assert_hash_equals "$S11/.claude/hooks/lib/review-breaker.sh" "$SRC_HASH_RS" \
+    "installed review-breaker.sh matches source (hash-identical)"
+
+# review-breaker.ps1 — PowerShell mirror is shipped by setup.sh too (dot-sourced by
+# the .ps1 gate hooks on Windows). Assert presence + hash-identical (not +x: .ps1
+# files are not chmod'd by setup.sh).
+assert_file_exists "$S11/.claude/hooks/lib/review-breaker.ps1" \
+    ".claude/hooks/lib/review-breaker.ps1 installed"
+
+SRC_HASH_RSPS=$(hash_file "$REPO_ROOT/hooks/lib/review-breaker.ps1")
+assert_hash_equals "$S11/.claude/hooks/lib/review-breaker.ps1" "$SRC_HASH_RSPS" \
+    "installed review-breaker.ps1 matches source (hash-identical)"
+
 # Note: setup.ps1 (Windows installer) installs default-branch.ps1; setup.sh
 # (Unix installer) installs only default-branch.sh. The cross-installer parity
 # is covered by test-contracts.sh (Contract: hooks/lib parity setup.sh ↔ setup.ps1).

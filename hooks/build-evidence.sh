@@ -59,6 +59,11 @@ fi
 
 STATE_MD=".claude/local/state.md"
 
+# Convergence-breaker helper (ADR 0009) — dual-path: installed location first,
+# Forge-internal source fallback. Absence is fail-open (see compute_breaker_fields).
+RS=".claude/hooks/lib/review-breaker.sh"
+[ -f "$RS" ] || RS="hooks/lib/review-breaker.sh"
+
 # ---------------------------------------------------------------------------
 # Git state queries (read-only, best-effort — failures produce empty strings)
 # ---------------------------------------------------------------------------
@@ -254,6 +259,29 @@ compute_reviewer_gate() {
     fi
 }
 
+# compute_breaker_fields — full-state helper run: emits the breaker state used both
+# for the JSON fields and the pr_ready suppression. Sets globals POST_CERT_ROUNDS,
+# BREAKER, BREAKER_OK. Helper absence → 0/"ok"/true (fail-open).
+compute_breaker_fields() {
+    POST_CERT_ROUNDS=0
+    BREAKER="ok"
+    BREAKER_OK="true"
+    [ -f "$RS" ] && [ -f "$STATE_MD" ] || return 0
+    local rs_out rounds brk adj
+    rs_out=$(bash "$RS" "$STATE_MD" 2>/dev/null || echo "")
+    rounds=$(echo "$rs_out" | sed -n 's/^POST_CERT_ROUNDS://p' | tail -1)
+    brk=$(echo "$rs_out" | sed -n 's/^BREAKER://p' | tail -1)
+    adj=$(echo "$rs_out" | sed -n 's/^ADJUDICATED://p' | tail -1)
+    [ -n "$rounds" ] && POST_CERT_ROUNDS="$rounds"
+    [ "$brk" = "tripped" ] && BREAKER="tripped"
+    # BREAKER_OK is false ONLY when the helper says BOTH tripped AND unadjudicated.
+    # A current-head human adjudication line (ADJUDICATED:yes) clears the block.
+    if [ "$brk" = "tripped" ] && [ "$adj" = "no" ]; then
+        BREAKER_OK="false"
+    fi
+    return 0
+}
+
 compute_plan_review_gate() {
     # Output: "clean_same_iteration|matched_iteration|matched_plan_sha"
     # Canonical clean-line stem (referenced by tests/template/test-contracts.sh
@@ -404,6 +432,10 @@ RG_REST="${RG_RESULT#*|}"
 RG_ITER="${RG_REST%%|*}"
 RG_HEAD="${RG_REST##*|}"
 
+# Convergence breaker fields (full-state helper run). Sets POST_CERT_ROUNDS,
+# BREAKER, BREAKER_OK (false only when tripped AND unadjudicated).
+compute_breaker_fields
+
 # Parse plan-review gate (plan-review iteration rows in Checklist; plan_sha bound).
 PRG_RESULT=$(compute_plan_review_gate)
 PRG_CLEAN="${PRG_RESULT%%|*}"
@@ -446,7 +478,7 @@ PR_HEAD_MATCH="false"
 PR_READY="false"
 if [ "$PR_OPEN" = "true" ] && [ "$PR_HEAD_MATCH" = "true" ] && \
    [ "$RG_CLEAN" = "true" ] && [ "$E2E_FRESH" = "true" ] && \
-   [ "$PA_AUTH" = "true" ]; then
+   [ "$PA_AUTH" = "true" ] && [ "$BREAKER_OK" = "true" ]; then
     PR_READY="true"
 fi
 
@@ -531,8 +563,8 @@ E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
     printf '%s,' "$WORKFLOW_CMD_JSON"
     printf '"state":{%s,%s,"checklist_total":%d,"checklist_done":%d},' \
         "$PHASE_JSON" "$NEXT_STEP_JSON" "$TOTAL_COUNT" "$DONE_COUNT"
-    printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s},' \
-        "$RG_CLEAN" "$RG_ITER_JSON" "$RG_HEAD_JSON"
+    printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s,"post_cert_rounds":%d,"breaker":"%s"},' \
+        "$RG_CLEAN" "$RG_ITER_JSON" "$RG_HEAD_JSON" "$POST_CERT_ROUNDS" "$BREAKER"
     printf '"plan_review_gate":{"clean_same_iteration":%s,%s,%s},' \
         "$PRG_CLEAN" "$PRG_ITER_JSON" "$PRG_SHA_JSON"
     printf '%s,' "$BRANCH_JSON"

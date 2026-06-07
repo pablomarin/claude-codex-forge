@@ -2081,6 +2081,131 @@ if grep -qE 'rm[[:space:]]+-[rf]*[[:space:]]+/tmp/codex_response' "$CODEX_MD"; t
 else
     pass "codex.md clears the stale OLM with a hook-safe truncate (no blocked 'rm -f /tmp/...')"
 fi
+# ===========================================================================
+# convergence-breaker (v5.54, ADR 0009)
+#
+# Pins the breaker-only ship: the helper twins exist + their constant is mirrored
+# to prose; the human-only adjudication stem is byte-shared across its sites; the
+# PS hooks dot-source (never subprocess) the dual-mode helper; the installer ships
+# both twins; and the /goal council carve-out + count-preserving-N/A prose ship in
+# the commands + workflow.
+# ===========================================================================
+start_test "convergence-breaker: helper twins exist"
+assert_file_exists "$REPO_ROOT/hooks/lib/review-breaker.sh"  "review-breaker.sh ships"
+assert_file_exists "$REPO_ROOT/hooks/lib/review-breaker.ps1" "review-breaker.ps1 ships (PS twin)"
+
+start_test "convergence-breaker: POST_CERT_REVIEW_ROUND_LIMIT=3 canonical in the helper + name mirrored to prose"
+# The numeric definition lives in the .sh helper; the .ps1 twin mirrors it.
+if grep -qE 'POST_CERT_REVIEW_ROUND_LIMIT=3' "$REPO_ROOT/hooks/lib/review-breaker.sh"; then
+    pass "review-breaker.sh defines POST_CERT_REVIEW_ROUND_LIMIT=3"
+else
+    fail "review-breaker.sh missing POST_CERT_REVIEW_ROUND_LIMIT=3"
+fi
+if grep -qE 'POST_CERT_REVIEW_ROUND_LIMIT = 3' "$REPO_ROOT/hooks/lib/review-breaker.ps1"; then
+    pass "review-breaker.ps1 mirrors POST_CERT_REVIEW_ROUND_LIMIT = 3"
+else
+    fail "review-breaker.ps1 missing POST_CERT_REVIEW_ROUND_LIMIT = 3"
+fi
+# The literal constant name must appear in the prose that documents the breaker.
+for f in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
+    if grep -qF "POST_CERT_REVIEW_ROUND_LIMIT" "$REPO_ROOT/$f"; then
+        pass "$(basename "$f") names the POST_CERT_REVIEW_ROUND_LIMIT constant"
+    else
+        fail "$(basename "$f") missing the literal POST_CERT_REVIEW_ROUND_LIMIT constant name"
+    fi
+done
+
+start_test "convergence-breaker: human-only adjudication stem shared across its sites"
+# The exact stem the human records to release a tripped breaker. The agent NEVER
+# writes it; every site that emits/parses it must use the identical phrase, so an
+# edit to one fails CI until the others follow.
+ADJ_STEM='Post-certification tail adjudicated by human'
+for f in state.template.md rules/workflow.md \
+         hooks/check-workflow-gates.sh hooks/check-workflow-gates.ps1; do
+    if grep -qF "$ADJ_STEM" "$REPO_ROOT/$f"; then
+        pass "$(basename "$f") carries the adjudication stem"
+    else
+        fail "$(basename "$f") missing the adjudication stem '$ADJ_STEM'"
+    fi
+done
+
+start_test "convergence-breaker: PS hooks dot-source the dual-mode helper (never subprocess)"
+# review-breaker.ps1 is dual-mode: the function Invoke-ReviewBreaker RETURNS the
+# sentinels and the consumer hooks must dot-source it (`. $ReviewBreakerPs1`) +
+# CALL the function. A script-style invocation (`& $ReviewBreakerPs1`) or
+# `pwsh -File` would let the helper's standalone `exit` terminate the calling hook
+# mid-validation (the cross-launcher 5.1 hazard documented in default-branch.ps1).
+if grep -qF 'Invoke-ReviewBreaker' "$REPO_ROOT/hooks/lib/review-breaker.ps1"; then
+    pass "review-breaker.ps1 defines the dual-mode Invoke-ReviewBreaker function"
+else
+    fail "review-breaker.ps1 missing the dual-mode Invoke-ReviewBreaker function"
+fi
+for f in hooks/check-workflow-gates.ps1 hooks/build-evidence.ps1; do
+    bn=$(basename "$f")
+    if grep -qF 'Invoke-ReviewBreaker' "$REPO_ROOT/$f"; then
+        pass "$bn calls Invoke-ReviewBreaker"
+    else
+        fail "$bn does not call Invoke-ReviewBreaker"
+    fi
+    if grep -qF '. $ReviewBreakerPs1' "$REPO_ROOT/$f"; then
+        pass "$bn dot-sources the helper (. \$ReviewBreakerPs1)"
+    else
+        fail "$bn does not dot-source the helper (. \$ReviewBreakerPs1)"
+    fi
+    if grep -qF '& $ReviewBreakerPs1' "$REPO_ROOT/$f"; then
+        fail "$bn invokes the helper script-style (& \$ReviewBreakerPs1) — standalone exit can kill the hook"
+    else
+        pass "$bn does not subprocess the helper (no & \$ReviewBreakerPs1)"
+    fi
+    if grep -qF 'pwsh -File' "$REPO_ROOT/$f"; then
+        fail "$bn runs the helper via 'pwsh -File' — not cross-launcher safe (powershell.exe 5.1)"
+    else
+        pass "$bn does not run the helper via 'pwsh -File'"
+    fi
+done
+
+start_test "convergence-breaker: installer twins ship both helper files"
+for inst in setup.sh setup.ps1; do
+    for twin in review-breaker.sh review-breaker.ps1; do
+        if grep -qF "$twin" "$REPO_ROOT/$inst"; then
+            pass "$inst references $twin"
+        else
+            fail "$inst does not ship $twin"
+        fi
+    done
+done
+
+start_test "convergence-breaker: /goal council carve-out + convergence-breaker prose ship in commands + workflow"
+# The breaker is human-only: the /goal council instruction carries the carve-out
+# in BOTH sites per command file (the printed /goal string AND the critical-
+# reminder DO-bullet) — `never substitute /council` must appear >= 2 per command.
+for f in commands/new-feature.md commands/fix-bug.md; do
+    bn=$(basename "$f")
+    CNT=$(grep -c "never substitute /council" "$REPO_ROOT/$f" || true)
+    if [ "$CNT" -ge 2 ]; then
+        pass "$bn carries the breaker carve-out at both /goal sites ($CNT)"
+    else
+        fail "$bn breaker carve-out missing from a /goal site (found $CNT, need >=2)"
+    fi
+done
+for f in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
+    if grep -qF "convergence-breaker" "$REPO_ROOT/$f"; then
+        pass "$(basename "$f") names the convergence-breaker exception"
+    else
+        fail "$(basename "$f") missing 'convergence-breaker'"
+    fi
+done
+
+start_test "convergence-breaker: count-preserving N/A rule documented in workflow.md"
+# An N/A escape after certification must KEEP the iteration count — the
+# `(N iterations) — N/A:` form — or it reads as breaker-counter erasure and trips
+# the breaker (helper fail-closed). The rule prose must show that form.
+if grep -qE 'iterations\) — N/A:' "$REPO_ROOT/rules/workflow.md"; then
+    pass "workflow.md documents the count-preserving '(N iterations) — N/A:' form"
+else
+    fail "workflow.md missing the count-preserving '(N iterations) — N/A:' rule"
+fi
+
 
 # ---------------------------------------------------------------------------
 # Report

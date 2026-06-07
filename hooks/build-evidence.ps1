@@ -57,6 +57,24 @@ if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
 $StateMd = ".claude/local/state.md"
 
 # ---------------------------------------------------------------------------
+# Convergence-breaker helper (ADR 0009): resolve it the SAME way the gate does —
+# installed path first, then forge-internal source path — and DOT-SOURCE it so
+# Invoke-ReviewBreaker is in scope. Do NOT call-operator the script (its standalone
+# entrypoint would `exit` the hook) and do NOT spawn a separate pwsh interpreter
+# (the repo ships against powershell.exe 5.1 per the default-branch.ps1 contract).
+# Helper absence → fail-open (0/"ok"/$true; see Compute-BreakerFields).
+# ---------------------------------------------------------------------------
+$ReviewBreakerPs1 = Join-Path (Get-Location) ".claude\hooks\lib\review-breaker.ps1"
+if (-not (Test-Path -LiteralPath $ReviewBreakerPs1)) {
+    $ReviewBreakerPs1 = Join-Path (Get-Location) "hooks\lib\review-breaker.ps1"
+}
+$ReviewBreakerAvailable = $false
+if (Test-Path -LiteralPath $ReviewBreakerPs1) {
+    . $ReviewBreakerPs1
+    $ReviewBreakerAvailable = $true
+}
+
+# ---------------------------------------------------------------------------
 # Helper: Unix epoch time (PS 5.1 compatible)
 # ---------------------------------------------------------------------------
 function Get-UnixTime {
@@ -207,6 +225,27 @@ function Compute-ReviewerGate {
             }
         }
     }
+    return $result
+}
+
+# ---------------------------------------------------------------------------
+# Compute-BreakerFields: full-state helper run. Returns
+# @{rounds=0; breaker='ok'; breaker_ok=$true}. Helper absence → 0/'ok'/$true.
+# breaker_ok is $false ONLY when the helper says BOTH tripped AND unadjudicated.
+# ---------------------------------------------------------------------------
+function Compute-BreakerFields {
+    $result = @{ rounds = 0; breaker = 'ok'; breaker_ok = $true }
+    if (-not $ReviewBreakerAvailable) { return $result }
+    if (-not (Test-Path $StateMd)) { return $result }
+    $rsOut = Invoke-ReviewBreaker $StateMd
+    $brk = 'ok'; $adj = 'no'
+    foreach ($l in $rsOut) {
+        if ($l -match '^POST_CERT_ROUNDS:(\d+)$') { $result.rounds = [int]$matches[1] }
+        elseif ($l -match '^BREAKER:(.*)$') { $brk = $matches[1] }
+        elseif ($l -match '^ADJUDICATED:(.*)$') { $adj = $matches[1] }
+    }
+    if ($brk -eq 'tripped') { $result.breaker = 'tripped' }
+    if (($brk -eq 'tripped') -and ($adj -eq 'no')) { $result.breaker_ok = $false }
     return $result
 }
 
@@ -457,6 +496,12 @@ $RgClean = if ($rg.clean) { "true" } else { "false" }
 $RgIter = $rg.matched_iteration
 $RgHead = $rg.matched_head
 
+# Convergence breaker fields (full-state helper run).
+$brkFields = Compute-BreakerFields
+$PostCertRounds = $brkFields.rounds
+$Breaker = $brkFields.breaker
+$BreakerOk = $brkFields.breaker_ok
+
 $prg = Compute-PlanReviewGate
 $PrgClean = if ($prg.clean) { "true" } else { "false" }
 $PrgIter = $prg.matched_iteration
@@ -481,7 +526,7 @@ if ((-not [string]::IsNullOrEmpty($HeadSha)) -and ($PrHeadOid -eq $HeadSha)) {
 }
 
 $PrReady = "false"
-if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $RgClean -eq "true" -and $E2eFresh -eq "true" -and $PaAuth -eq "true") {
+if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $RgClean -eq "true" -and $E2eFresh -eq "true" -and $PaAuth -eq "true" -and $BreakerOk) {
     $PrReady = "true"
 }
 
@@ -606,7 +651,7 @@ $json = '{' +
     $SessionNonceJson + ',' +
     $WorkflowCmdJson + ',' +
     '"state":{' + $PhaseJson + ',' + $NextStepJson + ',"checklist_total":' + $TotalCount + ',"checklist_done":' + $DoneCount + '},' +
-    '"reviewer_gate":{"clean_same_iteration":' + $RgClean + ',' + $RgIterJson + ',' + $RgHeadJson + '},' +
+    '"reviewer_gate":{"clean_same_iteration":' + $RgClean + ',' + $RgIterJson + ',' + $RgHeadJson + ',"post_cert_rounds":' + $PostCertRounds + ',"breaker":"' + $Breaker + '"},' +
     '"plan_review_gate":{"clean_same_iteration":' + $PrgClean + ',' + $PrgIterJson + ',' + $PrgShaJson + '},' +
     $BranchJson + ',' +
     $HeadShaJson + ',' +

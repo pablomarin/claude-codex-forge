@@ -405,7 +405,7 @@ When Phase 1 (PRD) completes (PRD file exists in `docs/prds/<feature>.md` and th
     PRD approved. Type this to begin the autonomous loop:
    ────────────────────────────────────────
 
-   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through research, plan, plan review, implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND plan_review_gate.clean_same_iteration=true AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
+   /goal Continue the active Forge workflow from the current .claude/local/state.md checkpoint through research, plan, plan review, implementation, code review, simplify, verification, E2E, commit, push, PR authorization, and PR creation. Stop after the PR is open. Do not merge. If a non-PR decision would normally pause for human input, invoke /council and apply the chairman verdict. Exception: a convergence-breaker halt is human-only — write the Blockers line and STOP; never substitute /council. Completion condition: clear only when the latest FORGE_GOAL_EVIDENCE JSON printed after this /goal message has session_nonce="<NONCE>" AND pr_ready=true AND pr_state.state="OPEN" AND plan_review_gate.clean_same_iteration=true AND reviewer_gate.clean_same_iteration=true AND e2e_report.fresh_for_head=true AND pr_authorization.authorized=true. Ignore older evidence and evidence with any other session_nonce. CI status is not required.
 
    ────────────────────────────────────────
     Or type "no" to continue manually phase-by-phase.
@@ -424,7 +424,7 @@ When Phase 1 (PRD) completes (PRD file exists in `docs/prds/<feature>.md` and th
 - **DO NOT** call `gh pr create` until you have run `AskUserQuestion` asking the user to authorize, and they answered YES, and you have REPLACED the `## PR authorization` section in state.md with the new authorization line (matching nonce + current HEAD SHA at the moment of authorization).
 - **DO NOT** call `/goal clear` after success — `/goal` auto-clears when the verifier confirms the condition.
 - **DO** track each code-review iteration by appending `- [x] Code review iteration <N> — codex clean — head=`<sha>`AND`- [x] Code review iteration <N> — pr-toolkit clean — head=`<sha>` to `### Checklist` (state.md). The `reviewer_gate.clean_same_iteration` evidence only fires when BOTH appear for the same iteration AND at the current HEAD.
-- **DO** invoke `/council` whenever you would otherwise pause for the user (except PR creation). Apply the chairman's verdict; do not second-guess it.
+- **DO** invoke `/council` whenever you would otherwise pause for the user (except PR creation). Apply the chairman's verdict; do not second-guess it. Exception: a convergence-breaker halt is human-only — write the Blockers line and STOP; never substitute /council.
 - **REPLACE, never append** when writing `/goal session` or `## PR authorization`. Appending creates stale duplicate entries that confuse Layer 1's parsers.
 
 ### PR-create gate — AskUserQuestion modal text
@@ -924,7 +924,7 @@ Gather severity-tagged findings from all available reviewers. Use the same P0–
   2. Check the loop-complete box: `- [x] Code review loop (<N> iterations) — PASS`
   3. Proceed to 5.2.
 
-The PreToolUse `check-workflow-gates` hook blocks ship actions if (2) is checked without (1). New commits since iter-N invalidate the head-bound lines — re-run reviewers at the new HEAD and append a fresh iteration row.
+The PreToolUse `check-workflow-gates` hook blocks ship actions if (2) is checked without (1). New commits since iter-N invalidate the head-bound lines — re-run reviewers at the new HEAD and append a fresh iteration row. A **convergence-breaker** guards this loop: after the first both-engines-clean iteration (certification), more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3, canonical in `hooks/lib/review-breaker.sh`) further rounds hook-blocks all ship actions until a HUMAN records `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\`` in the Checklist (head-bound; never agent-written; never substitute /council). N/A escapes on a counted loop line must keep the count — a count-less `Code review loop — N/A:` after certification trips the breaker.
 
 **Rules:**
 
