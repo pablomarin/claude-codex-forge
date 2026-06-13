@@ -104,6 +104,9 @@ function Invoke-ForgeGoalStuckCheck {
         }
     }
     if ([string]::IsNullOrEmpty($nonce)) { return }
+    # Placeholder/sample values are not active sessions. Require UUID-shaped
+    # lowercase nonce before reading/updating the stuck counter.
+    if ($nonce -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { return }
 
     # Read the current fingerprint written by build-evidence.ps1.
     if (-not (Test-Path $fpFile)) { return }

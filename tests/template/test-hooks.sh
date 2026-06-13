@@ -1204,6 +1204,47 @@ EXIT=$(cat "$scratch/.exit")
 assert_equals "$EXIT" "0" "PR-auth guard INACTIVE when /goal session nonce is empty (exit 0)"
 
 # ---------------------------------------------------------------------------
+# Test L2-5b: placeholder/sample /goal nonce row → treated as INACTIVE
+# ---------------------------------------------------------------------------
+start_test "check-workflow-gates treats placeholder /goal nonce row as INACTIVE (no block)"
+
+scratch=$(scratch_dir wgates-prauth-placeholdernonce)
+mkdir -p "$scratch/.claude/local"
+cat > "$scratch/.claude/local/state.md" <<'EOF'
+## /goal session
+
+| Field            | Value                                  |
+| ---------------- | -------------------------------------- |
+| nonce            | <uuid-v4-lowercase>                    |
+| workflow_command | /new-feature <name> OR /fix-bug <name> |
+| issued_at        | <ISO-8601-UTC-timestamp>               |
+
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature foo  |
+| Phase     | 6 — Ship          |
+| Next step | gh pr create      |
+
+### Checklist
+
+- [x] All gates green via verify-app
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+EOF
+
+(
+    cd "$scratch"
+    INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
+    OUT="$scratch/.out"
+    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo $? > "$scratch/.exit"
+)
+
+EXIT=$(cat "$scratch/.exit")
+assert_equals "$EXIT" "0" "PR-auth guard INACTIVE when /goal session nonce is placeholder text (exit 0)"
+
+# ---------------------------------------------------------------------------
 # Test L2-6 (P1.4 fix): stale-duplicate auth lines → guard uses LAST one
 # ---------------------------------------------------------------------------
 start_test "check-workflow-gates uses LAST PR authorization line when multiple present (stale-duplicate defense)"
@@ -1274,7 +1315,7 @@ mkdir -p "$scratch/.claude/local"
 
 | Field            | Value |
 | ---------------- | ----- |
-| nonce            | session-A-uuid |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
 | workflow_command | /new-feature foo |
 | issued_at        | 2026-05-16T10:00:00Z |
 
@@ -1293,7 +1334,7 @@ mkdir -p "$scratch/.claude/local"
 
 ## PR authorization
 
-- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`session-B-different\` — head=\`$HEAD_SHA\`
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`ffffffff-1111-2222-3333-444444444444\` — head=\`$HEAD_SHA\`
 EOF
 
     INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
@@ -1326,7 +1367,7 @@ start_test "Layer 2 — check-state-updated emits FORGE_GOAL_STUCK_WARNING after
 
 | Field            | Value |
 | ---------------- | ----- |
-| nonce            | test-nonce-stuck-detection |
+| nonce            | 11111111-2222-3333-4444-555555555555 |
 | workflow_command | /new-feature foo |
 | issued_at        | 2026-05-16T10:00:00Z |
 
@@ -1405,7 +1446,7 @@ cat > "$V32A_WORKTREE/.claude/local/state.md" <<'EOF'
 
 | Field            | Value |
 | ---------------- | ----- |
-| nonce            | v532-worktree-nonce-marker |
+| nonce            | 22222222-3333-4444-5555-666666666666 |
 | workflow_command | /new-feature foo |
 | issued_at        | 2026-05-18T10:00:00Z |
 
@@ -1432,7 +1473,7 @@ OUT_V32A="$V32A_MAIN/.out"
 INPUT_V32A=$(printf '{"stop_hook_active":false,"cwd":"%s"}' "$V32A_WORKTREE")
 ( cd "$V32A_MAIN" && echo "$INPUT_V32A" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32A.stdout" 2> "$OUT_V32A.stderr" )
 
-assert_contains "$OUT_V32A.stderr" "v532-worktree-nonce-marker" \
+assert_contains "$OUT_V32A.stderr" "22222222-3333-4444-5555-666666666666" \
     "build-evidence read state.md from stdin.cwd (worktree), not its own CWD (main)"
 
 # Negative control: same setup but no `cwd` in stdin → build-evidence reads
@@ -1440,7 +1481,7 @@ assert_contains "$OUT_V32A.stderr" "v532-worktree-nonce-marker" \
 OUT_V32A_FALLBACK="$V32A_MAIN/.out-fallback"
 INPUT_V32A_NOCWD='{"stop_hook_active":false}'
 ( cd "$V32A_MAIN" && echo "$INPUT_V32A_NOCWD" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32A_FALLBACK.stdout" 2> "$OUT_V32A_FALLBACK.stderr" )
-if grep -q "v532-worktree-nonce-marker" "$OUT_V32A_FALLBACK.stderr"; then
+if grep -q "22222222-3333-4444-5555-666666666666" "$OUT_V32A_FALLBACK.stderr"; then
     fail "negative control failed: evidence picked up worktree nonce without stdin.cwd (should have read main repo's state.md)"
 else
     pass "negative control: without stdin.cwd, evidence reads CWD's state.md (no worktree nonce leak)"
@@ -1470,7 +1511,7 @@ cat > "$V32B_WORKTREE/.claude/local/state.md" <<'EOF'
 
 | Field            | Value |
 | ---------------- | ----- |
-| nonce            | v532b-worktree-nonce |
+| nonce            | 33333333-4444-5555-6666-777777777777 |
 | workflow_command | /new-feature bar |
 | issued_at        | 2026-05-18T10:00:00Z |
 
@@ -1527,7 +1568,7 @@ cat > "$V32C/.claude/local/state.md" <<'EOF'
 
 | Field            | Value |
 | ---------------- | ----- |
-| nonce            | v532c-subdir-marker |
+| nonce            | 44444444-5555-6666-7777-888888888888 |
 | workflow_command | /new-feature foo |
 | issued_at        | 2026-05-18T10:00:00Z |
 
@@ -1553,7 +1594,7 @@ SUBDIR="$V32C/apps/web/src"
 INPUT_V32C=$(printf '{"stop_hook_active":false,"cwd":"%s"}' "$SUBDIR")
 echo "$INPUT_V32C" | bash "$REPO_ROOT/hooks/build-evidence.sh" > "$OUT_V32C.stdout" 2> "$OUT_V32C.stderr"
 
-assert_contains "$OUT_V32C.stderr" "v532c-subdir-marker" \
+assert_contains "$OUT_V32C.stderr" "44444444-5555-6666-7777-888888888888" \
     "build-evidence normalized subdirectory cwd to repo root and read state.md"
 
 # ===========================================================================

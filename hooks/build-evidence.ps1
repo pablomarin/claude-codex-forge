@@ -95,6 +95,14 @@ function Build-JsonStringField {
     return '"' + $Key + '":"' + $esc + '"'
 }
 
+function Test-ForgeGoalNonce {
+    param([string]$Nonce)
+    # A /goal session is active only when nonce is UUID-shaped. This prevents
+    # state.template.md examples/placeholders like <uuid-v4-lowercase> from
+    # becoming false active sessions.
+    return ($Nonce -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+}
+
 # ---------------------------------------------------------------------------
 # Helper: Read state.md as CRLF-normalized lines (LF only)
 # ---------------------------------------------------------------------------
@@ -484,6 +492,10 @@ if (Test-Path "tests/e2e/reports") {
 $goalSession = Parse-GoalSession
 $GoalNonce = $goalSession.nonce
 $GoalCmd = $goalSession.workflow_command
+if (-not (Test-ForgeGoalNonce $GoalNonce)) {
+    $GoalNonce = ""
+    $GoalCmd = ""
+}
 
 $wf = Parse-Workflow
 $Phase = $wf.phase

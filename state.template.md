@@ -25,22 +25,21 @@
 (populated by `/new-feature` at the PRD-complete checkpoint, or by `/fix-bug` at the
 Plan-Approved checkpoint, when the user opts into the `/forge-goal` autonomous loop)
 
-Format when active:
+Format when active (shown descriptively to avoid a parseable placeholder table):
 
-| Field            | Value                                  |
-| ---------------- | -------------------------------------- |
-| nonce            | <uuid-v4-lowercase>                    |
-| workflow_command | /new-feature <name> OR /fix-bug <name> |
-| issued_at        | <ISO-8601-UTC-timestamp>               |
+- `nonce`: lowercase UUID value
+- `workflow_command`: `/new-feature <name>` OR `/fix-bug <name>`
+- `issued_at`: ISO-8601 UTC timestamp
 
 **REPLACE semantics:** the entire `## /goal session` block (heading + table) is
 replaced atomically on each new autonomous-loop kickoff. A stale session from a
 previous run is never appended to — it is overwritten in full. When no session is
 active, this section is absent from the file.
 
-**Guard "active" definition:** the `/goal session` is considered ACTIVE when the nonce
-row is non-empty (`nonce` column has a UUID value). A heading with no nonce row, or a
-missing section entirely, is treated as INACTIVE by all guards and hooks.
+**Guard "active" definition:** the `/goal session` is considered ACTIVE only when the
+`nonce` row contains a lowercase UUID-shaped value. A heading with no nonce row, a
+placeholder/sample nonce, a non-UUID nonce, or a missing section entirely is treated
+as INACTIVE by all guards and hooks.
 
 ---
 

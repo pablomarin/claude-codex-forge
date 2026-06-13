@@ -58,6 +58,28 @@ OUT="$scratch/.out"
 assert_contains "$OUT" '"session_nonce":null' "session_nonce null when section missing"
 assert_contains "$OUT" '"workflow_command":null' "workflow_command null when section missing"
 
+start_test "build-evidence.sh treats placeholder /goal nonce as inactive"
+
+scratch=$(scratch_dir bevidence-placeholder)
+mkdir -p "$scratch/.claude/local"
+cat > "$scratch/.claude/local/state.md" <<'EOF'
+# Project State
+
+## /goal session
+
+| Field            | Value                                  |
+| ---------------- | -------------------------------------- |
+| nonce            | <uuid-v4-lowercase>                    |
+| workflow_command | /new-feature <name> OR /fix-bug <name> |
+| issued_at        | <ISO-8601-UTC-timestamp>               |
+EOF
+
+OUT="$scratch/.out"
+( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+
+assert_contains "$OUT" '"session_nonce":null' "placeholder nonce does not become active session"
+assert_contains "$OUT" '"workflow_command":null' "placeholder workflow command ignored with inactive nonce"
+
 start_test "build-evidence.sh parses workflow checklist counts and reviewer rows"
 
 scratch=$(scratch_dir bevidence-workflow)

@@ -1692,14 +1692,14 @@ assert_contains "$ST_TPL" "## /goal session" "/goal session section documented"
 assert_contains "$ST_TPL" "## PR authorization" "PR authorization section documented"
 assert_contains "$ST_TPL" "Code review iteration" "reviewer-iteration head-SHA convention documented"
 assert_contains "$ST_TPL" "REPLACE semantics" "REPLACE semantics documented in state.template.md"
-# P1.2: state.template must NOT have a pre-populated empty /goal session table
-# (The section documents the FORMAT, not an empty instance.)
-# Check that the nonce row, if present, does not have an empty value placeholder
-# that would cause the Bash guard to find a block with no actual nonce.
-if grep -E '^\|\s*nonce\s*\|\s*\|\s*$' "$ST_TPL" > /dev/null 2>&1; then
-    fail "state.template.md has empty nonce row (would cause false-active /goal session detection)"
+# P1.2: state.template must NOT have a pre-populated empty or placeholder
+# /goal session table (the section documents the FORMAT, not an active-ish
+# instance). Parseable nonce rows in the template have caused false-active
+# /goal sessions in downstream installs.
+if grep -E '^\|\s*nonce\s*\|' "$ST_TPL" > /dev/null 2>&1; then
+    fail "state.template.md has a parseable nonce table row (would risk false-active /goal session detection)"
 else
-    pass "state.template.md does NOT have empty nonce row (correct — format documented, not instantiated)"
+    pass "state.template.md has no parseable nonce table row (correct — format documented, not instantiated)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1713,12 +1713,12 @@ assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "PR creation authori
 assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "PR creation authorized" \
     "check-workflow-gates.ps1 references PR auth line"
 
-# P1.2: Bash guard must use non-empty GOAL_NONCE as "active" definition
-assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh" 'if [ -n "$GOAL_NONCE"' \
-    "Bash guard checks non-empty GOAL_NONCE (not just block presence)"
-# PS guard must also use non-empty goalNonce
-assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" 'if ($goalNonce)' \
-    "PS guard checks non-empty goalNonce"
+# P1.2/P1.5: guards must use UUID-shaped nonce as "active" definition, not
+# merely non-empty text (placeholders like <uuid-v4-lowercase> are inactive).
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh" 'grep -Eq '\''^[0-9a-f]{8}-[0-9a-f]{4}' \
+    "Bash guard checks UUID-shaped GOAL_NONCE (not just block presence/non-empty)"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" '$goalNonce -match '\''^[0-9a-f]{8}-[0-9a-f]{4}' \
+    "PS guard checks UUID-shaped goalNonce"
 
 # ---------------------------------------------------------------------------
 # Contract: workflow-gate-semantics — no-code carve-out present in BOTH hooks
@@ -1795,13 +1795,13 @@ if command -v pwsh > /dev/null 2>&1; then
 
 | Field            | Value |
 | ---------------- | ----- |
-| nonce            | correct-session-nonce |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
 | workflow_command | /new-feature foo |
 | issued_at        | 2026-05-16T10:00:00Z |
 
 ## PR authorization
 
-- [x] PR creation authorized — `2026-05-16T10:15:00Z` — nonce=`stale-different-nonce` — head=`abc123`
+- [x] PR creation authorized — `2026-05-16T10:15:00Z` — nonce=`ffffffff-1111-2222-3333-444444444444` — head=`abc123`
 EOF
 
     (
@@ -1884,14 +1884,14 @@ if command -v git > /dev/null 2>&1; then
 
 | Field            | Value |
 | ---------------- | ----- |
-| nonce            | current-nonce |
+| nonce            | aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee |
 | workflow_command | /new-feature foo |
 | issued_at        | 2026-05-16T10:00:00Z |
 
 ## PR authorization
 
-- [x] PR creation authorized — \`2026-05-16T09:00:00Z\` — nonce=\`stale-nonce\` — head=\`stalehash\`
-- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`current-nonce\` — head=\`$HEAD_SHA\`
+- [x] PR creation authorized — \`2026-05-16T09:00:00Z\` — nonce=\`ffffffff-1111-2222-3333-444444444444\` — head=\`stalehash\`
+- [x] PR creation authorized — \`2026-05-16T10:15:00Z\` — nonce=\`aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\` — head=\`$HEAD_SHA\`
 
 ## Workflow
 

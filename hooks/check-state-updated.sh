@@ -102,6 +102,9 @@ _forge_goal_stuck_check() {
         | grep -E '\|[[:space:]]*nonce[[:space:]]*\|' \
         | head -1 | awk -F'|' '{print $3}' | xargs 2>/dev/null)
     [ -n "$nonce" ] || return 0
+    # Placeholder/sample values are not active sessions. Require UUID-shaped
+    # lowercase nonce before reading/updating the stuck counter.
+    printf '%s' "$nonce" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' || return 0
 
     # Read the current fingerprint written by build-evidence.sh.
     [ -f "$fp_file" ] || return 0

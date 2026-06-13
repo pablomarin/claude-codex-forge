@@ -407,10 +407,21 @@ json_str_field() {
     fi
 }
 
+is_valid_goal_nonce() {
+    # A /goal session is active only when nonce is UUID-shaped. This prevents
+    # state.template.md examples/placeholders like <uuid-v4-lowercase> from
+    # becoming false active sessions.
+    printf '%s' "$1" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+}
+
 # Parse ## /goal session section.
 GOAL_PARSED=$(parse_goal_session)
 GOAL_NONCE="${GOAL_PARSED%%|*}"
 GOAL_CMD="${GOAL_PARSED##*|}"
+if ! is_valid_goal_nonce "$GOAL_NONCE"; then
+    GOAL_NONCE=""
+    GOAL_CMD=""
+fi
 
 SESSION_NONCE_JSON=$(json_str_field "session_nonce" "$GOAL_NONCE")
 WORKFLOW_CMD_JSON=$(json_str_field "workflow_command" "$GOAL_CMD")

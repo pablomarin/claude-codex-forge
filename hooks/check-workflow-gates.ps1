@@ -161,8 +161,9 @@ if (-not $cmd -or $cmd -eq "none" -or $cmd -eq ([char]0x2014).ToString() -or $cm
 # ---------------------------------------------------------------------------
 # Layer 2 — /forge-goal PR-create authorization guard (PS parity for .sh)
 #
-# ACTIVE definition: $goalNonce is non-empty after parsing. An empty nonce
-# cell, missing /goal session section, or missing state.md → guard is no-op.
+# ACTIVE definition: $goalNonce is lowercase UUID-shaped after parsing. An empty
+# nonce cell, placeholder/sample nonce, missing /goal session section, or missing
+# state.md → guard is no-op.
 # LAST-LINE defense: multiple PR auth lines → use last (REPLACE semantics
 # should keep exactly one; multiple = state.md corruption, surface to user).
 # PS 5.1 constraints: no ??, no Out-Null on STDERR, no pwsh spawn,
@@ -189,8 +190,8 @@ if ($command -match $prCreatePattern) {
             }
         }
 
-        if ($goalNonce) {
-            # /forge-goal is active (non-empty nonce); enforce PR-auth requirements
+        if ($goalNonce -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+            # /forge-goal is active (UUID-shaped nonce); enforce PR-auth requirements
             $headSha = ""
             try { $headSha = ((git rev-parse HEAD 2>$null) -join "").Trim() } catch {}
 
