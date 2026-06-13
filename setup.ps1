@@ -110,6 +110,42 @@ function Get-ForgeVersion {
 }
 $ForgeVersion = Get-ForgeVersion
 
+# Source provenance (advisory): setup copies templates from $ScriptDir, which matters
+# when a developer has multiple Forge clones (e.g. upstream release + local dogfood
+# branch). Version alone cannot distinguish two dirty checkouts with the same
+# changelog version, so print and locally stamp the source path/revision.
+function Get-ForgeSourceRevision {
+    try {
+        $head = (& git -C $ScriptDir rev-parse --short HEAD 2>$null)
+        if (-not $head) { $head = "unknown" }
+        $dirty = (& git -C $ScriptDir status --porcelain 2>$null)
+        if ($dirty -and $head -ne "unknown") { return "$head-dirty" }
+        return $head
+    } catch {
+        return "unknown"
+    }
+}
+$ForgeSourceRevision = Get-ForgeSourceRevision
+
+function Write-ForgeSourceStamp {
+    param([string]$DestDir)
+    if (-not $DestDir) { return }
+    try {
+        if (-not (Test-Path $DestDir)) { New-Item -ItemType Directory -Path $DestDir -Force | Out-Null }
+        $stampPath = Join-Path $DestDir "forge-source.env"
+        $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $content = @(
+            "FORGE_VERSION=$ForgeVersion",
+            "FORGE_SOURCE_DIR=$ScriptDir",
+            "FORGE_SOURCE_REVISION=$ForgeSourceRevision",
+            "INSTALLED_AT_UTC=$timestamp"
+        ) -join "`n"
+        [System.IO.File]::WriteAllText($stampPath, "$content`n")
+    } catch {
+        # Advisory only — provenance write must never break setup.
+    }
+}
+
 # Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
 # install / -Force / -Upgrade / -Global run — NOT -Migrate (exited above, installs no
 # machinery). Placed before the -Global branch so both modes hit it. Fail-open via
@@ -200,6 +236,8 @@ if ($Global) {
     Write-Color "============================================" "Blue"
     Write-Color "  Claude Code Global Setup" "Blue"
     Write-Color "============================================" "Blue"
+    Write-Host "Forge source: " -NoNewline; Write-Color $ScriptDir "Green"
+    Write-Host "Forge revision: " -NoNewline; Write-Color "$ForgeSourceRevision (version: $ForgeVersion)" "Green"
     Write-Host ""
     Write-Host "This sets up Claude Code's memory system for " -NoNewline
     Write-Color "ALL" "Green"
@@ -238,6 +276,7 @@ if ($Global) {
 
     # Copy global hooks
     Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "pre-compact-memory.ps1") (Join-Path (Join-Path (Join-Path $HOME ".claude") "hooks") "pre-compact-memory.ps1") "~\.claude\hooks\pre-compact-memory.ps1"
+    Write-ForgeSourceStamp (Join-Path $HOME ".claude")
 
     # Merge global hooks into existing settings (preserves user's plugins, statusLine, etc.)
     $globalSettings = Join-Path (Join-Path $HOME ".claude") "settings.json"
@@ -314,6 +353,8 @@ Write-Color "============================================" "Blue"
 Write-Color "  Claude Code Setup for: $Project" "Green"
 Write-Color "  Tech Stack: $Tech" "Green"
 Write-Color "============================================" "Blue"
+Write-Host "Forge source: " -NoNewline; Write-Color $ScriptDir "Green"
+Write-Host "Forge revision: " -NoNewline; Write-Color "$ForgeSourceRevision (version: $ForgeVersion)" "Green"
 Write-Host ""
 
 # Check prerequisites
@@ -649,6 +690,7 @@ if (-not (Test-Path ".claude\local\state.md")) {
     if (-not (Test-Path ".claude\local")) { New-Item -ItemType Directory -Path ".claude\local" -Force | Out-Null }
     Copy-TemplateFile (Join-Path $ScriptDir "state.template.md") ".claude\local\state.md" ".claude\local\state.md (volatile per-developer state)"
 }
+Write-ForgeSourceStamp ".claude\local"
 
 # Resolve Python command (Windows uses 'python', Unix uses 'python3')
 $PythonCmd = $null

@@ -78,6 +78,14 @@ assert_contains "$S1/docs/ci-templates/e2e.yml" "working-directory: ." \
     "CI template stamped with '.'"
 assert_not_contains "$S1/docs/ci-templates/e2e.yml" "__PLAYWRIGHT_DIR__" \
     "no placeholder leak in CI template"
+assert_contains "$LOG1" "Forge source:" \
+    "setup log names the Forge checkout used as source"
+assert_file_exists "$S1/.claude/local/forge-source.env" \
+    "local source provenance stamp written"
+assert_contains "$S1/.claude/local/forge-source.env" "FORGE_SOURCE_DIR=$REPO_ROOT" \
+    "source provenance stamp records Forge checkout"
+assert_contains "$S1/.claude/local/forge-source.env" "FORGE_SOURCE_REVISION=" \
+    "source provenance stamp records source revision"
 
 # ===========================================================================
 # Test 2: frontend/ auto-detect

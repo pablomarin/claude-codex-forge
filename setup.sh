@@ -130,6 +130,34 @@ forge_version() {
 }
 FORGE_VERSION="$(forge_version)"
 
+# Source provenance (advisory): setup copies templates from SCRIPT_DIR, which matters
+# when a developer has multiple Forge clones (e.g. upstream release + local dogfood
+# branch). Version alone cannot distinguish two dirty checkouts with the same
+# changelog version, so print and locally stamp the source path/revision.
+forge_source_revision() {
+    local head dirty
+    head=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    dirty=$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null || echo "")
+    if [[ -n "$dirty" && "$head" != "unknown" ]]; then
+        printf '%s-dirty' "$head"
+    else
+        printf '%s' "$head"
+    fi
+}
+FORGE_SOURCE_REVISION="$(forge_source_revision)"
+
+write_source_stamp() {
+    local dest_dir="$1"
+    [[ -n "$dest_dir" ]] || return 0
+    mkdir -p "$dest_dir" 2>/dev/null || return 0
+    {
+        printf 'FORGE_VERSION=%s\n' "$FORGE_VERSION"
+        printf 'FORGE_SOURCE_DIR=%s\n' "$SCRIPT_DIR"
+        printf 'FORGE_SOURCE_REVISION=%s\n' "$FORGE_SOURCE_REVISION"
+        printf 'INSTALLED_AT_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } > "$dest_dir/forge-source.env" 2>/dev/null || true
+}
+
 # Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
 # install / -f / --upgrade / --global invocation — NOT --migrate (which exited above
 # and installs no machinery). Placed before the --global branch so both modes hit it.
@@ -185,6 +213,8 @@ if [[ "$GLOBAL" == true ]]; then
     echo -e "${BLUE}============================================${NC}"
     echo -e "${BLUE}  Claude Code Global Setup${NC}"
     echo -e "${BLUE}============================================${NC}"
+    echo -e "Forge source: ${GREEN}$SCRIPT_DIR${NC}"
+    echo -e "Forge revision: ${GREEN}$FORGE_SOURCE_REVISION${NC} (version: ${GREEN}$FORGE_VERSION${NC})"
     echo ""
     echo -e "This sets up Claude Code's memory system for ${GREEN}ALL${NC} your projects."
     echo "After this, Claude will remember learnings across sessions and projects."
@@ -217,6 +247,7 @@ if [[ "$GLOBAL" == true ]]; then
     # Copy global hooks
     copy_file "$SCRIPT_DIR/hooks/pre-compact-memory.sh" "$HOME/.claude/hooks/pre-compact-memory.sh" "~/.claude/hooks/pre-compact-memory.sh"
     chmod +x "$HOME/.claude/hooks/pre-compact-memory.sh" 2>/dev/null || true
+    write_source_stamp "$HOME/.claude"
 
     # Merge global hooks into existing settings (preserves user's plugins, statusLine, etc.)
     GLOBAL_SETTINGS="$HOME/.claude/settings.json"
@@ -304,6 +335,8 @@ echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}  Claude Code Setup for: ${GREEN}$PROJECT_NAME${NC}"
 echo -e "${BLUE}  Tech Stack: ${GREEN}$TECH_STACK${NC}"
 echo -e "${BLUE}============================================${NC}"
+echo -e "Forge source: ${GREEN}$SCRIPT_DIR${NC}"
+echo -e "Forge revision: ${GREEN}$FORGE_SOURCE_REVISION${NC} (version: ${GREEN}$FORGE_VERSION${NC})"
 echo ""
 
 # Check prerequisites
@@ -622,6 +655,7 @@ if [ ! -f ".claude/local/state.md" ]; then
     mkdir -p .claude/local
     copy_file "$SCRIPT_DIR/state.template.md" ".claude/local/state.md" ".claude/local/state.md (volatile per-developer state)"
 fi
+write_source_stamp ".claude/local"
 
 # Settings — merge on upgrade, copy otherwise
 if [[ "$UPGRADE" == true ]] && [[ -f ".claude/settings.json" ]]; then
@@ -872,11 +906,11 @@ EOF
     # CI workflow reference (NOT auto-activated).
     # Stamp PW_DIR into the workflow so defaults.run.working-directory matches
     # the actual scaffold location. Two important subtleties:
-    # (1) Use bash parameter expansion (${var//pat/repl}) for the substitution.
-    #     Unlike sed AND awk — both of which interpret '&' in the replacement
-    #     string as "the matched text" — bash parameter expansion does literal
-    #     substitution with NO metachar interpretation. Paths containing &, |,
-    #     \, or $ (e.g. --playwright-dir 'apps/r&d') substitute correctly.
+    # (1) Use bash parameter expansion with '&' escaped in the replacement.
+    #     Bash 5.2's `patsub_replacement` option makes unescaped '&' expand to
+    #     the matched pattern (sed-like), so --playwright-dir 'apps/r&d' would
+    #     otherwise become 'apps/r__PLAYWRIGHT_DIR__d' on machines with that
+    #     option enabled. Escaping '&' keeps the replacement literal.
     # (2) Preserve user-edited files on non-force reruns (matches copy_file
     #     semantics). setup.sh --with-playwright should be idempotent; a
     #     second run without -f must not clobber CI customizations.
@@ -890,9 +924,10 @@ EOF
         # Read → literal-substitute → write. $(<file) strips trailing newlines;
         # the source templates always end with a newline, so we restore one
         # unconditionally via printf '%s\n'.
-        local content
+        local content safe_pw_dir
         content=$(<"$src")
-        printf '%s\n' "${content//__PLAYWRIGHT_DIR__/$PW_DIR}" > "$dest"
+        safe_pw_dir=${PW_DIR//&/\\&}
+        printf '%s\n' "${content//__PLAYWRIGHT_DIR__/$safe_pw_dir}" > "$dest"
         echo -e "  ${GREEN}✓${NC} Created $desc (working-directory stamped: $PW_DIR)"
     }
 
