@@ -332,7 +332,7 @@ Success: detailed validation still fires even though startup `testing.md` is sli
 - [x] Revised plan to use one consolidated `docs/reference/testing-e2e.md` first.
 - [ ] Split `rules/testing.md` into index + reference.
   - [x] Created consolidated reference: `docs/reference/testing-e2e.md`.
-  - [ ] Slim `rules/testing.md` into compact index.
+  - [x] Slimmed `rules/testing.md` into compact index.
 - [ ] Update `/new-feature` and `/fix-bug` Phase 3.2b instructions.
 - [ ] Add `Testing references loaded:` marker requirement.
 - [ ] Update `verify-e2e.md` stale references.
