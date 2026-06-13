@@ -209,6 +209,47 @@ Add or extend `tests/template/test-contracts.sh` assertions:
   - `SURFACE_COVERAGE_WARNING`
 - `setup.sh` and `setup.ps1` both install `docs/reference/testing-e2e.md`.
 
+## Measurement results
+
+Measured in `/home/aescala82/projects/forge-empty` after installing this branch from `/home/aescala82/projects/forge-dev`:
+
+```text
+FORGE_SOURCE_REVISION=2b00f58
+```
+
+Startup after fresh `hi`:
+
+```text
+minimal Forge + caveman active + slim testing index:    47,229 context tokens
+minimal Forge + caveman disabled + slim testing index:  44,619 context tokens
+```
+
+Comparison to earlier baselines:
+
+```text
+active caveman baseline before split:       56,022
+active caveman after split:                 47,229
+savings:                                     8,793
+
+caveman-disabled baseline before split:     54,599
+caveman-disabled after split:               44,619
+savings:                                     9,980
+
+caveman-disabled with testing.md removed:   43,556
+slim index overhead vs removed entirely:     1,063
+```
+
+Installed sizes:
+
+```text
+.claude/rules/testing.md          132 lines,  5,476 bytes (~1,369 rough tokens)
+docs/reference/testing-e2e.md     416 lines, 29,162 bytes
+```
+
+Transcript check: `docs/reference/testing-e2e.md` content did not appear in the startup transcript, confirming the detailed reference is not autoloaded.
+
+Interpretation: the first-pass progressive-disclosure split hit the expected target. The slim index preserves routing/safety vocabulary for roughly ~1k startup-token overhead compared with deleting `testing.md` entirely, while saving ~9–10k versus the prior full autoloaded testing rule.
+
 ## Verification plan
 
 ### A. Static verification
@@ -338,7 +379,7 @@ Success: detailed validation still fires even though startup `testing.md` is sli
 - [x] Update `verify-e2e.md` stale references.
 - [x] Update `setup.sh` and `setup.ps1` to install the new reference.
 - [x] Add/extend template contract tests.
-- [ ] Reinstall into `forge-empty` and measure startup context.
+- [x] Reinstall into `forge-empty` and measure startup context.
 - [ ] Run positive behavior test.
 - [ ] Run negative malformed-UC test.
 - [ ] Review results and decide whether to apply same pattern to `workflow.md`.
