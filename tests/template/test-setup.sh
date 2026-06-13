@@ -72,6 +72,8 @@ assert_file_exists "$S1/.claude/playwright-dir" \
     "playwright-dir marker exists"
 assert_equals "$(cat "$S1/.claude/playwright-dir")" "." \
     "marker records '.' for flat layout"
+assert_file_exists "$S1/docs/reference/testing-e2e.md" \
+    "on-demand E2E testing reference installed"
 assert_file_exists "$S1/docs/ci-templates/e2e.yml" \
     "CI template scaffolded"
 assert_contains "$S1/docs/ci-templates/e2e.yml" "working-directory: ." \

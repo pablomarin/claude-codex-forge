@@ -64,4 +64,4 @@ The `verify-e2e` agent stays read-only. Only the main agent writes specs. This i
 - **`tests/e2e/use-cases/*.md`** — intent, lives with your plan
 - **`tests/e2e/specs/*.spec.ts`** — deterministic replay, runs everywhere (local, CI, cron, contributor PRs)
 
-See `.claude/rules/testing.md` for the full model.
+See `docs/reference/testing-e2e.md` for the full model.

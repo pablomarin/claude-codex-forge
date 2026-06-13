@@ -86,7 +86,7 @@ Valid values: `UI`, `API`, `CLI`. Order does not matter. Omit the line entirely 
 - API: `http://localhost:8000` (update as needed)
 - UI: `http://localhost:3000` (update as needed)
 
-See `.claude/rules/testing.md` for the full interface capability matrix.
+See `docs/reference/testing-e2e.md` for the full interface capability matrix.
 
 ### Playwright Framework (optional)
 

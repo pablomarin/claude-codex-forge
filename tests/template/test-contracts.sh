@@ -180,6 +180,7 @@ start_test "Surface coverage audit — canonical vocabulary across files"
 SURFACE_KEY="SURFACE_COVERAGE_WARNING"
 SURFACE_DECISION_KEY="Surface coverage decision"
 RULES_TESTING="$REPO_ROOT/rules/testing.md"
+E2E_REF="$REPO_ROOT/docs/reference/testing-e2e.md"
 
 # Producer (agent) must define BOTH the warning marker AND the decision
 # sub-block name (Codex P2-4 fix v5.33): the agent reads the decision
@@ -222,6 +223,27 @@ assert_contains "$NF" "$DISQUALIFIED" \
     "new-feature.md flags the disqualified N/A pattern"
 assert_contains "$FB" "$DISQUALIFIED" \
     "fix-bug.md flags the disqualified N/A pattern"
+
+# Progressive disclosure contract: detailed E2E doctrine lives outside the
+# autoloaded rules directory, and command phases must explicitly load it.
+assert_file_exists "$E2E_REF" "on-demand E2E testing reference exists"
+TESTING_LINES=$(wc -l < "$RULES_TESTING" | tr -d ' ')
+if [ "$TESTING_LINES" -lt 150 ]; then
+    pass "rules/testing.md stays compact (<150 lines; got $TESTING_LINES)"
+else
+    fail "rules/testing.md is too large for startup progressive disclosure (got $TESTING_LINES lines)"
+fi
+for f in "$NF" "$FB"; do
+    base=$(basename "$f")
+    assert_contains "$f" "docs/reference/testing-e2e.md" \
+        "$base requires/uses the on-demand E2E testing reference"
+    assert_contains "$f" "Testing references loaded:" \
+        "$base requires the Testing references loaded marker"
+done
+assert_contains "$REPO_ROOT/setup.sh" "docs/reference/testing-e2e.md" \
+    "setup.sh installs the on-demand E2E testing reference"
+assert_contains "$REPO_ROOT/setup.ps1" "docs\\reference\\testing-e2e.md" \
+    "setup.ps1 installs the on-demand E2E testing reference"
 
 # Codex P2-1 (v5.33): callers must explicitly scan for SURFACE_COVERAGE_WARNING
 # after parsing the verdict. Without this post-report check, a PASS verdict

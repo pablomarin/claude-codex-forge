@@ -566,6 +566,7 @@ $directories = @(
     ".claude\agents",
     "docs\prds",
     "docs\plans",
+    "docs\reference",
     "docs\solutions\build-errors",
     "docs\solutions\test-failures",
     "docs\solutions\runtime-errors",
@@ -785,6 +786,10 @@ Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "docs") "adr\README.md") "doc
 foreach ($adr in @("0001-volatile-state-not-auto-loaded", "0002-bash-and-powershell-dual-platform", "0003-template-distributed-no-build-step", "0004-diataxis-docs-structure", "0005-hard-platform-parity-rule")) {
     Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "docs") "adr\$adr.md") "docs\adr\$adr.md" "docs\adr\$adr.md"
 }
+
+# On-demand references -- installed outside .claude/rules so they are not autoloaded.
+if (-not (Test-Path "docs\reference")) { New-Item -ItemType Directory -Path "docs\reference" -Force | Out-Null }
+Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "docs") "reference\testing-e2e.md") "docs\reference\testing-e2e.md" "docs\reference\testing-e2e.md"
 
 # Append .claude/local/ to root .gitignore if not already present (idempotent).
 if (Test-Path ".gitignore") {

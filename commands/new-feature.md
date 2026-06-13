@@ -660,7 +660,18 @@ This is pre-code and therefore speculative: label every forward-looking claim `[
 
 If this feature changes any user-facing behavior (UI, API, flows, forms, navigation, permissions), design E2E use cases NOW — before implementation, not after.
 
-Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `rules/testing.md`. Each UC must include **Actor**, **Scenario**, **Interface**, **Intent**, **Setup**, **Steps**, **Verification**, and **Persistence** — see the required-shape checklist below. See `rules/testing.md` "GOOD vs BAD use cases" for canonical worked examples per API / UI / CLI.
+Before writing E2E use cases, Read:
+
+- `docs/reference/testing-e2e.md`
+
+Write use cases in the plan file under a `#### E2E Use Cases` heading, using the template from `docs/reference/testing-e2e.md`. Each UC must include **Actor**, **Scenario**, **Interface**, **Intent**, **Setup**, **Steps**, **Verification**, and **Persistence** — see the required-shape checklist below. See `docs/reference/testing-e2e.md` "GOOD vs BAD use cases" for canonical worked examples per API / UI / CLI.
+
+At the top of the plan file's `#### E2E Use Cases` section, include this marker:
+
+```markdown
+Testing references loaded:
+- `docs/reference/testing-e2e.md`
+```
 
 **Pick the interface from the feature surface, not the project type.** `CLAUDE.md ## E2E Configuration` tells you which interfaces the project EXPOSES — that is the capability envelope. The feature itself tells you which surface the user actually touches:
 
@@ -683,7 +694,7 @@ Run this checklist:
 2. For EACH exposed interface, ask: "Does this feature's capability area exist behind this interface today, or should it after this PR?"
 3. In the plan file's `#### E2E Use Cases` section, declare a **Surface coverage decision** sub-block listing every exposed interface with either:
    - **Covered** — a UC for this surface exists below, OR
-   - **N/A — \<substantive justification\>** — see `rules/testing.md` "Multi-surface coverage" for acceptable vs unacceptable N/A reasons.
+   - **N/A — \<substantive justification\>** — see `docs/reference/testing-e2e.md` "Multi-surface coverage" for acceptable vs unacceptable N/A reasons.
 
 **The disqualifying N/A justification** (surfaced 2026-05-18 from msai-v2 soak): _"CLI: N/A — no CLI changes in my diff."_ That describes implementation, not user-facing scope. If the project's CLI already exposes the feature's capability area and you've extended it in UI/API, the CLI should be extended too — OR you need a substantive product reason it shouldn't (e.g., admin-only by product decision, deferred to v2 with a tracked TODO, feature is a UI-only visual element).
 
@@ -697,7 +708,7 @@ verify-e2e's Step 2c emits a `SURFACE_COVERAGE_WARNING` if UCs cover fewer surfa
 4. **Intent** — one sentence stating what the Actor achieves, in the Actor's terms
 5. **Setup** — sanctioned setup only. Must NOT perform the same action the UC tests (verify-e2e rejects as `CHEAT_SETUP`). Don't re-test login here; declare the auth state and use a sanctioned auth path.
 6. **Steps** — at least 2 user actions through the declared interface
-7. **Verification** — surface-specific user-observable outcome. See the rubric in `rules/testing.md` "Verification language — surface-specific". A bare status code / bare exit code / single element-visible check is rejected as `THIN_VERIFICATION`.
+7. **Verification** — surface-specific user-observable outcome. See the rubric in `docs/reference/testing-e2e.md` "Verification language — surface-specific". A bare status code / bare exit code / single element-visible check is rejected as `THIN_VERIFICATION`.
 8. **Persistence** — reload, re-request, or re-invoke through the same interface. Missing = `MISSING_PERSISTENCE`.
 
 **Quick sanity check before saving:**
@@ -1005,7 +1016,7 @@ The header's `VERDICT:` line is the top-level outcome. For `FAIL` and `PARTIAL`,
 - **VERDICT: PASS** — Proceed to Phase 5.4b — **after** the SURFACE_COVERAGE_WARNING check below.
 - **VERDICT: FAIL** — At least one UC was classified `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body. Do NOT check the box until PASS.
   - `FAIL_BUG`: Fix the issue in the product code, re-run verify-e2e.
-  - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason code: `MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW` / `NOT_USER_JOURNEY` / `WRONG_INTERFACE`. Rewrite the offending UC in the plan file using the required-shape checklist from Phase 3.2b and the GOOD examples in `rules/testing.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
+  - `FAIL_INVALID_USE_CASE`: This is a **test-design** failure, not a product bug. The agent reports a reason code: `MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW` / `NOT_USER_JOURNEY` / `WRONG_INTERFACE`. Rewrite the offending UC in the plan file using the required-shape checklist from Phase 3.2b and the GOOD examples in `docs/reference/testing-e2e.md`. Re-invoke verify-e2e. Do not change product code in response to this classification.
   - If the body has mixed classifications, address `FAIL_INVALID_USE_CASE` first (verify-e2e can't meaningfully run an invalid UC), then `FAIL_BUG`, then `FAIL_STALE`.
 - **VERDICT: PARTIAL** — No `FAIL_BUG` or `FAIL_INVALID_USE_CASE` in the body, but at least one `FAIL_STALE` or `FAIL_INFRA`. Look at each failed UC:
   - `FAIL_STALE`: update the stale use case file (interface or selector changed), re-run.
@@ -1102,8 +1113,8 @@ If no files (empty directory, or directory missing): check the box with `- [x] E
 - **FAIL_STALE (agent only):** Update stale use case file and re-run.
 - **FAIL_INFRA / flake (both paths):** Retry once. If still failing, report to user for decision.
 - **FAIL_INVALID_USE_CASE (agent only):** two flavors in regression mode, both telling you to fix the UC (NOT product code):
-  - **Hard-SHAPE reasons** (`MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW`) are skipped in regression mode (v5.35 mode-gating) to avoid retroactively failing legacy UCs that predate v5.34's shape requirement. If one of these fires anyway, it's a graduation bug — a post-v5.34 UC reached `tests/e2e/use-cases/` without the new shape. Rewrite it to the v5.34 shape (see `rules/testing.md`), commit, re-run.
-  - **Judgment-call reasons** (`NOT_USER_JOURNEY`, `WRONG_INTERFACE`) **DO fire in regression mode by design.** This is the desired behavior: pulling forward old bad UCs (endpoint-shaped Intents, wrong-interface declarations) so they get cleaned up to the new standard. Treat each one as a real find — open the UC, rewrite it to a proper user-journey UC per `rules/testing.md`, commit, re-run. The point of the regression suite catching these isn't ceremony; it's that old code-shaped UCs were testing the wrong thing all along.
+  - **Hard-SHAPE reasons** (`MISSING_ACTOR` / `MISSING_SCENARIO` / `SCENARIO_FLUFF` / `CHEAT_SETUP` / `THIN_VERIFICATION` / `MISSING_PERSISTENCE` / `TOO_SHALLOW`) are skipped in regression mode (v5.35 mode-gating) to avoid retroactively failing legacy UCs that predate v5.34's shape requirement. If one of these fires anyway, it's a graduation bug — a post-v5.34 UC reached `tests/e2e/use-cases/` without the new shape. Rewrite it to the v5.34 shape (see `docs/reference/testing-e2e.md`), commit, re-run.
+  - **Judgment-call reasons** (`NOT_USER_JOURNEY`, `WRONG_INTERFACE`) **DO fire in regression mode by design.** This is the desired behavior: pulling forward old bad UCs (endpoint-shaped Intents, wrong-interface declarations) so they get cleaned up to the new standard. Treat each one as a real find — open the UC, rewrite it to a proper user-journey UC per `docs/reference/testing-e2e.md`, commit, re-run. The point of the regression suite catching these isn't ceremony; it's that old code-shaped UCs were testing the wrong thing all along.
 
 **Note:** `pnpm exec playwright test` runs the binary directly — no `package.json` script is required. setup.sh does not modify `package.json`; use the binary invocation above.
 

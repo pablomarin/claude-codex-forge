@@ -534,6 +534,7 @@ directories=(
     ".claude/skills/council/references"
     "docs/prds"
     "docs/plans"
+    "docs/reference"
     "docs/solutions/build-errors"
     "docs/solutions/test-failures"
     "docs/solutions/runtime-errors"
@@ -720,6 +721,10 @@ copy_file "$SCRIPT_DIR/docs/adr/README.md" "docs/adr/README.md" "docs/adr/README
 for adr in 0001-volatile-state-not-auto-loaded 0002-bash-and-powershell-dual-platform 0003-template-distributed-no-build-step 0004-diataxis-docs-structure 0005-hard-platform-parity-rule; do
     copy_file "$SCRIPT_DIR/docs/adr/${adr}.md" "docs/adr/${adr}.md" "docs/adr/${adr}.md"
 done
+
+# On-demand references — installed outside .claude/rules so they are not autoloaded.
+mkdir -p docs/reference
+copy_file "$SCRIPT_DIR/docs/reference/testing-e2e.md" "docs/reference/testing-e2e.md" "docs/reference/testing-e2e.md"
 
 # Step 5: Append .claude/local/ to root .gitignore if not already present (idempotent).
 if [ -f ".gitignore" ]; then

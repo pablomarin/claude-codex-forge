@@ -333,11 +333,11 @@ Success: detailed validation still fires even though startup `testing.md` is sli
 - [ ] Split `rules/testing.md` into index + reference.
   - [x] Created consolidated reference: `docs/reference/testing-e2e.md`.
   - [x] Slimmed `rules/testing.md` into compact index.
-- [ ] Update `/new-feature` and `/fix-bug` Phase 3.2b instructions.
-- [ ] Add `Testing references loaded:` marker requirement.
-- [ ] Update `verify-e2e.md` stale references.
-- [ ] Update `setup.sh` and `setup.ps1` to install the new reference.
-- [ ] Add/extend template contract tests.
+- [x] Update `/new-feature` and `/fix-bug` Phase 3.2b instructions.
+- [x] Add `Testing references loaded:` marker requirement.
+- [x] Update `verify-e2e.md` stale references.
+- [x] Update `setup.sh` and `setup.ps1` to install the new reference.
+- [x] Add/extend template contract tests.
 - [ ] Reinstall into `forge-empty` and measure startup context.
 - [ ] Run positive behavior test.
 - [ ] Run negative malformed-UC test.
