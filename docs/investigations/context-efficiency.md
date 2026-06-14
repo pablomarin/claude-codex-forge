@@ -149,6 +149,22 @@ Policy direction:
 
 Measurement implication: track context tokens separately from visible output tokens and reasoning/thinking tokens if exposed. If hidden reasoning tokens are not available in transcript JSONL, use provider dashboard cost/latency as a proxy and compare review-finding rates after lower-effort implementation.
 
+## Grill-with-docs alignment — 2026-06-14
+
+Canonical target: **runtime context efficiency** — reduce main-thread context growth during active Forge workflows while preserving mandatory review gates and durable rationale.
+
+Agreed first direction:
+
+- Optimize first at the **Phase 3 → Phase 4 phase-boundary seam**.
+- Add a required `## Implementation Handoff` to approved plans for full plans (4+ tasks), recommended for trivial plans (≤3 tasks).
+- Treat `### Task Contract` inside the handoff as the canonical implementation contract. For full plans, it carries the dispatch table; Phase 4 verifies/updates it instead of appending a separate drifting `## Dispatch Plan`.
+- Default to same-session compaction after durable handoff; recommend a fresh implementation session only when fresh-session triggers apply: large task count, multiple plan-review iterations, material council/spike changes, heavy Phase 3 churn, or metrics showing Phase 3 dominates context growth.
+- Suppress `build-evidence` Stop output outside active `/goal` sessions, while preserving byte/schema behavior for active UUID-shaped `/goal` nonces.
+- Document model/effort budgeting now, but do not automate model or effort switching in the first change.
+- Defer Phase 3.3a Claude-side plan-review offloading to a later measured Tier 2 change.
+
+Decision recorded in `docs/adr/0010-runtime-context-efficiency-via-handoff-seams.md`.
+
 ## Change tiers
 
 ### Tier 0 — Measurement only
@@ -213,6 +229,8 @@ Only after measurement: bounded brainstorming artifacts, structured council outp
 - [x] Investigation plan written down.
 - [x] Tier 0 metrics script created (`scripts/context-metrics.py`).
 - [x] Setup provenance added so throwaway targets can verify they were installed from this checkout (`.claude/local/forge-source.env`).
+- [x] Grill-with-docs alignment completed for runtime context efficiency direction.
+- [x] ADR recorded (`docs/adr/0010-runtime-context-efficiency-via-handoff-seams.md`).
 - [ ] Baseline metrics captured.
 - [ ] Tier 1.1 implemented with `.sh` / `.ps1` parity.
 - [ ] After metrics captured.
