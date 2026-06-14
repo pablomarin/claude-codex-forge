@@ -250,6 +250,80 @@ Transcript check: `docs/reference/testing-e2e.md` content did not appear in the 
 
 Interpretation: the first-pass progressive-disclosure split hit the expected target. The slim index preserves routing/safety vocabulary for roughly ~1k startup-token overhead compared with deleting `testing.md` entirely, while saving ~9–10k versus the prior full autoloaded testing rule.
 
+## Behavior validation results
+
+Validated in `/home/aescala82/projects/forge-empty` with a throwaway `tiny-notes` CLI feature created through the real `/new-feature tiny-notes CLI` workflow. The original user prompt did **not** mention `docs/reference/testing-e2e.md`, the `Testing references loaded:` marker, or required E2E field names; the workflow had to discover those from Forge instructions.
+
+Positive artifact result:
+
+```text
+Plan: /home/aescala82/projects/forge-empty/docs/superpowers/plans/2026-06-13-tiny-notes.md
+```
+
+The generated plan included:
+
+```markdown
+#### E2E Use Cases
+
+Testing references loaded:
+- `docs/reference/testing-e2e.md`
+```
+
+It also included CLI use cases with Actor, Scenario, Interface, Intent, Setup, Steps, Verification, Persistence, and a Surface coverage decision block. This proves the command workflow loaded the detailed testing reference on demand at E2E design time.
+
+Positive verifier result:
+
+```text
+Report: /home/aescala82/projects/forge-empty/tests/e2e/reports/2026-06-13-tiny-notes.md
+Verdict: PASS
+Mode: feature
+Project type: cli
+```
+
+`verify-e2e` executed the CLI through subprocess invocations only, reported both use cases as PASS, and confirmed no `SURFACE_COVERAGE_WARNING`. Passing use cases were graduated to:
+
+```text
+/home/aescala82/projects/forge-empty/tests/e2e/use-cases/tiny-notes.md
+```
+
+Negative verifier result:
+
+A temporary malformed plan was created at `/home/aescala82/projects/forge-empty/docs/plans/malformed-e2e-check.md` and then deleted after inspection, along with its temporary report. The malformed UC used a bare `Actor: user`, omitted `Scenario`, had one step, used `Verification: exit code 0`, and set `Persistence: N/A` on a state-mutating add command.
+
+`verify-e2e` returned:
+
+```text
+VERDICT: FAIL
+Result: FAIL_INVALID_USE_CASE
+Execution: skipped before health check / product execution
+Primary reason: TOO_SHALLOW
+Additional reasons: MISSING_ACTOR, MISSING_SCENARIO, THIN_VERIFICATION, MISSING_PERSISTENCE, NOT_USER_JOURNEY
+```
+
+This proves strict Step 2b shape validation still fires even though the detailed E2E doctrine is no longer startup-autoloaded from `rules/testing.md`.
+
+Caveats observed during validation:
+
+- The plan path came from the Superpowers writer as `docs/superpowers/plans/...`, not Forge's documented `docs/plans/...`; `verify-e2e` still worked when given the explicit path.
+- `forge-empty/CLAUDE.md` still had the template E2E config placeholder, but `verify-e2e` correctly used the explicit `Project type: cli` prompt and CLI-only project evidence.
+- One error-path UC staged state through the public CLI in its Steps and used `Persistence: N/A`; `verify-e2e` accepted it as a read-only error-path check after treating the add as sanctioned setup. The happy-path UC still covered persistence explicitly.
+
+Final static verification:
+
+```text
+bash tests/template/test-lint.sh
+# 30 passed, 0 failed
+
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/aescala82/.nvm/versions/node/v24.8.0/bin" \
+  bash tests/template/test-contracts.sh
+# 390 passed, 0 failed
+
+bash tests/template/test-setup.sh
+# 182 passed, 0 failed
+```
+
+PowerShell runtime parity checks were skipped by the test scripts because `pwsh` is not installed in this environment. The earlier `test-setup.sh` version-stamp failures were resolved by promoting the top changelog entry from `Unreleased` to `5.55`, matching `setup.sh`'s top-heading-only version parser.
+
 ## Verification plan
 
 ### A. Static verification
@@ -371,7 +445,7 @@ Success: detailed validation still fires even though startup `testing.md` is sli
 
 - [x] Wrote initial progressive-disclosure plan.
 - [x] Revised plan to use one consolidated `docs/reference/testing-e2e.md` first.
-- [ ] Split `rules/testing.md` into index + reference.
+- [x] Split `rules/testing.md` into index + reference.
   - [x] Created consolidated reference: `docs/reference/testing-e2e.md`.
   - [x] Slimmed `rules/testing.md` into compact index.
 - [x] Update `/new-feature` and `/fix-bug` Phase 3.2b instructions.
@@ -380,6 +454,6 @@ Success: detailed validation still fires even though startup `testing.md` is sli
 - [x] Update `setup.sh` and `setup.ps1` to install the new reference.
 - [x] Add/extend template contract tests.
 - [x] Reinstall into `forge-empty` and measure startup context.
-- [ ] Run positive behavior test.
-- [ ] Run negative malformed-UC test.
-- [ ] Review results and decide whether to apply same pattern to `workflow.md`.
+- [x] Run positive behavior test.
+- [x] Run negative malformed-UC test.
+- [x] Review results: testing progressive disclosure is validated; `workflow.md` progressive disclosure remains a separate future work item.

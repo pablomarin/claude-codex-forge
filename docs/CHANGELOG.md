@@ -2,7 +2,7 @@
 
 All notable changes to claude-codex-forge.
 
-## Unreleased — 2026-06-13
+## 5.55 — 2026-06-14
 
 **Context-efficiency investigation + setup provenance.** Added investigation docs for Forge startup/workflow token overhead (`docs/investigations/context-efficiency.md`, `startup-context-overhead.md`, `startup-skill-inventory.md`, `testing-progressive-disclosure-plan.md`). Measurements show the biggest Forge-owned startup lever is autoloaded rule content, especially `rules/testing.md` (~11k startup-token savings when removed in a throwaway install) and `rules/workflow.md` (~4.2k). Also added setup source provenance stamping to `setup.sh`/`setup.ps1`: setup now prints the source checkout/revision and writes `.claude/local/forge-source.env` (or global `~/.claude/forge-source.env`) so dogfood installs can verify which Forge clone produced downstream files. `test-setup.sh` now pins provenance output/stamp behavior. Test: `bash tests/template/test-setup.sh` (181 passed).
 
