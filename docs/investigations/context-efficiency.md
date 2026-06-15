@@ -233,5 +233,6 @@ Only after measurement: bounded brainstorming artifacts, structured council outp
 - [x] ADR recorded (`docs/adr/0010-runtime-context-efficiency-via-handoff-seams.md`).
 - [x] Baseline metrics captured on available Forge transcript (`scripts/context-metrics.py --project-root .`; newest transcript peak 100,963, p95 100,963, phase unknown).
 - [x] Tier 1.1 implemented with `.sh` / `.ps1` parity: `build-evidence` now emits only with active UUID-shaped `/goal` nonce.
-- [ ] After metrics captured on comparable post-change workflow.
+- [x] Runtime phase-gate v1 implemented with `.sh` / `.ps1` parity: `phase-3-4` is durable in `.claude/local/workflow-run.json`, events append to `.claude/local/workflow-events.jsonl`, and `check-phase-gates` blocks implementation mutations while pending.
+- [ ] Dogfood metrics captured on comparable post-change workflow.
 - [ ] Results reviewed.

@@ -755,6 +755,7 @@ Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "pre-compact-memory.
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "check-config-change.ps1") ".claude\hooks\check-config-change.ps1" ".claude\hooks\check-config-change.ps1"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "check-bash-safety.ps1") ".claude\hooks\check-bash-safety.ps1" ".claude\hooks\check-bash-safety.ps1"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "check-workflow-gates.ps1") ".claude\hooks\check-workflow-gates.ps1" ".claude\hooks\check-workflow-gates.ps1"
+Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "check-phase-gates.ps1") ".claude\hooks\check-phase-gates.ps1" ".claude\hooks\check-phase-gates.ps1"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "auto-approve-local-writes.ps1") ".claude\hooks\auto-approve-local-writes.ps1" ".claude\hooks\auto-approve-local-writes.ps1"
 # build-evidence.ps1 — read-only evidence emitter for the /forge-goal autonomous loop
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "build-evidence.ps1") ".claude\hooks\build-evidence.ps1" ".claude\hooks\build-evidence.ps1"
@@ -772,6 +773,8 @@ Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "d
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "default-branch.sh") "$libDir\default-branch.sh" "$libDir\default-branch.sh (default-branch detection helper, bash — used by commands/*.md preflight)"
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "review-breaker.sh") "$libDir\review-breaker.sh" "$libDir\review-breaker.sh (review-loop convergence breaker, v5.54)"
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "review-breaker.ps1") "$libDir\review-breaker.ps1" "$libDir\review-breaker.ps1 (review-loop convergence breaker, v5.54)"
+Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "forge-workflow.ps1") "$libDir\forge-workflow.ps1" "$libDir\forge-workflow.ps1 (runtime workflow controller)"
+Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "forge-workflow.sh") "$libDir\forge-workflow.sh" "$libDir\forge-workflow.sh (runtime workflow controller, bash)"
 # codex-pty shim — work around openai/codex#19945 (silent empty exit when codex
 # exec runs without a controlling TTY). Both .ps1 + .sh + helper.py ship for
 # cross-platform parity (ADR 0005).
@@ -790,6 +793,7 @@ foreach ($adr in @("0001-volatile-state-not-auto-loaded", "0002-bash-and-powersh
 # On-demand references -- installed outside .claude/rules so they are not autoloaded.
 if (-not (Test-Path "docs\reference")) { New-Item -ItemType Directory -Path "docs\reference" -Force | Out-Null }
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "docs") "reference\testing-e2e.md") "docs\reference\testing-e2e.md" "docs\reference\testing-e2e.md"
+Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "docs") "reference\workflow-runtime.md") "docs\reference\workflow-runtime.md" "docs\reference\workflow-runtime.md"
 
 # Append .claude/local/ to root .gitignore if not already present (idempotent).
 if (Test-Path ".gitignore") {

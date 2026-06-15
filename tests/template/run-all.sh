@@ -19,6 +19,7 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-lint.sh"
     "$REPO_ROOT/tests/template/test-fixtures.sh"
     "$REPO_ROOT/tests/template/test-build-evidence.sh"
+    "$REPO_ROOT/tests/template/test-forge-workflow.sh"
     "$REPO_ROOT/tests/template/test-contracts.sh"
     "$REPO_ROOT/tests/template/test-state-roundtrip.sh"
     "$REPO_ROOT/tests/template/test-review-breaker.sh"

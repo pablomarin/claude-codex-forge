@@ -74,6 +74,8 @@ assert_equals "$(cat "$S1/.claude/playwright-dir")" "." \
     "marker records '.' for flat layout"
 assert_file_exists "$S1/docs/reference/testing-e2e.md" \
     "on-demand E2E testing reference installed"
+assert_file_exists "$S1/docs/reference/workflow-runtime.md" \
+    "workflow runtime reference installed"
 assert_file_exists "$S1/docs/ci-templates/e2e.yml" \
     "CI template scaffolded"
 assert_contains "$S1/docs/ci-templates/e2e.yml" "working-directory: ." \
@@ -702,6 +704,31 @@ assert_file_exists "$S11/.claude/hooks/lib/review-breaker.ps1" \
 SRC_HASH_RSPS=$(hash_file "$REPO_ROOT/hooks/lib/review-breaker.ps1")
 assert_hash_equals "$S11/.claude/hooks/lib/review-breaker.ps1" "$SRC_HASH_RSPS" \
     "installed review-breaker.ps1 matches source (hash-identical)"
+
+assert_file_exists "$S11/.claude/hooks/check-phase-gates.sh" \
+    ".claude/hooks/check-phase-gates.sh installed"
+if [[ -x "$S11/.claude/hooks/check-phase-gates.sh" ]]; then
+    pass ".claude/hooks/check-phase-gates.sh is executable"
+else
+    fail ".claude/hooks/check-phase-gates.sh is NOT executable"
+fi
+
+assert_file_exists "$S11/.claude/hooks/lib/forge-workflow.sh" \
+    ".claude/hooks/lib/forge-workflow.sh installed"
+if [[ -x "$S11/.claude/hooks/lib/forge-workflow.sh" ]]; then
+    pass ".claude/hooks/lib/forge-workflow.sh is executable"
+else
+    fail ".claude/hooks/lib/forge-workflow.sh is NOT executable"
+fi
+SRC_HASH_FW=$(hash_file "$REPO_ROOT/hooks/lib/forge-workflow.sh")
+assert_hash_equals "$S11/.claude/hooks/lib/forge-workflow.sh" "$SRC_HASH_FW" \
+    "installed forge-workflow.sh matches source (hash-identical)"
+
+assert_file_exists "$S11/.claude/hooks/lib/forge-workflow.ps1" \
+    ".claude/hooks/lib/forge-workflow.ps1 installed"
+SRC_HASH_FWPS=$(hash_file "$REPO_ROOT/hooks/lib/forge-workflow.ps1")
+assert_hash_equals "$S11/.claude/hooks/lib/forge-workflow.ps1" "$SRC_HASH_FWPS" \
+    "installed forge-workflow.ps1 matches source (hash-identical)"
 
 # Note: setup.ps1 (Windows installer) installs default-branch.ps1; setup.sh
 # (Unix installer) installs only default-branch.sh. The cross-installer parity

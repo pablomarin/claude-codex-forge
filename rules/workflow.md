@@ -24,7 +24,9 @@
 3. **After completing a step**: Check the box in the Checklist and advance `Next step` to the next unchecked item
 4. **On phase transition**: Update the `Phase` field
 
-The Stop hook reminds you of the current phase on every response. The PreToolUse hook blocks commit/push/PR if quality gates are incomplete. This rule is re-injected every turn — it survives context compaction.
+The Stop hook reminds you of the current phase on every response. PreToolUse hooks are runtime authority: `check-phase-gates` blocks implementation Bash/Edit/Write while a phase gate is pending, and `check-workflow-gates` blocks commit/push/PR if quality gates are incomplete. This rule is re-injected every turn — it survives context compaction.
+
+**Phase-gate authority:** If `.claude/local/workflow-run.json` contains `phase-3-4` with `status: pending`, do not start Phase 4. Only read/status commands and `.claude/local/**` state updates are allowed until the gate is approved with one of `same-context`, `compact`, or `fresh-session`.
 
 ## Council During `/forge-goal` Autonomous Run
 

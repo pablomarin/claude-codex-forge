@@ -682,6 +682,7 @@ copy_file "$SCRIPT_DIR/hooks/pre-compact-memory.sh" ".claude/hooks/pre-compact-m
 copy_file "$SCRIPT_DIR/hooks/check-config-change.sh" ".claude/hooks/check-config-change.sh" ".claude/hooks/check-config-change.sh"
 copy_file "$SCRIPT_DIR/hooks/check-bash-safety.sh" ".claude/hooks/check-bash-safety.sh" ".claude/hooks/check-bash-safety.sh"
 copy_file "$SCRIPT_DIR/hooks/check-workflow-gates.sh" ".claude/hooks/check-workflow-gates.sh" ".claude/hooks/check-workflow-gates.sh"
+copy_file "$SCRIPT_DIR/hooks/check-phase-gates.sh" ".claude/hooks/check-phase-gates.sh" ".claude/hooks/check-phase-gates.sh"
 copy_file "$SCRIPT_DIR/hooks/auto-approve-local-writes.sh" ".claude/hooks/auto-approve-local-writes.sh" ".claude/hooks/auto-approve-local-writes.sh"
 # build-evidence.sh — read-only evidence emitter for the /forge-goal autonomous loop
 copy_file "$SCRIPT_DIR/hooks/build-evidence.sh" ".claude/hooks/build-evidence.sh" ".claude/hooks/build-evidence.sh"
@@ -695,6 +696,9 @@ copy_file "$SCRIPT_DIR/hooks/lib/default-branch.ps1" ".claude/hooks/lib/default-
 copy_file "$SCRIPT_DIR/hooks/lib/review-breaker.sh" ".claude/hooks/lib/review-breaker.sh" ".claude/hooks/lib/review-breaker.sh (review-loop convergence breaker, v5.54)"
 chmod +x .claude/hooks/lib/review-breaker.sh 2>/dev/null || true
 copy_file "$SCRIPT_DIR/hooks/lib/review-breaker.ps1" ".claude/hooks/lib/review-breaker.ps1" ".claude/hooks/lib/review-breaker.ps1 (PowerShell mirror)"
+copy_file "$SCRIPT_DIR/hooks/lib/forge-workflow.sh" ".claude/hooks/lib/forge-workflow.sh" ".claude/hooks/lib/forge-workflow.sh (runtime workflow controller)"
+chmod +x .claude/hooks/lib/forge-workflow.sh 2>/dev/null || true
+copy_file "$SCRIPT_DIR/hooks/lib/forge-workflow.ps1" ".claude/hooks/lib/forge-workflow.ps1" ".claude/hooks/lib/forge-workflow.ps1 (PowerShell runtime workflow controller)"
 # codex-pty shim — work around openai/codex#19945 (silent empty exit when codex
 # exec runs without a controlling TTY). Both .sh + .ps1 + helper.py ship for
 # cross-platform parity (ADR 0005).
@@ -711,6 +715,7 @@ chmod +x .claude/hooks/pre-compact-memory.sh 2>/dev/null || true
 chmod +x .claude/hooks/check-config-change.sh 2>/dev/null || true
 chmod +x .claude/hooks/check-bash-safety.sh 2>/dev/null || true
 chmod +x .claude/hooks/check-workflow-gates.sh 2>/dev/null || true
+chmod +x .claude/hooks/check-phase-gates.sh 2>/dev/null || true
 chmod +x .claude/hooks/auto-approve-local-writes.sh 2>/dev/null || true
 chmod +x .claude/hooks/build-evidence.sh 2>/dev/null || true
 
@@ -725,6 +730,7 @@ done
 # On-demand references — installed outside .claude/rules so they are not autoloaded.
 mkdir -p docs/reference
 copy_file "$SCRIPT_DIR/docs/reference/testing-e2e.md" "docs/reference/testing-e2e.md" "docs/reference/testing-e2e.md"
+copy_file "$SCRIPT_DIR/docs/reference/workflow-runtime.md" "docs/reference/workflow-runtime.md" "docs/reference/workflow-runtime.md"
 
 # Step 5: Append .claude/local/ to root .gitignore if not already present (idempotent).
 if [ -f ".gitignore" ]; then

@@ -792,7 +792,10 @@ Gather severity-tagged findings from all available reviewers. Use this rubric:
      `- [x] Plan review iteration <N> — codex clean — plan=\`docs/plans/<name>.md\` — plan_sha=\`<sha>\` — ts=\`<ISO8601>\``
   4. Check the loop-complete box:
      `- [x] Plan review loop (<N> iterations) — PASS`
-  5. Proceed to Phase 4.
+  5. Open the Phase 3 → Phase 4 runtime gate, then STOP before implementation:
+     ```bash
+     .claude/hooks/lib/forge-workflow.sh open-gate phase-3-4 --plan docs/plans/<name>.md
+     ```
 
 The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is checked without (2). The plan_sha binds the clean claim to the actual reviewed plan content — re-patching the plan after the clean line invalidates the gate. The only escape is `- [x] Plan review loop — N/A: <reason>`.
 
@@ -841,13 +844,27 @@ For trivial plans (≤3 tasks), `### Task Contract` may be a short ordered list 
 
 **Fresh-session triggers:** Recommend a fresh implementation session (or `/goal` continuation from the handoff) instead of only same-session compaction when any are true: 8+ tasks, 2+ plan-review iterations, a full council or spike materially changed the approach, Phase 3 had heavy PRD/brainstorm/review churn, or transcript metrics show Phase 3 dominates context growth. Otherwise, recommend `/compact` after this handoff and continue in-session.
 
+**Runtime gate:** After the handoff is written and plan-review clean evidence is stamped, run:
+
+```bash
+.claude/hooks/lib/forge-workflow.sh open-gate phase-3-4 --plan docs/plans/<name>.md
+```
+
+Then STOP. Do not start Phase 4 until the user chooses a crossing mode and the gate is approved:
+
+```bash
+.claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode same-context|compact|fresh-session
+```
+
+While `phase-3-4` is pending, the `check-phase-gates` PreToolUse hook blocks implementation Bash/Edit/Write actions.
+
 ---
 
 ## Phase 4: Execute
 
 > **Checkpoint:** Update `## Workflow` in .claude/local/state.md — Phase: `4 — Execute`, check off design items (brainstorming, plan, review).
 >
-> **Optional before starting:** Run `/compact` if the session is heavy with brainstorm + plan-review discussion. Consolidates prior phases into a structured summary and frees budget for execution. Reminder, not a gate.
+> **Required before starting:** Confirm `.claude/hooks/lib/forge-workflow.sh status` shows `phase-3-4` approved. If the gate is pending, choose/obtain a crossing mode and run `approve-gate` first.
 
 ### Trivial plans (≤3 tasks)
 

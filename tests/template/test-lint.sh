@@ -28,8 +28,11 @@ BASH_FILES=(
     "$REPO_ROOT/hooks/check-bash-safety.sh"
     "$REPO_ROOT/hooks/check-config-change.sh"
     "$REPO_ROOT/hooks/check-workflow-gates.sh"
+    "$REPO_ROOT/hooks/check-phase-gates.sh"
     "$REPO_ROOT/hooks/lib/default-branch.sh"
+    "$REPO_ROOT/hooks/lib/forge-workflow.sh"
     "$REPO_ROOT/hooks/lib/review-breaker.sh"
+    "$REPO_ROOT/tests/template/test-forge-workflow.sh"
     "$REPO_ROOT/tests/template/test-review-breaker.sh"
     "$REPO_ROOT/tests/template/lib.sh"
     "$REPO_ROOT/tests/template/test-setup.sh"
@@ -75,7 +78,9 @@ if command -v pwsh >/dev/null 2>&1; then
         "$REPO_ROOT/hooks/check-bash-safety.ps1"
         "$REPO_ROOT/hooks/check-config-change.ps1"
         "$REPO_ROOT/hooks/check-workflow-gates.ps1"
+        "$REPO_ROOT/hooks/check-phase-gates.ps1"
         "$REPO_ROOT/hooks/lib/default-branch.ps1"
+        "$REPO_ROOT/hooks/lib/forge-workflow.ps1"
         "$REPO_ROOT/hooks/lib/review-breaker.ps1"
     )
     for f in "${PS_FILES[@]}"; do
