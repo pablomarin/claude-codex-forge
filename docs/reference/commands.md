@@ -48,7 +48,7 @@ All slash commands and subagents available after setup.
 | --------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------- |
 | `/superpowers:brainstorming`                  | Interactive design refinement                              | Uses PRD context                         |
 | `/superpowers:writing-plans`                  | Create detailed implementation plan                        | TDD tasks                                |
-| `/superpowers:subagent-driven-development`    | Execute plan via dispatched subagents (default in Phase 4) | TDD enforced, parallel via Dispatch Plan |
+| `/superpowers:subagent-driven-development`    | Execute plan via dispatched subagents (default in Phase 4) | TDD enforced, parallel via Implementation Handoff Task Contract |
 | `/superpowers:executing-plans`                | Execute plan in a separate session                         | Headless / walk-away mode                |
 | `/superpowers:systematic-debugging`           | 4-phase root cause analysis                                | Before ANY bug fix                       |
 | `/superpowers:verification-before-completion` | Evidence-based completion check                            | Catches "should work" claims             |

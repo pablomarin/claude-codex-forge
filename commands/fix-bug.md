@@ -610,16 +610,17 @@ Gather severity-tagged findings from all available reviewers. Use this rubric:
 
 - **P0/P1/P2 found by any reviewer →** Fix the plan, increment iteration counter in the state.md checklist (`Plan review loop (N iterations)`), go back to Step A.
 - **Only P3 or clean from all available reviewers on the same pass →**
-  1. Compute `plan_sha`:
+  1. Ensure the `## Implementation Handoff` exists in the plan file for the complex-fix path (see 3.4 below). Do this BEFORE computing `plan_sha` so the final clean evidence binds to the actual implementation contract.
+  2. Compute `plan_sha`:
      ```bash
      PLAN_SHA=$(shasum -a 256 docs/plans/<name>.md 2>/dev/null | awk '{print $1}')
      # Linux: PLAN_SHA=$(sha256sum docs/plans/<name>.md | awk '{print $1}')
      ```
-  2. Append the per-iter clean line to `.claude/local/state.md` `### Checklist`:
+  3. Append the per-iter clean line to `.claude/local/state.md` `### Checklist`:
      `- [x] Plan review iteration <N> — codex clean — plan=\`docs/plans/<name>.md\` — plan_sha=\`<sha>\` — ts=\`<ISO8601>\``
-  3. Check the loop-complete box:
+  4. Check the loop-complete box:
      `- [x] Plan review loop (<N> iterations) — PASS`
-  4. Proceed to Phase 4.
+  5. Proceed to Phase 4.
 
 The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is checked without (2). The plan_sha binds the clean claim to the actual reviewed plan content — re-patching the plan after the clean line invalidates the gate. The only escape is `- [x] Plan review loop — N/A: <reason>`.
 
@@ -631,6 +632,42 @@ The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is che
 - Do NOT proceed to Phase 4 until the plan is approved
 
 > **Why mandatory?** A wrong fix plan leads to wasted effort and potentially new bugs. Two independent reviewers checking the plan against the actual code catches things a single pass misses.
+
+### 3.4 Implementation Handoff (context-efficiency seam; complex-fix path only)
+
+Before recording final plan-review clean evidence and before the Plan-Approved checkpoint or Phase 4 starts, append a `## Implementation Handoff` section to the plan file. This is the durable Phase 3 → Phase 4 seam: it preserves the “why” so implementation can proceed after `/compact` or from a fresh implementation session without rereading the full debugging/brainstorm/review transcript. Do not edit the plan after computing `plan_sha`; if the handoff changes after the clean line, recompute `plan_sha` and re-stamp the clean evidence.
+
+Required for complex fixes with full plans (4+ tasks). Recommended for smaller complex fixes when Phase 3 had meaningful debugging debate, council/spike changes, or review churn. Simple fixes that skipped Phase 3 do not need a handoff because they have no plan file.
+
+```markdown
+## Implementation Handoff
+
+### Outcome
+[What to fix, in 1-3 concrete sentences.]
+
+### Decision Ledger
+- Chose [X] because [reason].
+- Rejected [Y] because [reason].
+- Root cause/risk accepted: [risk] because [mitigation/reason].
+
+### Non-goals
+- [What not to change.]
+
+### Invariants
+- [Behavior, contract, security, data, or UX property that must remain true.]
+
+### Task Contract
+| Task ID | Depends on | Writes (concrete file paths) |
+| ------- | ---------- | ---------------------------- |
+| B1      | —          | `path/to/file.ext`           |
+
+### Review Expectations
+- [What plan/code reviewers should verify later.]
+```
+
+For smaller complex fixes (≤3 tasks), `### Task Contract` may be a short ordered list instead of the table. For full plans, the table is mandatory and becomes the canonical dispatch contract for Phase 4.
+
+**Fresh-session triggers:** Recommend a fresh implementation session (or `/goal` continuation from the handoff) instead of only same-session compaction when any are true: 8+ tasks, 2+ plan-review iterations, a full council or spike materially changed the approach, Phase 3 had heavy debugging/brainstorm/review churn, or transcript metrics show Phase 3 dominates context growth. Otherwise, recommend `/compact` after this handoff and continue in-session.
 
 ---
 
@@ -738,11 +775,11 @@ Write a failing test first, then fix. Single-threaded — no dispatch plan neede
 
 ### Complex fixes (3+ files, Phase 3 complete)
 
-> **Optional before starting:** Run `/compact` if the session is heavy with debugging + plan-review discussion.
+> **Optional before starting:** Run `/compact` after the Implementation Handoff if the session is heavy with debugging + plan-review discussion. If a fresh-session trigger applies, recommend starting implementation from the plan file's handoff instead of carrying the full Phase 3 transcript forward.
 
-#### 4.0 Dispatch Plan (MANDATORY before dispatching any subagent)
+#### 4.0 Task Contract verification (MANDATORY before dispatching any subagent)
 
-Append a `## Dispatch Plan` heading to the plan file with one row per task. Format, scheduling rules, and failure semantics are identical to `/new-feature` — see `new-feature.md` in this same `.claude/commands/` directory, Phase 4.0, for the full spec. Key points restated:
+Verify the plan file's `## Implementation Handoff` has a `### Task Contract` with one row per task for full plans. Update it if plan-review edits changed dependencies or write targets; do not append a separate `## Dispatch Plan` section that can drift from the handoff. Format, scheduling rules, and failure semantics are identical to `/new-feature` — see `new-feature.md` in this same `.claude/commands/` directory, Phase 4.0, for the full spec. Key points restated:
 
 - `Writes` lists **concrete file paths**, not directories or globs
 - Default concurrency cap: 3 concurrent subagents (max 5 for small, genuinely independent tasks)

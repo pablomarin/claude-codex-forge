@@ -59,6 +59,25 @@ fi
 
 STATE_MD=".claude/local/state.md"
 
+# Context-efficiency guard (ADR 0010): Goal evidence is only useful when an
+# active /goal loop exists. Outside /goal, emitting the full evidence JSON on
+# every Stop event is transcript noise and can trigger git/gh/E2E probes the
+# normal interactive workflow does not consume. Keep active-goal behavior below
+# byte/schema compatible; skip only when there is no UUID-shaped nonce.
+_has_active_goal_session() {
+    [ -f "$STATE_MD" ] || return 1
+    local nonce
+    nonce=$(tr -d '\r' < "$STATE_MD" 2>/dev/null \
+        | awk '/^## \/goal session$/{flag=1;next} flag && /^## /{flag=0} flag' \
+        | grep -E '\|[[:space:]]*nonce[[:space:]]*\|' \
+        | head -1 | awk -F'|' '{print $3}' | xargs 2>/dev/null)
+    printf '%s' "$nonce" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+}
+
+if ! _has_active_goal_session; then
+    exit 0
+fi
+
 # Convergence-breaker helper (ADR 0009) — dual-path: installed location first,
 # Forge-internal source fallback. Absence is fail-open (see compute_breaker_fields).
 RS=".claude/hooks/lib/review-breaker.sh"

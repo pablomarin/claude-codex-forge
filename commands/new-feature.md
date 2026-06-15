@@ -782,16 +782,17 @@ Gather severity-tagged findings from all available reviewers. Use this rubric:
 
 - **P0/P1/P2 found by any reviewer →** Fix the plan, increment iteration counter in the state.md checklist (`Plan review loop (N iterations)`), go back to Step A.
 - **Only P3 or clean from all available reviewers on the same pass →**
-  1. Compute `plan_sha`:
+  1. Ensure the `## Implementation Handoff` exists in the plan file (see 3.4 below). Do this BEFORE computing `plan_sha` so the final clean evidence binds to the actual implementation contract.
+  2. Compute `plan_sha`:
      ```bash
      PLAN_SHA=$(shasum -a 256 docs/plans/<name>.md 2>/dev/null | awk '{print $1}')
      # Linux: PLAN_SHA=$(sha256sum docs/plans/<name>.md | awk '{print $1}')
      ```
-  2. Append the per-iter clean line to `.claude/local/state.md` `### Checklist`:
+  3. Append the per-iter clean line to `.claude/local/state.md` `### Checklist`:
      `- [x] Plan review iteration <N> — codex clean — plan=\`docs/plans/<name>.md\` — plan_sha=\`<sha>\` — ts=\`<ISO8601>\``
-  3. Check the loop-complete box:
+  4. Check the loop-complete box:
      `- [x] Plan review loop (<N> iterations) — PASS`
-  4. Proceed to Phase 4.
+  5. Proceed to Phase 4.
 
 The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is checked without (2). The plan_sha binds the clean claim to the actual reviewed plan content — re-patching the plan after the clean line invalidates the gate. The only escape is `- [x] Plan review loop — N/A: <reason>`.
 
@@ -804,6 +805,42 @@ The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is che
 
 > **Why mandatory?** Fixing a design flaw after implementation is 10x more expensive than catching it here. Two independent reviewers checking the plan against the actual code catches things a single pass misses.
 
+### 3.4 Implementation Handoff (context-efficiency seam)
+
+Before recording final plan-review clean evidence and before Phase 4 starts, append a `## Implementation Handoff` section to the plan file. This is the durable Phase 3 → Phase 4 seam: it preserves the “why” so implementation can proceed after `/compact` or from a fresh implementation session without rereading the full brainstorm/review transcript. Do not edit the plan after computing `plan_sha`; if the handoff changes after the clean line, recompute `plan_sha` and re-stamp the clean evidence.
+
+Required for full plans (4+ tasks). Recommended for trivial plans (≤3 tasks) when Phase 3 had meaningful design debate, council/spike changes, or review churn.
+
+```markdown
+## Implementation Handoff
+
+### Outcome
+[What to build, in 1-3 concrete sentences.]
+
+### Decision Ledger
+- Chose [X] because [reason].
+- Rejected [Y] because [reason].
+- Risk accepted: [risk] because [mitigation/reason].
+
+### Non-goals
+- [What not to change.]
+
+### Invariants
+- [Behavior, contract, security, data, or UX property that must remain true.]
+
+### Task Contract
+| Task ID | Depends on | Writes (concrete file paths) |
+| ------- | ---------- | ---------------------------- |
+| B1      | —          | `path/to/file.ext`           |
+
+### Review Expectations
+- [What plan/code reviewers should verify later.]
+```
+
+For trivial plans (≤3 tasks), `### Task Contract` may be a short ordered list instead of the table. For full plans, the table is mandatory and becomes the canonical dispatch contract for Phase 4.
+
+**Fresh-session triggers:** Recommend a fresh implementation session (or `/goal` continuation from the handoff) instead of only same-session compaction when any are true: 8+ tasks, 2+ plan-review iterations, a full council or spike materially changed the approach, Phase 3 had heavy PRD/brainstorm/review churn, or transcript metrics show Phase 3 dominates context growth. Otherwise, recommend `/compact` after this handoff and continue in-session.
+
 ---
 
 ## Phase 4: Execute
@@ -814,13 +851,13 @@ The PreToolUse `check-workflow-gates` hook will block ship actions if (3) is che
 
 ### Trivial plans (≤3 tasks)
 
-No dispatch plan needed. Use `superpowers:subagent-driven-development` and execute the plan's tasks sequentially in order. Proceed to Phase 5 when done.
+Use `superpowers:subagent-driven-development` and execute the plan's tasks sequentially in order. If the plan has an Implementation Handoff, verify its `### Task Contract` ordered list still matches the approved plan before dispatch. Proceed to Phase 5 when done.
 
 ### Full plans (4+ tasks)
 
-#### 4.0 Dispatch Plan (MANDATORY before dispatching any subagent)
+#### 4.0 Task Contract verification (MANDATORY before dispatching any subagent)
 
-Append a `## Dispatch Plan` heading to the plan file with one row per task:
+Verify the plan file's `## Implementation Handoff` has a `### Task Contract` table with one row per task. Update it if plan-review edits changed dependencies or write targets; do not append a separate `## Dispatch Plan` section that can drift from the handoff.
 
 | Task ID | Depends on | Writes (concrete file paths)                           |
 | ------- | ---------- | ------------------------------------------------------ |
@@ -840,7 +877,7 @@ Append a `## Dispatch Plan` heading to the plan file with one row per task:
 
 **No append-only fast-path.** Tasks that both modify the same existing file — barrel exports (`index.ts`, `__init__.py`), migration manifests, shared schemas, `pyproject.toml`, etc. — **must be serialized via `Depends on`**. Same-second timestamp migrations collide on filename and on `alembic_version` head; do not parallelize migration generation. The only case where two tasks may concurrently "add" to a shared space is when each creates a **distinct new file at a different path**, in which case the `Writes` column already lists disjoint paths and the standard dispatch rule applies.
 
-**Sequential override:** if the plan is tightly coupled (most tasks share files or types, or the feature reads as one logical change), note `"sequential mode"` in the dispatch plan and dispatch one subagent at a time. This is Cognition's documented counter-position on multi-agent orchestration and a legitimate choice for high-coupling work — parallelism is not always a win.
+**Sequential override:** if the plan is tightly coupled (most tasks share files or types, or the feature reads as one logical change), note `"sequential mode"` in the Task Contract and dispatch one subagent at a time. This is Cognition's documented counter-position on multi-agent orchestration and a legitimate choice for high-coupling work — parallelism is not always a win.
 
 #### 4.1 Execute via subagent-driven-development
 
@@ -853,7 +890,7 @@ Use `superpowers:subagent-driven-development`. Per dispatch cycle:
 
 **Handling failures:**
 
-- Subagent returns failure, OR diff-review rejects the result → mark the task failed in the dispatch plan, cancel any in-flight dependents, surface to the user before continuing
+- Subagent returns failure, OR diff-review rejects the result → mark the task failed in the Task Contract, cancel any in-flight dependents, surface to the user before continuing
 - Rate limit or timeout → retry once with a fresh subagent; if it fails again, treat as a failure
 - After each task completes, verify in-flight dependents' assumptions still hold. If a completed task introduced a breaking change to shared code, cancel the dependent and re-dispatch with updated context
 

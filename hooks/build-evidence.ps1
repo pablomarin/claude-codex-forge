@@ -57,6 +57,36 @@ if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
 $StateMd = ".claude/local/state.md"
 
 # ---------------------------------------------------------------------------
+# Context-efficiency guard (ADR 0010): Goal evidence is only useful when an
+# active /goal loop exists. Outside /goal, emitting the full evidence JSON on
+# every Stop event is transcript noise and can trigger git/gh/E2E probes the
+# normal interactive workflow does not consume. Keep active-goal behavior below
+# byte/schema compatible; skip only when there is no UUID-shaped nonce.
+# ---------------------------------------------------------------------------
+function Test-ActiveForgeGoalSession {
+    if (-not (Test-Path $StateMd)) { return $false }
+    $raw = Get-Content $StateMd -Raw -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrEmpty($raw)) { return $false }
+    $lines = ($raw -replace "`r", "") -split "`n"
+    $inSection = $false
+    $nonce = ""
+    foreach ($line in $lines) {
+        if ($line -match '^## /goal session$') { $inSection = $true; continue }
+        if ($inSection -and $line -match '^## ') { break }
+        if (-not $inSection) { continue }
+        if ($line -match '^\|\s*nonce\s*\|\s*(.+?)\s*\|') {
+            $nonce = $matches[1].Trim()
+            break
+        }
+    }
+    return ($nonce -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+}
+
+if (-not (Test-ActiveForgeGoalSession)) {
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
 # Convergence-breaker helper (ADR 0009): resolve it the SAME way the gate does —
 # installed path first, then forge-internal source path — and DOT-SOURCE it so
 # Invoke-ReviewBreaker is in scope. Do NOT call-operator the script (its standalone

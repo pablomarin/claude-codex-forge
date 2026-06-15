@@ -231,7 +231,7 @@ Only after measurement: bounded brainstorming artifacts, structured council outp
 - [x] Setup provenance added so throwaway targets can verify they were installed from this checkout (`.claude/local/forge-source.env`).
 - [x] Grill-with-docs alignment completed for runtime context efficiency direction.
 - [x] ADR recorded (`docs/adr/0010-runtime-context-efficiency-via-handoff-seams.md`).
-- [ ] Baseline metrics captured.
-- [ ] Tier 1.1 implemented with `.sh` / `.ps1` parity.
-- [ ] After metrics captured.
+- [x] Baseline metrics captured on available Forge transcript (`scripts/context-metrics.py --project-root .`; newest transcript peak 100,963, p95 100,963, phase unknown).
+- [x] Tier 1.1 implemented with `.sh` / `.ps1` parity: `build-evidence` now emits only with active UUID-shaped `/goal` nonce.
+- [ ] After metrics captured on comparable post-change workflow.
 - [ ] Results reviewed.

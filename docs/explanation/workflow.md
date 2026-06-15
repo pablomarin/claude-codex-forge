@@ -53,6 +53,9 @@ How a feature goes from idea to merged PR.
 │                      No                                     │
 │                      ▼                                      │
 │              No P0/P1/P2s → Plan approved ✓                 │
+│                      │                                      │
+│                      ▼                                      │
+│              Implementation Handoff preserves why + tasks   │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -60,7 +63,7 @@ How a feature goes from idea to merged PR.
 │ 5. EXECUTE (Superpowers Plugin)                             │
 │    /superpowers:subagent-driven-development                 │
 │    → TDD enforced (RED-GREEN-REFACTOR)                      │
-│    → Dispatch Plan (DAG) controls parallelism               │
+│    → Task Contract in Implementation Handoff controls DAG   │
 │    → Auto-format on save (ruff/prettier)                    │
 └─────────────────────────────────────────────────────────────┘
                             │
@@ -173,10 +176,14 @@ When the workflow's gate checkpoint passes (PRD-complete for `/new-feature`; Pla
 ### What the loop does
 
 - Reads `.claude/local/state.md` each turn (the workflow checklist + `/goal session` nonce)
-- Surfaces evidence each turn via `hooks/build-evidence.sh` (Layer 1) — a JSON blob between `FORGE_GOAL_EVIDENCE_BEGIN/END` markers on STDERR
+- Surfaces evidence each turn **only while an active `/goal` nonce exists** via `hooks/build-evidence.sh` (Layer 1) — a JSON blob between `FORGE_GOAL_EVIDENCE_BEGIN/END` markers on STDERR
 - The native Anthropic `/goal` verifier reads the transcript on each Stop event and decides whether the completion condition holds
 - Stops only at the PR-creation gate (AskUserQuestion authorizes; the `check-workflow-gates` hook enforces nonce + HEAD match before `gh pr create` runs)
 - Invokes `/council` instead of pausing for the user on any other ambiguous decision
+
+### Runtime context efficiency
+
+Forge keeps the main thread lean by moving rationale into durable artifacts before implementation. After Phase 3 plan review passes, full plans add an `Implementation Handoff` with outcome, decision ledger, non-goals, invariants, a canonical `Task Contract`, and review expectations. The default is to run `/compact` after that handoff and continue; for large or churn-heavy work, start a fresh implementation session from the approved plan and handoff instead of carrying the full planning transcript forward.
 
 ### When NOT to use it
 

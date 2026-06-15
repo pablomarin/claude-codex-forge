@@ -2,6 +2,10 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.56 — 2026-06-14
+
+**Runtime context efficiency via Phase 3→4 handoff seams.** Adds `Implementation Handoff` guidance to `/new-feature` and complex `/fix-bug` plans so implementation can proceed after `/compact` or from a fresh session without carrying the full brainstorm/debug/plan-review transcript. The handoff records Outcome, Decision Ledger, Non-goals, Invariants, a canonical `Task Contract`, and Review Expectations; Phase 4 now verifies/updates that Task Contract instead of appending a separate drifting `## Dispatch Plan` artifact. Fresh-session triggers are documented for large or churn-heavy plans (8+ tasks, 2+ plan-review iterations, material council/spike changes, heavy Phase 3 churn, or metrics showing Phase 3 dominates context growth). `build-evidence.{sh,ps1}` now emits `FORGE_GOAL_EVIDENCE` only when `.claude/local/state.md` has an active UUID-shaped `/goal` nonce; outside `/goal` it exits 0 silently, preserving normal workflow reminders and ship gates while removing steady Stop-hook context noise. Decision recorded in ADR 0010; `CONTEXT.md` defines the runtime-context vocabulary. Tests updated for active-goal evidence vs inactive silence.
+
 ## 5.55 — 2026-06-14
 
 **Context-efficiency investigation + setup provenance.** Added investigation docs for Forge startup/workflow token overhead (`docs/investigations/context-efficiency.md`, `startup-context-overhead.md`, `startup-skill-inventory.md`, `testing-progressive-disclosure-plan.md`). Measurements show the biggest Forge-owned startup lever is autoloaded rule content, especially `rules/testing.md` (~11k startup-token savings when removed in a throwaway install) and `rules/workflow.md` (~4.2k). Also added setup source provenance stamping to `setup.sh`/`setup.ps1`: setup now prints the source checkout/revision and writes `.claude/local/forge-source.env` (or global `~/.claude/forge-source.env`) so dogfood installs can verify which Forge clone produced downstream files. `test-setup.sh` now pins provenance output/stamp behavior. Test: `bash tests/template/test-setup.sh` (181 passed).

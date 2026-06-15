@@ -921,25 +921,24 @@ else
 fi
 
 # ===========================================================================
-# Test N: check-state-updated emits FORGE_GOAL_EVIDENCE markers even when
-# stop_hook_active=true.
+# Test N: check-state-updated emits FORGE_GOAL_EVIDENCE markers during an
+# active /goal session even when stop_hook_active=true.
 #
 # Regression guard for the bug where the early-return path (active /goal loop)
 # suppressed evidence emission entirely, defeating Layer 1 of /forge-goal.
 #
 # v5.32 architecture: build-evidence is registered as its own Stop hook
-# (BEFORE check-state-updated) in settings.template.json. It always exits 0
-# and writes evidence to STDERR regardless of stop_hook_active. This test
-# now invokes build-evidence directly with stop_hook_active=true to assert
-# evidence still emits inside an active /goal loop.
+# (BEFORE check-state-updated) in settings.template.json. ADR 0010 makes it
+# silent outside active /goal sessions, but active UUID-shaped /goal loops must
+# still emit evidence regardless of stop_hook_active.
 # ===========================================================================
-start_test "build-evidence emits FORGE_GOAL_EVIDENCE markers even when stop_hook_active=true"
+start_test "build-evidence emits FORGE_GOAL_EVIDENCE markers for active /goal even when stop_hook_active=true"
 
 HOOK_EVIDENCE_SH="$REPO_ROOT/hooks/build-evidence.sh"
 
 SN=$(scratch_dir checkstateupd-evidence)
 mkdir -p "$SN/.claude/local"
-cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/with-goal-session.md" \
    "$SN/.claude/local/state.md"
 
 OUT_N="$SN/.out"

@@ -2,8 +2,8 @@
 # tests/template/test-build-evidence.sh — runtime tests for hooks/build-evidence.sh.
 #
 # Parses .claude/local/state.md and emits unified evidence JSON between
-# FORGE_GOAL_EVIDENCE_BEGIN/END markers. Tests verify schema, markers, and
-# basic JSON structure in the skeleton phase.
+# FORGE_GOAL_EVIDENCE_BEGIN/END markers only during active /goal sessions.
+# Tests verify inactive silence plus active schema/markers.
 #
 # Run from repo root: bash tests/template/test-build-evidence.sh
 
@@ -13,7 +13,7 @@ source "$REPO_ROOT/tests/template/lib.sh"
 
 init_counters
 
-start_test "build-evidence.sh emits markers + valid JSON on empty state.md"
+start_test "build-evidence.sh is silent when no active /goal session exists"
 
 scratch=$(scratch_dir bevidence)
 mkdir -p "$scratch/.claude/local"
@@ -25,10 +25,11 @@ OUT="$scratch/.out"
 EXIT=$?
 
 assert_equals "$EXIT" "0" "exit code is 0"
-assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_BEGIN" "begin marker present"
-assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_END" "end marker present"
-assert_contains "$OUT" '"type":"forge_goal_evidence"' "type field present"
-assert_contains "$OUT" '"schema_version":1' "schema_version is 1"
+if [ ! -s "$OUT" ]; then
+    pass "no evidence output without active /goal nonce"
+else
+    fail "expected no output without active /goal nonce; got: $(cat "$OUT")"
+fi
 
 start_test "build-evidence.sh parses ## /goal session section (Markdown table)"
 
@@ -44,8 +45,12 @@ assert_contains "$OUT" '"session_nonce":"00000000-0000-0000-0000-000000000001"' 
     "session_nonce extracted from table"
 assert_contains "$OUT" '"workflow_command":"/new-feature foo"' \
     "workflow_command extracted from table"
+assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_BEGIN" "begin marker present during active /goal"
+assert_contains "$OUT" "FORGE_GOAL_EVIDENCE_END" "end marker present during active /goal"
+assert_contains "$OUT" '"type":"forge_goal_evidence"' "type field present during active /goal"
+assert_contains "$OUT" '"schema_version":1' "schema_version is 1 during active /goal"
 
-start_test "build-evidence.sh emits null session_nonce when ## /goal session missing"
+start_test "build-evidence.sh is silent when ## /goal session is missing"
 
 scratch=$(scratch_dir bevidence-noses)
 mkdir -p "$scratch/.claude/local"
@@ -55,8 +60,11 @@ cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
 OUT="$scratch/.out"
 ( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
 
-assert_contains "$OUT" '"session_nonce":null' "session_nonce null when section missing"
-assert_contains "$OUT" '"workflow_command":null' "workflow_command null when section missing"
+if [ ! -s "$OUT" ]; then
+    pass "no evidence output when /goal section missing"
+else
+    fail "expected no output when /goal section missing; got: $(cat "$OUT")"
+fi
 
 start_test "build-evidence.sh treats placeholder /goal nonce as inactive"
 
@@ -77,8 +85,11 @@ EOF
 OUT="$scratch/.out"
 ( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
 
-assert_contains "$OUT" '"session_nonce":null' "placeholder nonce does not become active session"
-assert_contains "$OUT" '"workflow_command":null' "placeholder workflow command ignored with inactive nonce"
+if [ ! -s "$OUT" ]; then
+    pass "placeholder nonce does not emit goal evidence"
+else
+    fail "expected no output for placeholder nonce; got: $(cat "$OUT")"
+fi
 
 start_test "build-evidence.sh parses workflow checklist counts and reviewer rows"
 
@@ -121,7 +132,7 @@ start_test "build-evidence.sh extracts git head_sha + branch"
 
 scratch=$(scratch_dir bevidence-git)
 mkdir -p "$scratch/.claude/local"
-cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/with-goal-session.md" \
    "$scratch/.claude/local/state.md"
 
 OUT="$scratch/.out"
@@ -149,7 +160,7 @@ start_test "build-evidence.sh handles gh pr view absence gracefully (pr_state.ex
 
 scratch=$(scratch_dir bevidence-nopr)
 mkdir -p "$scratch/.claude/local" "$scratch/fake-bin"
-cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/with-goal-session.md" \
    "$scratch/.claude/local/state.md"
 # Create a fake gh that always exits 1 (simulates "gh not installed / no PR").
 # This approach is more portable than stripping PATH (which would also remove git).
@@ -177,7 +188,7 @@ start_test "build-evidence.sh detects fresh E2E report on feature branch"
 
 scratch=$(scratch_dir bevidence-e2e)
 mkdir -p "$scratch/.claude/local" "$scratch/fake-bin"
-cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/with-goal-session.md" \
    "$scratch/.claude/local/state.md"
 # Stub gh (same pattern as the no-pr test above)
 printf '#!/bin/sh\nexit 1\n' > "$scratch/fake-bin/gh"
@@ -580,7 +591,12 @@ bev_scope_repo   # NOTE: bev_install_helper intentionally NOT called.
 # self-contained legacy pair at HEAD still computes the reviewer_gate clean.
 H="$(git -C "$R" rev-parse HEAD)"
 mkdir -p "$R/.claude/local"
-{ echo "## Workflow"; echo
+{ echo "## /goal session"; echo
+  echo "| Field | Value |"
+  echo "| nonce | 00000000-0000-0000-0000-000000000006 |"
+  echo "| workflow_command | /new-feature x |"
+  echo
+  echo "## Workflow"; echo
   echo "| Field | Value |"
   echo "| Command | /new-feature x |"
   echo
@@ -601,7 +617,7 @@ if command -v pwsh >/dev/null 2>&1; then
 
     scratch=$(scratch_dir bevidence-ps)
     mkdir -p "$scratch/.claude/local"
-    cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
+    cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/with-goal-session.md" \
        "$scratch/.claude/local/state.md"
 
     OUT="$scratch/.out"

@@ -1593,33 +1593,16 @@ for f in "$REPO_ROOT/hooks/build-evidence.sh" "$REPO_ROOT/hooks/build-evidence.p
     assert_file_exists "$f" "producer exists: $(basename "$f")"
     assert_contains "$f" "FORGE_GOAL_EVIDENCE_BEGIN" "$(basename "$f") begin marker"
     assert_contains "$f" "FORGE_GOAL_EVIDENCE_END"   "$(basename "$f") end marker"
+    assert_contains "$f" "Context-efficiency guard" "$(basename "$f") has inactive-/goal silence guard"
 done
 
-# (2) Consumer ordering: build-evidence invocation must appear BEFORE the
-#     stop_hook_active early-return in check-state-updated.{sh,ps1}.
-#
-#     The early-return takes different forms in each file:
-#       .sh  — `[ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0` (uppercase var, after parsing)
-#       .ps1 — `if ($data.stop_hook_active -eq $true) {`
-#     We match on those exact guard patterns (not the comment that mentions
-#     stop_hook_active in lowercase, which appears in the parsing block and
-#     would give a false earlier line number via tail -1).
-#     Note: bash 3.2 (macOS) has no associative arrays — use explicit if/else.
-for f in "$REPO_ROOT/hooks/check-state-updated.sh" "$REPO_ROOT/hooks/check-state-updated.ps1"; do
-    [ -f "$f" ] || { fail "consumer missing: $f"; continue; }
-    case "$(basename "$f")" in
-        check-state-updated.sh)  guard_pattern='STOP_HOOK_ACTIVE.*exit 0' ;;
-        check-state-updated.ps1) guard_pattern='data\.stop_hook_active' ;;
-        *) fail "unexpected consumer file: $(basename "$f")"; continue ;;
-    esac
-    EVIDENCE_LINE=$(grep -n 'build-evidence' "$f" | head -1 | cut -d: -f1)
-    EXIT_LINE=$(grep -En "$guard_pattern" "$f" | tail -1 | cut -d: -f1)
-    if [ -n "$EVIDENCE_LINE" ] && [ -n "$EXIT_LINE" ] && [ "$EVIDENCE_LINE" -lt "$EXIT_LINE" ]; then
-        pass "$(basename "$f") invokes build-evidence BEFORE stop_hook_active early-return"
-    else
-        fail "$(basename "$f") consumer ordering wrong (build-evidence line $EVIDENCE_LINE not before early-return line $EXIT_LINE)"
-    fi
-done
+# (2) Consumer wiring: build-evidence is a separate Stop hook that must remain
+#     registered before check-state-updated so its fingerprint side-channel is
+#     available to stuck detection. The dedicated "Stop hook ordering" contract
+#     above asserts settings ordering for Unix and Windows. Here, assert the
+#     check-state-updated hooks still read the side-channel file.
+assert_contains "$REPO_ROOT/hooks/check-state-updated.sh"  "forge-goal-last-fingerprint" "check-state-updated.sh reads build-evidence fingerprint side-channel"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" "forge-goal-last-fingerprint" "check-state-updated.ps1 reads build-evidence fingerprint side-channel"
 
 # (3) Schema shape — producer emits required top-level JSON keys.
 #     Each key appears as a literal substring in both .sh (printf format string)
@@ -1691,6 +1674,20 @@ else
 fi
 # P1.4: REPLACE semantics documented
 assert_contains "$FB" "REPLACE" "fix-bug.md documents REPLACE semantics for /goal session and PR auth"
+
+# ---------------------------------------------------------------------------
+# Contract: runtime context efficiency — Phase 3→4 handoff seam
+# ---------------------------------------------------------------------------
+start_test "Runtime context efficiency — workflow commands use Implementation Handoff Task Contract"
+
+assert_contains "$NF" "Implementation Handoff" "new-feature.md requires Implementation Handoff"
+assert_contains "$NF" "Task Contract verification" "new-feature.md verifies Task Contract in Phase 4"
+assert_contains "$NF" "do not append a separate `## Dispatch Plan`" "new-feature.md prevents drifting Dispatch Plan artifact"
+assert_contains "$NF" "Fresh-session triggers" "new-feature.md documents fresh-session triggers"
+assert_contains "$FB" "Implementation Handoff" "fix-bug.md requires Implementation Handoff on complex path"
+assert_contains "$FB" "Task Contract verification" "fix-bug.md verifies Task Contract in Phase 4"
+assert_contains "$FB" "do not append a separate `## Dispatch Plan`" "fix-bug.md prevents drifting Dispatch Plan artifact"
+assert_contains "$FB" "Fresh-session triggers" "fix-bug.md documents fresh-session triggers"
 
 # ---------------------------------------------------------------------------
 # Contract: /forge-goal Layer 2 — rules/workflow.md has council-during-/goal rule
