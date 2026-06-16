@@ -65,7 +65,7 @@ event_count=$(grep -c '"event":"gate_opened"' "$S1/.claude/local/workflow-events
 assert_equals "$event_count" "1" "second same open-gate does not duplicate event"
 
 # ---------------------------------------------------------------------------
-start_test "approve-gate validates mode and records approval"
+start_test "approve-gate validates mode and records direct pending approval"
 S2=$(scratch_dir forge-runtime-approve)
 make_runtime_repo "$S2"
 (cd "$S2" && .claude/hooks/lib/forge-workflow.sh open-gate phase-3-4 --plan docs/plans/test.md >/dev/null)
@@ -78,6 +78,47 @@ assert_equals "$(json_value "$S2/.claude/local/workflow-run.json" '.gates["phase
 assert_contains "$S2/.claude/local/workflow-events.jsonl" '"event":"gate_approved"' "gate_approved event appended"
 (cd "$S2" && .claude/hooks/lib/forge-workflow.sh open-gate phase-3-4 --plan docs/plans/test.md > .reopen)
 assert_equals "$(json_value "$S2/.claude/local/workflow-run.json" '.gates["phase-3-4"].status')" "approved" "open-gate does not reopen an approved gate for same plan"
+
+# ---------------------------------------------------------------------------
+start_test "select-gate fresh-session awaits explicit approval and blocks implementation"
+S2B=$(scratch_dir forge-runtime-select-fresh)
+make_runtime_repo "$S2B"
+(cd "$S2B" && .claude/hooks/lib/forge-workflow.sh open-gate phase-3-4 --plan docs/plans/test.md >/dev/null)
+(cd "$S2B" && .claude/hooks/lib/forge-workflow.sh select-gate phase-3-4 --mode fresh-session > .select)
+assert_equals "$(json_value "$S2B/.claude/local/workflow-run.json" '.gates["phase-3-4"].status')" "awaiting-fresh-session" "fresh-session selection awaits fresh approval"
+assert_equals "$(json_value "$S2B/.claude/local/workflow-run.json" '.gates["phase-3-4"].selected_mode')" "fresh-session" "fresh-session mode stored"
+selected_at=$(json_value "$S2B/.claude/local/workflow-run.json" '.gates["phase-3-4"].selected_at // empty')
+if [ -n "$selected_at" ]; then pass "selected_at recorded"; else fail "selected_at recorded"; fi
+assert_equals "$(json_value "$S2B/.claude/local/workflow-run.json" '.gates["phase-3-4"].approved_at')" "null" "approval timestamp remains null while awaiting fresh session"
+assert_contains "$S2B/.claude/local/workflow-events.jsonl" '"event":"gate_selected"' "gate_selected event appended"
+rc=$(run_gate_hook "$S2B" "{\"tool_name\":\"Bash\",\"cwd\":\"$S2B\",\"tool_input\":{\"command\":\"python tiny_notes.py add x\"}}")
+assert_equals "$rc" "2" "awaiting fresh-session blocks implementation Bash"
+assert_contains "$S2B/.hook-err" "status: awaiting-fresh-session" "blocker includes awaiting status"
+(cd "$S2B" && .claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode compact > .mismatch 2> .mismatcherr)
+assert_equals "$?" "2" "mismatched awaiting approval exits 2"
+assert_contains "$S2B/.mismatcherr" "selected mode mismatch" "mismatched approval explains selected mode"
+(cd "$S2B" && .claude/hooks/lib/forge-workflow.sh select-gate phase-3-4 --mode same-context > .reselect 2> .reselecterr)
+assert_equals "$?" "2" "awaiting fresh-session cannot be re-selected as same-context"
+assert_contains "$S2B/.reselecterr" "cannot be re-selected" "reselect failure explains selected mode is fixed"
+assert_equals "$(json_value "$S2B/.claude/local/workflow-run.json" '.gates["phase-3-4"].status')" "awaiting-fresh-session" "failed reselect leaves gate awaiting fresh-session"
+(cd "$S2B" && .claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode fresh-session > .approve)
+assert_equals "$(json_value "$S2B/.claude/local/workflow-run.json" '.gates["phase-3-4"].status')" "approved" "fresh-session approval transitions to approved"
+assert_equals "$(json_value "$S2B/.claude/local/workflow-run.json" '.gates["phase-3-4"].selected_at')" "$selected_at" "approval preserves selected_at"
+rc=$(run_gate_hook "$S2B" "{\"tool_name\":\"Write\",\"cwd\":\"$S2B\",\"tool_input\":{\"file_path\":\"src/app.py\"}}")
+assert_equals "$rc" "0" "approved fresh-session gate allows implementation writes"
+
+# ---------------------------------------------------------------------------
+start_test "select-gate same-context approves immediately"
+S2C=$(scratch_dir forge-runtime-select-same)
+make_runtime_repo "$S2C"
+(cd "$S2C" && .claude/hooks/lib/forge-workflow.sh open-gate phase-3-4 --plan docs/plans/test.md >/dev/null)
+(cd "$S2C" && .claude/hooks/lib/forge-workflow.sh select-gate phase-3-4 --mode same-context > .select)
+assert_equals "$(json_value "$S2C/.claude/local/workflow-run.json" '.gates["phase-3-4"].status')" "approved" "same-context selection approves immediately"
+assert_equals "$(json_value "$S2C/.claude/local/workflow-run.json" '.gates["phase-3-4"].selected_mode')" "same-context" "same-context mode stored"
+assert_contains "$S2C/.claude/local/workflow-events.jsonl" '"event":"gate_selected"' "same-context selection emits gate_selected"
+assert_contains "$S2C/.claude/local/workflow-events.jsonl" '"event":"gate_approved"' "same-context selection emits gate_approved"
+rc=$(run_gate_hook "$S2C" "{\"tool_name\":\"Bash\",\"cwd\":\"$S2C\",\"tool_input\":{\"command\":\"pytest\"}}")
+assert_equals "$rc" "0" "same-context selected gate allows implementation Bash"
 
 # ---------------------------------------------------------------------------
 start_test "pending gate blocks implementation Bash and allows read/status Bash"
@@ -95,6 +136,8 @@ rc=$(run_gate_hook "$S3" "{\"tool_name\":\"Bash\",\"cwd\":\"$S3\",\"tool_input\"
 assert_equals "$rc" "2" "redirecting read output to a file is blocked"
 rc=$(run_gate_hook "$S3" "{\"tool_name\":\"Bash\",\"cwd\":\"$S3\",\"tool_input\":{\"command\":\".claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode same-context\"}}")
 assert_equals "$rc" "0" "approve-gate command is allowed while pending"
+rc=$(run_gate_hook "$S3" "{\"tool_name\":\"Bash\",\"cwd\":\"$S3\",\"tool_input\":{\"command\":\".claude/hooks/lib/forge-workflow.sh select-gate phase-3-4 --mode compact\"}}")
+assert_equals "$rc" "0" "select-gate command is allowed while pending"
 
 # ---------------------------------------------------------------------------
 start_test "pending gate blocks source writes and allows .claude/local writes"
@@ -127,12 +170,13 @@ assert_contains "$REPO_ROOT/setup.sh" "forge-workflow.sh" "setup.sh installs for
 assert_contains "$REPO_ROOT/setup.ps1" "forge-workflow.ps1" "setup.ps1 installs forge-workflow.ps1"
 assert_contains "$REPO_ROOT/commands/new-feature.md" "open-gate phase-3-4" "new-feature opens phase gate"
 assert_contains "$REPO_ROOT/commands/fix-bug.md" "open-gate phase-3-4" "fix-bug opens phase gate"
-for key in "phase-3-4" "PHASE_GATE_PENDING" "same-context" "compact" "fresh-session"; do
+for key in "phase-3-4" "PHASE_GATE_PENDING" "select-gate" "awaiting-fresh-session" "awaiting-compact" "gate_selected" "same-context" "compact" "fresh-session"; do
     assert_contains "$FW_SH" "$key" "forge-workflow.sh references $key"
     assert_contains "$FW_PS" "$key" "forge-workflow.ps1 references $key"
 done
 assert_file_exists "$REPO_ROOT/tests/template/fixtures/workflow-runtime/pending-phase-3-4.json" "pending workflow-runtime fixture exists"
 assert_file_exists "$REPO_ROOT/tests/template/fixtures/workflow-runtime/approved-phase-3-4.json" "approved workflow-runtime fixture exists"
+assert_file_exists "$REPO_ROOT/tests/template/fixtures/workflow-runtime/awaiting-fresh-session-phase-3-4.json" "awaiting fresh-session workflow-runtime fixture exists"
 
 # Optional PowerShell parity smoke when pwsh is available.
 start_test "PowerShell controller smoke (optional)"
@@ -143,6 +187,9 @@ if command -v pwsh >/dev/null 2>&1; then
     (cd "$S6" && pwsh -NoProfile -File .claude/hooks/lib/forge-workflow.ps1 open-gate phase-3-4 --plan docs/plans/test.md > .ps-out 2> .ps-err)
     assert_equals "$?" "0" "PowerShell open-gate exits 0"
     assert_equals "$(json_value "$S6/.claude/local/workflow-run.json" '.gates["phase-3-4"].status')" "pending" "PowerShell writes pending status"
+    (cd "$S6" && pwsh -NoProfile -File .claude/hooks/lib/forge-workflow.ps1 select-gate phase-3-4 --mode fresh-session > .ps-select 2>> .ps-err)
+    assert_equals "$?" "0" "PowerShell select-gate exits 0"
+    assert_equals "$(json_value "$S6/.claude/local/workflow-run.json" '.gates["phase-3-4"].status')" "awaiting-fresh-session" "PowerShell writes awaiting fresh-session status"
 else
     pass "pwsh not installed — PowerShell smoke skipped"
 fi

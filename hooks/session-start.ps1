@@ -97,6 +97,35 @@ if ($source -eq "startup" -or $source -eq "resume") {
     }
 }
 
+# Runtime gate resume notice: if a Phase 3→4 seam is awaiting a compact/fresh
+# continuation, surface the durable state path and exact approval command. This
+# is advisory context only; absence/malformed state fails open silently.
+$projectDir = ""
+$sessionCwd = if ($data -and $data.cwd) { [string]$data.cwd } else { "" }
+if ($sessionCwd -and (Test-Path $sessionCwd)) {
+    try { $projectDir = (git -C $sessionCwd rev-parse --show-toplevel 2>$null) } catch { $projectDir = "" }
+    if (-not $projectDir) { $projectDir = $sessionCwd }
+} elseif ($env:CLAUDE_PROJECT_DIR -and (Test-Path $env:CLAUDE_PROJECT_DIR)) {
+    try { $projectDir = (git -C $env:CLAUDE_PROJECT_DIR rev-parse --show-toplevel 2>$null) } catch { $projectDir = "" }
+    if (-not $projectDir) { $projectDir = $env:CLAUDE_PROJECT_DIR }
+} else {
+    try { $projectDir = (git rev-parse --show-toplevel 2>$null) } catch { $projectDir = "" }
+    if (-not $projectDir) { $projectDir = (Get-Location).Path }
+}
+$runtimeState = Join-Path $projectDir ".claude/local/workflow-run.json"
+if (Test-Path $runtimeState) {
+    try {
+        $run = Get-Content $runtimeState -Raw | ConvertFrom-Json
+        $gate = $run.gates.'phase-3-4'
+        $gateStatus = if ($gate -and $gate.status) { [string]$gate.status } else { "" }
+        if ($gateStatus -eq "awaiting-fresh-session" -or $gateStatus -eq "awaiting-compact") {
+            $gateMode = if ($gate.selected_mode) { [string]$gate.selected_mode } else { "unknown" }
+            $gatePlan = if ($run.plan_file) { [string]$run.plan_file } else { "unknown" }
+            $context = "$context; WORKFLOW_RUNTIME_GATE: phase-3-4 status=$gateStatus mode=$gateMode plan=$gatePlan — read the plan's Implementation Handoff, then run: .claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode $gateMode before Phase 4 implementation."
+        }
+    } catch {}
+}
+
 $output = @{
     hookSpecificOutput = @{
         hookEventName     = "SessionStart"

@@ -26,6 +26,6 @@ Global hooks (`~/.claude/settings.json`) and project hooks (`.claude/settings.js
 
 ## Workflow Gates
 
-`check-phase-gates.{sh,ps1}` blocks **implementation Bash/Edit/Write** while `.claude/local/workflow-run.json` has `phase-3-4` pending. It allows read/status commands and `.claude/local/**` state updates so the agent can approve the gate or recover. See [Workflow Runtime](workflow-runtime.md).
+`check-phase-gates.{sh,ps1}` blocks **implementation Bash/Edit/Write** while `.claude/local/workflow-run.json` has `phase-3-4` in any non-approved state (`pending`, `awaiting-compact`, or `awaiting-fresh-session`). It allows read/status commands and `.claude/local/**` state updates so the agent can select/approve the gate or recover. See [Workflow Runtime](workflow-runtime.md).
 
 `check-workflow-gates.sh` blocks **commit/push/PR** until the workflow checklist in `.claude/local/state.md` contains the required markers (`Code review loop`, `Simplified`, `Verified`). The hook reads only `.claude/local/state.md` — if the file is missing, it prints a friendly stderr breadcrumb pointing at `setup.sh --migrate` and exits 0 (it never falls back to legacy state files). This is the ship discipline hook — it refuses to let you ship until the quality loop has run.

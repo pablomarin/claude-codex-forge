@@ -79,7 +79,7 @@ function Add-WorkflowEvent([string]$Event, [string]$Gate, [string]$Plan, [string
     ($obj | ConvertTo-Json -Compress) + "`n" | Add-Content -Path $EventsFile -NoNewline
 }
 
-function Write-RunState([string]$Workflow, [string]$Phase, [string]$NextStep, [string]$Plan, [string]$Gate, [string]$Status, [string]$OpenedAt, [string]$SelectedMode, [string]$ApprovedAt) {
+function Write-RunState([string]$Workflow, [string]$Phase, [string]$NextStep, [string]$Plan, [string]$Gate, [string]$Status, [string]$OpenedAt, [string]$SelectedMode, [string]$SelectedAt, [string]$ApprovedAt) {
     if (-not (Test-Path ".claude/local")) { New-Item -ItemType Directory -Path ".claude/local" -Force | Out-Null }
     $gateObj = [ordered]@{
         status = $Status
@@ -87,6 +87,7 @@ function Write-RunState([string]$Workflow, [string]$Phase, [string]$NextStep, [s
         reason = "Implementation Handoff complete; choose same-context, compact, or fresh-session before implementation."
         allowed_modes = $AllowedModes
         selected_mode = $(if ($SelectedMode) { $SelectedMode } else { $null })
+        selected_at = $(if ($SelectedAt) { $SelectedAt } else { $null })
         approved_at = $(if ($ApprovedAt) { $ApprovedAt } else { $null })
     }
     $gates = [ordered]@{}
@@ -119,15 +120,84 @@ function Open-Gate([string[]]$ArgsList) {
         Write-Output "Gate already pending: $Gate ($Plan)"
         return
     }
+    if (($status -eq "awaiting-compact" -or $status -eq "awaiting-fresh-session") -and $existingPlan -eq $Plan) {
+        Write-Output "Gate already awaiting approval: $Gate ($status, $Plan)"
+        return
+    }
     if ($status -eq "approved" -and $existingPlan -eq $Plan) {
         Write-Output "Gate already approved: $Gate ($Plan)"
         return
     }
 
     $opened = Get-NowUtc
-    Write-RunState (Get-WorkflowCommand) "3 — Design" "Implementation Handoff" $Plan $Gate "pending" $opened "" ""
+    Write-RunState (Get-WorkflowCommand) "3 — Design" "Implementation Handoff" $Plan $Gate "pending" $opened "" "" ""
     Add-WorkflowEvent "gate_opened" $Gate $Plan
     Write-Output "Gate opened: $Gate ($Plan)"
+}
+
+function Select-Gate([string[]]$ArgsList) {
+    $Gate = if ($ArgsList.Count -gt 0) { $ArgsList[0] } else { "" }
+    $Mode = ""
+    for ($i = 1; $i -lt $ArgsList.Count; $i++) {
+        if ($ArgsList[$i] -eq "--mode" -and ($i + 1) -lt $ArgsList.Count) { $Mode = $ArgsList[$i + 1]; $i++; continue }
+        Write-Error "forge-workflow: unknown select-gate argument: $($ArgsList[$i])"
+        exit 2
+    }
+    if ($Gate -ne $GatePhase34) { Write-Error "forge-workflow: unsupported gate: $Gate"; exit 2 }
+    if ($AllowedModes -notcontains $Mode) { Write-Error "forge-workflow: invalid mode '$Mode' (expected: same-context|compact|fresh-session)"; exit 2 }
+
+    $state = Get-RunState
+    if (-not $state) { Write-Error "forge-workflow: no workflow run state to select"; exit 2 }
+    $gateObj = $state.gates.$Gate
+    $status = if ($gateObj) { [string]$gateObj.status } else { "" }
+    $selected = if ($gateObj -and $gateObj.selected_mode) { [string]$gateObj.selected_mode } else { "" }
+    if ($status -eq "approved") {
+        Write-Output "Gate already approved: $Gate ($(if ($selected) { $selected } else { 'unknown' }))"
+        return
+    }
+    if ($status -eq "awaiting-compact" -or $status -eq "awaiting-fresh-session") {
+        if ($selected -ne $Mode) {
+            Write-Error "forge-workflow: gate '$Gate' already selected mode '$(if ($selected) { $selected } else { 'missing' })' and cannot be re-selected as '$Mode'"
+            exit 2
+        }
+    } elseif ($status -ne "pending") {
+        Write-Error "forge-workflow: gate '$Gate' is not selectable (status: $(if ($status) { $status } else { 'missing' }))"
+        exit 2
+    }
+
+    if ($Mode -eq "same-context") {
+        $newStatus = "approved"
+        $phase = "4 — Execute"
+        $nextStep = "Implementation may start"
+    } elseif ($Mode -eq "compact") {
+        $newStatus = "awaiting-compact"
+        $phase = "3 — Design"
+        $nextStep = "Awaiting compact approval"
+    } else {
+        $newStatus = "awaiting-fresh-session"
+        $phase = "3 — Design"
+        $nextStep = "Awaiting fresh-session approval"
+    }
+
+    if ($status -eq $newStatus -and $selected -eq $Mode) {
+        Write-Output "Gate already selected: $Gate ($Mode)"
+        return
+    }
+
+    $opened = if ($gateObj.opened_at) { [string]$gateObj.opened_at } else { Get-NowUtc }
+    $workflow = if ($state.workflow) { [string]$state.workflow } else { Get-WorkflowCommand }
+    $plan = if ($state.plan_file) { [string]$state.plan_file } else { "" }
+    $now = Get-NowUtc
+    if ($Mode -eq "same-context") {
+        Write-RunState $workflow $phase $nextStep $plan $Gate $newStatus $opened $Mode $now $now
+        Add-WorkflowEvent "gate_selected" $Gate $plan $Mode
+        Add-WorkflowEvent "gate_approved" $Gate $plan $Mode
+        Write-Output "Gate selected and approved: $Gate ($Mode)"
+    } else {
+        Write-RunState $workflow $phase $nextStep $plan $Gate $newStatus $opened $Mode $now ""
+        Add-WorkflowEvent "gate_selected" $Gate $plan $Mode
+        Write-Output "Gate selected: $Gate ($Mode); status=$newStatus"
+    }
 }
 
 function Approve-Gate([string[]]$ArgsList) {
@@ -149,12 +219,23 @@ function Approve-Gate([string[]]$ArgsList) {
         Write-Output "Gate already approved: $Gate ($Mode)"
         return
     }
-    if ($status -ne "pending") { Write-Error "forge-workflow: gate '$Gate' is not pending (status: $(if ($status) { $status } else { 'missing' }))"; exit 2 }
+    if ($status -eq "awaiting-compact" -or $status -eq "awaiting-fresh-session") {
+        if ($gateObj.selected_mode -ne $Mode) {
+            Write-Error "forge-workflow: selected mode mismatch for gate '$Gate' (selected: $(if ($gateObj.selected_mode) { $gateObj.selected_mode } else { 'missing' }), requested: $Mode)"
+            exit 2
+        }
+    } elseif ($status -ne "pending") {
+        Write-Error "forge-workflow: gate '$Gate' is not awaiting approval (status: $(if ($status) { $status } else { 'missing' }))"
+        exit 2
+    }
 
     $opened = if ($gateObj.opened_at) { [string]$gateObj.opened_at } else { Get-NowUtc }
     $workflow = if ($state.workflow) { [string]$state.workflow } else { Get-WorkflowCommand }
     $plan = if ($state.plan_file) { [string]$state.plan_file } else { "" }
-    Write-RunState $workflow "4 — Execute" "Implementation may start" $plan $Gate "approved" $opened $Mode (Get-NowUtc)
+    $selectedAt = if ($gateObj.selected_at) { [string]$gateObj.selected_at } else { "" }
+    $approvedAt = Get-NowUtc
+    if (-not $selectedAt) { $selectedAt = $approvedAt }
+    Write-RunState $workflow "4 — Execute" "Implementation may start" $plan $Gate "approved" $opened $Mode $selectedAt $approvedAt
     Add-WorkflowEvent "gate_approved" $Gate $plan $Mode
     Write-Output "Gate approved: $Gate ($Mode)"
 }
@@ -173,7 +254,7 @@ function Test-LocalStatePath([string]$PathValue) {
 
 function Test-AllowedBashWhilePending([string]$Command) {
     if (-not $Command) { return $false }
-    if ($Command -match '^\s*(\./)?\.claude/hooks/lib/forge-workflow\.sh\s+(status|approve-gate|open-gate)\b') { return $true }
+    if ($Command -match '^\s*(\./)?\.claude/hooks/lib/forge-workflow\.(sh|ps1)\s+(status|approve-gate|select-gate|open-gate)\b') { return $true }
     # Single-command only: do not let `git status && pytest` or redirects ride
     # through the gate because the first token is read-only.
     if ($Command -match '[;&|<>]') { return $false }
@@ -185,12 +266,19 @@ function Test-AllowedBashWhilePending([string]$Command) {
 }
 
 function Write-BlockMessage([string]$Gate) {
+    $state = Get-RunState
+    $gateObj = if ($state -and $state.gates) { $state.gates.$Gate } else { $null }
+    $status = if ($gateObj -and $gateObj.status) { [string]$gateObj.status } else { "unknown" }
+    $selected = if ($gateObj -and $gateObj.selected_mode) { [string]$gateObj.selected_mode } else { "none" }
     [Console]::Error.WriteLine("PHASE_GATE_PENDING: $Gate")
-    [Console]::Error.WriteLine("Implementation Handoff is complete. Choose how to cross the Phase 3→4 seam:")
-    [Console]::Error.WriteLine("- same-context: approve and continue in this session")
-    [Console]::Error.WriteLine("- compact: run /compact, then approve")
-    [Console]::Error.WriteLine("- fresh-session: start a new session in the worktree and approve there")
-    [Console]::Error.WriteLine("Allowed command: .claude/hooks/lib/forge-workflow.sh approve-gate $Gate --mode <mode>")
+    [Console]::Error.WriteLine("Implementation Handoff is complete. Current gate status: $status; selected mode: $selected.")
+    [Console]::Error.WriteLine("Choose how to cross the Phase 3→4 seam:")
+    [Console]::Error.WriteLine("- same-context: select and continue in this session")
+    [Console]::Error.WriteLine("- compact: select compact, run /compact, then approve after resume")
+    [Console]::Error.WriteLine("- fresh-session: select fresh-session, start a new session in the worktree, then approve there")
+    [Console]::Error.WriteLine("Allowed commands:")
+    [Console]::Error.WriteLine("  .claude/hooks/lib/forge-workflow.sh select-gate $Gate --mode same-context|compact|fresh-session")
+    [Console]::Error.WriteLine("  .claude/hooks/lib/forge-workflow.sh approve-gate $Gate --mode <selected-mode>")
 }
 
 function Check-Tool {
@@ -199,7 +287,7 @@ function Check-Tool {
     if ($data -and $data.cwd) { Set-RepoRootFromCwd ([string]$data.cwd) } else { Set-RepoRootFromCwd "" }
 
     $status = Get-GateStatus $GatePhase34
-    if ($status -ne "pending") { exit 0 }
+    if (-not $status -or $status -eq "approved") { exit 0 }
 
     $tool = if ($data -and $data.tool_name) { [string]$data.tool_name } else { "" }
     $command = if ($data -and $data.tool_input -and $data.tool_input.command) { [string]$data.tool_input.command } else { "" }
@@ -220,7 +308,7 @@ function Check-Tool {
 }
 
 function Show-Usage {
-    Write-Output "Usage: forge-workflow <status|open-gate|approve-gate|check-tool>"
+    Write-Output "Usage: forge-workflow <status|open-gate|select-gate|approve-gate|check-tool>"
 }
 
 $cmd = if ($args.Count -gt 0) { $args[0] } else { "" }
@@ -230,6 +318,7 @@ if ($args.Count -gt 1) { $rest = $args[1..($args.Count - 1)] }
 switch ($cmd) {
     "status" { Show-Status }
     "open-gate" { Open-Gate $rest }
+    "select-gate" { Select-Gate $rest }
     "approve-gate" { Approve-Gate $rest }
     "check-tool" { Check-Tool }
     "help" { Show-Usage }

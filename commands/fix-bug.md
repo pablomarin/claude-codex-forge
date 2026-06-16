@@ -742,13 +742,13 @@ For smaller complex fixes (≤3 tasks), `### Task Contract` may be a short order
 .claude/hooks/lib/forge-workflow.sh open-gate phase-3-4 --plan docs/plans/<name>.md
 ```
 
-Then STOP. Do not start Phase 4 until the user chooses a crossing mode and the gate is approved:
+Then STOP and ask the user to choose a crossing mode. Do not start Phase 4 until the runtime gate status is `approved`:
 
-```bash
-.claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode same-context|compact|fresh-session
-```
+- `same-context`: run `.claude/hooks/lib/forge-workflow.sh select-gate phase-3-4 --mode same-context` and continue.
+- `compact`: run `.claude/hooks/lib/forge-workflow.sh select-gate phase-3-4 --mode compact`, instruct `/compact`, then after compaction/resume run `.claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode compact` before Phase 4.
+- `fresh-session`: run `.claude/hooks/lib/forge-workflow.sh select-gate phase-3-4 --mode fresh-session`, then STOP. Do **not** run `approve-gate` in the leaving session; the fresh implementation session must read the plan's Implementation Handoff and approve with `.claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode fresh-session`.
 
-While `phase-3-4` is pending, the `check-phase-gates` PreToolUse hook blocks implementation Bash/Edit/Write actions.
+While `phase-3-4` is not approved (`pending`, `awaiting-compact`, or `awaiting-fresh-session`), the `check-phase-gates` PreToolUse hook blocks implementation Bash/Edit/Write actions.
 
 ---
 
@@ -856,7 +856,7 @@ Write a failing test first, then fix. Single-threaded — no dispatch plan neede
 
 ### Complex fixes (3+ files, Phase 3 complete)
 
-> **Required before starting:** Confirm `.claude/hooks/lib/forge-workflow.sh status` shows `phase-3-4` approved. If the gate is pending, choose/obtain a crossing mode and run `approve-gate` first.
+> **Required before starting:** Confirm `.claude/hooks/lib/forge-workflow.sh status` shows `phase-3-4` approved. If the gate is `pending`, choose a crossing mode with `select-gate`; if it is `awaiting-compact` or `awaiting-fresh-session`, resume from the durable Implementation Handoff and run `approve-gate --mode <selected-mode>` first.
 
 #### 4.0 Task Contract verification (MANDATORY before dispatching any subagent)
 

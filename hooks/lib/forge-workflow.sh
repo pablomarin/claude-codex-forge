@@ -113,9 +113,9 @@ _append_event() {
 }
 
 _write_state() {
-    local workflow="$1" phase="$2" next_step="$3" plan="$4" gate="$5" status="$6" opened_at="$7" selected_mode="$8" approved_at="$9"
+    local workflow="$1" phase="$2" next_step="$3" plan="$4" gate="$5" status="$6" opened_at="$7" selected_mode="$8" selected_at="$9" approved_at="${10}"
     mkdir -p .claude/local
-    local workflow_e phase_e next_e plan_e gate_e opened_e mode_json approved_json
+    local workflow_e phase_e next_e plan_e gate_e opened_e mode_json selected_json approved_json
     workflow_e=$(_json_escape "$workflow")
     phase_e=$(_json_escape "$phase")
     next_e=$(_json_escape "$next_step")
@@ -127,13 +127,18 @@ _write_state() {
     else
         mode_json="null"
     fi
+    if [ -n "$selected_at" ]; then
+        selected_json="\"$(_json_escape "$selected_at")\""
+    else
+        selected_json="null"
+    fi
     if [ -n "$approved_at" ]; then
         approved_json="\"$(_json_escape "$approved_at")\""
     else
         approved_json="null"
     fi
-    printf '{"version":1,"workflow":"%s","phase":"%s","next_step":"%s","plan_file":"%s","gates":{"%s":{"status":"%s","opened_at":"%s","reason":"Implementation Handoff complete; choose same-context, compact, or fresh-session before implementation.","allowed_modes":["same-context","compact","fresh-session"],"selected_mode":%s,"approved_at":%s}}}\n' \
-        "$workflow_e" "$phase_e" "$next_e" "$plan_e" "$gate_e" "$status" "$opened_e" "$mode_json" "$approved_json" > "$STATE_FILE"
+    printf '{"version":1,"workflow":"%s","phase":"%s","next_step":"%s","plan_file":"%s","gates":{"%s":{"status":"%s","opened_at":"%s","reason":"Implementation Handoff complete; choose same-context, compact, or fresh-session before implementation.","allowed_modes":["same-context","compact","fresh-session"],"selected_mode":%s,"selected_at":%s,"approved_at":%s}}}\n' \
+        "$workflow_e" "$phase_e" "$next_e" "$plan_e" "$gate_e" "$status" "$opened_e" "$mode_json" "$selected_json" "$approved_json" > "$STATE_FILE"
 }
 
 _open_gate() {
@@ -161,6 +166,10 @@ _open_gate() {
         echo "Gate already pending: $gate ($plan)"
         return 0
     fi
+    if { [ "$existing_status" = "awaiting-compact" ] || [ "$existing_status" = "awaiting-fresh-session" ]; } && [ "$existing_plan" = "$plan" ]; then
+        echo "Gate already awaiting approval: $gate ($existing_status, $plan)"
+        return 0
+    fi
     if [ "$existing_status" = "approved" ] && [ "$existing_plan" = "$plan" ]; then
         echo "Gate already approved: $gate ($plan)"
         return 0
@@ -169,7 +178,7 @@ _open_gate() {
     local opened workflow
     opened=$(_now_utc)
     workflow=$(_current_workflow_command)
-    _write_state "$workflow" "3 — Design" "Implementation Handoff" "$plan" "$gate" "pending" "$opened" "" ""
+    _write_state "$workflow" "3 — Design" "Implementation Handoff" "$plan" "$gate" "pending" "$opened" "" "" ""
     _append_event "gate_opened" "$gate" "$plan"
     echo "Gate opened: $gate ($plan)"
 }
@@ -179,6 +188,81 @@ _valid_mode() {
         *" $1 "*) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+_select_gate() {
+    local gate="${1:-}" mode=""
+    shift || true
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --mode) mode="${2:-}"; shift 2 ;;
+            *) echo "forge-workflow: unknown select-gate argument: $1" >&2; return 2 ;;
+        esac
+    done
+    if [ "$gate" != "$GATE_PHASE_3_4" ]; then
+        echo "forge-workflow: unsupported gate: $gate" >&2
+        return 2
+    fi
+    if ! _valid_mode "$mode"; then
+        echo "forge-workflow: invalid mode '$mode' (expected: same-context|compact|fresh-session)" >&2
+        return 2
+    fi
+    [ -f "$STATE_FILE" ] || { echo "forge-workflow: no workflow run state to select" >&2; return 2; }
+
+    local status plan selected opened workflow now new_status phase next_step
+    status=$(_gate_status "$gate")
+    plan=$(_state_plan_file)
+    selected=$(_state_selected_mode "$gate")
+    if [ "$status" = "approved" ]; then
+        echo "Gate already approved: $gate (${selected:-unknown})"
+        return 0
+    fi
+    case "$status" in
+        pending) ;;
+        awaiting-compact|awaiting-fresh-session)
+            if [ "$selected" != "$mode" ]; then
+                echo "forge-workflow: gate '$gate' already selected mode '${selected:-missing}' and cannot be re-selected as '$mode'" >&2
+                return 2
+            fi
+            ;;
+        *) echo "forge-workflow: gate '$gate' is not selectable (status: ${status:-missing})" >&2; return 2 ;;
+    esac
+
+    if [ "$mode" = "same-context" ]; then
+        new_status="approved"
+        phase="4 — Execute"
+        next_step="Implementation may start"
+    elif [ "$mode" = "compact" ]; then
+        new_status="awaiting-compact"
+        phase="3 — Design"
+        next_step="Awaiting compact approval"
+    else
+        new_status="awaiting-fresh-session"
+        phase="3 — Design"
+        next_step="Awaiting fresh-session approval"
+    fi
+
+    if [ "$status" = "$new_status" ] && [ "$selected" = "$mode" ]; then
+        echo "Gate already selected: $gate ($mode)"
+        return 0
+    fi
+
+    opened=$(_json_get "$(cat "$STATE_FILE" 2>/dev/null || true)" ".gates[\"$gate\"].opened_at" 'opened_at')
+    [ -n "$opened" ] || opened=$(_now_utc)
+    workflow=$(_json_get "$(cat "$STATE_FILE" 2>/dev/null || true)" '.workflow' 'workflow')
+    [ -n "$workflow" ] || workflow=$(_current_workflow_command)
+    now=$(_now_utc)
+
+    if [ "$mode" = "same-context" ]; then
+        _write_state "$workflow" "$phase" "$next_step" "$plan" "$gate" "$new_status" "$opened" "$mode" "$now" "$now"
+        _append_event "gate_selected" "$gate" "$plan" "$mode"
+        _append_event "gate_approved" "$gate" "$plan" "$mode"
+        echo "Gate selected and approved: $gate ($mode)"
+    else
+        _write_state "$workflow" "$phase" "$next_step" "$plan" "$gate" "$new_status" "$opened" "$mode" "$now" ""
+        _append_event "gate_selected" "$gate" "$plan" "$mode"
+        echo "Gate selected: $gate ($mode); status=$new_status"
+    fi
 }
 
 _approve_gate() {
@@ -200,7 +284,7 @@ _approve_gate() {
     fi
     [ -f "$STATE_FILE" ] || { echo "forge-workflow: no workflow run state to approve" >&2; return 2; }
 
-    local status plan selected opened workflow
+    local status plan selected selected_at opened workflow
     status=$(_gate_status "$gate")
     plan=$(_state_plan_file)
     selected=$(_state_selected_mode "$gate")
@@ -208,16 +292,29 @@ _approve_gate() {
         echo "Gate already approved: $gate ($mode)"
         return 0
     fi
-    if [ "$status" != "pending" ]; then
-        echo "forge-workflow: gate '$gate' is not pending (status: ${status:-missing})" >&2
-        return 2
-    fi
+    case "$status" in
+        pending) ;;
+        awaiting-compact|awaiting-fresh-session)
+            if [ "$selected" != "$mode" ]; then
+                echo "forge-workflow: selected mode mismatch for gate '$gate' (selected: ${selected:-missing}, requested: $mode)" >&2
+                return 2
+            fi
+            ;;
+        *)
+            echo "forge-workflow: gate '$gate' is not awaiting approval (status: ${status:-missing})" >&2
+            return 2
+            ;;
+    esac
     opened=$(_json_get "$(cat "$STATE_FILE" 2>/dev/null || true)" ".gates[\"$gate\"].opened_at" 'opened_at')
     [ -n "$opened" ] || opened=$(_now_utc)
+    selected_at=$(_json_get "$(cat "$STATE_FILE" 2>/dev/null || true)" ".gates[\"$gate\"].selected_at" 'selected_at')
     workflow=$(_json_get "$(cat "$STATE_FILE" 2>/dev/null || true)" '.workflow' 'workflow')
     [ -n "$workflow" ] || workflow=$(_current_workflow_command)
 
-    _write_state "$workflow" "4 — Execute" "Implementation may start" "$plan" "$gate" "approved" "$opened" "$mode" "$(_now_utc)"
+    local approved_at
+    approved_at=$(_now_utc)
+    [ -n "$selected_at" ] || selected_at="$approved_at"
+    _write_state "$workflow" "4 — Execute" "Implementation may start" "$plan" "$gate" "approved" "$opened" "$mode" "$selected_at" "$approved_at"
     _append_event "gate_approved" "$gate" "$plan" "$mode"
     echo "Gate approved: $gate ($mode)"
 }
@@ -230,10 +327,10 @@ _status() {
     fi
 }
 
-_pending_gate() {
+_blocked_gate() {
     local status
     status=$(_gate_status "$GATE_PHASE_3_4")
-    [ "$status" = "pending" ] && printf '%s' "$GATE_PHASE_3_4"
+    [ -n "$status" ] && [ "$status" != "approved" ] && printf '%s' "$GATE_PHASE_3_4"
 }
 
 _is_local_state_path() {
@@ -250,7 +347,7 @@ _is_local_state_path() {
 _is_allowed_bash_while_pending() {
     local command="$1"
     # Gate-control commands must remain possible while the gate is pending.
-    if printf '%s' "$command" | grep -Eq '^[[:space:]]*(\./)?\.claude/hooks/lib/forge-workflow\.sh[[:space:]]+(status|approve-gate|open-gate)\b'; then
+    if printf '%s' "$command" | grep -Eq '^[[:space:]]*(\./)?\.claude/hooks/lib/forge-workflow\.(sh|ps1)[[:space:]]+(status|approve-gate|select-gate|open-gate)\b'; then
         return 0
     fi
     # Keep the read/status allowlist single-command only. A chained command like
@@ -274,14 +371,19 @@ _is_allowed_bash_while_pending() {
 }
 
 _block_message() {
-    local gate="$1"
+    local gate="$1" status selected
+    status=$(_gate_status "$gate")
+    selected=$(_state_selected_mode "$gate")
     cat >&2 <<EOF
 PHASE_GATE_PENDING: $gate
-Implementation Handoff is complete. Choose how to cross the Phase 3→4 seam:
-- same-context: approve and continue in this session
-- compact: run /compact, then approve
-- fresh-session: start a new session in the worktree and approve there
-Allowed command: .claude/hooks/lib/forge-workflow.sh approve-gate $gate --mode <mode>
+Implementation Handoff is complete. Current gate status: ${status:-unknown}; selected mode: ${selected:-none}.
+Choose how to cross the Phase 3→4 seam:
+- same-context: select and continue in this session
+- compact: select compact, run /compact, then approve after resume
+- fresh-session: select fresh-session, start a new session in the worktree, then approve there
+Allowed commands:
+  .claude/hooks/lib/forge-workflow.sh select-gate $gate --mode same-context|compact|fresh-session
+  .claude/hooks/lib/forge-workflow.sh approve-gate $gate --mode <selected-mode>
 EOF
 }
 
@@ -291,7 +393,7 @@ _check_tool() {
     cwd=$(_parse_stdin_field "$input" '.cwd' 'cwd')
     _repo_root_from_cwd "$cwd"
 
-    gate=$(_pending_gate)
+    gate=$(_blocked_gate)
     [ -z "$gate" ] && return 0
 
     tool=$(_parse_stdin_field "$input" '.tool_name' 'tool_name')
@@ -327,6 +429,7 @@ Usage: forge-workflow <command>
 Commands:
   status
   open-gate phase-3-4 --plan <plan-file>
+  select-gate phase-3-4 --mode same-context|compact|fresh-session
   approve-gate phase-3-4 --mode same-context|compact|fresh-session
   check-tool
 EOF
@@ -337,6 +440,7 @@ main() {
     case "$cmd" in
         status) _status ;;
         open-gate) shift; _open_gate "$@" ;;
+        select-gate) shift; _select_gate "$@" ;;
         approve-gate) shift; _approve_gate "$@" ;;
         check-tool) _check_tool ;;
         -h|--help|help|"") _usage ;;

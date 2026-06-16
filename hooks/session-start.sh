@@ -9,9 +9,12 @@ set -u
 INPUT=$(cat 2>/dev/null)
 if command -v jq &>/dev/null; then
     SOURCE=$(printf '%s' "$INPUT" | jq -r '.source // ""' 2>/dev/null)
+    HOOK_CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
 else
     SOURCE=$(printf '%s' "$INPUT" | grep -o '"source"[[:space:]]*:[[:space:]]*"[^"]*"' \
         | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/')
+    HOOK_CWD=$(printf '%s' "$INPUT" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        | head -1 | sed -E 's/.*"cwd"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')
 fi
 
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
@@ -77,6 +80,36 @@ if [[ "$SOURCE" == "startup" || "$SOURCE" == "resume" ]]; then
                 CONTEXT="$CONTEXT (this project pins Forge $PIN; you're on $MINE — your Forge is newer; running setup --upgrade here would change the project to $MINE, which other clones would pull)"
             fi
         fi
+    fi
+fi
+
+# Runtime gate resume notice: if a Phase 3→4 seam is awaiting a compact/fresh
+# continuation, surface the durable state path and exact approval command. This
+# is advisory context only; absence/malformed state fails open silently.
+PROJECT_DIR=""
+if [[ -n "${HOOK_CWD:-}" && -d "$HOOK_CWD" ]]; then
+    PROJECT_DIR=$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null || true)
+    [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]] || PROJECT_DIR="$HOOK_CWD"
+elif [[ -n "${CLAUDE_PROJECT_DIR:-}" && -d "$CLAUDE_PROJECT_DIR" ]]; then
+    PROJECT_DIR=$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || true)
+    [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" ]] || PROJECT_DIR="$CLAUDE_PROJECT_DIR"
+else
+    PROJECT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+fi
+RUNTIME_STATE="$PROJECT_DIR/.claude/local/workflow-run.json"
+if [[ -f "$RUNTIME_STATE" ]]; then
+    if command -v jq &>/dev/null; then
+        GATE_STATUS=$(jq -r '.gates["phase-3-4"].status // ""' "$RUNTIME_STATE" 2>/dev/null)
+        GATE_MODE=$(jq -r '.gates["phase-3-4"].selected_mode // ""' "$RUNTIME_STATE" 2>/dev/null)
+        GATE_PLAN=$(jq -r '.plan_file // ""' "$RUNTIME_STATE" 2>/dev/null)
+    else
+        RAW_STATE=$(tr -d '\n' < "$RUNTIME_STATE" 2>/dev/null || true)
+        GATE_STATUS=$(printf '%s' "$RAW_STATE" | sed -nE 's/.*"phase-3-4"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')
+        GATE_MODE=$(printf '%s' "$RAW_STATE" | sed -nE 's/.*"phase-3-4"[[:space:]]*:[[:space:]]*\{[^}]*"selected_mode"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')
+        GATE_PLAN=$(printf '%s' "$RAW_STATE" | sed -nE 's/.*"plan_file"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')
+    fi
+    if [[ "$GATE_STATUS" == "awaiting-fresh-session" || "$GATE_STATUS" == "awaiting-compact" ]]; then
+        CONTEXT="$CONTEXT; WORKFLOW_RUNTIME_GATE: phase-3-4 status=$GATE_STATUS mode=${GATE_MODE:-unknown} plan=${GATE_PLAN:-unknown} — read the plan's Implementation Handoff, then run: .claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode ${GATE_MODE:-<selected-mode>} before Phase 4 implementation."
     fi
 fi
 

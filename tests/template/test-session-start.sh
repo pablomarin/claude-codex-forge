@@ -225,6 +225,14 @@ prepare_hook_repo "$S8/repo"
 # `timeout` or `gtimeout` binary. Always add $S8/empty-bin first so any
 # stub we might want later lives at front, but we leave it empty here.
 mkdir -p "$S8/empty-bin"
+# Keep required helpers reachable even on systems where they live beside
+# timeout (for example /usr/bin on Linux). The filtered PATH must hide only
+# timeout/gtimeout, not basic shell/JSON/text utilities used by the hook.
+for _bin in bash git jq grep sed head date; do
+    if command -v "$_bin" >/dev/null 2>&1; then
+        ln -s "$(command -v "$_bin")" "$S8/empty-bin/$_bin"
+    fi
+done
 FILTERED_PATH="$S8/empty-bin"
 IFS=':' read -ra _PATH_SEGS <<< "$PATH"
 for _seg in "${_PATH_SEGS[@]}"; do
@@ -384,6 +392,30 @@ OUTFILE=$(run_ss_drift "$R" "compact" "$(dirname "$R")/home")
 assert_not_contains "$OUTFILE" "this project pins Forge" "drift: not shown on compact"
 
 # PowerShell parity (pwsh-gated): 5.9 machine vs 5.50 pin → numeric, machine older.
+start_test "workflow runtime awaiting gate notice is injected"
+S_RUNTIME=$(scratch_dir runtime-session)
+mkdir -p "$S_RUNTIME/repo/.claude/local"
+( cd "$S_RUNTIME/repo" && git init -q )
+prepare_hook_repo "$S_RUNTIME/repo"
+cp "$REPO_ROOT/tests/template/fixtures/workflow-runtime/awaiting-fresh-session-phase-3-4.json" "$S_RUNTIME/repo/.claude/local/workflow-run.json"
+OUTFILE=$(run_session_start_sh "$S_RUNTIME/repo" "startup")
+assert_contains "$OUTFILE" "WORKFLOW_RUNTIME_GATE: phase-3-4" "runtime gate notice present"
+assert_contains "$OUTFILE" "status=awaiting-fresh-session" "runtime gate notice includes awaiting status"
+assert_contains "$OUTFILE" "approve-gate phase-3-4 --mode fresh-session" "runtime gate notice includes approval command"
+
+start_test "workflow runtime notice prefers stdin cwd over CLAUDE_PROJECT_DIR"
+S_RUNTIME_CWD=$(scratch_dir runtime-session-cwd)
+mkdir -p "$S_RUNTIME_CWD/parent" "$S_RUNTIME_CWD/worktree/.claude/local"
+( cd "$S_RUNTIME_CWD/parent" && git init -q )
+( cd "$S_RUNTIME_CWD/worktree" && git init -q )
+prepare_hook_repo "$S_RUNTIME_CWD/worktree"
+cp "$REPO_ROOT/tests/template/fixtures/workflow-runtime/awaiting-fresh-session-phase-3-4.json" "$S_RUNTIME_CWD/worktree/.claude/local/workflow-run.json"
+OUTFILE="$S_RUNTIME_CWD/worktree/.session-cwd-out"
+( cd "$S_RUNTIME_CWD/worktree" && printf '{"source":"startup","session_id":"t","cwd":"%s"}' "$S_RUNTIME_CWD/worktree" \
+    | env CLAUDE_PROJECT_DIR="$S_RUNTIME_CWD/parent" bash ./.hooks/session-start.sh ) \
+    > "$OUTFILE" 2>"$S_RUNTIME_CWD/worktree/.session-cwd-err"
+assert_contains "$OUTFILE" "WORKFLOW_RUNTIME_GATE: phase-3-4" "runtime gate notice uses stdin cwd worktree despite parent CLAUDE_PROJECT_DIR"
+
 if command -v pwsh >/dev/null 2>&1; then
     start_test "pwsh drift: 5.9 vs 5.50 numeric (machine older → upgrade-warning)"
     base=$(scratch_dir driftps); repo="$base/repo"; mkdir -p "$repo"; ( cd "$repo" && git init -q )
@@ -407,6 +439,27 @@ if command -v pwsh >/dev/null 2>&1; then
         | env HOME="$base/home" CLAUDE_PROJECT_DIR="$repo" pwsh -NoProfile -File ./.hooks/session-start.ps1 ) \
         > "$out2" 2>"$repo/.session-err2"
     assert_contains "$out2" "your Forge is newer" "pwsh drift: machine 5.50 newer than pin 5.40"
+
+    start_test "pwsh workflow runtime awaiting gate notice is injected"
+    base=$(scratch_dir runtime-session-ps); repo="$base/repo"; mkdir -p "$repo/.claude/local"; ( cd "$repo" && git init -q )
+    prepare_hook_repo_ps "$repo"
+    cp "$REPO_ROOT/tests/template/fixtures/workflow-runtime/awaiting-fresh-session-phase-3-4.json" "$repo/.claude/local/workflow-run.json"
+    out="$repo/.session-runtime-out"
+    ( cd "$repo" && printf '{"source":"startup","session_id":"t","cwd":"%s"}' "$repo" \
+        | env CLAUDE_PROJECT_DIR="$repo" pwsh -NoProfile -File ./.hooks/session-start.ps1 ) \
+        > "$out" 2>"$repo/.session-runtime-err"
+    assert_contains "$out" "WORKFLOW_RUNTIME_GATE: phase-3-4" "pwsh runtime gate notice present"
+    assert_contains "$out" "approve-gate phase-3-4 --mode fresh-session" "pwsh runtime gate approval command present"
+
+    start_test "pwsh workflow runtime notice prefers stdin cwd over CLAUDE_PROJECT_DIR"
+    base=$(scratch_dir runtime-session-cwd-ps); parent="$base/parent"; repo="$base/worktree"; mkdir -p "$parent" "$repo/.claude/local"; ( cd "$parent" && git init -q ); ( cd "$repo" && git init -q )
+    prepare_hook_repo_ps "$repo"
+    cp "$REPO_ROOT/tests/template/fixtures/workflow-runtime/awaiting-fresh-session-phase-3-4.json" "$repo/.claude/local/workflow-run.json"
+    out="$repo/.session-runtime-cwd-out"
+    ( cd "$repo" && printf '{"source":"startup","session_id":"t","cwd":"%s"}' "$repo" \
+        | env CLAUDE_PROJECT_DIR="$parent" pwsh -NoProfile -File ./.hooks/session-start.ps1 ) \
+        > "$out" 2>"$repo/.session-runtime-cwd-err"
+    assert_contains "$out" "WORKFLOW_RUNTIME_GATE: phase-3-4" "pwsh runtime notice uses stdin cwd worktree despite parent CLAUDE_PROJECT_DIR"
 fi
 
 report "test-session-start.sh"
