@@ -244,6 +244,8 @@ assert_file_exists "$S8/.claude/commands/new-feature.md" \
     "initial install populated .claude/commands"
 assert_file_exists "$S8/docs/CHANGELOG.md" \
     "initial install created docs/CHANGELOG.md"
+assert_contains "$LOG8a" "FORGE_UPGRADE_UNCOMMITTED" \
+    "initial install warns that Forge-managed machinery must be committed before worktrees"
 
 # First-install soft-tip regression guard: LOG8a is the initial-install
 # log from above. CLAUDE.md/CONTINUITY.md did not exist before that run, so
@@ -285,6 +287,12 @@ assert_hash_equals "$S8/CLAUDE.md" "$HASH_CLAUDE" \
     "--upgrade does not touch CLAUDE.md at all"
 assert_hash_equals "$S8/CONTINUITY.md" "$HASH_CONTINUITY" \
     "--upgrade does not touch CONTINUITY.md at all"
+assert_contains "$LOG8b" "FORGE_UPGRADE_UNCOMMITTED" \
+    "--upgrade warns that Forge-managed machinery must be committed before worktrees"
+assert_contains "$LOG8b" "New worktrees will NOT inherit these changes until committed" \
+    "--upgrade warning explains the worktree inheritance failure mode"
+assert_contains "$LOG8b" "git push" \
+    "--upgrade warning tells user to push committed Forge machinery"
 
 # UC1 soft tip: --upgrade with CLAUDE.md preserved → end-of-summary soft tip
 # with full Variant B prompt, both-preserved final summary, migration prompt

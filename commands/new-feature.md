@@ -75,6 +75,37 @@ fi
 FEATURE_NAME="$ARGUMENTS"
 WORKTREE_PATH=".worktrees/$FEATURE_NAME"
 
+# FORGE-UPGRADE-PREFLIGHT-BEGIN (byte-identical with commands/fix-bug.md — enforced by test-contracts.sh)
+# A Forge upgrade changes committed workflow machinery. If those files are still
+# modified/untracked in the parent checkout, a new worktree based on origin/<default>
+# will not inherit them and later phases can run without the upgraded hooks/controller.
+ROOT="$(git rev-parse --show-toplevel)"
+FORGE_MANAGED_STATUS=$(git -C "$ROOT" status --porcelain --untracked-files=all -- \
+    .claude .mcp.json docs/reference docs/adr tests/e2e docs/ci-templates 2>/dev/null \
+  | while IFS= read -r line; do
+      normalized=${line//\\//}
+      case "$normalized" in
+        *" .claude/local/"*|*" .claude/local"|*" .claude/settings.bak."*) continue ;;
+      esac
+      printf '%s\n' "$line"
+    done)
+if [ -n "$FORGE_MANAGED_STATUS" ]; then
+  echo "FORGE_UPGRADE_UNCOMMITTED" >&2
+  echo "Forge-managed files are changed/untracked in the parent checkout." >&2
+  echo "New worktrees will not inherit them. Commit and push, or discard them, before creating this worktree." >&2
+  echo "" >&2
+  echo "Changed Forge-managed files:" >&2
+  printf '%s\n' "$FORGE_MANAGED_STATUS" | sed 's/^/  /' >&2
+  echo "" >&2
+  echo "Suggested:" >&2
+  echo "  git status --short .claude docs/reference docs/adr tests/e2e docs/ci-templates .mcp.json" >&2
+  echo "  git add .claude docs/reference docs/adr tests/e2e docs/ci-templates .mcp.json" >&2
+  echo "  git commit -m \"chore: upgrade Forge\"" >&2
+  echo "  git push  # if this repo has a remote/default branch" >&2
+  exit 1
+fi
+# FORGE-UPGRADE-PREFLIGHT-END
+
 # Ensure .worktrees exists and is gitignored
 mkdir -p .worktrees
 grep -qxF '.worktrees/' .gitignore 2>/dev/null || echo '.worktrees/' >> .gitignore
@@ -123,6 +154,39 @@ if [ "$FETCH_OK" = "true" ] \
       # (they stay in this checkout; the new worktree gets its own working tree).
       echo "  ⚠ Local '$DEFAULT_BRANCH' is $BEHIND commits behind origin (you're on '$CURRENT_BRANCH', skipping auto-FF)"
     fi
+  fi
+fi
+
+# If local <default> has unpushed Forge-managed commits, origin/<default> lacks the
+# upgraded workflow machinery. Since this workflow prefers origin/<default> as BASE,
+# block before creating a worktree that silently misses those local upgrade commits.
+if [ "$FETCH_OK" = "true" ] \
+   && git rev-parse --verify "$DEFAULT_BRANCH" >/dev/null 2>&1 \
+   && git rev-parse --verify "origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+  FORGE_UNPUSHED_STATUS=$(git diff --name-only "origin/$DEFAULT_BRANCH..$DEFAULT_BRANCH" -- \
+      .claude .mcp.json docs/reference docs/adr tests/e2e docs/ci-templates 2>/dev/null \
+    | while IFS= read -r path; do
+        normalized=${path//\\//}
+        case "$normalized" in
+          .claude/local/*|.claude/local|.claude/settings.bak.*) continue ;;
+        esac
+        printf '%s\n' "$path"
+      done)
+  if [ -n "$FORGE_UNPUSHED_STATUS" ]; then
+    AHEAD=$(git rev-list --count "origin/$DEFAULT_BRANCH..$DEFAULT_BRANCH" 2>/dev/null || echo "")
+    [[ "$AHEAD" =~ ^[0-9]+$ ]] || AHEAD="unknown"
+    echo "FORGE_UPGRADE_UNPUSHED" >&2
+    echo "Local '$DEFAULT_BRANCH' has $AHEAD unpushed commit(s) touching Forge-managed files." >&2
+    echo "This workflow bases new worktrees from origin/$DEFAULT_BRANCH, so they will not inherit those commits." >&2
+    echo "Push the Forge upgrade before creating this worktree, or manually create a local-base worktree if this is intentional." >&2
+    echo "" >&2
+    echo "Forge-managed files changed ahead of origin/$DEFAULT_BRANCH:" >&2
+    printf '%s\n' "$FORGE_UNPUSHED_STATUS" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "Suggested:" >&2
+    echo "  git push origin $DEFAULT_BRANCH" >&2
+    echo "  # or manual local-only dogfood: git worktree add <path> -b <branch-name> $DEFAULT_BRANCH" >&2
+    exit 1
   fi
 fi
 

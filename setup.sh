@@ -158,6 +158,40 @@ write_source_stamp() {
     } > "$dest_dir/forge-source.env" 2>/dev/null || true
 }
 
+forge_managed_git_status() {
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    git status --porcelain --untracked-files=all -- \
+        .claude .mcp.json docs/reference docs/adr tests/e2e docs/ci-templates 2>/dev/null \
+      | while IFS= read -r line; do
+            normalized=${line//\\//}
+            case "$normalized" in
+                *" .claude/local/"*|*" .claude/local"|*" .claude/settings.bak."*) continue ;;
+            esac
+            printf '%s\n' "$line"
+        done
+}
+
+warn_uncommitted_forge_machinery() {
+    local dirty
+    dirty=$(forge_managed_git_status || true)
+    [[ -n "$dirty" ]] || return 0
+
+    echo ""
+    echo -e "${RED}FORGE_UPGRADE_UNCOMMITTED${NC}"
+    echo -e "${YELLOW}Forge-managed files changed but are not committed.${NC}"
+    echo -e "${YELLOW}New worktrees will NOT inherit these changes until committed.${NC}"
+    echo ""
+    echo "Changed Forge-managed files:"
+    printf '%s\n' "$dirty" | sed 's/^/  /'
+    echo ""
+    echo "Run:"
+    echo "  git status --short .claude docs/reference docs/adr tests/e2e docs/ci-templates .mcp.json"
+    echo "  git add .claude docs/reference docs/adr tests/e2e docs/ci-templates .mcp.json"
+    echo "  git commit -m \"chore: upgrade Forge\""
+    echo "  git push  # if this repo has a remote/default branch"
+    echo ""
+}
+
 # Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
 # install / -f / --upgrade / --global invocation — NOT --migrate (which exited above
 # and installs no machinery). Placed before the --global branch so both modes hit it.
@@ -1036,6 +1070,8 @@ if [[ -f .claude/settings.json ]] \
         { rm -f .claude/.forge-version; } 2>/dev/null || true
     fi
 fi
+
+warn_uncommitted_forge_machinery
 
 echo ""
 if [[ "$UPGRADE" == true ]]; then

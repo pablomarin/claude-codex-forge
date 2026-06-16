@@ -916,6 +916,109 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Contract: Forge-upgrade preflight blocks in new-feature.md and fix-bug.md
+# byte-identical, and they fail closed when managed machinery is uncommitted.
+# ---------------------------------------------------------------------------
+start_test "FORGE-UPGRADE-PREFLIGHT blocks byte-identical and block dirty machinery"
+
+NF_UPGRADE=$(sed -n '/^# FORGE-UPGRADE-PREFLIGHT-BEGIN/,/^# FORGE-UPGRADE-PREFLIGHT-END/p' "$NF")
+FB_UPGRADE=$(sed -n '/^# FORGE-UPGRADE-PREFLIGHT-BEGIN/,/^# FORGE-UPGRADE-PREFLIGHT-END/p' "$FB")
+
+if [[ -z "$NF_UPGRADE" ]] || [[ -z "$FB_UPGRADE" ]]; then
+    fail "FORGE-UPGRADE-PREFLIGHT markers missing from one or both command files"
+elif [[ "$NF_UPGRADE" == "$FB_UPGRADE" ]]; then
+    pass "FORGE-UPGRADE-PREFLIGHT blocks byte-identical"
+else
+    fail "FORGE-UPGRADE-PREFLIGHT blocks differ between new-feature.md and fix-bug.md"
+    diff <(printf '%s' "$NF_UPGRADE") <(printf '%s' "$FB_UPGRADE") | head -10
+fi
+
+if echo "$NF_UPGRADE" | grep -qF "FORGE_UPGRADE_UNCOMMITTED" \
+   && echo "$NF_UPGRADE" | grep -qF ".claude/local" \
+   && echo "$NF_UPGRADE" | grep -qF "docs/reference"; then
+    pass "FORGE-UPGRADE-PREFLIGHT contains sentinel, managed paths, and local-state exclusion"
+else
+    fail "FORGE-UPGRADE-PREFLIGHT missing sentinel, managed paths, or local-state exclusion"
+fi
+
+S_UP=$(scratch_dir forge-upgrade-preflight)
+(
+    cd "$S_UP" || exit 1
+    git init -q
+    git config user.email test@example.com
+    git config user.name "Test User"
+    mkdir -p .claude/hooks/lib
+    printf 'new runtime controller\n' > .claude/hooks/lib/forge-workflow.sh
+    bash -c "$NF_UPGRADE"
+) >"$S_UP/dirty.out" 2>"$S_UP/dirty.err"
+UP_DIRTY_RC=$?
+assert_equals "$UP_DIRTY_RC" "1" "FORGE-UPGRADE-PREFLIGHT exits non-zero for untracked managed machinery"
+assert_contains "$S_UP/dirty.err" "FORGE_UPGRADE_UNCOMMITTED" \
+    "FORGE-UPGRADE-PREFLIGHT prints stable blocker sentinel"
+
+(
+    cd "$S_UP" || exit 1
+    git add .claude/hooks/lib/forge-workflow.sh
+    git commit -q -m "chore: upgrade Forge"
+    mkdir -p .claude/local
+    printf 'developer-local state\n' > .claude/local/state.md
+    bash -c "$NF_UPGRADE"
+) >"$S_UP/clean.out" 2>"$S_UP/clean.err"
+UP_CLEAN_RC=$?
+assert_equals "$UP_CLEAN_RC" "0" "FORGE-UPGRADE-PREFLIGHT passes after commit and ignores .claude/local"
+
+S_PUSH=$(scratch_dir forge-upgrade-unpushed)
+(
+    mkdir -p "$S_PUSH/work"
+    git init -q --bare "$S_PUSH/origin.git"
+    cd "$S_PUSH/work" || exit 1
+    git init -q
+    git checkout -q -b main
+    git config user.email test@example.com
+    git config user.name "Test User"
+    printf 'base\n' > README.md
+    git add README.md
+    git commit -q -m "initial"
+    git remote add origin "$S_PUSH/origin.git"
+    git push -q -u origin main
+    mkdir -p .claude/hooks/lib
+    printf 'new runtime controller\n' > .claude/hooks/lib/forge-workflow.sh
+    git add .claude/hooks/lib/forge-workflow.sh
+    git commit -q -m "chore: upgrade Forge"
+    bash -c "$NF_NEW"
+) >"$S_PUSH/unpushed.out" 2>"$S_PUSH/unpushed.err"
+UP_UNPUSHED_RC=$?
+assert_equals "$UP_UNPUSHED_RC" "1" "DRIFT-PREFLIGHT-NEW blocks clean local Forge upgrade commits not pushed to origin/default"
+assert_contains "$S_PUSH/unpushed.err" "FORGE_UPGRADE_UNPUSHED" \
+    "DRIFT-PREFLIGHT-NEW prints stable unpushed-upgrade sentinel"
+assert_contains "$S_PUSH/unpushed.err" "git push origin main" \
+    "DRIFT-PREFLIGHT-NEW tells user to push default branch before worktree creation"
+
+# Installer warning parity: both setup twins must expose the same sentinel,
+# inheritance warning, managed surfaces, and exclusions. This is source-string
+# parity because pwsh is not guaranteed in the Linux template-test environment.
+for installer in "$REPO_ROOT/setup.sh" "$REPO_ROOT/setup.ps1"; do
+    base=$(basename "$installer")
+    assert_contains "$installer" "FORGE_UPGRADE_UNCOMMITTED" \
+        "$base emits the Forge-upgrade-uncommitted sentinel"
+    assert_contains "$installer" "New worktrees will NOT inherit these changes until committed" \
+        "$base explains the worktree inheritance failure mode"
+    assert_contains "$installer" "docs/ci-templates" \
+        "$base checks docs/ci-templates managed surface"
+    assert_contains "$installer" "git push" \
+        "$base warning tells users to push committed Forge machinery"
+    assert_contains "$installer" ".claude/local" \
+        "$base excludes volatile .claude/local state"
+    if [[ "$base" == "setup.ps1" ]]; then
+        assert_contains "$installer" "settings\\.bak" \
+            "$base excludes setup settings backups"
+    else
+        assert_contains "$installer" ".claude/settings.bak." \
+            "$base excludes setup settings backups"
+    fi
+done
+
+# ---------------------------------------------------------------------------
 # Contract: DRIFT-PREFLIGHT-ALREADY blocks in new-feature.md and fix-bug.md byte-identical
 # ---------------------------------------------------------------------------
 start_test "DRIFT-PREFLIGHT-ALREADY blocks byte-identical across new-feature.md and fix-bug.md"

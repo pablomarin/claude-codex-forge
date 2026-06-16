@@ -146,6 +146,42 @@ function Write-ForgeSourceStamp {
     }
 }
 
+function Get-ForgeManagedGitStatus {
+    try {
+        $inside = (& git rev-parse --is-inside-work-tree 2>$null)
+        if (-not $inside) { return @() }
+        $paths = @(".claude", ".mcp.json", "docs/reference", "docs/adr", "tests/e2e", "docs/ci-templates")
+        $lines = @(& git status --porcelain --untracked-files=all -- $paths 2>$null)
+        if (-not $lines) { return @() }
+        return @($lines | Where-Object {
+            $normalized = ($_ -replace '\\', '/')
+            -not ($normalized -match ' \.claude/local(/|$)' -or $normalized -match ' \.claude/settings\.bak\.')
+        })
+    } catch {
+        return @()
+    }
+}
+
+function Show-ForgeUpgradeUncommittedWarning {
+    $dirty = @(Get-ForgeManagedGitStatus)
+    if ($dirty.Count -eq 0) { return }
+
+    Write-Host ""
+    Write-Color "FORGE_UPGRADE_UNCOMMITTED" "Red"
+    Write-Color "Forge-managed files changed but are not committed." "Yellow"
+    Write-Color "New worktrees will NOT inherit these changes until committed." "Yellow"
+    Write-Host ""
+    Write-Host "Changed Forge-managed files:"
+    foreach ($line in $dirty) { Write-Host "  $line" }
+    Write-Host ""
+    Write-Host "Run:"
+    Write-Host "  git status --short .claude docs/reference docs/adr tests/e2e docs/ci-templates .mcp.json"
+    Write-Host "  git add .claude docs/reference docs/adr tests/e2e docs/ci-templates .mcp.json"
+    Write-Host "  git commit -m `"chore: upgrade Forge`""
+    Write-Host "  git push  # if this repo has a remote/default branch"
+    Write-Host ""
+}
+
 # Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
 # install / -Force / -Upgrade / -Global run — NOT -Migrate (exited above, installs no
 # machinery). Placed before the -Global branch so both modes hit it. Fail-open via
@@ -1146,6 +1182,8 @@ if ((Test-Path ".claude/settings.json") -and ($script:ForgeCopyErrors -eq 0) -an
         Remove-Item (Join-Path (Get-Location) ".claude/.forge-version") -Force -ErrorAction SilentlyContinue
     }
 }
+
+Show-ForgeUpgradeUncommittedWarning
 
 Write-Host ""
 if ($Upgrade) {
