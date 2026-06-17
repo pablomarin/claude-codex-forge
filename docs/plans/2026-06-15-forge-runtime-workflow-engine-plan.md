@@ -262,6 +262,16 @@ In `tiny_notes`:
 6. Continue from `workflow-run.json` + plan handoff.
 7. Measure context drop and quality outcome.
 
+### Dogfood results — 2026-06-17
+
+Target repo: `/home/aescala82/projects/forge-empty`.
+
+- `pinned-notes` validated the Forge-upgrade preflight fix and the basic durable gate path: the generated worktree included `.claude/hooks/lib/forge-workflow.sh` and `.claude/hooks/check-phase-gates.sh`, the plan contained `## Implementation Handoff` + `### Task Contract`, and the feature shipped with 222 tests, ruff, mypy strict, code review, E2E, and regression passing. That run used the older direct-approval semantics, so it did **not** validate the later awaiting-state fix.
+- `note-count-command` validated the current `fresh-session` state machine: `select-gate --mode fresh-session` left `phase-3-4` in `awaiting-fresh-session` with `approved_at=null`, recorded `gate_selected`, and blocked attempted `Edit` and implementation `Bash` actions with `PHASE_GATE_PENDING`.
+- The fresh implementation session received `WORKFLOW_RUNTIME_GATE` from `SessionStart`, read `docs/plans/note-count-command.md` → `## Implementation Handoff`, approved via `.claude/hooks/lib/forge-workflow.sh approve-gate phase-3-4 --mode fresh-session`, then implemented after the gate was approved.
+- Quality outcome stayed acceptable: `note-count-command` passed 234 pytest tests, ruff, `mypy --strict tiny_notes.py`, code-review loop, and CLI E2E.
+- Context outcome was directionally positive: planning/gate session peaked at 197,309 context tokens; fresh implementation session peaked at 119,896. This is not a controlled benchmark, but it supports the Phase 3→4 seam as a runtime context-efficiency lever.
+
 ## Acceptance Criteria
 
 - The agent cannot enter Phase 4 implementation while `phase-3-4` gate is pending.

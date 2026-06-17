@@ -223,6 +223,43 @@ Only after measurement: bounded brainstorming artifacts, structured council outp
 5. Run a comparable workflow.
 6. Compare peak/p95 main-thread context tokens and inspect any quality regressions.
 
+## Dogfood results — 2026-06-17
+
+Throwaway target: `/home/aescala82/projects/forge-empty`.
+
+### `pinned-notes`
+
+This run validated the Forge-upgrade preflight and basic durable gate path, but not the later awaiting-state fix because the target had been installed from Forge rev `6f166c7`.
+
+Evidence:
+
+- Worktree included `.claude/hooks/lib/forge-workflow.sh` and `.claude/hooks/check-phase-gates.sh` after the upgrade was committed/pushed to `origin/master`.
+- Plan included `## Implementation Handoff` and `### Task Contract`.
+- Runtime files existed under `.claude/local/` and recorded `gate_opened` + direct `gate_approved` for `fresh-session`.
+- Feature quality passed: 222 pytest tests, ruff, mypy strict, code review, E2E, and regression.
+
+### `note-count-command`
+
+This run validated the current `fresh-session` gate semantics.
+
+Evidence:
+
+- Selecting `fresh-session` produced `status=awaiting-fresh-session`, `selected_mode=fresh-session`, `selected_at=<ts>`, and `approved_at=null` in `.claude/local/workflow-run.json`.
+- `.claude/local/workflow-events.jsonl` recorded `gate_opened`, `gate_selected`, then `gate_approved` only in the fresh implementation session.
+- Before approval, attempted `Edit` and implementation `Bash` actions were blocked by the PreToolUse hook with `PHASE_GATE_PENDING: phase-3-4`.
+- Fresh session `SessionStart` injected `WORKFLOW_RUNTIME_GATE: phase-3-4 status=awaiting-fresh-session mode=fresh-session plan=docs/plans/note-count-command.md` and instructed the session to read the Implementation Handoff and approve before Phase 4.
+- After approval, implementation proceeded and passed 234 pytest tests, ruff, `mypy --strict tiny_notes.py`, code review, and CLI E2E.
+
+Context metrics:
+
+| Run/session | Peak context tokens | p95 context tokens | Notes |
+| --- | ---: | ---: | --- |
+| `note-count-command` planning/gate session | 197,309 | 193,484 | Peak at Phase 3→4 awaiting gate. |
+| `note-count-command` fresh implementation session | 119,896 | 118,427 | Started from runtime notice + plan handoff. |
+| Earlier all-session `forge-empty` corpus | 384,269 | 353,786 | Previous long workflow corpus; not a controlled comparison. |
+
+Interpretation: the result is not an apples-to-apples benchmark, but it supports the runtime context-efficiency hypothesis: the fresh implementation session stayed materially leaner while preserving quality through durable rationale and gates.
+
 ## Progress log
 
 - [x] Initial repository investigation completed.
@@ -234,5 +271,5 @@ Only after measurement: bounded brainstorming artifacts, structured council outp
 - [x] Baseline metrics captured on available Forge transcript (`scripts/context-metrics.py --project-root .`; newest transcript peak 100,963, p95 100,963, phase unknown).
 - [x] Tier 1.1 implemented with `.sh` / `.ps1` parity: `build-evidence` now emits only with active UUID-shaped `/goal` nonce.
 - [x] Runtime phase-gate v1 implemented with `.sh` / `.ps1` parity: `phase-3-4` is durable in `.claude/local/workflow-run.json`, events append to `.claude/local/workflow-events.jsonl`, and `check-phase-gates` blocks implementation mutations while pending.
-- [ ] Dogfood metrics captured on comparable post-change workflow.
-- [ ] Results reviewed.
+- [x] Dogfood metrics captured on post-change workflow (`note-count-command`).
+- [x] Results reviewed: fresh-session gate semantics validated; context result directionally positive; no need to add session-identity enforcement before first PR.
