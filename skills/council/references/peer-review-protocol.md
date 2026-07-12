@@ -56,7 +56,7 @@ Run via the codex-pty shim (`.claude/hooks/lib/codex-pty.sh`) — works around o
 
 ```bash
 .claude/hooks/lib/codex-pty.sh exec \
-  -m "gpt-5.5" \
+  -m "gpt-5.6-sol" \
   -c model_reasoning_effort="high" \
   -c service_tier="fast" \
   --sandbox read-only \
@@ -79,7 +79,7 @@ After all advisors complete, construct the chairman prompt:
 
 ```bash
 .claude/hooks/lib/codex-pty.sh exec \
-  -m "gpt-5.5" \
+  -m "gpt-5.6-sol" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   --sandbox read-only \
@@ -137,7 +137,7 @@ Before firing the full council, the Contrarian/Codex validates the "default wins
 
 ```bash
 .claude/hooks/lib/codex-pty.sh exec \
-  -m "gpt-5.5" \
+  -m "gpt-5.6-sol" \
   -c model_reasoning_effort="high" \
   -c service_tier="fast" \
   --sandbox read-only \

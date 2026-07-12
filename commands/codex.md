@@ -50,7 +50,7 @@ Use `AskUserQuestion` with these options:
 ```bash
 : > /tmp/codex_response.txt   # truncate any stale verdict (a failed run then yields an empty file, not a prior verdict). NOT `rm -f /tmp/...` — the bash-safety hook blocks `rm -f /<path>` as root-targeting.
 .claude/hooks/lib/codex-pty.sh exec review \
-  -m "gpt-5.5" \
+  -m "gpt-5.6-sol" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   -c web_search="live" \
@@ -66,7 +66,7 @@ Use `AskUserQuestion` with these options:
 ```bash
 : > /tmp/codex_response.txt   # truncate any stale verdict (a failed run then yields an empty file, not a prior verdict). NOT `rm -f /tmp/...` — the bash-safety hook blocks `rm -f /<path>` as root-targeting.
 .claude/hooks/lib/codex-pty.sh exec review \
-  -m "gpt-5.5" \
+  -m "gpt-5.6-sol" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   -c web_search="live" \
@@ -107,7 +107,7 @@ Also check if there's a plan in the current conversation context. If the user sp
 ```bash
 : > /tmp/codex_response.txt   # truncate any stale verdict (a failed run then yields an empty file, not a prior verdict). NOT `rm -f /tmp/...` — the bash-safety hook blocks `rm -f /<path>` as root-targeting.
 .claude/hooks/lib/codex-pty.sh exec \
-  -m "gpt-5.5" \
+  -m "gpt-5.6-sol" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   -c web_search="live" \
@@ -159,7 +159,7 @@ Construct the prompt by combining the user's instruction with the gathered conte
 ```bash
 : > /tmp/codex_response.txt   # truncate any stale verdict (a failed run then yields an empty file, not a prior verdict). NOT `rm -f /tmp/...` — the bash-safety hook blocks `rm -f /<path>` as root-targeting.
 .claude/hooks/lib/codex-pty.sh exec \
-  -m "gpt-5.5" \
+  -m "gpt-5.6-sol" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   -c web_search="live" \
@@ -233,7 +233,7 @@ whatever this repo uses. Rules:
 ```bash
 mkdir -p .claude/local/investigate
 .claude/hooks/lib/codex-pty.sh exec \
-  -m "gpt-5.5" \
+  -m "gpt-5.6-sol" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   -c web_search="live" \
@@ -320,7 +320,7 @@ These are the only `-c` overrides used by the canonical examples above:
 
 | Config key               | Why this command uses it                                                                                                                                                                                                                            |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`                  | Pin the session to gpt-5.5 (overrides whatever the user has as default in `~/.codex`)                                                                                                                                                               |
+| `model`                  | Pin the session to gpt-5.6-sol (overrides whatever the user has as default in `~/.codex`)                                                                                                                                                               |
 | `model_reasoning_effort` | `xhigh` — Codex is being used as a serious second opinion, not a quick autocomplete                                                                                                                                                                 |
 | `service_tier`           | `fast` — prioritise latency for the review/feedback loop                                                                                                                                                                                            |
 | `web_search`             | `live` — make the live web-search tool available to the model when it decides it needs current docs/issue status. Not "always search." Codex's default is documented inconsistently (some sources say `disabled`, others `cached`); set explicitly. |
