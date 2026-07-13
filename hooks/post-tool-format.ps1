@@ -106,8 +106,12 @@ switch ($extension) {
         npx prettier --write $filePath 2>$null
     }
     ".md" {
-        # Markdown files - format with prettier
-        npx prettier --write $filePath 2>$null
+        # Markdown is intentionally NOT auto-formatted (v5.56) — mirrors the .sh hook.
+        # The harness ships hand-authored markdown (rules/, commands/, skills/, agents/,
+        # docs/) using an escaped-backtick convention (\`...\`) and sentinel/byte-pinned
+        # blocks enforced by tests/template/test-contracts.sh. prettier 3.x corrupts it
+        # (merges escaped-backtick continuation lines, strips spaces around inline code),
+        # garbling prose and breaking byte-identical contracts. Skip it.
     }
 }
 
