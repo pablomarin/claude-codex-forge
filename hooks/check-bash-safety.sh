@@ -84,6 +84,21 @@ elif echo "$COMMAND" | grep -qE 'pnpm\s+(add|install|i)\s+(-g|--global)|pnpm\s+(
     REASON="Global pnpm package install detected (supply chain risk)"
 elif echo "$COMMAND" | grep -qE '(^|\s)pip3?\s+install\s+[^-]' 2>/dev/null && ! echo "$COMMAND" | grep -qE 'pip3?\s+install\s+(-r\s|-e\s|\.\s*$)|uv\s+pip' 2>/dev/null; then
     REASON="Unscoped pip install detected (supply chain risk — use venv or uv)"
+
+# 8. Workflow-safety (NOT security): block Bash read-utilities that read
+#    .claude/local/state.md inline. Bash is not a read-only tool in Claude Code,
+#    so a Bash read of this sensitive file trips CC's sensitive-file access prompt
+#    — which SILENTLY STALLS an autonomous /goal run (no human to answer). The Read
+#    tool is prompt-free for in-project files; use it instead. This is a TARGETED
+#    guardrail for the common inline form, not a proof recurrence is impossible:
+#    the match is per-line (`echo | grep`) and requires the read-utility token and
+#    the literal path on the SAME line, so sanctioned flows that read via a shell
+#    VARIABLE (EXTRACT-FOLDABLE `awk … "$1"`, finish-branch `"$MAIN_STATE"`/`"$WT_SNAP"`)
+#    are structurally exempt, as is the `bash …/review-breaker.sh …/state.md`
+#    diagnostic (bash is not a read-utility). Filename terminator keeps state.md.bak
+#    from matching. Gates the AGENT's Bash tool only — a human's terminal is unaffected.
+elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(/[^[:space:]]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[[:space:]].*\.claude/local/state\.md([^A-Za-z0-9._-]|$)' 2>/dev/null; then
+    REASON="Reading .claude/local/state.md via Bash — use the Read tool instead (Bash reads of this sensitive file stall autonomous /goal runs on a permission prompt)"
 fi
 
 # --- Block or allow ---

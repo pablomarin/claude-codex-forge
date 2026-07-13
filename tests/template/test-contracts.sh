@@ -2208,6 +2208,75 @@ fi
 
 
 # ---------------------------------------------------------------------------
+# Contract: state.md Bash-read guardrail (v5.56) — .sh ↔ .ps1 parity.
+# The guardrail blocks a Bash read-utility that reads .claude/local/state.md
+# inline (stalls autonomous /goal on CC's sensitive-file prompt). Both hooks must
+# carry it, with the SAME reason string, and the .ps1 must NOT use the POSIX
+# `[[:space:]]` class (invalid in .NET regex — Codex P1). Behavioral block/allow
+# is covered by tests/template/test-bash-safety.sh.
+# ---------------------------------------------------------------------------
+start_test "state.md Bash-read guardrail — check-bash-safety .sh ↔ .ps1 parity"
+GUARD_REASON="Reading .claude/local/state.md via Bash"
+if grep -qF "$GUARD_REASON" "$REPO_ROOT/hooks/check-bash-safety.sh"; then
+    pass "check-bash-safety.sh carries the state.md read guardrail"
+else
+    fail "check-bash-safety.sh missing the state.md read guardrail reason string"
+fi
+if grep -qF "$GUARD_REASON" "$REPO_ROOT/hooks/check-bash-safety.ps1"; then
+    pass "check-bash-safety.ps1 carries the state.md read guardrail (parity)"
+else
+    fail "check-bash-safety.ps1 missing the state.md read guardrail (parity gap)"
+fi
+# Both must scope to the exact state.md path (with a Windows-separator variant in ps1).
+if grep -qE '\\\.claude/local/state\\\.md' "$REPO_ROOT/hooks/check-bash-safety.sh"; then
+    pass "check-bash-safety.sh guardrail scoped to .claude/local/state.md"
+else
+    fail "check-bash-safety.sh guardrail not scoped to state.md path"
+fi
+if grep -qE '\\\.claude\[/\\\\\]local\[/\\\\\]state\\\.md' "$REPO_ROOT/hooks/check-bash-safety.ps1"; then
+    pass "check-bash-safety.ps1 guardrail scoped to .claude[/\\]local[/\\]state.md"
+else
+    fail "check-bash-safety.ps1 guardrail not scoped to state.md path (Windows-sep variant)"
+fi
+# .ps1 must never use POSIX [[:space:]] (invalid .NET regex) — Codex P1.
+if grep -qF '[[:space:]]' "$REPO_ROOT/hooks/check-bash-safety.ps1"; then
+    fail "check-bash-safety.ps1 uses POSIX [[:space:]] — invalid in .NET regex (use \\s or [ \\t])"
+else
+    pass "check-bash-safety.ps1 uses no POSIX [[:space:]] class"
+fi
+
+# ---------------------------------------------------------------------------
+# Contract: post-tool-format must NOT run prettier on Markdown (v5.56).
+# prettier 3.x corrupts the harness's escaped-backtick + byte-pinned markdown, so
+# the md branch of both formatters is an explicit no-op. Guard that neither hook's
+# markdown case invokes prettier, in both .sh and .ps1. (JSON/TS prettier calls
+# are unaffected and must remain.)
+# ---------------------------------------------------------------------------
+start_test "post-tool-format: markdown case does not invoke prettier (.sh ↔ .ps1)"
+# .sh — extract the `md)` … `;;` case block and assert it has no prettier call.
+SH_MD_BLOCK=$(awk '/^[[:space:]]*md\)/{f=1} f{print} f&&/;;/{exit}' "$REPO_ROOT/hooks/post-tool-format.sh")
+# Match an actual invocation (npx prettier / prettier --write), not the word
+# "prettier" in the explanatory comment.
+if printf '%s' "$SH_MD_BLOCK" | grep -qE 'npx[[:space:]]+prettier|prettier[[:space:]]+--write'; then
+    fail "post-tool-format.sh md) case still calls prettier (corrupts pinned markdown)"
+else
+    pass "post-tool-format.sh md) case does not call prettier"
+fi
+# .ps1 — extract the `".md" { … }` switch block and assert it has no prettier call.
+PS_MD_BLOCK=$(awk '/"\.md"[[:space:]]*\{/{f=1} f{print} f&&/^[[:space:]]*\}/{exit}' "$REPO_ROOT/hooks/post-tool-format.ps1")
+if printf '%s' "$PS_MD_BLOCK" | grep -qE 'npx[[:space:]]+prettier|prettier[[:space:]]+--write'; then
+    fail "post-tool-format.ps1 .md case still calls prettier (parity — corrupts pinned markdown)"
+else
+    pass "post-tool-format.ps1 .md case does not call prettier"
+fi
+# Sanity: JSON prettier formatting must still be present (we only disabled markdown).
+if grep -q 'prettier --write' "$REPO_ROOT/hooks/post-tool-format.sh"; then
+    pass "post-tool-format.sh still runs prettier for non-markdown (json/ts)"
+else
+    fail "post-tool-format.sh no longer runs prettier at all — md-only disable expected"
+fi
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 report "test-contracts.sh"

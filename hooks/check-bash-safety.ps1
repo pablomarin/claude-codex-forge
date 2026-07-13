@@ -96,6 +96,18 @@ elseif ($Command -match 'pnpm\s+(add|install|i)\s+(-g|--global)|pnpm\s+(-g|--glo
 elseif ($Command -match '(^|\s)pip3?\s+install\s+[^-]' -and $Command -notmatch 'pip3?\s+install\s+(-r\s|-e\s|\.\s*$)|uv\s+pip') {
     $Reason = "Unscoped pip install detected (supply chain risk — use venv or uv)"
 }
+# 8. Workflow-safety (NOT security): block Bash read-utilities that read
+#    .claude/local/state.md inline — mirrors check #8 in check-bash-safety.sh.
+#    A Bash read of this sensitive file trips CC's sensitive-file prompt and
+#    SILENTLY STALLS an autonomous /goal run; the Read tool is prompt-free.
+#    (?m) + [^\r\n]* keep the match line-scoped (.NET `.` is not dot-all, and
+#    -match runs on the whole string), so the utility token and the literal path
+#    must be on the SAME line — sanctioned flows that read via a shell variable
+#    are structurally exempt. [/\\] handles Windows separators; the trailing
+#    class is a filename terminator so state.md.bak does not match.
+elseif ($Command -match '(?m)(^|[ \t])(/[^ \t]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[ \t][^\r\n]*\.claude[/\\]local[/\\]state\.md([^A-Za-z0-9._-]|$)') {
+    $Reason = "Reading .claude/local/state.md via Bash — use the Read tool instead (Bash reads of this sensitive file stall autonomous /goal runs on a permission prompt)"
+}
 
 # --- Block or allow ---
 if ($Reason) {
