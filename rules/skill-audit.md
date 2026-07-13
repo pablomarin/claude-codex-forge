@@ -32,6 +32,43 @@
 - Skill contains base64-encoded or obfuscated strings
 - Skill writes to paths outside the project directory
 
+## Adversarial & Behavioral Audit (TAR Engine)
+
+The Quick Audit above catches static red flags in a skill's source and metadata. But a skill can pass every static check and still behave maliciously at runtime — the `SKILL.md` reads clean, yet its instructions turn the agent against the user. [TAR Engine](https://tarai.dev) closes this gap with LLM-based semantic and adversarial testing, run **before install**.
+
+Two complementary layers:
+
+- **Semantic audit** — reads what the skill *actually* asks the agent to do and flags intent that exceeds its stated purpose (e.g. a "note formatter" that also packages up `~/.aws` credentials, or one that instructs the agent to hide its network calls from the user).
+- **Adversarial testing** — treats the `SKILL.md` as a system prompt and runs 15 probes across 5 attack classes to see whether the skill can be coerced into unsafe behavior:
+
+| Class                     | ID     | Probes for                                            |
+| ------------------------- | ------ | ----------------------------------------------------- |
+| **Instruction override**  | AR-001 | `ignore previous`, `new system prompt` style hijacks  |
+| **Role jailbreak**        | AR-002 | DAN / hypothetical / fictional-roleplay bypasses      |
+| **Hidden payload**        | AR-003 | base64 / leetspeak / unicode-lookalike smuggling      |
+| **Authority spoof**       | AR-004 | `I'm the developer / admin / platform staff`          |
+| **Reflective injection**  | AR-005 | output-as-instruction loops|
+
+Each skill gets a 0–100 score and letter grade; findings cite the exact source lines with a fix.
+
+### Invocation
+
+```bash
+# One-off audit — no install needed
+uvx --from "git+https://github.com/qingxuantang/tar-engine@v0.3.0" \
+  tar-engine scan ./skills --min-score 70
+
+# Or wire it in as an MCP tool (Claude Code / Cursor / Codex)
+uvx --from tar-engine tar-engine-mcp
+```
+
+### Two-phase audit workflow
+
+1. **Pre-install — TAR Engine** semantic + adversarial testing (this section). Catches skills that pass static review but fail under attack.
+2. **Post-merge — SkillSpector** CI pattern checks. Catches regressions after a skill is already in the tree.
+
+`tar-engine scan ./skills --min-score 80` exits non-zero, so it drops straight into CI or a pre-commit hook as a **pre-publish gate** — a skill below the threshold fails the build.
+
 ## MCP-Specific Threats
 
 ### Tool Poisoning
