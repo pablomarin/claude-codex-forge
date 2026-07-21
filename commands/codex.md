@@ -221,17 +221,39 @@ whatever this repo uses. Rules:
 
 - **Credentials come from `.env`/config — NEVER in argv, the prompt, or anything
   that lands in logs.** A small runner that reads `.env` itself is the safe pattern.
-- **Write the brief + any runner + Codex's output ONLY to a gitignored in-repo
-  path** (e.g. `.claude/local/investigate/`). The autonomous loop already writes
-  there without prompting, and it keeps everything inside the sandbox boundary.
-- **Write a brief** (`.claude/local/investigate/CONTEXT.md`): the question, allowed
-  data sources, forbidden actions, acceptance criteria, and the expected output
-  (finding + reproduction steps + uncertainty + next checks).
+- **Create the brief with the Write tool, NOT Bash.** The Write tool auto-creates
+  the `.claude/local/investigate/` parent dir (ADR 0006) and is auto-approved on
+  `.claude/local/**`; a Bash `mkdir`/`touch`/redirect under `.claude/` is never
+  auto-approved and stalls an autonomous `/goal` run (check #9 blocks it).
+- **Write a brief** using the **Write tool** at `.claude/local/investigate/CONTEXT.md`:
+  the question, allowed data sources, forbidden actions, acceptance criteria, and
+  the expected output (finding + reproduction steps + uncertainty + next checks).
+  In Step 2, Codex reads this file itself from its sandbox — do NOT `cat` it in the
+  shell (a Bash read of `.claude/local/` also trips the prompt).
+- **In-repo vs transient:** the brief (`CONTEXT.md`) and the final persisted
+  `finding.txt` live in-repo under `.claude/local/investigate/`; Codex's transient
+  output (`--output-last-message`) goes to `/tmp` and is copied in-repo in Step 4.
 
 ### Step 2: Launch Codex with reach
 
 ```bash
-mkdir -p .claude/local/investigate
+# Per-worktree temp paths so parallel Investigate runs never clobber each other's
+# evidence. The key is a checksum of the FULL worktree path (not just basename —
+# two repos can each have .worktrees/fix), so it is unique AND deterministic
+# (Steps 3-4 reconstruct the same paths). /tmp is not a sensitive path — these
+# Bash writes never prompt. Do NOT put the finding under .claude/local/ via Bash
+# (that trips CC's sensitive-file prompt and stalls /goal — check #9 blocks it; ADR 0006).
+WT_KEY=$(pwd | cksum | cut -d' ' -f1)
+FINDING="/tmp/codex-investigate-$WT_KEY-finding.txt"
+FULLLOG="/tmp/codex-investigate-$WT_KEY-full.txt"
+: > "$FINDING"   # clear stale finding so a failed run yields empty, not a prior result
+
+# Codex reads the brief from its OWN sandbox (workspace-write includes the repo,
+# so .claude/local/investigate/CONTEXT.md is readable). The prompt names the path
+# only as a plain string ARGUMENT (no shell read op) — verified prompt-free. The
+# command contains NO .claude/local shell operation, so it never stalls the loop.
+# (Do NOT feed the brief via stdin: the PTY shim makes stdin a TTY, and codex only
+# reads a prompt from a piped stdin — a heredoc yields "No prompt provided".)
 .claude/hooks/lib/codex-pty.sh exec \
   -m "gpt-5.6-sol" \
   -c model_reasoning_effort="xhigh" \
@@ -241,9 +263,14 @@ mkdir -p .claude/local/investigate
   -c sandbox_workspace_write.network_access=true \
   --ephemeral \
   -C "$(pwd)" \
-  --output-last-message .claude/local/investigate/finding.txt \
-  "$(cat .claude/local/investigate/CONTEXT.md)"
+  --output-last-message "$FINDING" \
+  "Read the investigation brief at .claude/local/investigate/CONTEXT.md (relative to the repo root) and carry out the investigation it specifies. Return the evidence packet the brief asks for." \
+  > "$FULLLOG" 2>&1
 ```
+
+> Like modes A/B/C, the PTY transcript is redirected to the `/tmp` forensic file
+> `$FULLLOG` (`/tmp/codex-investigate-<worktree>-full.txt`) so the multi-MB stdout
+> does not flood context; you read the clean verdict from `$FINDING` in Step 3.
 
 > **Pin the exact network/execution flags against `codex --help`** for your Codex
 > version. `--sandbox danger-full-access` removes sandboxing entirely (do NOT use —
@@ -256,6 +283,14 @@ the background and poll the output file if the dig is long.
 
 ### Step 3: Cross-verify before trusting (MANDATORY)
 
+**First, capture the finding.** Once the codex run has **completed** — if you
+backgrounded it (per the note above), wait for the process to exit first; `$FINDING`
+is empty until `--output-last-message` is written at clean shutdown — Read `$FINDING`
+(`/tmp/codex-investigate-<key>-finding.txt`, same `WT_KEY` as Step 2) with the **Read
+tool** (do NOT `cat` it). That is Codex's evidence packet. An empty `$FINDING` **after
+the process has exited** means Codex died mid-stream: inspect `$FULLLOG` and STOP (do
+NOT improvise a finding).
+
 Codex's finding is a hypothesis until independently reproduced. Codex must return
 an **evidence packet**: hypothesis, exact queries/commands, parameters, row
 counts / checksums, before-after values, caveats. YOU then reproduce it
@@ -265,8 +300,11 @@ result within tolerance, plus one control/negative check. Only a finding with
 attached reproduction is trusted or acted on. **"Codex said so" is not
 verification.**
 
-### Step 4: Display + report
+### Step 4: Persist, display + report
 
+Using the finding you read in Step 3, **Write** it (via the Write tool) to
+`.claude/local/investigate/finding.txt` to preserve the in-repo artifact — the
+Write tool is auto-approved there; a Bash copy/redirect would stall the loop.
 Display Codex's finding verbatim, then state your independent verification result
 (reproduced / failed-to-reproduce / partial) BEFORE any recommendation.
 
@@ -297,7 +335,7 @@ Display Codex's finding verbatim, then state your independent verification resul
 | Review a specific commit   | `: > /tmp/codex_response.txt; .claude/hooks/lib/codex-pty.sh exec review --ephemeral --output-last-message /tmp/codex_response.txt --commit SHA > /tmp/codex_response_full.txt 2>&1`                      |
 | Review a design plan       | `: > /tmp/codex_response.txt; .claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral --output-last-message /tmp/codex_response.txt "Review the plan..." > /tmp/codex_response_full.txt 2>&1` |
 | General second opinion     | `: > /tmp/codex_response.txt; .claude/hooks/lib/codex-pty.sh exec --sandbox read-only --ephemeral --output-last-message /tmp/codex_response.txt "Your question..." > /tmp/codex_response_full.txt 2>&1`   |
-| Investigate (live systems) | `.claude/hooks/lib/codex-pty.sh exec --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral -C "$(pwd)" "$(cat .claude/local/investigate/CONTEXT.md)"`                      |
+| Investigate (live systems) | See **Investigate Mode** Steps 1–4: Write `CONTEXT.md` via the Write tool; `.claude/hooks/lib/codex-pty.sh exec --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral -C "$(pwd)" --output-last-message "$FINDING" "Read the brief at .claude/local/investigate/CONTEXT.md and investigate" > "$FULLLOG" 2>&1` (per-worktree `/tmp` files); Read `$FINDING`, then Write `finding.txt` via the Write tool. No `.claude/local` shell op. |
 
 ---
 

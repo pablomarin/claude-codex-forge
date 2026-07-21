@@ -99,6 +99,28 @@ elif echo "$COMMAND" | grep -qE '(^|\s)pip3?\s+install\s+[^-]' 2>/dev/null && ! 
 #    from matching. Gates the AGENT's Bash tool only — a human's terminal is unaffected.
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(/[^[:space:]]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[[:space:]].*\.claude/local/state\.md([^A-Za-z0-9._-]|$)' 2>/dev/null; then
     REASON="Reading .claude/local/state.md via Bash — use the Read tool instead (Bash reads of this sensitive file stall autonomous /goal runs on a permission prompt)"
+
+# 9. Workflow-safety (NOT security): block the COMMON Bash WRITE forms under
+#    .claude/local/. CC never auto-approves writes under .claude/ (ADR 0006 /
+#    Anthropic docs: protected path, only bypassPermissions skips it), so a Bash
+#    write here trips CC's sensitive-file prompt — which SILENTLY STALLS an
+#    autonomous /goal run. Use the Write/Edit tools (auto-approved on
+#    .claude/local/**, auto-create parent dirs — ADR 0006). Two field instances
+#    motivated this: `mkdir -p .claude/local/investigate` and `: > .claude/local/
+#    .../finding.txt`. This is a TARGETED guardrail for the common inline form,
+#    NOT a shell parser — it covers the common create/redirect commands, and the
+#    real fix is that /codex Investigate mode no longer emits any .claude/local
+#    write. Deliberately OUT of scope (documented residuals, per v5.56 policy):
+#    exotic writers (chmod/truncate/rsync, sed -i, ln/dd), alternate redirect
+#    operators (>&/>|), separator-attached forms, and backslash-line-continuation.
+#    The redirect target is scoped to its single token ([^[:space:]|&;]*) so a
+#    `> /tmp/log .claude/local/x` (real target /tmp) does NOT false-match. A
+#    .claude/local path as a plain string ARGUMENT (no shell op) is not matched.
+#    Gates the AGENT's Bash tool only — a human's terminal is unaffected.
+elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(mkdir|touch|cp|mv|tee|rm)[[:space:]][^|&;]*\.claude/local/' 2>/dev/null; then
+    REASON="Writing under .claude/local/ via Bash — use the Write/Edit tool instead (Bash writes under .claude/ are never auto-approved and stall autonomous /goal runs on a permission prompt; the Write tool auto-creates parent dirs — see ADR 0006)"
+elif echo "$COMMAND" | grep -qE '(^|[[:space:]])[12]?>>?[[:space:]]*[^[:space:]|&;]*\.claude/local/' 2>/dev/null; then
+    REASON="Writing under .claude/local/ via Bash (redirect) — use the Write/Edit tool instead (Bash writes under .claude/ stall autonomous /goal runs on a permission prompt; see ADR 0006)"
 fi
 
 # --- Block or allow ---

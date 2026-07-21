@@ -2246,6 +2246,88 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Contract: .claude/local WRITE guardrail (check #9) — .sh ↔ .ps1 parity.
+# Behavioral block/allow lives in tests/template/test-bash-safety.sh. (Global
+# no-POSIX assertion already exists above — do NOT duplicate it.)
+# ---------------------------------------------------------------------------
+start_test ".claude/local write guardrail — check-bash-safety .sh ↔ .ps1 parity"
+W_REASON="Writing under .claude/local/ via Bash"
+grep -qF "$W_REASON" "$REPO_ROOT/hooks/check-bash-safety.sh"  && pass "check-bash-safety.sh carries #9" || fail "check-bash-safety.sh missing #9 reason stem"
+grep -qF "$W_REASON" "$REPO_ROOT/hooks/check-bash-safety.ps1" && pass "check-bash-safety.ps1 carries #9 (parity)" || fail "check-bash-safety.ps1 missing #9 (parity gap)"
+# Structural parity: every branch element must appear in BOTH hooks (Codex P2-2 —
+# a .ps1 that silently drops a branch would otherwise pass on a no-pwsh box).
+# Scope the needles to each hook's check #9 REGION so a needle that also occurs in
+# check #8 (e.g. `sed`) can't vacuously satisfy the assertion.
+SH9_REGION=$(awk '/# 9\. Workflow-safety/{f=1} f{print} f&&/^fi$/{exit}' "$REPO_ROOT/hooks/check-bash-safety.sh")
+PS9_REGION=$(awk '/# 9\. Workflow-safety/{f=1} f{print} f&&/# --- Block or allow/{exit}' "$REPO_ROOT/hooks/check-bash-safety.ps1")
+check9_parity() {
+    local label="$1" needle="$2"
+    # `-- ` so a needle beginning with '-' (e.g. -[A-Za-z]*i) isn't parsed as a grep option.
+    if printf '%s' "$SH9_REGION" | grep -qF -- "$needle" && printf '%s' "$PS9_REGION" | grep -qF -- "$needle"; then
+        pass "check #9 parity: $label present in both hooks' check #9 region"
+    else
+        fail "check #9 parity GAP: $label missing in one/both check #9 regions ($needle)"
+    fi
+}
+check9_parity "write-primitive alternation" '(mkdir|touch|cp|mv|tee|rm)'
+check9_parity "redirect form (>/>>/N>)"     '[12]?>>?'
+check9_parity "single-token target stops at ;&|" '|&;'
+
+# ---------------------------------------------------------------------------
+# Contract: commands/codex.md Investigate mode is prompt-free by construction.
+# No command surface may contain an inline .claude/ READER (incl. $(cat …)) or
+# WRITER; Step 1 (Write CONTEXT.md) must precede the Step 2 codex launch.
+# ---------------------------------------------------------------------------
+start_test "codex.md Investigate mode has no inline .claude/ reader or writer"
+CODEX_MD="$REPO_ROOT/commands/codex.md"
+codex_cmds=$(awk '/^```bash/{f=1;next} /^```/{f=0} f{print} /^\| (Investigate|Review|General)/{print}' "$CODEX_MD" \
+    | grep -v '^[[:space:]]*#' \
+    | awk 'BEGIN{p=""} /\\$/{p=p substr($0,1,length($0)-1) " "; next} {print p $0; p=""}')
+cv=""
+# Detectors mirror the (lean) runtime check #9 shape. Target is any `.claude/`
+# here (codex.md surfaces must have NO inline .claude/ op at all — stricter than
+# the runtime's .claude/local scope, and the reader list is broader since a read
+# of the brief file would also prompt).
+# ⚠ KEEP IN SYNC with check #9 in hooks/check-bash-safety.{sh,ps1}: these regexes
+# duplicate the hook's shape (no shared lib — hooks ship inline per the
+# no-runtime-deps model). If a hook write-primitive/redirect form changes, update
+# these too, or this codex.md scanner silently drifts.
+RE_READER='(^|[^A-Za-z0-9_])(/[^[:space:]]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[[:space:]][^|&;]*\.claude/'
+RE_WRITER='(^|[[:space:]])(mkdir|touch|cp|mv|tee|rm)[[:space:]][^|&;]*\.claude/'
+RE_REDIR='(^|[[:space:]])[12]?>>?[[:space:]]*[^[:space:]|&;]*\.claude/'
+if echo "$codex_cmds" | grep -qE "$RE_READER"; then
+    cv="inline .claude/ reader (cat/sed/… incl. \$(cat …))"
+elif echo "$codex_cmds" | grep -qE "$RE_WRITER"; then
+    cv="write-primitive into .claude/"
+elif echo "$codex_cmds" | grep -qE "$RE_REDIR"; then
+    cv="redirect into .claude/"
+fi
+[ -z "$cv" ] && pass "codex.md command surfaces have no inline .claude/ reader/writer" || fail "codex.md Investigate surface has a prompt-tripping .claude/ op: $cv"
+
+# Self-tests: the detectors catch every spelling (guards regex rot). Reader via
+# command substitution + writers with abspath / separator / pipe / attached-redirect.
+if echo 'foo="$(cat .claude/local/investigate/CONTEXT.md)"' | grep -qE "$RE_READER"; then
+    pass "reader detector catches \$(cat .claude/…) command substitution"
+else
+    fail "reader detector MISSES \$(cat .claude/…) — boundary regex broken"
+fi
+_wf=0
+for w in 'mkdir .claude/local/x' 'touch .claude/local/x' 'echo hi > .claude/local/x' ': > .claude/local/x'; do
+    if echo "$w" | grep -qE "$RE_WRITER" || echo "$w" | grep -qE "$RE_REDIR"; then :; else fail "writer detector MISSES: $w"; _wf=1; fi
+done
+[ "$_wf" = 0 ] && pass "writer detector catches the common create/redirect writers"
+
+# Step 1 (Write CONTEXT.md) precedes Step 2 (codex launch), scoped to the D) section.
+inv=$(awk '/^## D\) Investigate Mode/{f=1;print;next} /^## /{if(f)exit} f{print}' "$CODEX_MD")
+ctx_rel=$(printf '%s\n' "$inv" | grep -n 'CONTEXT\.md' | head -1 | cut -d: -f1)
+launch_rel=$(printf '%s\n' "$inv" | grep -n 'codex-pty\.sh exec' | head -1 | cut -d: -f1)
+if [ -n "$ctx_rel" ] && [ -n "$launch_rel" ] && [ "$ctx_rel" -lt "$launch_rel" ]; then
+    pass "codex.md Step 1 (CONTEXT.md) precedes Step 2 (codex launch) within ## D)"
+else
+    fail "codex.md Step 1/Step 2 ordering wrong or markers missing (ctx=$ctx_rel launch=$launch_rel)"
+fi
+
+# ---------------------------------------------------------------------------
 # Contract: post-tool-format must NOT run prettier on Markdown (v5.56).
 # prettier 3.x corrupts the harness's escaped-backtick + byte-pinned markdown, so
 # the md branch of both formatters is an explicit no-op. Guard that neither hook's
