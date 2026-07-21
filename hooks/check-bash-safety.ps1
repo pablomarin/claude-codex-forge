@@ -32,6 +32,11 @@ $LogEntry = "[$Timestamp] session=$SessionId cwd=$Cwd cmd=$SafeCommand"
 Add-Content -Path $AuditLog -Value $LogEntry -ErrorAction SilentlyContinue
 
 # --- High-risk pattern detection ---
+# Collapse bash line-continuations (backslash + newline) for the check #9 write
+# guardrail so a write split across physical lines still matches. Used ONLY by
+# check #9; check #8 keeps its v5.56 per-line scope. Mirror of the .sh CMD9.
+$C9 = $Command -replace '\\\r?\n', ''
+
 $Reason = ""
 
 # 1. Piping remote content to shell
@@ -107,6 +112,19 @@ elseif ($Command -match '(^|\s)pip3?\s+install\s+[^-]' -and $Command -notmatch '
 #    class is a filename terminator so state.md.bak does not match.
 elseif ($Command -match '(?m)(^|[ \t])(/[^ \t]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[ \t][^\r\n]*\.claude[/\\]local[/\\]state\.md([^A-Za-z0-9._-]|$)') {
     $Reason = "Reading .claude/local/state.md via Bash — use the Read tool instead (Bash reads of this sensitive file stall autonomous /goal runs on a permission prompt)"
+}
+# 9. Workflow-safety: block Bash WRITES under .claude/local/ — mirrors check #9
+#    in check-bash-safety.sh. (?m) + [^\r\n] keep the match line-scoped; [ \t]
+#    and [/\\] handle whitespace + Windows separators; no POSIX bracket
+#    space-class (invalid .NET regex). Wildcard stops at ; so it cannot span commands.
+elseif ($C9 -match '(?m)(^|[ \t]|[;&|()])(/[^ \t]*/)?(mkdir|touch|cp|mv|tee|ln|install|dd|rmdir|rm|truncate|rsync|chmod|chown|chgrp)[ \t][^\r\n|&;]*\.claude[/\\]local($|[^A-Za-z0-9._-])') {
+    $Reason = "Writing under .claude/local/ via Bash — use the Write/Edit tool instead (Bash writes under .claude/ are never auto-approved and stall autonomous /goal runs on a permission prompt; the Write tool auto-creates parent dirs — see ADR 0006)"
+}
+elseif ($C9 -match '(?m)(^|[ \t]|[;&|()])(/[^ \t]*/)?g?sed[ \t][^\r\n|&;]*-[A-Za-z]*i[^\r\n|&;]*\.claude[/\\]local($|[^A-Za-z0-9._-])') {
+    $Reason = "Writing under .claude/local/ via Bash (sed -i) — use the Write/Edit tool instead (Bash writes under .claude/ stall autonomous /goal runs on a permission prompt; see ADR 0006)"
+}
+elseif ($C9 -match '(?m)(^|[^-\r\n])([0-9]*|&)?>>?[&|]?[ \t]*[^\r\n \t|&;]*\.claude[/\\]local($|[^A-Za-z0-9._-])') {
+    $Reason = "Writing under .claude/local/ via Bash (redirect) — use the Write/Edit tool instead (Bash writes under .claude/ stall autonomous /goal runs on a permission prompt; see ADR 0006)"
 }
 
 # --- Block or allow ---

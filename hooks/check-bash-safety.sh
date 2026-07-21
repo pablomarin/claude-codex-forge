@@ -41,6 +41,15 @@ printf '[%s] session=%s cwd=%s cmd=%s\n' "$TIMESTAMP" "$SESSION_ID" "$CWD" "$SAF
 # Each check is a separate function for clarity and testability.
 # Only flag patterns that are clearly dangerous — minimize false positives.
 
+# Collapse bash line-continuations (a trailing backslash + newline is removed by
+# the shell before execution) so the check #9 write guardrail below still matches
+# a write split across physical lines, e.g. `mkdir -p \<newline>.claude/local/x`
+# (grep is otherwise line-oriented). Pure-bash parameter expansion — no subprocess
+# (this hook is on the Bash hot path); strips every `\<newline>` exactly as the
+# shell would. Used ONLY by check #9; check #8's inline-read guardrail keeps its
+# v5.56 per-line scope. A single-line command is unchanged.
+CMD9=${COMMAND//$'\\'$'\n'/}
+
 REASON=""
 
 # 1. Piping remote content to shell (curl/wget ... | sh/bash/zsh)
@@ -99,6 +108,41 @@ elif echo "$COMMAND" | grep -qE '(^|\s)pip3?\s+install\s+[^-]' 2>/dev/null && ! 
 #    from matching. Gates the AGENT's Bash tool only — a human's terminal is unaffected.
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(/[^[:space:]]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[[:space:]].*\.claude/local/state\.md([^A-Za-z0-9._-]|$)' 2>/dev/null; then
     REASON="Reading .claude/local/state.md via Bash — use the Read tool instead (Bash reads of this sensitive file stall autonomous /goal runs on a permission prompt)"
+
+# 9. Workflow-safety (NOT security): block Bash WRITES under .claude/local/.
+#    CC never auto-approves writes under .claude/ (ADR 0006 / Anthropic docs:
+#    protected path, only bypassPermissions skips it), so a Bash write here trips
+#    CC's sensitive-file prompt — which SILENTLY STALLS an autonomous /goal run.
+#    The Write/Edit tools ARE auto-approved on .claude/local/** and create parent
+#    dirs in one call (ADR 0006) — use them. Two field instances motivated this:
+#    `mkdir -p .claude/local/investigate` and `: > .claude/local/.../finding.txt`.
+#    TARGETED guardrail for the common inline form (per-line, like #8): the
+#    write-primitive/redirect and the literal .claude/local/ must be on the SAME
+#    line, with the wildcard stopping at `;` so it cannot span into an unrelated
+#    later command. Builtin list aligned with the AC-2b static contract. A
+#    .claude/local path passed only as a string ARGUMENT (no shell op) is NOT
+#    matched — sanctioned flows route real output to /tmp, so there is zero
+#    sanctioned surface. Boundaries: a write-primitive is recognized at line
+#    start, after whitespace, OR after a shell separator (;&|() so `true;mkdir`
+#    and `printf x|tee` are caught; the target `.claude/local` matches the dir
+#    itself OR a subpath (terminator `($|[^A-Za-z0-9._-])`, so `.claude/localfoo`
+#    is NOT matched). Redirects use a `(^|[^-])` boundary so an attached
+#    `echo hi>.claude/local/x` IS caught while a `-> .claude/local` arrow inside
+#    quoted data is NOT (Codex vs PR-toolkit reconciliation), and the target is
+#    scoped to the single redirect-target token ([^[:space:]|&;]*) so a
+#    `> /tmp/log .claude/local/x` (real target is /tmp) does NOT false-match.
+#    Accepted residuals (targeted guardrail, per v5.56): a write-primitive next
+#    to .claude/local inside quoted DATA (echo/commit-msg) can false-match; a
+#    `sed -i … .claude/local/state.md` is blocked by check #8 first (correct
+#    outcome, message says "read" not "write"); interpreter-level writes
+#    (`python -c "open(...)"`) and `tar -C .claude/local` are outside the
+#    primitive list by design. Gates the AGENT's Bash tool only.
+elif echo "$CMD9" | grep -qE '(^|[[:space:]]|[;&|()])(/[^[:space:]]*/)?(mkdir|touch|cp|mv|tee|ln|install|dd|rmdir|rm|truncate|rsync|chmod|chown|chgrp)[[:space:]][^|&;]*\.claude/local($|[^A-Za-z0-9._-])' 2>/dev/null; then
+    REASON="Writing under .claude/local/ via Bash — use the Write/Edit tool instead (Bash writes under .claude/ are never auto-approved and stall autonomous /goal runs on a permission prompt; the Write tool auto-creates parent dirs — see ADR 0006)"
+elif echo "$CMD9" | grep -qE '(^|[[:space:]]|[;&|()])(/[^[:space:]]*/)?g?sed[[:space:]][^|&;]*-[A-Za-z]*i[^|&;]*\.claude/local($|[^A-Za-z0-9._-])' 2>/dev/null; then
+    REASON="Writing under .claude/local/ via Bash (sed -i) — use the Write/Edit tool instead (Bash writes under .claude/ stall autonomous /goal runs on a permission prompt; see ADR 0006)"
+elif echo "$CMD9" | grep -qE '(^|[^-])([0-9]*|&)?>>?[&|]?[[:space:]]*[^[:space:]|&;]*\.claude/local($|[^A-Za-z0-9._-])' 2>/dev/null; then
+    REASON="Writing under .claude/local/ via Bash (redirect) — use the Write/Edit tool instead (Bash writes under .claude/ stall autonomous /goal runs on a permission prompt; see ADR 0006)"
 fi
 
 # --- Block or allow ---
