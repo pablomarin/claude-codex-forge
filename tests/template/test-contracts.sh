@@ -2269,14 +2269,9 @@ check9_parity() {
         fail "check #9 parity GAP: $label missing in one/both check #9 regions ($needle)"
     fi
 }
-check9_parity "write-primitive alternation" '(mkdir|touch|cp|mv|tee|ln|install|dd|rmdir|rm|truncate|rsync|chmod|chown|chgrp)'
-check9_parity "sed/gsed in-place (g?sed … -[A-Za-z]*i)" 'g?sed'
-check9_parity "sed in-place (-[A-Za-z]*i)"   '-[A-Za-z]*i'
-check9_parity "redirect form (>&/>|/N>/&>>)" '>>?[&|]?'
-check9_parity "redirect anchor (^|[^-)"      '[^-'
-check9_parity "wildcard stops at ;"          '|&;'
-check9_parity "write-primitive boundary incl )" '[;&|()]'
-check9_parity "target terminator (dir or subpath)" 'local($|[^A-Za-z0-9._-])'
+check9_parity "write-primitive alternation" '(mkdir|touch|cp|mv|tee|rm)'
+check9_parity "redirect form (>/>>/N>)"     '[12]?>>?'
+check9_parity "single-token target stops at ;&|" '|&;'
 
 # ---------------------------------------------------------------------------
 # Contract: commands/codex.md Investigate mode is prompt-free by construction.
@@ -2289,16 +2284,17 @@ codex_cmds=$(awk '/^```bash/{f=1;next} /^```/{f=0} f{print} /^\| (Investigate|Re
     | grep -v '^[[:space:]]*#' \
     | awk 'BEGIN{p=""} /\\$/{p=p substr($0,1,length($0)-1) " "; next} {print p $0; p=""}')
 cv=""
-# Detectors mirror the hardened runtime check #9 shape (boundary incl. ;&|() ,
-# abspath prefix, redirect (^|[^-]) anchor + target-token scope). Target is any
-# `.claude/` here (codex.md surfaces must have NO inline .claude/ op at all).
+# Detectors mirror the (lean) runtime check #9 shape. Target is any `.claude/`
+# here (codex.md surfaces must have NO inline .claude/ op at all — stricter than
+# the runtime's .claude/local scope, and the reader list is broader since a read
+# of the brief file would also prompt).
 # ⚠ KEEP IN SYNC with check #9 in hooks/check-bash-safety.{sh,ps1}: these regexes
 # duplicate the hook's shape (no shared lib — hooks ship inline per the
 # no-runtime-deps model). If a hook write-primitive/redirect form changes, update
 # these too, or this codex.md scanner silently drifts.
 RE_READER='(^|[^A-Za-z0-9_])(/[^[:space:]]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[[:space:]][^|&;]*\.claude/'
-RE_WRITER='(^|[[:space:]]|[;&|()])(/[^[:space:]]*/)?(mkdir|touch|cp|mv|tee|ln|install|dd|rmdir|rm|truncate|rsync|chmod|chown|chgrp)[[:space:]][^|&;]*\.claude/'
-RE_REDIR='(^|[^-])([0-9]*|&)?>>?[&|]?[[:space:]]*[^[:space:]|&;]*\.claude/'
+RE_WRITER='(^|[[:space:]])(mkdir|touch|cp|mv|tee|rm)[[:space:]][^|&;]*\.claude/'
+RE_REDIR='(^|[[:space:]])[12]?>>?[[:space:]]*[^[:space:]|&;]*\.claude/'
 if echo "$codex_cmds" | grep -qE "$RE_READER"; then
     cv="inline .claude/ reader (cat/sed/… incl. \$(cat …))"
 elif echo "$codex_cmds" | grep -qE "$RE_WRITER"; then
@@ -2316,10 +2312,10 @@ else
     fail "reader detector MISSES \$(cat .claude/…) — boundary regex broken"
 fi
 _wf=0
-for w in '/bin/mkdir .claude/local/x' 'true;mkdir .claude/local/x' 'printf x|tee .claude/local/x' 'echo x>.claude/local/x' 'case x in x)mkdir .claude/local/x;; esac' 'cmd >| .claude/local/x'; do
+for w in 'mkdir .claude/local/x' 'touch .claude/local/x' 'echo hi > .claude/local/x' ': > .claude/local/x'; do
     if echo "$w" | grep -qE "$RE_WRITER" || echo "$w" | grep -qE "$RE_REDIR"; then :; else fail "writer detector MISSES: $w"; _wf=1; fi
 done
-[ "$_wf" = 0 ] && pass "writer detector catches abspath / separator / pipe / attached-redirect / case-arm / >| writers"
+[ "$_wf" = 0 ] && pass "writer detector catches the common create/redirect writers"
 
 # Step 1 (Write CONTEXT.md) precedes Step 2 (codex launch), scoped to the D) section.
 inv=$(awk '/^## D\) Investigate Mode/{f=1;print;next} /^## /{if(f)exit} f{print}' "$CODEX_MD")

