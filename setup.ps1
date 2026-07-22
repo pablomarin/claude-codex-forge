@@ -234,7 +234,16 @@ if ($Global) {
     # Copy global CLAUDE.md
     Write-Color "Step 2: Installing global configuration..." "Yellow"
     Write-Host "  These files tell Claude how to manage its memory."
-    Copy-TemplateFile (Join-Path $ScriptDir "GLOBAL-CLAUDE.template.md") (Join-Path (Join-Path $HOME ".claude") "CLAUDE.md") "~\.claude\CLAUDE.md (global instructions)"
+    # CLAUDE.md is USER CONTENT — NEVER overwrite it, even under -Force/-Upgrade
+    # (both set $Force). Copy-TemplateFile's skip-guard is $Force-gated, so a plain
+    # copy here clobbers a customized ~\.claude\CLAUDE.md on upgrade — the data-loss
+    # bug this guard fixes. Mirrors the project-mode guard. First install still creates it.
+    $globalClaudeMd = Join-Path (Join-Path $HOME ".claude") "CLAUDE.md"
+    if (Test-Path $globalClaudeMd) {
+        Write-Host "  " -NoNewline; Write-Color "o" "Blue"; Write-Host " ~\.claude\CLAUDE.md already exists (never overwritten - user content)"
+    } else {
+        Copy-TemplateFile (Join-Path $ScriptDir "GLOBAL-CLAUDE.template.md") $globalClaudeMd "~\.claude\CLAUDE.md (global instructions)"
+    }
 
     # Copy global hooks
     Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "pre-compact-memory.ps1") (Join-Path (Join-Path (Join-Path $HOME ".claude") "hooks") "pre-compact-memory.ps1") "~\.claude\hooks\pre-compact-memory.ps1"

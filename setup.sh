@@ -212,7 +212,16 @@ if [[ "$GLOBAL" == true ]]; then
     # Copy global CLAUDE.md
     echo -e "${YELLOW}Step 2: Installing global configuration...${NC}"
     echo "  These files tell Claude how to manage its memory."
-    copy_file "$SCRIPT_DIR/GLOBAL-CLAUDE.template.md" "$HOME/.claude/CLAUDE.md" "~/.claude/CLAUDE.md (global instructions)"
+    # CLAUDE.md is USER CONTENT — NEVER overwrite it, even under -f/--upgrade
+    # (both set FORCE=true). copy_file's skip-guard is FORCE-gated, so a plain
+    # copy_file here clobbers a customized ~/.claude/CLAUDE.md on upgrade — the
+    # data-loss bug this guard fixes. Mirrors the project-mode guard (never
+    # overwritten, even with -f). First-time install still creates it.
+    if [[ -f "$HOME/.claude/CLAUDE.md" ]]; then
+        echo -e "  ${BLUE}○${NC} ~/.claude/CLAUDE.md already exists (never overwritten — user content)"
+    else
+        copy_file "$SCRIPT_DIR/GLOBAL-CLAUDE.template.md" "$HOME/.claude/CLAUDE.md" "~/.claude/CLAUDE.md (global instructions)"
+    fi
 
     # Copy global hooks
     copy_file "$SCRIPT_DIR/hooks/pre-compact-memory.sh" "$HOME/.claude/hooks/pre-compact-memory.sh" "~/.claude/hooks/pre-compact-memory.sh"

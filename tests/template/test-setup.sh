@@ -1078,6 +1078,34 @@ test_copy_file_self_copy_guard
 test_copy_file_normal_copy_still_works
 test_copy_file_ps1_self_copy_guard
 
+# Global CLAUDE.md must NEVER be overwritten (user content), even under --upgrade
+# (which sets FORCE=true) or -f — mirroring the project-mode CLAUDE.md guard.
+# Regression for the data-loss bug where `setup.sh --global --upgrade` clobbered
+# a customized ~/.claude/CLAUDE.md with the template.
+test_global_preserves_existing_claudemd() {
+    local scratch; scratch=$(scratch_dir global-preserves-claudemd)
+    local fakehome="$scratch/.fakehome"
+    mkdir -p "$fakehome/.claude"
+    # Developer's customized global CLAUDE.md.
+    printf '# Global Claude Code Instructions\n\n## Personal Preferences\n\nMY GLOBAL PREFS SENTINEL - uv, pnpm, Next.js stack. DO NOT CLOBBER.\n' > "$fakehome/.claude/CLAUDE.md"
+    local before; before=$(hash_file "$fakehome/.claude/CLAUDE.md")
+    # --global --upgrade sets FORCE=true; the existing global CLAUDE.md must survive.
+    ( cd "$scratch" && HOME="$fakehome" bash "$REPO_ROOT/setup.sh" --global --upgrade >/dev/null 2>&1 )
+    if [ -f "$fakehome/.claude/CLAUDE.md" ]; then
+        local after; after=$(hash_file "$fakehome/.claude/CLAUDE.md")
+        assert_equals "$before" "$after" "existing ~/.claude/CLAUDE.md byte-preserved through --global --upgrade"
+        assert_contains "$fakehome/.claude/CLAUDE.md" "MY GLOBAL PREFS SENTINEL" "global CLAUDE.md user content survives --global --upgrade"
+    else
+        fail "~/.claude/CLAUDE.md was deleted by --global --upgrade"
+    fi
+    # First-time install (no existing global CLAUDE.md) must still CREATE it.
+    local scratch2; scratch2=$(scratch_dir global-creates-claudemd)
+    local fh2="$scratch2/.fakehome"
+    ( cd "$scratch2" && HOME="$fh2" bash "$REPO_ROOT/setup.sh" --global >/dev/null 2>&1 )
+    assert_file_exists "$fh2/.claude/CLAUDE.md" "fresh --global still creates ~/.claude/CLAUDE.md"
+}
+test_global_preserves_existing_claudemd
+
 # ===========================================================================
 # Report
 # ===========================================================================
