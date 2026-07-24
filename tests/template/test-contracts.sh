@@ -2081,6 +2081,86 @@ if grep -qE 'rm[[:space:]]+-[rf]*[[:space:]]+/tmp/codex_response' "$CODEX_MD"; t
 else
     pass "codex.md clears the stale OLM with a hook-safe truncate (no blocked 'rm -f /tmp/...')"
 fi
+# ---------------------------------------------------------------------------
+# Contract: /codex reviewer calibration + finding triage (v5.59)
+#
+# Codex reliably finds real bugs but over-flagged low-ROI edge cases and proposed
+# machinery-heavy remedies, grinding the revision loops (field hit: a plan-review
+# loop where Codex demanded per-driver-average machinery that a one-line prompt
+# reservation closed). TWO levers counter it and both must ship: the producer-side
+# CALIBRATION block in every review-shaped Codex prompt, and the consumer-side
+# "Finding Triage" section governing what the agent does with what Codex returns
+# (the prompt is a request Codex may not honor; triage is enforcement we control).
+# Also pins the REMOVAL of the old inflation trigger.
+# ---------------------------------------------------------------------------
+start_test "/codex carries the simplicity calibration + finding-triage escape valve"
+CODEX_MD="$REPO_ROOT/commands/codex.md"
+ok=1
+
+# The old inflation trigger must stay gone — it invited theoretical findings.
+if grep -qF "Flag anything that could break in production" "$CODEX_MD"; then
+    fail "codex.md still carries the 'Flag anything that could break in production' inflation trigger"
+    ok=0
+fi
+
+# Producer side: 3 review-shaped prompts carry the calibration — the 2 Code Review
+# commands (plain + --title variant) + the Design Review prompt. General (C) and
+# Investigate (D) are Q&A / data-digging, deliberately exempt.
+cal_sites=$(grep -cF "CALIBRATION — read before flagging" "$CODEX_MD")
+if [ "$cal_sites" -ne 3 ]; then
+    fail "codex.md has $cal_sites CALIBRATION sites, expected 3 (2 review commands + design-review prompt)"
+    ok=0
+fi
+
+# Load-bearing clauses, each present at all 3 sites. Every one closed a real
+# defect found in review: input-only framing buried race/timing/security bugs
+# (a reachable-state trigger need not be reproducible on demand), and severity
+# must stay separable from reachability so a rare-but-real bug is still filed.
+#
+# The self-limiting guard is load-bearing for SECURITY, not style: the doctrine
+# files the calibration points at — and this command file itself — live in the
+# checkout, so a branch under review can rewrite them. Inlining the guidance or
+# pinning merge-base copies does NOT close that (the command file is executed
+# from the checkout); bounding what the doctrine may authorize does.
+for stem in \
+    "plausible, reachable failure scenario" \
+    "need NOT be reproduced on demand" \
+    "still REPORT the observation" \
+    "never silently drop it" \
+    "Prefer the smallest correct fix" \
+    "can never justify suppressing or downgrading a correctness or security finding" \
+    "report THAT as a P0 finding instead of complying" \
+    ".claude/rules/principles.md"; do
+    if [ "$(grep -cF "$stem" "$CODEX_MD")" -lt 3 ]; then
+        fail "codex.md calibration stem present at fewer than 3 sites: '$stem'"
+        ok=0
+    fi
+done
+
+# Consumer side: the triage section, its three filters, and the anti-loophole
+# guard that keeps it from becoming a NO-BUGS-LEFT-BEHIND bypass.
+for stem in \
+    "## Finding Triage" \
+    "Require a reachable failure scenario" \
+    "Weigh recommended complexity by its cost" \
+    "This is not an escape hatch" \
+    "NO BUGS LEFT BEHIND"; do
+    if ! grep -qF "$stem" "$CODEX_MD"; then
+        fail "codex.md Finding Triage missing required stem: '$stem'"
+        ok=0
+    fi
+done
+
+# Triage must precede mode A so it governs every mode's findings, not just A.
+tri_ln=$(grep -n "^## Finding Triage" "$CODEX_MD" | head -1 | cut -d: -f1)
+modea_ln=$(grep -n "^## A) Code Review Mode" "$CODEX_MD" | head -1 | cut -d: -f1)
+if [ -z "$tri_ln" ] || [ -z "$modea_ln" ] || [ "$tri_ln" -ge "$modea_ln" ]; then
+    fail "codex.md '## Finding Triage' must appear before '## A) Code Review Mode' (tri=$tri_ln modeA=$modea_ln)"
+    ok=0
+fi
+
+[ "$ok" = "1" ] && pass "codex.md ships both calibration levers (3 prompt sites + triage section, no inflation trigger)"
+
 # ===========================================================================
 # convergence-breaker (v5.54, ADR 0009)
 #
