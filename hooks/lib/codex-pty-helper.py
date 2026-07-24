@@ -205,7 +205,7 @@ def main() -> int:
                     # the child's next read() returns 0 bytes. Without this,
                     # children that read stdin (like /bin/cat with piped
                     # input) hang forever waiting for more data — found by
-                    # the iter-3 smoke /codex review against ../mcpgateway.
+                    # the iter-3 smoke /codex review against a downstream repo.
                     stdin_open = False
                     try:
                         os.write(master_fd, b'\x04')

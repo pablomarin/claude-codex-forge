@@ -42,7 +42,7 @@ See `docs/plans/2026-05-13-forge-goal-experiments.md` for the full design explor
 **A:** Both `/new-feature` AND `/fix-bug`. (Autonomous bug-fix loop is in scope.)
 
 **Q2: Downstream support in v1?**
-**A:** Yes — must work on `msai-v2` and similar downstream installs from v1. (Implies PowerShell parity and downstream smoke-test required from day 1.)
+**A:** Yes — must work on `a downstream project` and similar downstream installs from v1. (Implies PowerShell parity and downstream smoke-test required from day 1.)
 
 **Q3: If forced to pick 2 of 4 (PRD-with-Codex / autonomous-loop / council-auto-fire / AskUserQuestion-gated-PR), which 2?**
 **A:** All four. None are MVP-cuttable. (V1 scope is BIG — no minimum viable cut.)
@@ -116,7 +116,7 @@ Implication: ignore my proposed triggers (i)–(v). The trigger is conceptually 
 **A:** (b) No new command. Modify `/new-feature` and `/fix-bug` so they print the `/goal <condition>` command at the PRD-complete / plan-approved checkpoint. User types it manually.
 
 **Q21: Test strategy?**
-**A:** (a) + (d) — dogfood on the forge itself first (catch issues cheaply), then manual smoke on `msai-v2` before declaring v1 done.
+**A:** (a) + (d) — dogfood on the forge itself first (catch issues cheaply), then manual smoke on `a downstream project` before declaring v1 done.
 
 ---
 
@@ -142,7 +142,7 @@ Implication: ignore my proposed triggers (i)–(v). The trigger is conceptually 
 - **US-008:** When the loop appears stuck (no progress for N turns), the agent gets a soft signal warning; auto-abort is NOT enforced.
 - **US-009:** I can watch the autonomous run without disrupting it (scroll). Typing input terminates autonomy (matches native `/goal`).
 - **US-010:** If the session is interrupted, I can `--resume`; the goal restores with counters reset. Acceptable.
-- **US-011:** `/forge-goal` capability works on downstream installs (msai-v2 etc.) **automatically after Forge upgrade** — no opt-in flag.
+- **US-011:** `/forge-goal` capability works on downstream installs **automatically after Forge upgrade** — no opt-in flag.
 
 ### Non-Goals
 
@@ -164,7 +164,7 @@ Implication: ignore my proposed triggers (i)–(v). The trigger is conceptually 
 3. **AskUserQuestion + file-evidence pattern** for the PR-creation gate (EXP 4 proved answer alone doesn't auto-clear `/goal`; agent runs `touch <file>` after answer).
 4. **`session_nonce` + `produced_at`** in every build-evidence JSON blob to prevent stale-evidence rubber-stamping (Codex REFINE).
 5. **Council at agent discretion** — no mechanical instrumentation; Claude judges when to fire.
-6. **Test plan:** dogfood on forge first, then manual msai-v2 smoke before v1 ships.
+6. **Test plan:** dogfood on forge first, then manual downstream smoke before v1 ships.
 
 ### Open Questions (Remaining — for PRD or follow-up)
 

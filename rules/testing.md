@@ -345,7 +345,7 @@ Two-step selection:
 | **cli**       | CLI only                                      | Subprocess + stdout   | No                         |
 | **hybrid**    | Declared per UC                               | Mixed                 | Only if UI use cases exist |
 
-**Why the explicit `surfaces:` field exists** (surfaced 2026-05-18 msai-v2 soak): a fullstack project that ALSO ships a CLI cannot be described by `interface_type` alone — the defaults map fullstack to UI + API only. Without `surfaces: [UI, API, CLI]`, verify-e2e Step 2c never warns when UCs miss the CLI surface, because it doesn't know the CLI exists. **Always declare `surfaces:` explicitly when the project's actual surfaces exceed the interface_type default.**
+**Why the explicit `surfaces:` field exists** (surfaced 2026-05-18 downstream soak): a fullstack project that ALSO ships a CLI cannot be described by `interface_type` alone — the defaults map fullstack to UI + API only. Without `surfaces: [UI, API, CLI]`, verify-e2e Step 2c never warns when UCs miss the CLI surface, because it doesn't know the CLI exists. **Always declare `surfaces:` explicitly when the project's actual surfaces exceed the interface_type default.**
 
 2. **The feature tells you which interface(s) the user actually touches.** Pick from the envelope based on the feature surface:
 

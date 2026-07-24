@@ -1901,17 +1901,17 @@ Run a real `/forge-goal` end-to-end on a small forge feature:
 
 If the dogfood reveals real-world issues, capture them in a follow-up task or memory entry.
 
-- [ ] **Step 6: Downstream smoke against `../mcpgateway`**
+- [ ] **Step 6: Downstream smoke against `a downstream repo`**
 
 ```bash
-if [ -d ../mcpgateway ]; then
-    cd ../mcpgateway
+if [ -d a downstream repo ]; then
+    cd ../<downstream-repo>
     bash ../claude-codex-forge/hooks/check-workflow-gates.sh < <(echo '{"tool_name":"Bash","tool_input":{"command":"gh pr create"}}') 2>&1 | head -10
     cd -
 fi
 ```
 
-Expected: the guard either fires correctly (if mcpgateway has a `/goal session` with a non-empty nonce — unlikely) or exits cleanly (empty/missing nonce → guard is a no-op).
+Expected: the guard either fires correctly (if a downstream project has a `/goal session` with a non-empty nonce — unlikely) or exits cleanly (empty/missing nonce → guard is a no-op).
 
 - [ ] **Step 7: Final commit**
 

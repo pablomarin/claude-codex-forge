@@ -7,7 +7,7 @@
 
 ## Problem (one paragraph)
 
-The code-review loop's head-rebind rule has freshness but no scope model: any HEAD move triggers "re-run reviewers at the new HEAD," dispatched in practice as full-branch reviews. Stochastic reviewers ~always find something in a big diff, so a docs-only merge conflict re-opened a certified branch into a 10-round spiral (msai-v2 PR #89) with no stopping rule. We add a certification model: scoped, machine-visible evidence; PR-owned-delta re-reviews; a hook-enforced convergence breaker; a deliberate deep pass at certification.
+The code-review loop's head-rebind rule has freshness but no scope model: any HEAD move triggers "re-run reviewers at the new HEAD," dispatched in practice as full-branch reviews. Stochastic reviewers ~always find something in a big diff, so a docs-only merge conflict re-opened a certified branch into a 10-round spiral (downstream PR #89) with no stopping rule. We add a certification model: scoped, machine-visible evidence; PR-owned-delta re-reviews; a hook-enforced convergence breaker; a deliberate deep pass at certification.
 
 ## Architecture (units)
 

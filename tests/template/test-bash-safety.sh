@@ -40,7 +40,7 @@ assert_allow_sh() {
 
 # ---------------------------------------------------------------------------
 start_test "bash: blocks improvised Bash reads of .claude/local/state.md"
-# The exact bug from the field (actbl-he /goal stall):
+# The exact bug from the field (downstream /goal stall):
 assert_block_sh "sed -n '/## Workflow/,/## Update Rules/p' .claude/local/state.md" "the exact bug — sed -n section read"
 assert_block_sh "sed -n '/## Workflow/,/## Update Rules/p' .claude/local/state.md | head -120" "piped variant (sed ... | head)"
 assert_block_sh "cat .claude/local/state.md" "cat state.md"

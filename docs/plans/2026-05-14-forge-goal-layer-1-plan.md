@@ -1361,11 +1361,11 @@ for key in "${REQUIRED_KEYS[@]}"; do
 done
 ```
 
-- [ ] **Step 4: Run a downstream smoke test against `../mcpgateway`**
+- [ ] **Step 4: Run a downstream smoke test against `a downstream repo`**
 
 ```bash
-# Assumes ../mcpgateway exists with a current .claude/local/state.md
-cd ../mcpgateway
+# Assumes a downstream repo exists with a current .claude/local/state.md
+cd ../<downstream-repo>
 bash ../claude-codex-forge/hooks/build-evidence.sh 2>&1 | head -20
 ```
 
@@ -1460,7 +1460,7 @@ Which approach?
 - **Branch:** continue work on `research/forge-goal-experiments` OR create a new branch `feature/forge-goal-layer-1` off main. Recommend the latter for cleaner PR scope.
 - **Testing convention:** `tests/template/lib.sh` is the canonical helper. Use `init_counters`, `start_test`, `assert_equals`, `assert_contains`, `scratch_dir` — see existing `test-hooks.sh` for patterns.
 - **Forge meta-rule:** README badge + Version history table MUST be updated in the same PR as the CHANGELOG bump. The `feedback_readme_must_stay_current_every_release.md` memory documents this.
-- **Downstream sanity:** run a smoke against `../mcpgateway` (Task 10 Step 4) before final commit — fixture tests alone are not sufficient per `feedback_test_harness_changes_against_mcpgateway.md`.
+- **Downstream sanity:** run a smoke against `a downstream repo` (Task 10 Step 4) before final commit — fixture tests alone are not sufficient per the downstream-smoke rule in auto-memory.
 - **`gh pr create` from a worktree:** if working in a worktree, ensure `gh auth status` is clean and the worktree is pushed to a remote branch before invoking PR creation.
 - **JSON-shape changes:** if you need to add a field to the evidence JSON, ALSO update the cross-file marker contract test (Task 10) so future consumers can rely on the shape.
 

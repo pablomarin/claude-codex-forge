@@ -129,7 +129,7 @@ For each UC marked `FAIL_INVALID_USE_CASE`, record:
 
 ### Step 2c: Surface coverage check (soft warning, feature mode only)
 
-Surfaced 2026-05-18 from msai-v2 portfolio-backtest soak: the agent designed UI + API UCs and silently skipped CLI even though the project's CLI exposed the same capability area. The fix landed in v5.31 (feature-surface-driven interface) and v5.33 (this step) — Phase 3.2b now requires a "Surface coverage decision" sub-block, and verify-e2e backstops it.
+Surfaced 2026-05-18 from downstream portfolio-backtest soak: the agent designed UI + API UCs and silently skipped CLI even though the project's CLI exposed the same capability area. The fix landed in v5.31 (feature-surface-driven interface) and v5.33 (this step) — Phase 3.2b now requires a "Surface coverage decision" sub-block, and verify-e2e backstops it.
 
 **Mode gating (Codex P2-3, v5.33 review):** This step ONLY runs in `feature` mode. In `regression` and `smoke` modes the UCs are the accumulated history from `tests/e2e/use-cases/` — there is no current-feature plan and no Surface coverage decision block. A regression suite that happens to be all-UI (because all past features were UI-only) would otherwise warn about missing API/CLI on every run, creating noise unrelated to the current change. **If `mode != feature`, skip this step entirely.**
 

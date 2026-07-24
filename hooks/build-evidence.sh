@@ -13,7 +13,7 @@ set -u
 NOW_UNIX=$(date +%s)
 
 # ---------------------------------------------------------------------------
-# Worktree CWD fix (v5.32) — surfaced 2026-05-18 in msai-v2 portfolio-backtest
+# Worktree CWD fix (v5.32) — surfaced 2026-05-18 in downstream portfolio-backtest
 # soak: evidence reported `session_nonce:null, phase:null` even though the
 # worktree state.md was populated. Root cause: CC's Stop hook ran with
 # CWD=$CLAUDE_PROJECT_DIR (the parent project), not the worktree where the

@@ -6,7 +6,7 @@ Accepted (2026-06-02)
 
 ## Context
 
-ADR 0001 moved volatile per-developer workflow state to `.claude/local/state.md` — gitignored, not auto-loaded — to kill the cross-developer staleness bug a tracked `CONTINUITY.md` had caused. That split was correct, but it left a regression that only surfaced in the field (msai-v2, 2026-06): the per-developer **continuity narrative** (the `## State` Done/Now/Next/Deferred story, plus `## Open Questions` and `## Blockers`) became **worktree-local and ephemeral**.
+ADR 0001 moved volatile per-developer workflow state to `.claude/local/state.md` — gitignored, not auto-loaded — to kill the cross-developer staleness bug a tracked `CONTINUITY.md` had caused. That split was correct, but it left a regression that only surfaced in the field (downstream, 2026-06): the per-developer **continuity narrative** (the `## State` Done/Now/Next/Deferred story, plus `## Open Questions` and `## Blockers`) became **worktree-local and ephemeral**.
 
 Concretely: `/new-feature` and `/fix-bug` initialize a _blank_ worktree `state.md` from the template (`new-feature.md` STATE-INIT, `git rev-parse --show-toplevel` = the worktree), and `/finish-branch` runs `git worktree remove --force`, which deletes the worktree's working tree — including the gitignored `state.md`. Step 2.8 only cleared main's `## Workflow` section; it never carried the narrative back. So a developer's confirmed operational facts ("the writable-KV apply + spike is done — don't re-propose it") died at every merge, and main's `state.md` was perpetually stale. This regressed the cross-session continuity the legacy `CONTINUITY.md` used to provide for a single developer.
 

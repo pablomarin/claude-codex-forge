@@ -64,7 +64,7 @@
 
 **Exit criteria:**
 - Discovery doc landed (can be inline in the SKILL.md or separate `docs/explanation/`)
-- Dogfood `/new-feature test-feature` in `../mcpgateway` reaches Phase 3.2 and writes the plan to `docs/plans/test-feature.md` with the same header shape v1 expected.
+- Dogfood `/new-feature test-feature` in `a downstream repo` reaches Phase 3.2 and writes the plan to `docs/plans/test-feature.md` with the same header shape v1 expected.
 - All four hot-path suites pass.
 
 **Risk:** medium (was "low" in v1). Contract inspection is the unknown.
