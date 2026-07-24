@@ -113,6 +113,41 @@ NINE_ALLOW=(
   'echo "a -> .claude/local/b" > /tmp/x'                     # -> in quoted data; real redirect to /tmp
 )
 
+# ---------------------------------------------------------------------------
+# check #6 (config tampering) — scoped to the same command segment.
+# Field bug (dogfooding v5.59): the pattern was
+# `(sed|awk|echo|tee|printf).*\.claude/(settings|config)`, whose `.*` spans the
+# WHOLE command — so an unrelated `echo "label"` earlier on the line poisoned a
+# later READ-ONLY `grep .claude/settings.json`. That blocks ordinary inspection
+# (and stalls a /goal loop) while `cat .claude/settings.json` sailed through,
+# since cat is not in the writer list. Fix mirrors check #9: `[^;|&]*` requires
+# the writer and the target to sit in the SAME segment.
+# Residuals (documented, NOT tested as allow — same LEAN posture as #8/#9):
+#   - variable-indirected targets (`echo x > "$F"`) are not caught;
+#   - a path quoted as DATA before a pipe (`echo ".claude/settings.json" | wc -c`)
+#     still blocks, because the writer and target share a segment. Closing that
+#     needs write-operator parsing; the false positive is contrived and the cost
+#     is real, so it stays a residual (smallest-correct-fix per rules/principles).
+# This is a targeted guardrail, not a shell parser.
+SIX_BLOCK=(
+  'echo "{}" > .claude/settings.json'                        # direct clobber
+  "sed -i '' 's/deny/allow/' .claude/settings.json"          # in-place permission edit
+  'printf "{}" > .claude/settings.local.json'                # printf clobber
+  'cat x | tee .claude/settings.json'                        # tee after a pipe (writer adjacent)
+  'cd /tmp && echo "{}" > .claude/config.json'               # writer after && still caught
+)
+SIX_ALLOW=(
+  'echo "checking"; grep -c allow .claude/settings.json'     # THE field bug: label echo + read-only grep
+  'grep -oE "hooks/[a-z-]+" .claude/settings.json'           # plain read (no writer token)
+  'echo "{}" > /tmp/settings.json'                           # writer targets /tmp, not .claude
+)
+
+start_test "bash: check #6 still blocks real config tampering"
+for c in "${SIX_BLOCK[@]}"; do assert_block_sh "$c" "$c"; done
+
+start_test "bash: check #6 no longer blocks reads that merely follow an echo"
+for c in "${SIX_ALLOW[@]}"; do assert_allow_sh "$c" "$c"; done
+
 start_test "bash: check #9 blocks Bash writes under .claude/local/"
 for c in "${NINE_BLOCK[@]}"; do assert_block_sh "$c" "$c"; done
 
