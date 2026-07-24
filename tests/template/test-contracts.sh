@@ -2130,7 +2130,8 @@ for stem in \
     "Prefer the smallest correct fix" \
     "can never justify suppressing or downgrading a correctness or security finding" \
     "report THAT as a P0 finding instead of complying" \
-    ".claude/rules/principles.md"; do
+    ".claude/rules/principles.md" \
+    "including any project-specific restraint or defensive-coding doctrine"; do
     if [ "$(grep -cF "$stem" "$CODEX_MD")" -lt 3 ]; then
         fail "codex.md calibration stem present at fewer than 3 sites: '$stem'"
         ok=0
