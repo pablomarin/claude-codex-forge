@@ -27,6 +27,20 @@ Analyze `$ARGUMENTS` to determine the mode:
 
 ---
 
+## Finding Triage — before you adopt Codex's findings
+
+Codex biases toward robustness and edge cases. Before treating any Codex finding as must-fix (P0/P1/P2) and opening a revision-loop round (`.claude/rules/workflow.md` **Revision Loop Protocol**), apply this filter. It governs how severity gets **assigned** — once assigned, the loop protocol is unchanged: P0/P1/P2 still must be fixed before proceeding.
+
+- **Require a reachable failure scenario.** A finding blocks only if it names a reachable trigger under the current or proposed system — an input, adversarial action, timing/interleaving, partial failure, or reachable state (it need NOT be reproduced on demand). A finding naming no such scenario is rejected as unsubstantiated. Treat a scenario as unreachable only when an enforced invariant prevents its preconditions — not merely because it is rare or hard to test; a reachable finding whose likelihood × impact is low is still valid, just P3/note.
+- **Prefer the smallest correct fix.** If Codex proposes new machinery (fields, abstractions, config) where a smaller change closes the same failure, adopt the smaller change and say why.
+- **Weigh recommended complexity by its cost.** If Codex's _recommendation_ adds complexity out of proportion to the risk it closes, decline it and record the simpler disposition.
+
+Record each downgrade/decline in one line so the loop doesn't re-raise it, and report the downgraded count alongside the findings you acted on.
+
+**This is not an escape hatch.** A reachable P0/P1/P2 stays blocking no matter how tedious the fix (`.claude/rules/critical-rules.md` **NO BUGS LEFT BEHIND**), and at the plan stage an omission that could cause the wrong feature to be built is a P1 (`.claude/rules/workflow.md` **Plan-stage severity**). Triage rejects unsubstantiated findings and machinery-heavy remedies — never substantiated defects.
+
+---
+
 ## A) Code Review Mode
 
 Triggered when `$ARGUMENTS` matches review-related keywords.
@@ -54,7 +68,7 @@ Use `AskUserQuestion` with these options:
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   -c web_search="live" \
-  -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production. If the PR body is a Developer Demo, verify every Mermaid diagram edge traces to a real file:line in its Evidence table — an unsupported or wrong diagram edge (Gate 2 / claimed-current-behavior) is a P1 finding; Gate-1 plan Briefing edges labeled planned/inferred are exempt." \
+  -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. CALIBRATION — read before flagging: this repo values brutal simplicity (KISS/YAGNI); read .claude/rules/principles.md and this project's CLAUDE.md, and calibrate severity to them. Every finding MUST name a plausible, reachable failure scenario under the current or proposed system — the trigger may be an input, adversarial action, timing/interleaving, partial failure, or reachable state, and need NOT be reproduced on demand. Treat a scenario as unreachable only when an enforced invariant prevents its preconditions, not merely because it is rare or hard to test; a finding that names no plausible reachable scenario is rejected as unsubstantiated. For reachable scenarios, assign severity by realistic likelihood x impact — including P3/note when that product is low. Also state the smallest fix that closes it. Prefer the smallest correct fix — do NOT propose new fields, abstractions, config, or machinery when an existing field or a smaller change achieves the same correctness; if you recommend added complexity, first justify why the simpler option is insufficient. Flag material over-engineering, speculative generality, and gold-plating too, with severity based on its concrete maintenance, correctness, or operational cost. If the PR body is a Developer Demo, verify every Mermaid diagram edge traces to a real file:line in its Evidence table — an unsupported or wrong diagram edge (Gate 2 / claimed-current-behavior) is a P1 finding; Gate-1 plan Briefing edges labeled planned/inferred are exempt." \
   --ephemeral \
   --output-last-message /tmp/codex_response.txt \
   [--uncommitted | --base main | --commit SHA] \
@@ -70,7 +84,7 @@ Use `AskUserQuestion` with these options:
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
   -c web_search="live" \
-  -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. Flag anything that could break in production. If the PR body is a Developer Demo, verify every Mermaid diagram edge traces to a real file:line in its Evidence table — an unsupported or wrong diagram edge (Gate 2 / claimed-current-behavior) is a P1 finding; Gate-1 plan Briefing edges labeled planned/inferred are exempt." \
+  -c developer_instructions="Focus on: correctness, security vulnerabilities, performance bottlenecks, error handling gaps, and maintainability. CALIBRATION — read before flagging: this repo values brutal simplicity (KISS/YAGNI); read .claude/rules/principles.md and this project's CLAUDE.md, and calibrate severity to them. Every finding MUST name a plausible, reachable failure scenario under the current or proposed system — the trigger may be an input, adversarial action, timing/interleaving, partial failure, or reachable state, and need NOT be reproduced on demand. Treat a scenario as unreachable only when an enforced invariant prevents its preconditions, not merely because it is rare or hard to test; a finding that names no plausible reachable scenario is rejected as unsubstantiated. For reachable scenarios, assign severity by realistic likelihood x impact — including P3/note when that product is low. Also state the smallest fix that closes it. Prefer the smallest correct fix — do NOT propose new fields, abstractions, config, or machinery when an existing field or a smaller change achieves the same correctness; if you recommend added complexity, first justify why the simpler option is insufficient. Flag material over-engineering, speculative generality, and gold-plating too, with severity based on its concrete maintenance, correctness, or operational cost. If the PR body is a Developer Demo, verify every Mermaid diagram edge traces to a real file:line in its Evidence table — an unsupported or wrong diagram edge (Gate 2 / claimed-current-behavior) is a P1 finding; Gate-1 plan Briefing edges labeled planned/inferred are exempt." \
   --ephemeral \
   --output-last-message /tmp/codex_response.txt \
   --base main \
@@ -122,6 +136,7 @@ Also check if there's a plan in the current conversation context. If the user sp
   4. DEPENDENCIES: Are there breaking changes or version conflicts?
   5. TESTING: Is the plan testable? What's hard to test?
   Flag any concerns that should be addressed BEFORE implementation begins.
+  CALIBRATION — read before flagging: this repo values brutal simplicity (KISS/YAGNI); read .claude/rules/principles.md and this project's CLAUDE.md, and calibrate severity to them. Every finding MUST name a plausible, reachable failure scenario under the current or proposed system — the trigger may be an input, adversarial action, timing/interleaving, partial failure, or reachable state, and need NOT be reproduced on demand. Treat a scenario as unreachable only when an enforced invariant prevents its preconditions, not merely because it is rare or hard to test; a finding that names no plausible reachable scenario is rejected as unsubstantiated. For reachable scenarios, assign severity by realistic likelihood x impact — including P3/note when that product is low. Also state the smallest fix that closes it. Prefer the smallest correct fix — do NOT ask for new fields, abstractions, config, or machinery when an existing field or a smaller change achieves the same correctness; if you recommend added complexity, first justify why the simpler option is insufficient. Flag material over-engineering, speculative generality, and gold-plating in the plan too, with severity based on its concrete maintenance, correctness, or operational cost. Note that at the plan stage an omission that could cause the WRONG FEATURE to be built (missing required behavior, missing edge-case handling, a missing acceptance criterion, a missing test stub for a known-important behavior) is a P1, not a P2.
   Note: If an Engineering Council already validated the approach, focus on implementation correctness rather than revisiting the strategic choice." \
   > /tmp/codex_response_full.txt 2>&1
 ```
