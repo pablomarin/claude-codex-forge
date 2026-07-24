@@ -292,7 +292,7 @@ assert_contains "$LOG8b" "@CONTINUITY.md import lines" \
 # 5.18: tightened prompt asks Claude to scan the whole file for ALL leftover
 # CONTINUITY references (tree diagrams, prose pointers, labels) -- not just
 # the @-import line. Lock in the new tokens so the broader scope cannot
-# silently regress. Field bug origin: msai-v2 retained line-102 tree-diagram
+# silently regress. Field bug origin: downstream retained line-102 tree-diagram
 # and line-212 prose pointer after running the v5.17 prompt.
 assert_contains "$LOG8b" "scan the ENTIRE file" \
     "UC1: --upgrade soft tip instructs full-file scan (5.18)"

@@ -37,7 +37,7 @@ Per Pablo's discussion answer 14: **most of the workflow machinery already exist
 | Workflow gate skip rate | 0 | Hook-enforced; verifier confirms every checklist item with on-disk evidence |
 | Council invocations per autonomous run | Pattern observed and logged during v1 dogfooding (threshold calibrated empirically) | Per-fire log entry |
 | First-pass success on dogfooded forge feature | Calibrated empirically during v1 testing | Manual observation |
-| Downstream smoke (msai-v2) | Pass | One manual run by Pablo confirms `/forge-goal` capability works in downstream install |
+| Downstream smoke | Pass | One manual run by Pablo confirms `/forge-goal` capability works in downstream install |
 
 ### Non-Goals (Explicitly Out of Scope)
 
@@ -406,14 +406,14 @@ And it is acceptable that the elapsed/turns/tokens counters reset
 
 ### US-011: Downstream Auto-Availability
 
-**As a** forge user on a downstream install (msai-v2 etc.)
+**As a** forge user on a downstream install
 **I want** `/forge-goal`'s capability to be available automatically after I upgrade the Forge
 **So that** I don't need to flip a flag or run setup with special arguments
 
 **Scenario:**
 
 ```gherkin
-Given I have a downstream Forge install on msai-v2
+Given I have a downstream Forge install on a downstream project
 When I run `./setup.sh --upgrade` to pick up the new Forge version
 Then the autonomous-loop capability is available immediately
 And /new-feature and /fix-bug print the /goal command at the PRD checkpoint

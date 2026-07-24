@@ -282,7 +282,7 @@ start_test "piped stdin EOF propagates to child (iter-3 smoke P1 fix — codex f
 # When parent's stdin is a pipe that closes, the child needs to see EOF on
 # its end of the pty too. Without writing EOT to master, children that read
 # stdin (e.g., /bin/cat with piped input) hang forever waiting for more data.
-# Bug found by codex review of the v5.22 PR (iter-3 mcpgateway smoke).
+# Bug found by codex review of the v5.22 PR (iter-3 downstream smoke).
 HELPER="$REPO_ROOT/hooks/lib/codex-pty-helper.py"
 RESULT=$(mktemp)
 (

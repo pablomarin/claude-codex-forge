@@ -135,7 +135,7 @@ assert_equals "$rc" "0" ".sh passes when all gates are [x]"
 
 # ===========================================================================
 # Test 2: E2E verified unchecked → hook blocks (exit 2)
-# This is the msai-v2 root cause — the whole reason this suite exists.
+# This is the downstream root cause — the whole reason this suite exists.
 # ===========================================================================
 start_test "E2E verified [ ] unchecked → exit 2 (blocks ship)"
 
@@ -246,7 +246,7 @@ assert_equals "$rc" "0" "non-gate items don't trigger the gate"
 
 # ===========================================================================
 # Test 7b: a literal `- [ ]` inside an already-[x] gate line's PROSE must NOT
-# re-arm the gate. Field bug (mcpgateway, 2026-05-28): a docs-only checkpoint
+# re-arm the gate. Field bug (downstream, 2026-05-28): a docs-only checkpoint
 # commit marked the 4 gates `[x] — N/A: ... Re-opens with `- [ ]` later`, and
 # the unanchored two-stage match counted those checked lines as unchecked. The
 # anchored regex (checkbox + gate stem at line start) must exit 0 here.
@@ -525,7 +525,7 @@ assert_contains "$S15/.state-stderr" "on branch vs master" \
 # Test 15b: check-state-updated.sh — CHANGELOG gate downgrades to advisory
 # (exit 0) when an OPEN PR already exists for the branch.
 #
-# Surfaced 2026-05-18 during /forge-goal v1.0 soak in msai-v2:
+# Surfaced 2026-05-18 during /forge-goal v1.0 soak in a downstream project:
 # the per-turn exit-2 nag during CI wait label-prefixed the build-evidence
 # STDERR dump as "Stop hook error", flooding the transcript every Stop.
 # Once the PR is open the human reviewer carries the signal — gate becomes
@@ -1373,7 +1373,7 @@ EOF
 # v5.32 Test A — Worktree CWD fix: build-evidence MUST read state.md from
 # the cwd in the stdin JSON, not from its own CWD.
 #
-# Surfaced 2026-05-18 in msai-v2 portfolio-backtest soak: evidence reported
+# Surfaced 2026-05-18 in downstream portfolio-backtest soak: evidence reported
 # session_nonce:null and phase:null even though the worktree's state.md was
 # populated. Root cause: CC's Stop hook runs with CWD=$CLAUDE_PROJECT_DIR
 # (the parent project in worktree sessions). build-evidence read state.md
@@ -1559,7 +1559,7 @@ assert_contains "$OUT_V32C.stderr" "v532c-subdir-marker" \
 # ===========================================================================
 # v5.39 — Plan review + Code review per-iter clean evidence gate
 # Tests 16-24. Closes the same-iteration-clean shortcut surfaced by the
-# msai-v2 v5.38 /goal run (iter-6 P1 pending, agent ticked Plan review PASS).
+# downstream v5.38 /goal run (iter-6 P1 pending, agent ticked Plan review PASS).
 # ===========================================================================
 
 # ---------------------------------------------------------------------------

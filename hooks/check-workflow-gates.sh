@@ -500,7 +500,7 @@ fi
 # ---------------------------------------------------------------------------
 # Evidence-based gate for Plan review loop PASS
 #
-# The msai-v2 v5.38 /goal run violated this by ticking [x] Plan review loop
+# The downstream v5.38 /goal run violated this by ticking [x] Plan review loop
 # (6 iterations) — PASS while iter-6 still had 2 P1 findings. Patching the
 # plan and skipping iter-7 confirmation is exactly the discipline drift this
 # gate prevents.

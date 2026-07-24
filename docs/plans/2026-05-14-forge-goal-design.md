@@ -269,7 +269,7 @@ Deliverables:
 - Wired into existing `hooks/check-state-updated.{sh,ps1}` (move `stop_hook_active` early-return after evidence emission)
 - `setup.sh`/`setup.ps1` copy the new files to `.claude/hooks/`
 - Unit tests for the parser
-- Smoke test against `../mcpgateway` per Pablo's known preference
+- Smoke test against `a downstream repo` per Pablo's known preference
 
 **Useful regardless of `/forge-goal`:** the JSON evidence centralizes what existing hooks already compute ad-hoc (E2E mtime check, reviewer status). Layer 1 hardens existing gate hooks even before Layer 2.
 
@@ -323,14 +323,14 @@ Deliverables:
 
 ## Test Plan
 
-Per PRD Q21 — **(a) + (d)**: dogfood on the forge first, then manual `msai-v2` smoke before declaring v1 done.
+Per PRD Q21 — **(a) + (d)**: dogfood on the forge first, then manual `a downstream project` smoke before declaring v1 done.
 
 ### Layer 1 acceptance
 
 - Unit tests for `build-evidence.sh` parser against fixture state.md files
 - Hook integration test: run `check-state-updated.sh` with a controlled state.md and verify FORGE_GOAL_EVIDENCE markers appear in STDERR
 - PowerShell parity test (existing forge test pattern)
-- Downstream smoke: copy build-evidence.sh into `../mcpgateway` and run against its state.md
+- Downstream smoke: copy build-evidence.sh into `a downstream repo` and run against its state.md
 
 ### Layer 2 acceptance
 
@@ -338,7 +338,7 @@ Per PRD Q21 — **(a) + (d)**: dogfood on the forge first, then manual `msai-v2`
 - Council-fire scenario: artificially set up a moment that would prompt the user, observe council fires and chairman verdict applied
 - Budget exhaustion: set `/goal` to a tiny budget, confirm graceful checkpoint + clear failure message (US-007)
 - Stuck detection: leave the loop idle for 5+ turns, confirm warning fires once
-- Manual msai-v2 smoke: Pablo runs one real autonomous loop on a small downstream feature
+- Manual downstream smoke: Pablo runs one real autonomous loop on a small downstream feature
 
 ---
 

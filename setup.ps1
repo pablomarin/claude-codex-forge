@@ -1217,7 +1217,7 @@ if ($Upgrade) {
     # guide" reference uses an absolute path to the Forge clone so it resolves
     # correctly when users run setup.ps1 -Upgrade from inside their project.
     # 5.18: prompt expanded to enumerate ALL CONTINUITY reference types
-    # (tree diagrams, prose pointers, labels) -- field bug where msai-v2
+    # (tree diagrams, prose pointers, labels) -- field bug where a downstream project
     # leftover refs at line 102 (tree) and line 212 (prose) survived because
     # the prior single-clause prompt only addressed the @-import line.
     if ($hadClaude) {

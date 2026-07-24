@@ -4,7 +4,7 @@ Regression suite for the claude-codex-forge template itself — not for user pro
 
 ## Why
 
-The dev loop for template changes used to be: commit → push → merge → run `setup.sh --upgrade` in a downstream repo (e.g. mcpgateway) → see if it works. Slow, dangerous, no regression protection. This suite catches the same class of bugs locally in ~5 seconds with no downstream repo needed.
+The dev loop for template changes used to be: commit → push → merge → run `setup.sh --upgrade` in a downstream repo (e.g. a downstream project) → see if it works. Slow, dangerous, no regression protection. This suite catches the same class of bugs locally in ~5 seconds with no downstream repo needed.
 
 ## Run everything
 
@@ -53,7 +53,7 @@ Every helper is in `lib.sh`. Don't duplicate assertion logic across suites.
 
 - `hooks/post-tool-format.sh` runtime behavior (needs crafted stdin JSON + real Python project). Covered by `test-fixtures.sh`'s static check of the script contents, not by a runtime harness. Upgrade if a regression slips through.
 - `markdownlint` on the full docs tree. Fence-balance check in `test-fixtures.sh` covers the one known class of failure; add a full `markdownlint` run if docs lint becomes a recurring problem.
-- Full end-to-end of a downstream project actually running against a scaffolded `setup.sh --with-playwright`. Too slow for this suite; rely on dogfooding in mcpgateway.
+- Full end-to-end of a downstream project actually running against a scaffolded `setup.sh --with-playwright`. Too slow for this suite; rely on dogfooding in a downstream project.
 
 ## Flake-risk conventions
 

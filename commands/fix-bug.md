@@ -513,7 +513,7 @@ Run this checklist:
    - **Covered** — a UC for this surface exists below, OR
    - **N/A — \<substantive justification\>** — see `rules/testing.md` "Multi-surface coverage" for acceptable vs unacceptable N/A reasons.
 
-**The disqualifying N/A justification** (surfaced 2026-05-18 from msai-v2 soak): _"CLI: N/A — no CLI changes in my diff."_ That describes the implementation, not the user-facing scope. If the project's CLI exposes the same capability area, the bug likely reproduces there too — verify it doesn't, or write a CLI UC.
+**The disqualifying N/A justification** (surfaced 2026-05-18 from downstream soak): _"CLI: N/A — no CLI changes in my diff."_ That describes the implementation, not the user-facing scope. If the project's CLI exposes the same capability area, the bug likely reproduces there too — verify it doesn't, or write a CLI UC.
 
 verify-e2e's Step 2c emits a `SURFACE_COVERAGE_WARNING` if UCs cover fewer surfaces than the project exposes; during an autonomous `/forge-goal` run, the warning triggers a `/council` consultation unless the Surface coverage decision sub-block pre-justified the omission.
 

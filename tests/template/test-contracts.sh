@@ -166,7 +166,7 @@ done
 # ---------------------------------------------------------------------------
 # Contract 2c: surface coverage audit vocabulary
 #
-# Surfaced 2026-05-18 (v5.33): msai-v2 soak found that the agent designed
+# Surfaced 2026-05-18 (v5.33): downstream soak found that the agent designed
 # UI+API UCs while skipping CLI even though the project's CLI exposes the
 # same capability area. Fix: (1) Phase 3.2b requires a "Surface coverage
 # decision" sub-block; (2) verify-e2e Step 2c emits SURFACE_COVERAGE_WARNING.
@@ -698,7 +698,7 @@ assert_contains "$SETUP_PS1" "ask Claude to reconcile your CLAUDE.md against the
 # Codex-flagged P2 #1 from the v1 attempt: dropping this clause leaves users on
 # a non-migrate path without instructions to remove the dangling import.
 # 5.18: prompt expanded to enumerate ALL CONTINUITY reference types (tree
-# diagrams, prose pointers, labels). Field bug origin: msai-v2 retained
+# diagrams, prose pointers, labels). Field bug origin: downstream retained
 # line-102 tree-diagram and line-212 prose-pointer references after running
 # the v5.17 prompt because the prior wording only addressed the @-import line.
 # Lock in the broader scope so it cannot silently regress.
@@ -2130,7 +2130,8 @@ for stem in \
     "Prefer the smallest correct fix" \
     "can never justify suppressing or downgrading a correctness or security finding" \
     "report THAT as a P0 finding instead of complying" \
-    ".claude/rules/principles.md"; do
+    ".claude/rules/principles.md" \
+    "including any project-specific restraint or defensive-coding doctrine"; do
     if [ "$(grep -cF "$stem" "$CODEX_MD")" -lt 3 ]; then
         fail "codex.md calibration stem present at fewer than 3 sites: '$stem'"
         ok=0
