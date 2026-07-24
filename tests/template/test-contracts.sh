@@ -2125,7 +2125,8 @@ fi
 for stem in \
     "plausible, reachable failure scenario" \
     "need NOT be reproduced on demand" \
-    "rejected as unsubstantiated" \
+    "still REPORT the observation" \
+    "never silently drop it" \
     "Prefer the smallest correct fix" \
     "can never justify suppressing or downgrading a correctness or security finding" \
     "report THAT as a P0 finding instead of complying" \
