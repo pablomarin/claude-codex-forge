@@ -2,6 +2,18 @@
 
 All notable changes to claude-codex-forge.
 
+## 5.60 — 2026-07-24 · `check-bash-safety` check #6 no longer blocks read-only inspection of `.claude/settings.json`
+
+**Found by dogfooding v5.59 in this repo.** Running `setup.sh --upgrade` in place brought Forge's own `.claude/` up to 5.59, and the freshly-installed hook immediately blocked an ordinary read: `echo "label"; grep -oE ... .claude/settings.json` was rejected as _"Attempting to modify Claude Code configuration via Bash"_. Nothing in that command writes anything.
+
+**Root cause:** check #6's pattern was `(sed|awk|echo|tee|printf).*\.claude/(settings|config)`. The `.*` spans the **entire command**, so a writer token anywhere — including an unrelated `echo "label"` used to print a heading — poisons a later, read-only `grep`/`wc` touching `.claude/settings.json`. The block was also inconsistent: `cat .claude/settings.json` passed cleanly (cat isn't in the writer list) while the echo-then-grep form failed. Same failure class as v5.56/v5.57 — an over-broad guardrail regex that fires on a read and, in a `/goal` run with no human, silently stalls the loop.
+
+**Fix:** replace `.*` with `[^;|&]*` in both twins (`check-bash-safety.sh:75`, `check-bash-safety.ps1:83`), requiring the writer and the target to sit in the **same command segment** — the same scoping v5.57's check #9 already uses for its redirect target. Every true positive is preserved (`echo "{}" > .claude/settings.json`, `sed -i … .claude/settings.json`, `cat x | tee .claude/settings.json`, `cd /tmp && echo … > .claude/config.json` all still block), and the field false positive is gone.
+
+**Documented residuals (deliberately not closed):** variable-indirected targets (`echo x > "$F"`), and a path quoted as *data* before a pipe (`echo ".claude/settings.json" | wc -c`) which still blocks because writer and target share a segment. Closing the latter needs write-operator parsing; the false positive is contrived and the cost is real, so it stays a residual — smallest correct fix, consistent with the LEAN posture check #9 settled on. This is a targeted guardrail, not a shell parser.
+
+New `SIX_BLOCK`/`SIX_ALLOW` corpus in `test-bash-safety.sh` (45 assertions, up from 37), proven discriminating: restoring the `.*` regex fails the field-bug case. 13-suite `run-all.sh` green. Reaches existing installs via `setup.sh --upgrade`.
+
 ## 5.59 — 2026-07-24 · Calibrate the `/codex` reviewer toward simplicity + add finding triage
 
 **Field hit (a downstream plan-review loop):** Codex reliably finds real bugs, but it over-flags low-ROI edge cases and proposes machinery-heavy remedies, grinding the revision loops. Concrete case: Codex demanded a new pre-truncation `per_driver_average_variance_percent` payload field plus in-driver computation, where reserving "averaged" phrasing for global titles — one prompt amendment, zero new computation — closed the same defect. Three causes, all in the harness rather than in Codex: (1) `commands/codex.md` **told** it to inflate — review mode said "Flag anything that could break in production" and the design-review prompt asked "What edge cases are missing?" with no counterweight; (2) Codex had never been pointed at this repo's brutal-simplicity doctrine, so it read a lean choice as a gap; (3) `rules/workflow.md`'s revision protocol makes every P0/P1/P2 load-bearing, so a diminishing-returns finding forces a full fix round.

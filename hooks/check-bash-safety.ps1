@@ -80,7 +80,7 @@ elseif ($Command -match 'Remove-Item.*-Recurse.*[A-Z]:\\$') {
     $Reason = "Recursive deletion targeting drive root"
 }
 # 6. Modifying Claude Code config via Bash
-elseif ($Command -match '(sed|awk|echo|tee|printf|Set-Content|Out-File).*\.claude[/\\](settings|config)') {
+elseif ($Command -match '(sed|awk|echo|tee|printf|Set-Content|Out-File)[^;|&]*\.claude[/\\](settings|config)') {
     $Reason = "Attempting to modify Claude Code configuration via Bash"
 }
 # 7. Global package installs (supply chain attack vector — see Clinejection)
