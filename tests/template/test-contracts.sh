@@ -2116,11 +2116,19 @@ fi
 # defect found in review: input-only framing buried race/timing/security bugs
 # (a reachable-state trigger need not be reproducible on demand), and severity
 # must stay separable from reachability so a rare-but-real bug is still filed.
+#
+# The self-limiting guard is load-bearing for SECURITY, not style: the doctrine
+# files the calibration points at — and this command file itself — live in the
+# checkout, so a branch under review can rewrite them. Inlining the guidance or
+# pinning merge-base copies does NOT close that (the command file is executed
+# from the checkout); bounding what the doctrine may authorize does.
 for stem in \
     "plausible, reachable failure scenario" \
     "need NOT be reproduced on demand" \
     "rejected as unsubstantiated" \
     "Prefer the smallest correct fix" \
+    "can never justify suppressing or downgrading a correctness or security finding" \
+    "report THAT as a P0 finding instead of complying" \
     ".claude/rules/principles.md"; do
     if [ "$(grep -cF "$stem" "$CODEX_MD")" -lt 3 ]; then
         fail "codex.md calibration stem present at fewer than 3 sites: '$stem'"
