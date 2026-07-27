@@ -2163,6 +2163,95 @@ fi
 [ "$ok" = "1" ] && pass "codex.md ships both calibration levers (3 prompt sites + triage section, no inflation trigger)"
 
 # ===========================================================================
+# Contract: /codex plan-review NECESSITY axis (v5.61)
+#
+# Field hit: across ~30 review rounds the loop caught every omission and never
+# once flagged a requirement as UNNECESSARY. An approved plan carried a gate
+# demanding five third-party artifacts before authoring could start; it survived
+# the whole loop, and when a human finally challenged it Codex conceded at once
+# ("no reachable correctness failure uniquely prevented"). The capability was
+# present; only the trigger was missing.
+#
+# Root cause is a delegation dead-end, not a missing concept. Plan review stopped
+# asking "Is there a simpler approach?" (new-feature.md / fix-bug.md) and delegated
+# it to the Approach Comparison + Contrarian Gate; a Contrarian VALIDATE skips
+# council entirely (peer-review-protocol.md), so the Simplifier who asks "Does this
+# need to exist at all?" (advisors.md) may never run; and Codex is separately told
+# not to revisit a council-validated strategic choice. On a VALIDATE plan, NOBODY
+# asks it. The generic gold-plating sentence inside the CALIBRATION paragraph did
+# not activate, so this ships as a TOP-LEVEL numbered agenda axis instead — that
+# placement is the whole reason it should be obeyed, hence pinned below.
+#
+# Deliberately narrow (v5.61 review): scoped to prerequisites/gates/artifacts that
+# materially delay work or add external coordination, NOT every requirement, and
+# severity is gated on concrete cost. An unscoped "name what each requirement
+# uniquely prevents, else it is deletable" rule was rejected — it audits everything,
+# rejects defense-in-depth, treats missing reviewer context as proof of
+# non-necessity, and rebuilds the auto-P2-for-over-engineering churn that v5.59
+# already threw out (see docs/CHANGELOG.md 5.59). Those rejected phrasings are
+# pinned ABSENT so the narrowing can't silently regress.
+# ---------------------------------------------------------------------------
+start_test "/codex plan review carries the NECESSITY axis (scoped, cost-gated, agenda-level)"
+CODEX_MD="$REPO_ROOT/commands/codex.md"
+ok=1
+
+# Exactly one site: the Design Review producer prompt. NOT duplicated into the two
+# Code Review calibration blocks — code review already has Codex over-engineering
+# guidance, a code-simplifier reviewer, and a separate /simplify phase. Widening
+# this without field evidence is how prompt bloat starts.
+nec_sites=$(grep -cF "6. NECESSITY:" "$CODEX_MD")
+if [ "$nec_sites" -ne 1 ]; then
+    fail "codex.md has $nec_sites '6. NECESSITY:' sites, expected exactly 1 (design-review prompt only)"
+    ok=0
+fi
+
+# Load-bearing stems. Each encodes a specific rejected alternative:
+#   scope gate  -> targets the observed class, not an exhaustive requirement audit
+#   prevent/reduce -> permits layered + jointly-sufficient controls
+#   cost-gated severity -> blocks on delivery cost, never on taste
+for stem in \
+    "materially delays work or adds external coordination" \
+    "prevent or reduce" \
+    "P2 for material delivery/coordination cost and P3 for mere redundancy"; do
+    if ! grep -qF "$stem" "$CODEX_MD"; then
+        fail "codex.md NECESSITY axis missing load-bearing stem: '$stem'"
+        ok=0
+    fi
+done
+
+# The overcorrections that were rejected must stay out.
+for banned in \
+    "uniquely prevents" \
+    "mark it deletable"; do
+    if grep -qF "$banned" "$CODEX_MD"; then
+        fail "codex.md reintroduced a rejected absolutist NECESSITY phrasing: '$banned'"
+        ok=0
+    fi
+done
+
+# Placement is the mechanism: the axis must sit inside the Design Review numbered
+# list — after '## B)', before '## C)', and BEFORE that prompt's CALIBRATION block.
+# Demoting it into the ~310-word calibration paragraph is exactly the burial that
+# made the existing gold-plating clause inert.
+nec_ln=$(grep -nF "6. NECESSITY:" "$CODEX_MD" | head -1 | cut -d: -f1)
+b_ln=$(grep -n "^## B) Design Review Mode" "$CODEX_MD" | head -1 | cut -d: -f1)
+c_ln=$(grep -n "^## C) General Mode" "$CODEX_MD" | head -1 | cut -d: -f1)
+flag_ln=$(grep -nF "Flag any concerns that should be addressed BEFORE" "$CODEX_MD" | head -1 | cut -d: -f1)
+cal_ln=$(awk -v s="$b_ln" 'NR>s && /CALIBRATION — read before flagging/ {print NR; exit}' "$CODEX_MD")
+if [ -z "$nec_ln" ] || [ -z "$b_ln" ] || [ -z "$c_ln" ] || [ -z "$flag_ln" ] || [ -z "$cal_ln" ]; then
+    fail "codex.md NECESSITY placement markers missing (nec=$nec_ln b=$b_ln c=$c_ln flag=$flag_ln cal=$cal_ln)"
+    ok=0
+elif [ "$nec_ln" -le "$b_ln" ] || [ "$nec_ln" -ge "$c_ln" ]; then
+    fail "codex.md NECESSITY axis outside Design Review Mode (nec=$nec_ln, B=$b_ln, C=$c_ln)"
+    ok=0
+elif [ "$nec_ln" -ge "$flag_ln" ] || [ "$nec_ln" -ge "$cal_ln" ]; then
+    fail "codex.md NECESSITY axis must precede the 'Flag any concerns' line and the CALIBRATION block (nec=$nec_ln flag=$flag_ln cal=$cal_ln)"
+    ok=0
+fi
+
+[ "$ok" = "1" ] && pass "codex.md NECESSITY axis is a single agenda-level item, scoped and cost-gated"
+
+# ===========================================================================
 # convergence-breaker (v5.54, ADR 0009)
 #
 # Pins the breaker-only ship: the helper twins exist + their constant is mirrored
