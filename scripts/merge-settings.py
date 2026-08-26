@@ -45,6 +45,9 @@ def _hook_key(h):
     """Identity tuple for a hook (type, command, prompt). Two hooks with the
     same key are considered the same command; the user-side instance is kept
     over the template-side instance during merge."""
+    managed_id = h.get("forgeManagedId")
+    if managed_id:
+        return ("forge-managed", managed_id)
     return (h.get("type"), h.get("command"), h.get("prompt"))
 
 
@@ -93,9 +96,22 @@ def merge_hook_event(template_event, user_event):
         for template_hook in template_block.get("hooks", []):
             tk = _hook_key(template_hook)
             if tk in user_by_key:
-                # Keep user's version (preserves any user customizations on the
-                # same command, e.g., extra fields we don't recognize).
-                new_hooks.append(user_by_key[tk])
+                user_hook = user_by_key[tk]
+                if template_hook.get("forgeManagedId"):
+                    # The stable managed id proves ownership of the fields Forge
+                    # emits. Refresh those fields while retaining unknown user
+                    # annotations on the same object.
+                    refreshed = dict(user_hook)
+                    refreshed.update(template_hook)
+                    new_hooks.append(refreshed)
+                    if refreshed != user_hook:
+                        changes.append(
+                            f"refreshed managed hook {template_hook['forgeManagedId']} "
+                            f"in matcher={matcher!r}"
+                        )
+                else:
+                    # Unowned entries remain user-controlled.
+                    new_hooks.append(user_hook)
             else:
                 new_hooks.append(template_hook)
                 cmd_label = template_hook.get("command") or template_hook.get("type", "?")

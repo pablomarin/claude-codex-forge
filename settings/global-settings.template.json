@@ -1,4 +1,30 @@
 {
+  "permissions": {
+    "deny": [
+      "Write(~/.forge/bin/**)",
+      "Edit(~/.forge/bin/**)",
+      "Bash(*.forge/bin*:*)",
+      "Read(~/.forge/goal-captures/**)",
+      "Write(~/.forge/goal-captures/**)",
+      "Edit(~/.forge/goal-captures/**)",
+      "Write(~/.forge/goal-authorizations/**)",
+      "Edit(~/.forge/goal-authorizations/**)",
+      "Bash(*.forge/goal-captures*:*)",
+      "Bash(*.forge/goal-authorizations*:*)",
+      "Bash(*forge-goal-authorize*:*)",
+      "Bash(*forge-goal-capture*:*)"
+    ],
+    "ask": []
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": ["~/.forge/goal-captures"],
+      "denyWrite": ["~/.forge/bin", "~/.forge/goal-captures", "~/.forge/goal-authorizations"]
+    }
+  },
   "hooks": {
     "PreCompact": [
       {

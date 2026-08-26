@@ -1,0 +1,12 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "modelUsage": {
+    "claude-opus-4-1": {
+      "provider": "anthropic",
+      "inputTokens": 17,
+      "outputTokens": 5
+    }
+  }
+}

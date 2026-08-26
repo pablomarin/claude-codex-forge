@@ -1,0 +1,2 @@
+{"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000002"}
+{"type":"turn.completed","usage":{"input_tokens":17,"output_tokens":5}}

@@ -1,0 +1,37 @@
+{
+  "forgeManagedVersion": 6,
+  "hooks": {
+    "session_start": [
+      {
+        "forgeManagedId": "session-start",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "session-start.sh"]
+      }
+    ],
+    "pre_tool_use": [
+      {
+        "forgeManagedId": "bash-safety",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "check-bash-safety.sh"]
+      },
+      {
+        "forgeManagedId": "workflow-gates",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "check-workflow-gates.sh"]
+      }
+    ],
+    "post_tool_use": [
+      {
+        "forgeManagedId": "format",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "post-tool-format.sh"]
+      }
+    ],
+    "stop": [
+      {
+        "forgeManagedId": "build-evidence",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "build-evidence.sh"]
+      },
+      {
+        "forgeManagedId": "state-updated",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "check-state-updated.sh"]
+      }
+    ]
+  }
+}

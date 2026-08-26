@@ -543,4 +543,62 @@ if [ -f "$REGIONS" ]; then
     fi
 fi
 
+start_test "Task 2 materializer, config, runtime, goal, and router surfaces are manifest-owned"
+for relative in \
+    scripts/materialize-adapters.sh scripts/materialize-adapters.ps1 \
+    scripts/render-codex-config.py scripts/verify-runtime.sh scripts/verify-runtime.ps1 \
+    scripts/qualify-dispatch-isolation.sh scripts/qualify-dispatch-isolation.ps1 \
+    scripts/qualify-goal-feasibility.sh scripts/qualify-goal-feasibility.ps1 \
+    scripts/forge-goal-authorize.sh scripts/forge-goal-authorize.ps1 \
+    scripts/forge-goal-capture.sh scripts/forge-goal-capture.ps1 \
+    hooks/lib/codex-worktree-dispatch.sh hooks/lib/codex-worktree-dispatch.ps1 \
+    settings/codex-config.template.toml settings/codex-hooks.template.json \
+    tests/template/test-runtime-identity.sh tests/template/test-runtime-identity.ps1 \
+    tests/template/test-goal-feasibility.sh tests/template/test-goal-feasibility.ps1 \
+    tests/template/run-all.ps1 .github/workflows/windows-parity.yml; do
+    assert_file_exists "$REPO_ROOT/$relative" "Task 2 artifact exists: $relative"
+done
+
+if [ -f "$MANIFEST" ]; then
+    for row in \
+        $'canonical\thooks/lib/codex-worktree-dispatch.sh\t.forge/hooks/lib/codex-worktree-dispatch.sh' \
+        $'canonical\thooks/lib/codex-worktree-dispatch.ps1\t.forge/hooks/lib/codex-worktree-dispatch.ps1' \
+        $'canonical\tscripts/verify-runtime.sh\t.forge/bin/verify-runtime' \
+        $'canonical\tscripts/verify-runtime.ps1\t.forge/bin/verify-runtime.ps1' \
+        $'canonical\tscripts/forge-goal-authorize.sh\t.forge/bin/forge-goal-authorize' \
+        $'canonical\tscripts/forge-goal-authorize.ps1\t.forge/bin/forge-goal-authorize.ps1' \
+        $'canonical\tscripts/forge-goal-capture.sh\t.forge/bin/forge-goal-capture' \
+        $'canonical\tscripts/forge-goal-capture.ps1\t.forge/bin/forge-goal-capture.ps1'; do
+        assert_contains "$MANIFEST" "$row" "managed-v6 owns shipped helper: ${row#*$'\t'}"
+    done
+    assert_contains "$MANIFEST" $'merge\tsettings/codex-config.template.toml\t.codex/config.toml' "Codex config template is singular and manifest-owned"
+    assert_contains "$MANIFEST" $'merge\tsettings/codex-hooks.template.json\t.codex/hooks.json' "Codex hook registry template is singular and manifest-owned"
+    assert_contains "$MANIFEST" $'protected\t-\t.forge/bin/codex.identity\tall\tcodex\tglobal\toperator-setup' "managed-v6 declares the independently recorded Codex identity"
+    assert_contains "$MANIFEST" $'protected\t-\t.forge/bin/codex.identity.sha256\tall\tcodex\tglobal\toperator-seal' "managed-v6 declares the Codex identity seal"
+fi
+
+start_test "live qualification scripts are separate from deterministic suite discovery"
+assert_not_contains "$REPO_ROOT/tests/template/run-all.sh" 'qualify-dispatch-isolation' "Bash deterministic runner never invokes live dispatch qualification"
+assert_not_contains "$REPO_ROOT/tests/template/run-all.sh" 'qualify-goal-feasibility' "Bash deterministic runner never invokes live goal qualification"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-runtime-identity.sh' "Bash runner owns deterministic runtime identity suite"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-goal-feasibility.sh' "Bash runner owns deterministic goal feasibility suite"
+
+start_test "PowerShell 5.1 materializer and owning runner mirror the Unix contracts"
+for function_name in Read-ManagedManifest Install-CanonicalFile Render-Adapter Set-ForgeMarkerBlock Get-EngineAvailability Write-InstallManifest; do
+    assert_contains "$REPO_ROOT/scripts/materialize-adapters.ps1" "function $function_name" "PowerShell materializer defines $function_name"
+done
+assert_contains "$REPO_ROOT/setup.ps1" '-Scope global -Platform windows' "PowerShell global setup delegates with explicit scope/platform"
+assert_contains "$REPO_ROOT/setup.ps1" '-Scope project -Platform windows' "PowerShell project setup delegates with explicit scope/platform"
+assert_contains "$REPO_ROOT/tests/template/run-all.ps1" 'Get-ChildItem -Path $PSScriptRoot -Filter "test-*.ps1"' "PowerShell runner discovers every owning suite"
+assert_not_contains "$REPO_ROOT/tests/template/run-all.ps1" 'ignore' "PowerShell runner has no silent ignore list"
+assert_contains "$REPO_ROOT/.github/workflows/windows-parity.yml" 'shell: powershell' "Windows workflow uses Windows PowerShell"
+
+start_test "live root templates are thin v6 marker surfaces"
+for template in CLAUDE.template.md GLOBAL-CLAUDE.template.md; do
+    lines=$(wc -l < "$REPO_ROOT/$template" | tr -d ' ')
+    [ "$lines" -le 20 ] && pass "$template stays thin ($lines lines)" || fail "$template still embeds a second policy body ($lines lines)"
+    assert_contains "$REPO_ROOT/$template" '<!-- forge:begin v6 -->' "$template opens bounded v6 block"
+    assert_contains "$REPO_ROOT/$template" '<!-- forge:end v6 -->' "$template closes bounded v6 block"
+done
+
 report "test-dual-layout.sh"

@@ -1,0 +1,15 @@
+name: Windows PowerShell parity
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  powershell-51:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run deterministic PowerShell 5.1 suites
+        shell: powershell
+        run: .\tests\template\run-all.ps1

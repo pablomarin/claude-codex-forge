@@ -9,8 +9,8 @@
       "Read",
       "Edit",
       "Write",
-      "Edit(./.claude/local/**)",
-      "Edit(**/.claude/local/**)",
+      "Edit(./.forge/local/**)",
+      "Edit(**/.forge/local/**)",
       "Bash",
       "Bash(codex:*)",
       "Bash(rm -rf .mypy_cache)",
@@ -30,7 +30,19 @@
       "Bash(su:*)",
       "Bash(chmod 777:*)",
       "Bash(dd:*)",
-      "Bash(mkfs:*)"
+      "Bash(mkfs:*)",
+      "Write(~/.forge/bin/**)",
+      "Edit(~/.forge/bin/**)",
+      "Bash(*.forge/bin*:*)",
+      "Read(~/.forge/goal-captures/**)",
+      "Write(~/.forge/goal-captures/**)",
+      "Edit(~/.forge/goal-captures/**)",
+      "Write(~/.forge/goal-authorizations/**)",
+      "Edit(~/.forge/goal-authorizations/**)",
+      "Bash(*.forge/goal-captures*:*)",
+      "Bash(*.forge/goal-authorizations*:*)",
+      "Bash(*forge-goal-authorize*:*)",
+      "Bash(*forge-goal-capture*:*)"
     ],
     "ask": [
       "Bash(gh pr create:*)",
@@ -40,6 +52,15 @@
       "Bash(rm -r:*)"
     ]
   },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": ["~/.forge/goal-captures"],
+      "denyWrite": ["~/.forge/bin", "~/.forge/goal-captures", "~/.forge/goal-authorizations"]
+    }
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -47,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/session-start.sh"
           }
         ]
       }
@@ -58,11 +79,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/build-evidence.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/build-evidence.sh"
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-state-updated.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/check-state-updated.sh"
           }
         ]
       }
@@ -85,12 +106,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).' >&2; exit 0",
+            "command": "echo 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .forge/local/state.md).' >&2; exit 0",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact-memory.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/pre-compact-memory.sh"
           }
         ]
       }
@@ -101,7 +122,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-config-change.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/check-config-change.sh"
           }
         ]
       }
@@ -112,11 +133,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-bash-safety.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/check-bash-safety.sh"
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-workflow-gates.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/check-workflow-gates.sh"
           }
         ]
       }
@@ -127,7 +148,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-local-writes.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/auto-approve-local-writes.sh"
           }
         ]
       }
@@ -138,7 +159,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/post-tool-format.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/post-tool-format.sh"
           }
         ]
       }

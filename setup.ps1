@@ -92,6 +92,49 @@ if ($Migrate) {
     exit $LASTEXITCODE
 }
 
+function Test-V6PreflightNoLegacy {
+    param([string]$Root, [ValidateSet("project", "global")][string]$Scope)
+    $version = Join-Path $Root ".forge\version"
+    if (Test-Path $version) {
+        if (((Get-Content -Raw $version).Trim()) -ne "6") { throw "BLOCKED: unsupported Forge layout version at $version" }
+        return
+    }
+    $manifest = Join-Path $ScriptDir "manifests\legacy-v5.tsv"
+    if (-not (Test-Path $manifest)) { throw "BLOCKED: legacy v5 inventory is unavailable" }
+    foreach ($raw in [IO.File]::ReadAllLines($manifest)) {
+        if (-not $raw.Trim() -or $raw.StartsWith("#")) { continue }
+        $fields = $raw.Split("`t")
+        if ($fields.Count -ne 9) { throw "BLOCKED: malformed legacy v5 inventory" }
+        $destination = $fields[2]; $rowScope = $fields[3]; $platform = $fields[4]; $ownership = $fields[6]
+        if ($rowScope -ne $Scope -or @("all", "windows") -notcontains $platform) { continue }
+        if ($destination -eq "CLAUDE.md" -or $destination -eq ".claude/CLAUDE.md") {
+            if ($ownership -ne "mixed-regions") { continue }
+            $mixed = Join-Path $Root ($destination -replace '/', '\')
+            if (-not (Test-Path $mixed -PathType Leaf)) { continue }
+            $text = [IO.File]::ReadAllText($mixed)
+            $recognizable = if ($Scope -eq "project") {
+                $text -match '(?m)^# CLAUDE\.md - |^## Project Overview$|^### Research Enforcement$|^## Detailed Rules$|\.claude/(commands|rules|hooks|skills|agents)/'
+            } else {
+                $text -match '(?m)^# Global Claude Code Instructions$|^## Ground Your Claims$|^## Memory Management$'
+            }
+            if (-not $recognizable) { continue }
+        } elseif ($destination.StartsWith(".claude/")) {
+            $tail = $destination.Substring(8)
+            $family = $tail.Split('/')[0]
+            if (-not (Test-Path (Join-Path $Root ".claude\$family"))) { continue }
+        } else { continue }
+        throw "BLOCKED: full refresh is not available in this checkpoint"
+    }
+}
+
+try {
+    if ($Global) { Test-V6PreflightNoLegacy $HOME "global" }
+    else { Test-V6PreflightNoLegacy (Get-Location).Path "project" }
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 # --- Forge version stamp (advisory drift detection) ------------------------
 # Mirror of setup.sh: read the Forge version from the top "## X.YY" line of its
 # CHANGELOG (single source of truth). Validated -> "unknown" on a non-match.
@@ -197,6 +240,12 @@ function Copy-TemplateFile {
 # GLOBAL SETUP (-Global flag)
 # ============================================================================
 if ($Global) {
+    & (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target $HOME -Scope global -Platform windows
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "GOAL_OVERLAY: BLOCKED until qualify-goal-feasibility.ps1 records both native hosts"
+    Write-Host "Global Forge v6 materialized for Claude Code and Codex. No permanent main agent was selected."
+    exit 0
+
     Write-Color "============================================" "Blue"
     Write-Color "  Claude Code Global Setup" "Blue"
     Write-Color "============================================" "Blue"
@@ -642,6 +691,12 @@ if ($hadContinuity -and (Test-Path "CLAUDE.md")) {
     }
 }
 
+& (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Retain the v5 implementation text for Task 3 ownership recognition, but do
+# not execute it beside the v6 materialized layout.
+if ($false) {
 if ($hadClaude) {
     Write-Host "  " -NoNewline; Write-Color "o" "Blue"; Write-Host " CLAUDE.md already exists (never overwritten - user content)"
 } else {
@@ -744,6 +799,17 @@ Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "r
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.ps1") "$libDir\codex-pty.ps1" "$libDir\codex-pty.ps1 (codex PTY shim, openai/codex#19945)"
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.sh") "$libDir\codex-pty.sh" "$libDir\codex-pty.sh (codex PTY shim, bash — used by commands/codex.md callsites)"
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty-helper.py") "$libDir\codex-pty-helper.py" "$libDir\codex-pty-helper.py (Python pty.fork helper for the shim)"
+}
+
+# Transitional workflow bodies still reference these helpers until Task 9.
+$libDir = ".claude\hooks\lib"
+New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+New-Item -ItemType Directory -Path ".claude\local" -Force | Out-Null
+if (-not (Test-Path ".claude\local\state.md")) { Copy-Item (Join-Path $ScriptDir "state.template.md") ".claude\local\state.md" }
+Copy-Item (Join-Path $ScriptDir "state.template.md") ".claude\state.template.md" -Force
+foreach ($helper in @("default-branch.ps1", "default-branch.sh", "review-breaker.ps1", "review-breaker.sh", "codex-pty.ps1", "codex-pty.sh", "codex-pty-helper.py")) {
+    Copy-Item (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") $helper) (Join-Path $libDir $helper) -Force
+}
 
 # ADRs -- ship template + README + seed ADRs (existing-file-skip semantics).
 if (-not (Test-Path "docs\adr")) { New-Item -ItemType Directory -Path "docs\adr" -Force | Out-Null }
@@ -762,14 +828,17 @@ if (Test-Path ".gitignore") {
         Add-Content -Path ".gitignore" -Value ".claude/local/"
         Write-Host "  " -NoNewline; Write-Color "+" "Green"; Write-Host " Added .claude/local/ to .gitignore"
     }
+    if (-not ($gitignoreContent -contains ".forge/local/")) { Add-Content -Path ".gitignore" -Value ".forge/local/" }
 } else {
     @"
 # Volatile per-developer workflow state (PR #2 / continuity-split)
 .claude/local/
+.forge/local/
 "@ | Set-Content ".gitignore"
     Write-Host "  " -NoNewline; Write-Color "+" "Green"; Write-Host " Created .gitignore with .claude/local/"
 }
 
+if ($false) {
 # Agents
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "agents") "verify-app.md") ".claude\agents\verify-app.md" ".claude\agents\verify-app.md"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "agents") "verify-e2e.md") ".claude\agents\verify-e2e.md" ".claude\agents\verify-e2e.md"
@@ -861,6 +930,7 @@ switch ($Tech) {
         $genImgDir = Join-Path (Join-Path (Join-Path $ScriptDir "skills") "generate-image")
         Copy-TemplateFile (Join-Path $genImgDir "SKILL.template.md") ".claude\skills\generate-image\SKILL.md" ".claude\skills\generate-image\SKILL.md"
     }
+}
 }
 
 # Playwright framework templates (opt-in via -WithPlaywright)
@@ -1077,17 +1147,8 @@ else {
     Write-Host " docs\CHANGELOG.md already exists"
 }
 
-# Update CLAUDE.md with project name
-if (Test-Path "CLAUDE.md") {
-    # Read with UTF8 encoding to preserve Unicode characters (arrows, box chars)
-    $content = [System.IO.File]::ReadAllText((Resolve-Path "CLAUDE.md"), [System.Text.Encoding]::UTF8)
-    $content = $content -replace '\[Project Name\]', $Project
-    # Write back with UTF8 without BOM to preserve Unicode
-    [System.IO.File]::WriteAllText((Resolve-Path "CLAUDE.md"), $content, (New-Object System.Text.UTF8Encoding $false))
-    Write-Host "  " -NoNewline
-    Write-Color "+" "Green"
-    Write-Host " Updated CLAUDE.md with project name"
-}
+# The v6 marker materializer owns only the bounded Forge block. Text outside
+# that block is user-owned bytes and is never subject to project-name rewriting.
 
 # Forge version pin (project) — WRITE LATE, after all .claude/ copies succeeded, and
 # only when machinery was actually (re)written this run (-Force / -Upgrade, or no
@@ -1327,5 +1388,6 @@ if ($Upgrade) {
     Write-Host "   git commit -m `"chore: add Claude Code automation setup`""
     Write-Host "   git push"
     Write-Host ""
-    Write-Color "You're ready! Run /new-feature <name> to start your first guided workflow." "Green"
+    Write-Color "Harness materialized for Claude Code and Codex." "Green"
+    Write-Color "Runtime readiness remains BLOCKED until the printed verify/qualify commands pass." "Yellow"
 }
