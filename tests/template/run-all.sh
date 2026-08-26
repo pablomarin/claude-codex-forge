@@ -18,6 +18,8 @@ source "$REPO_ROOT/tests/template/lib.sh"
 SUITES=(
     "$REPO_ROOT/tests/template/test-lint.sh"
     "$REPO_ROOT/tests/template/test-fixtures.sh"
+    "$REPO_ROOT/tests/template/test-dual-layout.sh"
+    "$REPO_ROOT/tests/template/test-platform-parity.sh"
     "$REPO_ROOT/tests/template/test-build-evidence.sh"
     "$REPO_ROOT/tests/template/test-contracts.sh"
     "$REPO_ROOT/tests/template/test-state-roundtrip.sh"

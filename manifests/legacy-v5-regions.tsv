@@ -1,0 +1,13 @@
+# Forge v5.50-v5.61 mixed-file recognition sets. Release commits are declared in legacy-v5-releases.tsv.
+# Managed body hashes cover exact bytes including trailing LF. User rows preserve arbitrary bytes.
+# region-set	scope	destination	sequence	ownership	region-id	start-anchor	end-anchor	body-sha256
+regions-5.50	project	CLAUDE.md	000	generated-field	# CLAUDE.md - [Project Name]	line:1	line:1	format:literal-prefix-plus-one-line-name
+regions-5.50	project	CLAUDE.md	010	managed	project-prefix	after:generated-field	before:project-overview	77eab4dbb0d7d7fda471d5243bf36dde89b6a0895ea2f7fb15d4c3a61559b7ac
+regions-5.50	project	CLAUDE.md	020	user	project-overview	### Goal	### Research Enforcement	PRESERVE
+regions-5.50	project	CLAUDE.md	030	managed	research-enforcement	### Research Enforcement	### Key Commands	913ce9b2842511d7fc908cc741cbf5a10078f0387dc2ab14047e41d443b6671c
+regions-5.50	project	CLAUDE.md	040	user	project-commands	### Key Commands	managed-policy-tail	PRESERVE
+regions-5.50	project	CLAUDE.md	050	managed	managed-policy-tail	---	EOF	baf73261674f30960b2ac261376a0af3f8f6a292faaa6ca18cc18323c5a408a8
+regions-5.50	global	.claude/CLAUDE.md	010	managed	global-policy-prefix	BOF	## Personal Preferences	d821cdbd4d3ec243bf861879c4cf09aa71482500988eaa6387a5355de194d3f0
+regions-5.50	global	.claude/CLAUDE.md	020	user	personal-preferences	## Personal Preferences	## Cross-Project Conventions	PRESERVE
+regions-5.50	global	.claude/CLAUDE.md	030	user	cross-project-conventions	## Cross-Project Conventions	## Personal Rules	PRESERVE
+regions-5.50	global	.claude/CLAUDE.md	040	user	personal-rules	## Personal Rules	EOF	PRESERVE

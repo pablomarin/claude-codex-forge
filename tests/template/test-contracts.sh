@@ -17,6 +17,17 @@ source "$REPO_ROOT/tests/template/lib.sh"
 init_counters
 
 # ---------------------------------------------------------------------------
+# Contract 0: v6 layout suites must stay in the deterministic driver
+# ---------------------------------------------------------------------------
+start_test "v6 canonical-layout suites are registered"
+
+RUN_ALL="$REPO_ROOT/tests/template/run-all.sh"
+assert_contains "$RUN_ALL" 'test-dual-layout.sh' \
+    "run-all registers the canonical layout suite"
+assert_contains "$RUN_ALL" 'test-platform-parity.sh' \
+    "run-all registers the centralized platform parity suite"
+
+# ---------------------------------------------------------------------------
 # Contract 1: verify-e2e VERDICT values must match caller branches
 # ---------------------------------------------------------------------------
 start_test "verify-e2e VERDICT header ↔ caller branch labels"

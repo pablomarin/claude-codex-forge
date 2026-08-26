@@ -1,0 +1,14 @@
+# Supported Forge v5 release ownership roots. Tab-separated; unsupported versions fail closed.
+# version	release-commit	stamp-mode	fingerprint-set	region-set
+5.50	d30dee8b045b202df39c5d3efabd3b49ea7b8950	pre-stamp	fp-5.50	regions-5.50
+5.51	1835740ff6c18d2d5a1efad3b23c3fb3d3237fbe	stamped	fp-5.51	regions-5.50
+5.52	e6f1f152ca0b51291be37b22db7ad79bc0afc024	stamped	fp-5.52	regions-5.50
+5.53	2660aeaf017340a16b3681e60ce27ec006b084f7	stamped	fp-5.53	regions-5.50
+5.54	582ba29ee099395de3d90e5e2d3d8e7fd853aae0	stamped	fp-5.54	regions-5.50
+5.55	b71123e50a5e415b6d7481347952755dfdb13ebb	stamped	fp-5.55	regions-5.50
+5.56	5c277758252a0e0560d396a926351f7c0b85c0e2	stamped	fp-5.56	regions-5.50
+5.57	09e9729126548c07f93b678c5f83a662fe46c070	stamped	fp-5.57	regions-5.50
+5.58	cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34	stamped	fp-5.57	regions-5.50
+5.59	bcaa79a511b10bbcee04720de504da780a712f46	stamped	fp-5.59	regions-5.50
+5.60	80dffe872cc0830243a617eacfecce1e5fc2a6f5	stamped	fp-5.60	regions-5.50
+5.61	cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff	stamped	fp-5.61	regions-5.50

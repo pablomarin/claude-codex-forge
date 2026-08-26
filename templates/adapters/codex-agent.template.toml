@@ -1,0 +1,6 @@
+name = "{{NAME}}"
+description = "{{DESCRIPTION}}"
+"forge-generated" = true
+"canonical-path" = "{{CANONICAL_PATH}}"
+"canonical-revision" = "{{CANONICAL_REVISION}}"
+developer_instructions = "Read the canonical agent role at {{CANONICAL_PATH}} completely, then perform the assigned task under that contract. This wrapper does not redefine the role."
