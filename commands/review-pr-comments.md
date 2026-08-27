@@ -22,6 +22,12 @@ rules. Do not agree performatively:
 Use automatic other-engine review with visible fresh same-engine fallback. A finding is not an
 engine failure and never triggers fallback.
 
+Treat the current fingerprinted review set as one broad review, use one repair pass, then one
+closure review limited to named findings and direct regressions. Do not start a second broad scan
+for unchanged comments/candidate. One still-open reachable P0/P1 may receive one surgical repair
+and verification; then surface the blocker to the developer. P3, cosmetic, and speculative concerns
+do not keep the loop open.
+
 ## 3. Repair and Re-Certify
 
 Apply accepted fixes with TDD where behavior changes, then run focused owning checks. Run the

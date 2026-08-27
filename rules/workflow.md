@@ -18,6 +18,30 @@ never persist a permanent main-engine preference. Reviewer `auto` selects the ot
 engine and automatically falls back to a fresh same-engine reviewer when launch/capability failure
 occurs. A finding is a review result, not a fallback reason.
 
+## Resource Discipline
+
+Optimize for the smallest correct solution; developer time, session length, tokens, and money are
+finite engineering resources. Do not pursue perfection, cosmetic polish, speculative hardening, or
+edge cases without a concrete supported trigger, stated acceptance criterion, material likelihood,
+security impact, or data-integrity impact.
+
+For each artifact revision, allow one broad review, one repair pass, and one closure review. Closure
+checks only the named findings and direct regressions; a reviewer may not start a second broad scan.
+One still-open reachable P0/P1 may receive one surgical repair plus a surgical verification of only
+that finding, then Forge surfaces the blocker to the developer instead of iterating indefinitely.
+
+P3, naming, cosmetic, purely theoretical, and unchanged candidate concerns never keep a loop open.
+P2 means a concrete material maintainability, reliability, performance, or test risk, not a merely
+imaginable rare case. Rare but catastrophic security or data loss triggers remain P0/P1. Resource
+discipline never excuses reachable security failure, data loss, incorrect supported behavior, or an
+explicit acceptance criterion.
+
+During repair, run focused owning checks. Run one complete aggregate after the final bytes freeze;
+do not mechanically restart unrelated verification. A mutation invalidates only evidence whose
+boundary it can affect, while exact-candidate receipts still require the same final fingerprint.
+Environment-only Windows, authenticated, and manual gates remain honest final gates; they do not
+trigger implementation loops or authorize fake evidence.
+
 ## Durable State and Host Switching
 
 Read `.forge/local/state.md` before every workflow action. Record the current phase, next unchecked
@@ -70,8 +94,10 @@ Use `/council` for non-PR doubts. PR creation authorization remains human-only. 
 
 ### Severity and Convergence Compatibility
 
-Plan-stage spec-loss is P1 when it could cause the wrong feature to be built; this does **not** relax the exit requirement of no P0/P1/P2 from all available reviewers on the same pass. In a Developer
-Demo, an unsupported claimed-current diagram edge without `file:line` evidence is P1.
+Plan-stage spec-loss is P1 when it could cause the wrong feature to be built; this does **not** relax the exit requirement of no P0/P1/P2 from all available reviewers on the same pass. That requirement
+controls certification, not iteration count: after the bounded closure or surgical P0/P1 check,
+surface any remaining blocker to the developer. In a Developer Demo, an unsupported claimed-current
+diagram edge without `file:line` evidence is P1.
 
 The v5 compatibility reader retains `POST_CERT_REVIEW_ROUND_LIMIT` and the convergence-breaker.
 Only a human may record `Post-certification tail adjudicated by human`. A compatibility N/A after a

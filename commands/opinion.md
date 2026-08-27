@@ -27,9 +27,16 @@ as a verdict.
 
 ## Result handling
 
+For a review, declare `review_mode=broad|closure`.
+Use one broad review, one repair pass, and one closure review.
+Closure checks only named findings and direct regressions. Do not start a second broad scan. One
+still-open reachable P0/P1 may receive one surgical repair plus surgical verification, then surface
+the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and unchanged-
+candidate concerns do not keep the loop open; a concrete material P2 still prevents certification.
+
 - `CLEAN` certifies only when maximum severity is `NONE` or `P3` and no P0/P1/P2 record exists.
-- `FINDINGS` is a successful review result: revise, fingerprint the new candidate, and run a new
-  invocation. It is never an engine fallback.
+- `FINDINGS` is a successful review result, not an engine fallback. Repair and invoke only within
+  the bounded broad/repair/closure policy above.
 - `BLOCKED artifact|authorization|invariant` stops without fallback.
 - Engine/capability launch failure follows the dispatcher's visible one-retry policy. With
   `--fallback-policy none`, no retry occurs.

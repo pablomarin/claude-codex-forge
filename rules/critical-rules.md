@@ -9,6 +9,7 @@
 - **E2E USER JOURNEYS** — Use `verify-e2e` for user-facing behavior. Arrange and verify only through sanctioned user interfaces; see `.forge/rules/testing.md`.
 - **UPDATE STATE** — Keep `.forge/local/state.md` and applicable changelog material current.
 - **NO SILENT DEFERRAL** — Fix known reachable correctness, security, evidence, or configuration defects in active scope before shipping.
+- **RESOURCE DISCIPLINE** — Use the smallest correct solution and the one-broad/one-repair/one-closure budget. Do not chase perfection or speculative rare cases; never waive reachable security, data loss, supported correctness, or explicit acceptance criteria.
 - **GROUND YOUR CLAIMS** — Distinguish verified facts, inferences, unverified results, and blockers. Confident guessing is a defect. Bind every certification to the exact candidate.
 - **HUMAN AUTHORITY** — PR creation and other new external mutations require an explicit human-created authorization record.
 - **HOST FREEDOM** — Either host may resume at the next durable step; warn about simultaneous editing but do not lock the worktree.

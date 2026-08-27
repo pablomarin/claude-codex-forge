@@ -70,7 +70,13 @@ must label that fallback. Do not turn missing research access into a verified re
    Include a Surface coverage decision and the `SURFACE_COVERAGE_WARNING` handling contract.
 5. Freeze the plan content hash and dispatch a fresh `plan` review with `--engine auto`. The
    dispatcher automatically retries once with a fresh same-engine reviewer on launch/capability
-   failure. Findings are not fallback. Revise and rerun until the current plan receipt is clean.
+   failure. Findings are not fallback.
+
+Before each plan-review iteration: use one broad review, one repair pass, and one closure review.
+Closure checks only named findings and direct regressions; do not start a second broad scan. One
+still-open reachable P0/P1 may receive one surgical repair plus surgical verification, then surface
+the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and unchanged-candidate
+concerns do not keep the loop open; a concrete material P2 still prevents certification.
 
 Review iterations remain subject to the canonical `POST_CERT_REVIEW_ROUND_LIMIT`
 convergence-breaker in `.forge/rules/workflow.md`; only a human may adjudicate a tripped breaker.
@@ -120,10 +126,19 @@ Run this order exactly:
      write its receipt.
 8. Promote the exact tree through the candidate promotion helper, then commit.
 
+Before each final code-review iteration: use one broad review, one repair pass, and one closure
+review. Closure checks only named findings and direct regressions; do not start a second broad scan.
+One still-open reachable P0/P1 may receive one surgical repair plus surgical verification, then
+surface the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and
+unchanged-candidate concerns do not keep the loop open; a concrete material P2 still prevents
+certification. Run focused owning checks during repair and one complete aggregate after final bytes
+freeze.
+
 Human-readable reports and receipts remain local under `.forge/local/`; they are not post-verification
-source commits. Any staged, unstaged, or in-scope untracked mutation invalidates affected evidence,
-returns to step 5, freezes a new candidate, and repeats all three final gates. Intermediate reviews
-are useful feedback but never satisfy the ship gate.
+source commits. A mutation invalidates only evidence whose boundary it can affect; any mutation in
+the exact-candidate boundary returns to step 5 and requires fresh candidate-bound final receipts.
+Do not restart unrelated focused verification mechanically. Intermediate reviews never satisfy the
+ship gate.
 
 For a Developer Demo PR body, every claimed-current diagram edge must have a `file:line` Evidence
 row. An unsupported claimed-current edge is P1; clearly labeled planned/inferred briefing edges are

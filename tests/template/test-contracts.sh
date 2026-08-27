@@ -2502,6 +2502,10 @@ assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-authorized-action.s
     "human-action boundary suite is registered"
 assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-skill-pressure-schema.sh' \
     "deterministic skill-pressure schema suite is registered without a model invocation"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-resource-discipline.sh' \
+    "resource-discipline contract is registered"
+assert_contains "$REPO_ROOT/templates/review-result.template.txt" 'review_mode=broad|closure' \
+    "review result schema records broad versus closure scope"
 assert_contains "$REPO_ROOT/scripts/qualify-skill-pressure.sh" '--validate-fixture' \
     "Bash skill-pressure runner separates deterministic fixture checks from live qualification"
 assert_contains "$REPO_ROOT/scripts/qualify-skill-pressure.ps1" 'ValidateFixture' \

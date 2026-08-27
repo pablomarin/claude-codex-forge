@@ -75,7 +75,13 @@ Use `/council` only for a consequential design fork.
 
 Freeze the plan hash and dispatch a fresh `plan` reviewer with `--engine auto`. Automatic
 same-engine fallback handles an unavailable/failed other engine without stopping. Findings are not
-fallback. Revise and rerun until the current plan receipt has no P0/P1/P2.
+fallback.
+
+Before each plan-review iteration: use one broad review, one repair pass, and one closure review.
+Closure checks only named findings and direct regressions; do not start a second broad scan. One
+still-open reachable P0/P1 may receive one surgical repair plus surgical verification, then surface
+the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and unchanged-candidate
+concerns do not keep the loop open; a concrete material P2 still prevents certification.
 
 Review iterations remain subject to the canonical `POST_CERT_REVIEW_ROUND_LIMIT`
 convergence-breaker in `.forge/rules/workflow.md`; only a human may adjudicate a tripped breaker.
@@ -114,9 +120,18 @@ and persist the unchanged leading header with the report. Handle `VERDICT: FAIL`
    leading `VERDICT:` lines and write candidate-bound receipts under `.forge/local/`.
 7. Promote the exact tree through candidate promotion, then commit.
 
-Any mutation invalidates affected evidence and repeats the final review, verify-app, and E2E gates
-from a new freeze. Intermediate reviews never satisfy the ship gate. Human-readable reports and
-receipts remain local evidence, not tracked post-verification source.
+Before each final code-review iteration: use one broad review, one repair pass, and one closure
+review. Closure checks only named findings and direct regressions; do not start a second broad scan.
+One still-open reachable P0/P1 may receive one surgical repair plus surgical verification, then
+surface the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and
+unchanged-candidate concerns do not keep the loop open; a concrete material P2 still prevents
+certification. Run focused owning checks during repair and one complete aggregate after final bytes
+freeze.
+
+A mutation invalidates only evidence whose boundary it can affect; any mutation in the exact-
+candidate boundary requires a new freeze and fresh candidate-bound final receipts. Do not restart
+unrelated focused verification mechanically. Intermediate reviews never satisfy the ship gate.
+Human-readable reports and receipts remain local evidence, not tracked post-verification source.
 
 For a Developer Demo, every claimed-current diagram edge needs a `file:line` Evidence row; an
 unsupported claimed-current edge is P1.

@@ -105,6 +105,10 @@ if [[ "$stage" == complete ]]; then
         assert_contains "$REPO_ROOT/$workflow" '.forge/' "$workflow uses canonical Forge state or evidence"
         assert_contains "$REPO_ROOT/$workflow" 'human authorization' "$workflow preserves external-mutation authority"
     done
+    for workflow in new-feature fix-bug opinion; do
+        assert_contains "$REPO_ROOT/commands/$workflow.md" "one broad review" "$workflow exposes the bounded review-loop budget"
+        assert_contains "$REPO_ROOT/commands/$workflow.md" "one closure review" "$workflow exposes closure review"
+    done
     if grep -R -nF -- '`/codex`' "$REPO_ROOT/commands" "$REPO_ROOT/rules" "$REPO_ROOT/agents" "$REPO_ROOT/skills" >/dev/null 2>&1; then
         fail "a live workflow/rule/agent/skill still invokes the transitional /codex command"
     else

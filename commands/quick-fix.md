@@ -28,3 +28,8 @@ architecture decision, and has an obvious verification path. Otherwise use `/fix
 Reviewer `auto` uses the other installed engine and falls back automatically to a fresh same-engine
 reviewer on launch/capability failure. A finding is not fallback. Reports and receipts remain under
 `.forge/local/` and do not become post-verification source changes.
+
+Use one broad review, one repair pass, and one closure review limited to named findings plus direct
+regressions; never start a second broad scan for the same candidate revision. If a reachable P0/P1
+remains, allow one surgical repair and verification, then surface it to the developer. P3, cosmetic,
+speculative, and unchanged-candidate concerns do not keep the closure review open.

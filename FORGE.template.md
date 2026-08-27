@@ -3,6 +3,19 @@
 This file is the canonical, engine-neutral Forge contract. Claude Code and Codex adapters must
 read it completely; adapters may translate discovery metadata but may not restate its policy.
 
+## Resource Discipline
+
+Build the smallest correct solution. Treat developer time, session length, tokens, and money as
+finite engineering resources. Do not pursue perfection, cosmetic polish, speculative hardening, or
+edge cases without a concrete supported trigger, explicit acceptance criterion, material
+likelihood, security impact, or data-integrity impact.
+
+Default to one broad review, one repair pass, and one closure review limited to named findings and
+direct regressions. One still-open reachable P0/P1 may receive one surgical repair and verification;
+then surface the blocker to the developer. Resource discipline never excuses a reachable security
+boundary failure, data loss, incorrect supported behavior, or violation of an explicit acceptance
+criterion.
+
 ## Working Contract
 
 - The agent running in the developer's current host is the main agent for that session. There is
@@ -34,9 +47,10 @@ proven, report `BLOCKED` and do not claim that host is runtime-ready.
 
 ## No Bugs Left Behind
 
-Fix every known correctness, security, verification, or configuration defect in the active scope
-before shipping. Do not hide a known defect behind a follow-up task. If access or evidence is
-missing, report the result as unverified or blocked rather than successful.
+Fix every known reproducible or concretely reachable correctness, security, verification, or
+configuration defect in the active supported scope before shipping. Do not hide a known reachable
+defect behind a follow-up task; an unsupported hypothesis is not a known defect. If access or
+evidence is missing, report the result as unverified or blocked rather than successful.
 
 ## Ground Your Claims
 
