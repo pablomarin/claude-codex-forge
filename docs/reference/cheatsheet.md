@@ -25,7 +25,7 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 │   cd C:\your\project                                        │
 │   & $HOME\claude-codex-forge\setup.ps1 -p "Project Name"    │
 │                                                             │
-│ # Then install Superpowers plugin in Claude Code            │
+│ # Same harness is installed for Claude Code and Codex       │
 ├─────────────────────────────────────────────────────────────┤
 │ UPGRADE EXISTING PROJECT                                    │
 ├─────────────────────────────────────────────────────────────┤
@@ -51,12 +51,12 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 │                                                             │
 │ DECISION ANALYSIS:                                          │
 │   /council <question>  ← Multi-perspective (5 advisors)     │
-│   /codex <instruction> ← Second opinion (Codex CLI)         │
+│   /opinion <request>   ← Fresh opinion (other engine first) │
+│   /opinion investigate ← Bounded writable investigation    │
 │                                                             │
 │ QUALITY GATES (in order):                                   │
-│   /codex review        ← First review (Codex CLI)           │
-│   /pr-review-toolkit:review-pr  ← Deep review (6 agents)    │
-│   /simplify            ← Clean up code (built-in)           │
+│   /opinion             ← Code-spec + code-quality receipts  │
+│   Simplification       ← Forge-owned cleanup phase          │
 │   verify-app           ← Run tests, lint, types (agent)     │
 │   verify-e2e           ← User-journey E2E (agent)           │
 │   /review-pr-comments  ← Address PR comments (post)         │

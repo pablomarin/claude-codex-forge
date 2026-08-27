@@ -11,10 +11,15 @@ the main agent for this session; there is no permanent main engine.
 2. Record `Last active host`. On a host switch, resume the exact next unchecked durable step. Warn
    about simultaneous editing; do not create a lock or lease.
 3. Work outside the protected default branch in one isolated worktree.
-4. Before the first fix change, persist the intended base ref and resolved base SHA. Reuse an
+4. On new worktree creation, seed only `## State` (with `### Now` cleared), `## Open Questions`, and
+   `## Blockers` from the primary checkout, and persist that exact baseline at
+   `.forge/local/.state-seed-snapshot.md`. Never seed workflow, goal, authorization, or receipt
+   sections. An adopted worktree preserves its recorded snapshot; if it is missing, require an
+   explicit reconciliation baseline rather than guessing.
+5. Before the first fix change, persist the intended base ref and resolved base SHA. Reuse an
    already-recorded base for an adopted worktree; when ancestry is ambiguous, require an explicit
    base. Never recompute from a later-moving default branch.
-5. Replace the active workflow checklist with:
+6. Replace the active workflow checklist with:
 
    ```markdown
    - [ ] Symptom reproduced
@@ -47,7 +52,7 @@ Follow four phases without editing production code early:
 4. State the proven root cause and the production change that a regression test must catch.
 
 If reproduction is impossible, record `BLOCKED` with the missing environment/input rather than
-guessing. When investigation needs network or write access, use `/review` with the `investigate`
+guessing. When investigation needs network or write access, use `/opinion investigate` with the
 profile and require an independent `investigation-repro` receipt before treating the hypothesis as
 actionable.
 

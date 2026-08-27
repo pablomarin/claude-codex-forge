@@ -114,6 +114,16 @@ if [ "$FULL_REFRESH" = true ] && { [ "$FORCE" = true ] || [ "$UPGRADE" = true ] 
     exit 1
 fi
 
+report_native_goal_collisions() {
+    local root="$1"
+    if [ -e "$root/.claude/commands/goal.md" ]; then
+        echo "RUNTIME_READY=BLOCKED host=claude custom native goal collision; rename .claude/commands/goal.md and rerun setup"
+    fi
+    if [ -e "$root/.agents/skills/goal" ]; then
+        echo "RUNTIME_READY=BLOCKED host=codex custom native goal collision; rename .agents/skills/goal/ and rerun setup"
+    fi
+}
+
 # Full refresh is a separate transaction. It exits before ordinary setup can
 # stamp, merge, or create any host surface.
 if [ "$FULL_REFRESH" = true ]; then
@@ -123,6 +133,7 @@ if [ "$FULL_REFRESH" = true ]; then
         bash "$refresh_helper" --target "${HOME:?HOME is required for global full refresh}" --scope global
     else
         bash "$refresh_helper" --target "$(pwd -P)" --scope project
+        report_native_goal_collisions "$(pwd -P)"
     fi
     exit $?
 fi
@@ -178,6 +189,13 @@ v6_preflight_no_legacy() {
                 family=${family%%/*}
                 family=".claude/$family"
                 [ -e "$root/$family" ] || continue
+                # A lone custom native goal is not a legacy Forge harness. Let
+                # setup preserve it and report the explicit goal collision.
+                if [ "$scope" = project ] && [ "$family" = ".claude/commands" ] \
+                    && [ -f "$root/.claude/commands/goal.md" ] \
+                    && [ "$(find "$root/.claude/commands" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = "1" ]; then
+                    continue
+                fi
                 ;;
             *) continue ;;
         esac
@@ -718,6 +736,7 @@ if [[ "$had_claude_md" == true ]]; then
 fi
 bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
     --repo-root "$SCRIPT_DIR" --target "$(pwd)" --scope project --platform unix
+report_native_goal_collisions "$(pwd -P)"
 
 # Transitional v5 workflow bodies still reference these three helper paths;
 # Task 9 removes the compatibility copies when those workflows are converted.
@@ -789,7 +808,6 @@ copy_file "$SCRIPT_DIR/commands/new-feature.md" ".claude/commands/new-feature.md
 copy_file "$SCRIPT_DIR/commands/fix-bug.md" ".claude/commands/fix-bug.md" ".claude/commands/fix-bug.md"
 copy_file "$SCRIPT_DIR/commands/quick-fix.md" ".claude/commands/quick-fix.md" ".claude/commands/quick-fix.md"
 copy_file "$SCRIPT_DIR/commands/finish-branch.md" ".claude/commands/finish-branch.md" ".claude/commands/finish-branch.md"
-copy_file "$SCRIPT_DIR/commands/codex.md" ".claude/commands/codex.md" ".claude/commands/codex.md"
 copy_file "$SCRIPT_DIR/commands/review-pr-comments.md" ".claude/commands/review-pr-comments.md" ".claude/commands/review-pr-comments.md"
 
 # Commands - PRD
@@ -1090,7 +1108,7 @@ if [[ "$UPGRADE" == true ]]; then
     echo -e "1. ${BLUE}Verify everything works${NC}:"
     echo ""
     echo "   /hooks       → Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    echo "   /help        → Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*"
+    echo "   /help        → Should show Forge workflows for both installed hosts"
     echo ""
     echo -e "2. ${BLUE}Commit and push${NC}:"
     echo ""
@@ -1204,11 +1222,9 @@ else
     echo "  .claude/rules/           Coding standards + workflow rules (safe to update)"
     echo "  docs/                    Changelog, ADRs (docs/adr/), PRDs, solutions knowledge base"
     echo ""
-    echo -e "${YELLOW}Plugins pre-enabled in .claude/settings.json:${NC}"
+    echo -e "${YELLOW}Optional host integration enabled in .claude/settings.json:${NC}"
     echo ""
-    echo "  - superpowers              (requires install — see step 3 below)"
-    echo "  - pr-review-toolkit        (built-in, no install needed)"
-    echo "  - frontend-design          (built-in, no install needed)"
+    echo "  - frontend-design          (optional Claude Code UI integration)"
     echo ""
     if [[ ! -f "$HOME/.claude/CLAUDE.md" ]]; then
         echo -e "${RED}┌──────────────────────────────────────────────────────────────┐${NC}"
@@ -1231,24 +1247,13 @@ else
     echo -e "2. ${BLUE}Set your project goal${NC} — In CLAUDE.md, add one sentence under '### Goal'"
     echo "   (Volatile state lives in .claude/local/state.md — gitignored, populated by /new-feature)"
     echo ""
-    echo -e "3. ${BLUE}Install the Superpowers plugin${NC} (one time):"
-    echo ""
-    echo "   claude"
-    echo "   /plugin install superpowers@claude-plugins-official"
-    echo ""
-    echo "   Then restart Claude Code."
-    echo ""
-    echo "   Note: pr-review-toolkit and frontend-design are built-in Claude Code plugins —"
-    echo "   no install needed. /simplify is a built-in command. They're already"
-    echo "   enabled in .claude/settings.json."
-    echo ""
-    echo -e "4. ${BLUE}Verify everything works${NC}:"
+    echo -e "3. ${BLUE}Verify everything works${NC}:"
     echo ""
     echo "   /hooks       → Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    echo "   /help        → Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*"
+    echo "   /help        → Should show Forge workflows for both installed hosts"
     echo "   /memory      → Should show your auto memory directory"
     echo ""
-    echo -e "5. ${BLUE}Commit and push${NC}:"
+    echo -e "4. ${BLUE}Commit and push${NC}:"
     echo ""
     echo "   git add .claude/ .mcp.json CLAUDE.md docs/"
     echo "   git commit -m \"chore: add Claude Code automation setup\""

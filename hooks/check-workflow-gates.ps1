@@ -451,7 +451,7 @@ if ($unchecked.Count -gt 0) {
     }
     [Console]::Error.WriteLine("")
     [Console]::Error.WriteLine("How to clear each gate:")
-    [Console]::Error.WriteLine("  - Code review loop:  run /codex review + /pr-review-toolkit:review-pr, fix findings")
+    [Console]::Error.WriteLine("  - Code review loop:  run /opinion for code-spec and code-quality, fix findings")
     [Console]::Error.WriteLine("  - Simplified:        run /simplify")
     [Console]::Error.WriteLine("  - Verified (tests):  run the verify-app agent")
     [Console]::Error.WriteLine("  - E2E verified:      run the verify-e2e agent AND persist its report, OR mark N/A:")

@@ -1318,6 +1318,26 @@ fi
 # guarded by the seed snapshot, section-scoped, fail-loud on divergence.
 # ---------------------------------------------------------------------------
 FBR="$REPO_ROOT/commands/finish-branch.md"
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "1" ]; then
+start_test "host-neutral finish-branch preserves guarded narrative fold before cleanup"
+assert_contains "$FBR" ".state-seed-snapshot.md"        "finish-branch reads the seed snapshot"
+assert_contains "$FBR" "## State"                       "finish-branch fold names the State narrative section"
+assert_contains "$FBR" "## Open Questions"              "finish-branch fold names Open Questions"
+assert_contains "$FBR" "## Blockers"                    "finish-branch fold names Blockers"
+assert_contains "$FBR" "FOLD_SAFE_STOP"                 "finish-branch stops on a missing or malformed seed"
+assert_contains "$FBR" "FOLD_DIVERGED"                  "finish-branch stops on primary-state divergence"
+assert_contains "$FBR" "stop cleanup"                   "finish-branch does not remove the worktree after a fold failure"
+assert_contains "$FBR" "Do not touch"                   "finish-branch preserves workflow and gate sections"
+assert_contains "$FBR" "## /goal session"               "finish-branch preserves goal authority"
+assert_contains "$FBR" ".forge/memory/"                 "finish-branch keeps durable memory separate"
+fold_line=$(grep -n '^## 3\. Preserve Continuity' "$FBR" | head -1 | cut -d: -f1)
+cleanup_line=$(grep -n '^## 4\. Cleanup' "$FBR" | head -1 | cut -d: -f1)
+if [ -n "$fold_line" ] && [ -n "$cleanup_line" ] && [ "$fold_line" -lt "$cleanup_line" ]; then
+    pass "guarded fold precedes cleanup ($fold_line < $cleanup_line)"
+else
+    fail "guarded fold must precede cleanup (fold=$fold_line cleanup=$cleanup_line)"
+fi
+else
 start_test "fold-back: guarded narrative fold present and ordered before worktree removal"
 assert_contains "$FBR" "extract_foldable"               "finish-branch defines/uses extract_foldable"
 assert_contains "$FBR" ".state-seed-snapshot.md"        "finish-branch reads the seed snapshot"
@@ -1340,6 +1360,7 @@ assert_contains "$FBR" "foldable_is_valid"              "finish-branch fold has 
 # Bind to the actual gate-exclusion clause, not a coincidental ## Workflow heading elsewhere in the file.
 assert_contains "$FBR" "Do NOT touch"                   "finish-branch fold action explicitly excludes the gate sections (Do NOT touch)"
 assert_contains "$FBR" "## /goal session"              "finish-branch fold names the gate sections it must not touch"
+fi
 
 # Byte-drift guard: the EXTRACT-FOLDABLE block must be identical (modulo indentation)
 # across new-feature.md step 2b, fix-bug.md step 2b, and finish-branch.md 2.2b — a silent
@@ -2023,7 +2044,7 @@ fi
 start_test "candidate-bound structured receipt vocabulary parity"
 
 ok=1
-for f in state.template.md rules/workflow.md commands/review.md; do
+for f in state.template.md rules/workflow.md commands/opinion.md; do
     for token in "code-spec" "code-quality"; do
         grep -qF "$token" "$REPO_ROOT/$f" \
             || { fail "$f missing structured review lens: $token"; ok=0; }
@@ -2105,14 +2126,14 @@ fi
 # Gate-2 diagram-honesty rule must be present in both review surfaces, with its
 # load-bearing parts (not just the phrase): the rule names "diagram edge", binds
 # to "file:line" evidence, and is a "P1" finding.
-for surface in commands/review.md rules/workflow.md; do
+for surface in commands/opinion.md rules/workflow.md; do
     for token in "diagram edge" "file:line" "P1"; do
         grep -qiF -- "$token" "$REPO_ROOT/$surface" \
             || { fail "$surface missing Gate-2 honesty-rule token: $token"; ok=0; }
     done
 done
 
-[ "$ok" = "1" ] && pass "DEV-DEMO block carries required stems + Gate-2 honesty rule present in review.md & workflow.md"
+[ "$ok" = "1" ] && pass "DEV-DEMO block carries required stems + Gate-2 honesty rule present in opinion.md & workflow.md"
 
 # ---------------------------------------------------------------------------
 # Contract: plan-stage "spec-loss is P1" severity rule parity (v5.50)
@@ -2151,11 +2172,16 @@ grep -qF -- "no P0/P1/P2 from all available reviewers on the same pass" "$REPO_R
 # ---------------------------------------------------------------------------
 # Contract: Task 5 host-neutral review replaces direct /codex launch policy.
 # ---------------------------------------------------------------------------
-start_test "host-neutral review command and transitional codex shim"
-REVIEW_MD="$REPO_ROOT/commands/review.md"
+start_test "host-neutral opinion command and transitional codex cutover"
+REVIEW_MD="$REPO_ROOT/commands/opinion.md"
 CODEX_MD="$REPO_ROOT/commands/codex.md"
-assert_contains "$CODEX_MD" ".forge/workflows/review.md" "codex shim delegates to canonical review workflow"
-assert_not_contains "$CODEX_MD" "codex-pty.sh exec" "codex shim carries no direct engine launch policy"
+if [ "$WORKFLOW_STAGE" = "complete" ]; then
+    assert_file_missing "$CODEX_MD" "completed cutover removes the codex shim"
+    assert_contains "$REPO_ROOT/manifests/managed-v6.tsv" $'tombstone\t-\t.claude/commands/codex.md' "retired shim has a provenance-aware tombstone"
+else
+    assert_contains "$CODEX_MD" ".forge/workflows/opinion.md" "codex shim delegates to canonical opinion workflow"
+    assert_not_contains "$CODEX_MD" "codex-pty.sh exec" "codex shim carries no direct engine launch policy"
+fi
 for stem in "--engine auto|claude|codex" "code-spec" "code-quality" "investigation-repro" "human-executed"; do
     assert_contains "$REVIEW_MD" "$stem" "review workflow carries load-bearing dispatch stem: $stem"
 done
@@ -2361,13 +2387,17 @@ check9_parity "redirect form (>/>>/N>)"     '[12]?>>?'
 check9_parity "single-token target stops at ;&|" '|&;'
 
 # ---------------------------------------------------------------------------
-# Contract: transitional shim stays policy-free while /review owns investigation.
+# Contract: transitional shim stays policy-free while /opinion owns investigation.
 # ---------------------------------------------------------------------------
 start_test "transitional codex shim has no direct investigation or model invocation"
-assert_not_contains "$REPO_ROOT/commands/codex.md" "## D) Investigate Mode" "codex shim has no duplicate investigation policy"
-assert_not_contains "$REPO_ROOT/commands/codex.md" "--output-last-message" "codex shim has no direct model argv"
-assert_contains "$REPO_ROOT/commands/review.md" "disposable candidate" "review workflow owns bounded investigation"
-assert_contains "$REPO_ROOT/commands/review.md" "independent control" "review workflow requires independent reproduction control"
+if [ "$WORKFLOW_STAGE" = "complete" ]; then
+    assert_file_missing "$REPO_ROOT/commands/codex.md" "completed cutover leaves no transitional shim"
+else
+    assert_not_contains "$REPO_ROOT/commands/codex.md" "## D) Investigate Mode" "codex shim has no duplicate investigation policy"
+    assert_not_contains "$REPO_ROOT/commands/codex.md" "--output-last-message" "codex shim has no direct model argv"
+fi
+assert_contains "$REPO_ROOT/commands/opinion.md" "disposable candidate" "opinion workflow owns bounded investigation"
+assert_contains "$REPO_ROOT/commands/opinion.md" "independent control" "opinion workflow requires independent reproduction control"
 
 # ---------------------------------------------------------------------------
 # Contract: post-tool-format must NOT run prettier on Markdown (v5.56).
@@ -2435,7 +2465,7 @@ assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'CreateNew' \
 
 start_test "Task 5 dispatcher surfaces are installed and every canonical workflow reference resolves"
 MANAGED_V6="$REPO_ROOT/manifests/managed-v6.tsv"
-for source in commands/review.md agents/independent-reviewer.md \
+for source in commands/opinion.md agents/independent-reviewer.md \
   hooks/lib/agent-dispatch.sh hooks/lib/agent-dispatch.ps1 \
   hooks/lib/host-context.sh hooks/lib/host-context.ps1 \
   hooks/lib/authorized-action.sh hooks/lib/authorized-action.ps1 \

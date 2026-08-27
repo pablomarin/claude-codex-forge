@@ -37,13 +37,22 @@ identity_mode() {
 }
 
 discovery_mode() {
-    local root="" count duplicates relative base seen_file
+    local root="" count duplicates relative base seen_file collision=0
     while [ "$#" -gt 0 ]; do
         case "$1" in --project-root) root="$2"; shift 2 ;; *) return 2 ;; esac
     done
     [ -d "$root/.forge/rules" ] && [ -f "$root/CLAUDE.md" ] && [ -f "$root/AGENTS.md" ] || return 3
     grep -qF '.forge/instructions.md' "$root/CLAUDE.md" || return 4
     grep -qF '.forge/instructions.md' "$root/AGENTS.md" || return 4
+    if [ -e "$root/.claude/commands/goal.md" ]; then
+        echo "RUNTIME_READY=BLOCKED host=claude custom native goal collision; rename .claude/commands/goal.md" >&2
+        collision=1
+    fi
+    if [ -e "$root/.agents/skills/goal" ]; then
+        echo "RUNTIME_READY=BLOCKED host=codex custom native goal collision; rename .agents/skills/goal/" >&2
+        collision=1
+    fi
+    [ "$collision" = 0 ] || return 5
     count=$(find "$root/.forge/rules" -type f -name '*.md' | wc -l | tr -d ' ')
     seen_file=$(mktemp "${TMPDIR:-/tmp}/forge-rules.XXXXXX")
     # Host adapters import .forge/rules; adapter skills and workflows may share
@@ -68,6 +77,11 @@ live_mode() {
     }
     command -v "$host" >/dev/null 2>&1 || { echo "BLOCKED: $host binary unavailable"; return 11; }
     [ -d "$root/.forge" ] || { echo "BLOCKED: materialized project missing"; return 12; }
+    case "$host" in
+        claude) [ ! -e "$root/.claude/commands/goal.md" ] || { echo "RUNTIME_READY=BLOCKED host=claude custom native goal collision; rename .claude/commands/goal.md"; return 14; } ;;
+        codex) [ ! -e "$root/.agents/skills/goal" ] || { echo "RUNTIME_READY=BLOCKED host=codex custom native goal collision; rename .agents/skills/goal/"; return 14; } ;;
+        *) return 2 ;;
+    esac
     echo "BLOCKED: host-specific authenticated sentinel is owned by qualify-dispatch-isolation; inventory alone is not RUNTIME_READY"
     return 13
 }

@@ -6,22 +6,22 @@
 
 ### macOS / Linux
 
-- **Claude Code** installed and working (`claude --version`)
-- **Node.js 22+** (for Codex CLI, npx commands, and Playwright MCP)
+- **Claude Code, Codex, or both** installed and authenticated
+- **Node.js 22+** when required by your selected CLI or project tooling
 - **Git 2.23+** initialized in your project
 - **jq** (recommended, not required): `brew install jq` (macOS) or `apt install jq` (Linux). Used for JSON merging during global setup (falls back to Python if unavailable). Hooks work without it.
-- **Codex CLI** (**required** for the full workflow): `npm i -g @openai/codex` or `brew install --cask codex` (macOS). Powers the first-pass code review (`/codex review`), design review, and 3 of the 5 Engineering Council roles (chairman + 2 advisors). Without it, those steps degrade to manual user review. See [Step 5](#step-5-install-codex-cli-required) for full instructions.
+- **Codex CLI** (optional second engine): `npm i -g @openai/codex` or `brew install --cask codex`
 - **Python 3.12+** with `uv` (if Python project)
 - **pnpm** or **npm** (if JavaScript/TypeScript project)
 
 ### Windows
 
-- **Claude Code** installed and working (`claude --version`)
+- **Claude Code, Codex, or both** installed and authenticated
 - **WSL2** (recommended for Codex CLI): `wsl --install` from elevated PowerShell
 - **PowerShell 5.1+** (included with Windows 10/11)
 - **Node.js 22+** (for Codex CLI, npx commands, and Playwright MCP)
 - **Git 2.23+** initialized in your project
-- **Codex CLI** (**required** for the full workflow): `npm i -g @openai/codex` inside WSL. Powers the first-pass code review, design review, and 3 of the 5 Engineering Council roles. Without it, those steps degrade to manual user review. See [Step 5](#step-5-install-codex-cli-required) for full instructions.
+- **Codex CLI** (optional second engine): `npm i -g @openai/codex` inside WSL
 - **Python 3.12+** with `uv` (if Python project)
 - **pnpm** or **npm** (if JavaScript/TypeScript project)
 
@@ -71,35 +71,13 @@ cd /path/to/your/project
 
 For tech-specific scenarios (new project, existing project with/without Claude Code, upgrading) see [Setup Scenarios](guides/setup-scenarios.md).
 
-## Step 4: Install the Superpowers plugin (once per machine)
+## Step 4: Optionally install the other engine
 
-Start Claude Code and install Superpowers from Anthropic's official marketplace:
+Forge installs the same dual-host harness regardless of which engine is currently available. With
+both engines installed, `/opinion` defaults to the other engine. With only one, review and council
+fall back automatically and visibly to fresh same-engine sessions.
 
-```bash
-claude
-```
-
-Then inside Claude Code:
-
-```
-/plugin install superpowers@claude-plugins-official
-```
-
-Restart Claude Code.
-
-> **Note:** `pr-review-toolkit` and `frontend-design` are built-in Claude Code plugins pre-enabled in `.claude/settings.json`. `/simplify` is a built-in Claude Code command (no plugin needed). `superpowers` requires a separate install (step above).
->
-> **Why the official marketplace?** Same plugin, but `superpowers@claude-plugins-official` (Anthropic-curated since 2026-01-15) installs in one step with no `marketplace add` prerequisite. The community `superpowers@superpowers-marketplace` works too, but [obra/superpowers-marketplace#11](https://github.com/obra/superpowers-marketplace/issues/11) documents an upstream Claude Code plugin-name-conflict bug that surfaces when both identities exist on the same machine.
-
-## Step 5: Install Codex CLI (required)
-
-Codex CLI is **required for the full workflow**. It powers three core phases:
-
-- **Design review** — independent validation of your plan before any code is written
-- **First-pass code review** (`/codex review`) — runs before the deep `/pr-review-toolkit:review-pr` pass
-- **Engineering Council** — Codex is the chairman plus 2 of the 5 advisor roles (3 total)
-
-Without Codex, those phases degrade to manual user review. The workflow still runs, but you lose the independent second opinion that catches issues Claude missed.
+## Step 5: Install Codex CLI (optional)
 
 **macOS / Linux:**
 
@@ -138,7 +116,8 @@ codex login --with-api-key
 codex --version   # Should show version 0.101.0+
 ```
 
-> **No Codex available?** The workflow still runs — Claude presents design plans to you for manual review, and the `/codex review` and Engineering Council steps fall back to user-led review. You lose the independent second opinion but nothing is blocked.
+> **No Codex available?** The workflow continues with fresh Claude reviewers and an all-Claude
+> council. The reverse applies when Codex is installed and Claude Code is unavailable.
 
 ## Step 6: Verify setup
 
@@ -146,7 +125,7 @@ Inside Claude Code, run:
 
 ```
 /hooks       → Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange
-/help        → Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*
+/help        → Should show: /opinion, /new-feature, /fix-bug, /prd:*
 /memory      → Should show your auto memory directory
 ```
 

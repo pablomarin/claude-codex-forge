@@ -1,4 +1,4 @@
-# /review — Host-neutral Fresh Review and Investigation
+# /opinion — Host-neutral Fresh Review and Investigation
 
 Use the host-fixed launcher registered by the active Claude Code or Codex adapter. Never invent a
 `main` engine flag: the SessionStart context determines the main host. User-facing reviewer choices
@@ -7,11 +7,12 @@ same-engine request is a fresh independent reviewer, not a fallback.
 
 ## Inputs
 
-Classify `$ARGUMENTS` as one of: General second opinion/analysis/brainstorming/question (`general`),
-plan, PRD, review comments, code review, investigation, or independent investigation reproduction.
-General is hermetic and read-only. Resolve the workflow's persisted immutable base SHA/ref from
-`.forge/local/state.md`; never recompute it from a moving default branch. Put the exact request in a
-regular prompt file under `.forge/local/reviews/`.
+`/opinion investigate <request>` selects the investigation profile. Otherwise classify the request
+as one of: general second opinion/analysis/brainstorming/question (`general`), plan, PRD, review
+comments, code review, or independent investigation reproduction. General is hermetic and
+read-only. Resolve the workflow's persisted immutable base SHA/ref from `.forge/local/state.md`;
+never recompute it from a moving default branch. Put the exact request in a regular prompt file
+under `.forge/local/reviews/`.
 
 Invoke the fixed launcher for this host:
 

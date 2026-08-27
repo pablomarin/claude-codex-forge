@@ -466,7 +466,7 @@ if [ -n "$UNCHECKED" ]; then
     echo "$MISSING" >&2
     echo "" >&2
     echo "How to clear each gate:" >&2
-    echo "  - Code review loop:  run /codex review + /pr-review-toolkit:review-pr, fix findings" >&2
+    echo "  - Code review loop:  run /opinion for code-spec and code-quality, fix findings" >&2
     echo "  - Simplified:        run /simplify" >&2
     echo "  - Verified (tests):  run the verify-app agent" >&2
     echo "  - E2E verified:      run the verify-e2e agent AND persist its report, OR mark N/A:" >&2

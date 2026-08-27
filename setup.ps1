@@ -41,6 +41,16 @@ if ($FullRefresh -and ($Force -or $Upgrade -or $Migrate -or $WithPlaywright)) {
     exit 1
 }
 
+function Write-NativeGoalCollisions {
+    param([string]$Root)
+    if (Test-Path -LiteralPath (Join-Path $Root ".claude\commands\goal.md")) {
+        Write-Host "RUNTIME_READY=BLOCKED host=claude custom native goal collision; rename .claude/commands/goal.md and rerun setup"
+    }
+    if (Test-Path -LiteralPath (Join-Path $Root ".agents\skills\goal")) {
+        Write-Host "RUNTIME_READY=BLOCKED host=codex custom native goal collision; rename .agents/skills/goal/ and rerun setup"
+    }
+}
+
 # Upgrade implies force for hooks/commands/rules
 if ($Upgrade) { $Force = $true }
 
@@ -94,7 +104,10 @@ if ($FullRefresh) {
         exit 1
     }
     if ($Global) { & $refreshHelper -Target $HOME -Scope global }
-    else { & $refreshHelper -Target (Get-Location).Path -Scope project }
+    else {
+        & $refreshHelper -Target (Get-Location).Path -Scope project
+        if ($LASTEXITCODE -eq 0) { Write-NativeGoalCollisions (Get-Location).Path }
+    }
     exit $LASTEXITCODE
 }
 
@@ -141,7 +154,15 @@ function Test-V6PreflightNoLegacy {
         } elseif ($destination.StartsWith(".claude/")) {
             $tail = $destination.Substring(8)
             $family = $tail.Split('/')[0]
-            if (-not (Test-Path (Join-Path $Root ".claude\$family"))) { continue }
+            $familyPath = Join-Path $Root ".claude\$family"
+            if (-not (Test-Path $familyPath)) { continue }
+            # A lone custom native goal is not a legacy Forge harness. Let
+            # setup preserve it and report the explicit goal collision.
+            if ($Scope -eq "project" -and $family -eq "commands") {
+                $members = @(Get-ChildItem -Force $familyPath)
+                $goalPath = Join-Path $familyPath "goal.md"
+                if ((Test-Path $goalPath -PathType Leaf) -and $members.Count -eq 1 -and $members[0].Name -eq "goal.md") { continue }
+            }
         } else { continue }
         if ($Upgrade) {
             if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness requires authoritative refresh. Run: & '$ScriptDir\setup.ps1' -Global -R" }
@@ -717,6 +738,7 @@ if ($hadContinuity -and (Test-Path "CLAUDE.md")) {
 }
 
 & (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows
+Write-NativeGoalCollisions (Get-Location).Path
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Retain the v5 implementation text for Task 3 ownership recognition, but do
@@ -822,7 +844,7 @@ Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "r
 # exec runs without a controlling TTY). Both .ps1 + .sh + helper.py ship for
 # cross-platform parity (ADR 0005).
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.ps1") "$libDir\codex-pty.ps1" "$libDir\codex-pty.ps1 (codex PTY shim, openai/codex#19945)"
-Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.sh") "$libDir\codex-pty.sh" "$libDir\codex-pty.sh (codex PTY shim, bash — used by commands/codex.md callsites)"
+Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.sh") "$libDir\codex-pty.sh" "$libDir\codex-pty.sh (Codex PTY shim, bash)"
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty-helper.py") "$libDir\codex-pty-helper.py" "$libDir\codex-pty-helper.py (Python pty.fork helper for the shim)"
 }
 
@@ -887,7 +909,6 @@ Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "new-feature.md")
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "fix-bug.md") ".claude\commands\fix-bug.md" ".claude\commands\fix-bug.md"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "quick-fix.md") ".claude\commands\quick-fix.md" ".claude\commands\quick-fix.md"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "finish-branch.md") ".claude\commands\finish-branch.md" ".claude\commands\finish-branch.md"
-Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "codex.md") ".claude\commands\codex.md" ".claude\commands\codex.md"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "review-pr-comments.md") ".claude\commands\review-pr-comments.md" ".claude\commands\review-pr-comments.md"
 
 # Commands - PRD
@@ -1232,7 +1253,7 @@ if ($Upgrade) {
     Write-Host ":"
     Write-Host ""
     Write-Host "   /hooks       -> Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    Write-Host "   /help        -> Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*"
+    Write-Host "   /help        -> Should show Forge workflows for both installed hosts"
     Write-Host ""
     Write-Host "2. " -NoNewline
     Write-Color "Commit and push" "Blue"
@@ -1349,11 +1370,9 @@ if ($Upgrade) {
     Write-Host "  .claude\skills\           Skills (release, council, ui-design if typescript/fullstack)"
     Write-Host "  docs\                    Changelog, ADRs (docs\adr\), PRDs, solutions knowledge base"
     Write-Host ""
-    Write-Color "Plugins pre-enabled in .claude\settings.json:" "Yellow"
+    Write-Color "Optional host integration enabled in .claude\settings.json:" "Yellow"
     Write-Host ""
-    Write-Host "  - superpowers              (requires install - see step 3 below)"
-    Write-Host "  - pr-review-toolkit        (built-in, no install needed)"
-    Write-Host "  - frontend-design          (built-in, no install needed)"
+    Write-Host "  - frontend-design          (optional Claude Code UI integration)"
     Write-Host ""
     # Check if global setup needed
     $globalClaude = Join-Path (Join-Path $HOME ".claude") "CLAUDE.md"
@@ -1385,27 +1404,14 @@ if ($Upgrade) {
     Write-Host "   (Volatile state lives in .claude\local\state.md - gitignored, populated by /new-feature)"
     Write-Host ""
     Write-Host "3. " -NoNewline
-    Write-Color "Install the Superpowers plugin" "Blue"
-    Write-Host " (one time):"
-    Write-Host ""
-    Write-Host "   claude"
-    Write-Host "   /plugin install superpowers@claude-plugins-official"
-    Write-Host ""
-    Write-Host "   Then restart Claude Code."
-    Write-Host ""
-    Write-Host "   Note: pr-review-toolkit and frontend-design are built-in Claude Code plugins -"
-    Write-Host "   no install needed. /simplify is a built-in command. They're already"
-    Write-Host "   enabled in .claude\settings.json."
-    Write-Host ""
-    Write-Host "4. " -NoNewline
     Write-Color "Verify everything works" "Blue"
     Write-Host ":"
     Write-Host ""
     Write-Host "   /hooks       -> Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    Write-Host "   /help        -> Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*"
+    Write-Host "   /help        -> Should show Forge workflows for both installed hosts"
     Write-Host "   /memory      -> Should show your auto memory directory"
     Write-Host ""
-    Write-Host "5. " -NoNewline
+    Write-Host "4. " -NoNewline
     Write-Color "Commit and push" "Blue"
     Write-Host ":"
     Write-Host ""

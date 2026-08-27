@@ -7,7 +7,8 @@
 | New capability | `/new-feature <name>` |
 | Reproduce and fix a defect | `/fix-bug <name>` |
 | Trivial, low-risk change under the quick-fix limits | `/quick-fix <name>` |
-| Fresh second opinion, code review, or investigation | `/review <request>` |
+| Fresh second opinion or code review | `/opinion <request>` |
+| Investigation with disposable write/network capability | `/opinion investigate <request>` |
 | Resolve engineering ambiguity | `/council <question>` |
 | Process PR feedback | `/review-pr-comments` |
 | Merge and clean up after approval | `/finish-branch` |

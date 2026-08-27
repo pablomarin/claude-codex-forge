@@ -42,9 +42,9 @@ How a feature goes from idea to merged PR.
 │    └──────────────────┬────────────────────────┘            │
 │                       ▼                                     │
 │    ┌───────────────────────────────────────────┐            │
-│    │ c. Claude + /codex review the plan        │◄──┐        │
+│    │ c. Main host + /opinion review the plan   │◄──┐        │
 │    │    → Two independent validations          │   │        │
-│    │    → If no Codex: user reviews instead    │   │        │
+│    │    → Other engine, else fresh same-engine │   │        │
 │    └──────────────────┬────────────────────────┘   │        │
 │                       ▼                            │        │
 │              ┌────────────────┐                    │        │
@@ -77,10 +77,9 @@ How a feature goes from idea to merged PR.
 │ 6. CODE REVIEW LOOP (repeats until no P0/P1/P2 issues)      │
 │                                                             │
 │    ┌──────────────────────┐ ┌────────────────────────────┐  │
-│    │ /codex review        │ │ /pr-review-toolkit:review-pr│ │
-│    │ → Independent second │ │ → 6 specialized agents      │ │
-│    │   opinion from Codex │ │   (silent failures, tests,  │ │
-│    │                      │ │    types, comments, code)   │ │
+│    │ /opinion code-spec   │ │ /opinion code-quality       │ │
+│    │ → Fresh requirements │ │ → Fresh quality lens        │ │
+│    │   conformance lens   │ │   on the same candidate     │ │
 │    └──────────┬───────────┘ └─────────────┬───────────────┘ │
 │               └──────────┬────────────────┘                 │
 │                          ▼                                  │

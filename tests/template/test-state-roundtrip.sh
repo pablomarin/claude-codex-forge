@@ -174,6 +174,33 @@ assert_contains "$SM/.forge/local/state.md" 'Code review iteration <N>' \
 
 NF="$REPO_ROOT/commands/new-feature.md"
 FBR="$REPO_ROOT/commands/finish-branch.md"
+WORKFLOW_STAGE=$(sed -n 's/^# conversion-stage:[[:space:]]*//p' \
+    "$REPO_ROOT/manifests/workflow-capabilities.tsv" | head -1)
+
+if [ "$WORKFLOW_STAGE" = "complete" ]; then
+    start_test "host-neutral workflows preserve seed-snapshot round-trip semantics"
+    for workflow in new-feature fix-bug; do
+        surface="$REPO_ROOT/commands/$workflow.md"
+        assert_contains "$surface" '.forge/local/.state-seed-snapshot.md' \
+            "$workflow persists the primary narrative baseline"
+        assert_contains "$surface" '### Now` cleared' \
+            "$workflow clears volatile Now content when seeding"
+        assert_contains "$surface" 'Never seed workflow, goal, authorization, or receipt' \
+            "$workflow excludes gate and authority sections"
+        assert_contains "$surface" 'explicit reconciliation baseline' \
+            "$workflow refuses to guess a missing adopted-worktree baseline"
+    done
+    assert_contains "$FBR" '.forge/local/.state-seed-snapshot.md' \
+        "finish-branch reads the persisted seed baseline"
+    assert_contains "$FBR" 'FOLD_SAFE_STOP' \
+        "finish-branch stops on a missing or malformed baseline"
+    assert_contains "$FBR" 'FOLD_DIVERGED' \
+        "finish-branch stops when primary narrative changed"
+    assert_contains "$FBR" 'Do not touch `## Workflow`, `## /goal session`, `## PR authorization`' \
+        "finish-branch preserves gate and authority sections"
+    report "test-state-roundtrip.sh"
+    exit 0
+fi
 
 # --- Load the REAL extract_foldable from the shipped new-feature.md (between markers) ---
 EF_SRC="$(sed -n '/# EXTRACT-FOLDABLE-BEGIN/,/# EXTRACT-FOLDABLE-END/p' "$NF")"

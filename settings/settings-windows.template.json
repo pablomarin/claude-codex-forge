@@ -1,7 +1,5 @@
 {
   "enabledPlugins": {
-    "superpowers@claude-plugins-official": true,
-    "pr-review-toolkit@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true
   },
   "permissions": {
@@ -111,16 +109,6 @@
             "type": "command",
             "forgeManagedId": "subagent-review-receipt",
             "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/check-subagent-review.ps1\""
-          }
-        ]
-      },
-      {
-        "matcher": "^(?!forge-v6-producer$).+",
-        "hooks": [
-          {
-            "type": "prompt",
-            "model": "sonnet",
-            "prompt": "Legacy evaluator stage-gated through Task 9. This matcher is disjoint from the forge-v6-producer command receipt evaluator. Evaluate the subagent's output quality. Consider:\n1. Did the subagent complete its assigned task?\n2. Is the output useful and actionable?\n3. Were there any errors or issues?\n\nYou MUST respond with ONLY a JSON object in one of these formats:\n{\"ok\": true} - if the subagent completed successfully\n{\"ok\": false, \"reason\": \"explanation of what went wrong\"} - if issues were found\n\nRespond with ONLY the JSON object, no other text."
           }
         ]
       }

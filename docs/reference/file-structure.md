@@ -53,7 +53,7 @@ your-project/
 │   │   ├── fix-bug.md                 # /fix-bug - Bug fix workflow
 │   │   ├── quick-fix.md               # /quick-fix - Trivial changes only
 │   │   ├── finish-branch.md           # /finish-branch - Merge PR + cleanup workflow
-│   │   ├── codex.md                   # /codex - Second opinion via Codex CLI
+│   │   ├── opinion.md                 # /opinion - Host-neutral fresh review/investigation
 │   │   ├── review-pr-comments.md      # /review-pr-comments - Process PR feedback
 │   │   └── prd/
 │   │       ├── discuss.md             # /prd:discuss command

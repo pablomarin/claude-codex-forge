@@ -11,29 +11,33 @@ All slash commands and subagents available after setup.
 | `/quick-fix <name>`   | Trivial changes only  | < 3 files, no arch impact, still requires verify                                 |
 | `/finish-branch`      | Merge + cleanup       | Merge PR to main → Delete remote/local branch + worktree → Restart servers       |
 
-**Workflow commands guide the process.** `.claude/local/state.md` is read on demand by hooks (not auto-loaded), and the Stop hook reminds you to keep it current; `check-workflow-gates.sh` validates completion before commit/push/PR.
+**Workflow commands guide the process.** `.forge/local/state.md` is the host-neutral durable
+checkpoint; hooks validate its current candidate evidence before commit/push/PR.
 
 ### Autonomous loop (`/goal`)
 
-`/goal` is not a Forge command you install — it's Claude Code's built-in, invoked with a Forge-composed instruction. After the PRD is approved in `/new-feature` (or the plan in `/fix-bug`), the workflow **offers** you a ready-to-paste `/goal …` command. Paste it and the agent drives the rest of the lifecycle — plan → review → implement → review → verify → E2E → PR — autonomously, routing hard decisions to `/council` and stopping only at the PR-creation gate. It's **optional and PRD-gated**; declining keeps you in manual phase-by-phase mode. In either mode you watch and steer by typing in the prompt. Full behavior: [Autonomous Goal Mode](../explanation/autonomous-goal.md); the agent's autonomous-run rules live in `rules/workflow.md` ("Council During `/forge-goal` Autonomous Run").
+`/goal` remains each host's native command; Forge never installs a command or skill with that name.
+The root adapter composes native autonomy over `.forge/workflows/goal.md`, including persistent
+budget, exact resume, evidence, and human-authorization boundaries.
 
 ## Decision Analysis
 
-| Command                | Purpose                       | Notes                                                                                                                                                                             |
-| ---------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/council <question>`  | Multi-perspective analysis    | 5 advisors (3 Claude + 2 Codex) + Codex chairman. See [The Engineering Council](../explanation/engineering-council.md) for personas, when it fires, and the minority-report rule. |
-| `/codex <instruction>` | Second opinion from Codex CLI | Four modes: Code Review, Design Review, General (all hermetic — read-only, no network), and **Investigate** (live-system access — see below).                                     |
+| Command                           | Purpose                    | Notes |
+| --------------------------------- | -------------------------- | ----- |
+| `/council <question>`             | Multi-perspective analysis | Uses both engines when available; otherwise reruns the whole topology on the main engine. |
+| `/opinion <request>`              | Fresh independent opinion  | Chooses Claude Code or Codex with automatic visible same-engine fallback. |
+| `/opinion investigate <request>`  | Bounded investigation      | Disposable candidate, declared read-only query channel, and independent reproduction. |
 
-### `/codex` modes
+### `/opinion` profiles
 
-**You don't pick the mode — Claude does, from your request.** Codex itself has no concept of modes; it just receives a prompt + sandbox flags. The three hermetic modes are **keyword/context-routed** (e.g. "review", "review the plan", or a general question). **Investigate is capability-routed**, not keyword-triggered: Claude enters it only when the task genuinely needs project credentials, network, an external system (DB/cloud/API), live data, or to execute something — so a plain "review this" never silently escalates to live access. Describe the work in plain language; Claude maps it to the right mode and only grants Codex live access when the task demands it.
+Forge deliberately uses `/opinion` because `/review` is reserved by both supported hosts. Ordinary
+requests are hermetic and read-only. Investigation is explicit: use `/opinion investigate` when the
+task needs network, execution, or a declared live-data query channel.
 
-| Mode            | Sandbox / network                                                                 | Use for                                                                                                                                                                                                                                                                                                                                                    |
-| --------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Code Review     | `exec review`, hermetic (read-only, no network)                                   | Reviewing committed/uncommitted diffs                                                                                                                                                                                                                                                                                                                      |
-| Design Review   | `--sandbox read-only`, no network                                                 | Reviewing a plan/design before implementation                                                                                                                                                                                                                                                                                                              |
-| General         | `--sandbox read-only`, no network                                                 | A second opinion / analysis question                                                                                                                                                                                                                                                                                                                       |
-| **Investigate** | `--sandbox workspace-write` + network, repo-confined (never `danger-full-access`) | Debugging / reverse-engineering / data-spelunking against **live systems** — Codex runs queries, reaches DBs/APIs, executes. Read-only / non-mutating; Claude provisions it from the project's own connection surface; findings cross-verified. Works inside an autonomous `/goal` run. See [Codex Investigate Mode](../explanation/codex-investigate.md). |
+| Profile           | Boundary | Use for |
+| ----------------- | -------- | ------- |
+| General/plan/code | Hermetic, read-only, no network | Independent analysis and candidate-bound review |
+| `investigate`     | Disposable workspace plus explicitly declared capabilities | Reproduction or live-state fact finding; replay is bounded and findings require an independent control |
 
 ## PRD Commands (Requirements)
 
@@ -42,27 +46,14 @@ All slash commands and subagents available after setup.
 | `/prd:discuss {feature}` | Interactive user story refinement | `docs/prds/{feature}-discussion.md` |
 | `/prd:create {feature}`  | Generate structured PRD           | `docs/prds/{feature}.md`            |
 
-## Superpowers Commands (Design → Execute → Debug)
-
-| Command                                       | Purpose                                                    | Notes                                    |
-| --------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------- |
-| `/superpowers:brainstorming`                  | Interactive design refinement                              | Uses PRD context                         |
-| `/superpowers:writing-plans`                  | Create detailed implementation plan                        | TDD tasks                                |
-| `/superpowers:subagent-driven-development`    | Execute plan via dispatched subagents (default in Phase 4) | TDD enforced, parallel via Dispatch Plan |
-| `/superpowers:executing-plans`                | Execute plan in a separate session                         | Headless / walk-away mode                |
-| `/superpowers:systematic-debugging`           | 4-phase root cause analysis                                | Before ANY bug fix                       |
-| `/superpowers:verification-before-completion` | Evidence-based completion check                            | Catches "should work" claims             |
-
 ## Quality Gates (Pre-PR — in this order)
 
-| Command / Agent                | Purpose                                                        | Notes                                       |
-| ------------------------------ | -------------------------------------------------------------- | ------------------------------------------- |
-| `/codex review`                | First review after implementation — independent second opinion | Codex CLI (uncommitted/base/commit options) |
-| `/codex {instruction}`         | General second opinion                                         | Runs `codex exec` in read-only sandbox      |
-| `/pr-review-toolkit:review-pr` | Deep multi-analyzer review (6 agents)                          | Silent failures, test coverage, type design |
-| `/simplify`                    | Clean up modified files                                        | Built-in command, no plugin needed          |
-| `verify-app` agent             | Unit tests, migration check, lint, types                       | "Use the verify-app agent"                  |
-| `verify-e2e` agent             | User-journey E2E (API / UI / CLI) + regression suite replay    | "Use the verify-e2e agent"                  |
+| Command / Agent    | Purpose |
+| ------------------ | ------- |
+| `/opinion`         | Distinct fresh code-spec and code-quality receipts over one frozen candidate |
+| Simplification phase | Forge-owned cleanup before final candidate freeze |
+| `verify-app` agent | Unit tests, migration check, lint, and types |
+| `verify-e2e` agent | User-journey E2E plus regression replay |
 
 ## Research Enforcement (Pre-Design — Phase 2)
 

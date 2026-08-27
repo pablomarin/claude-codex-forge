@@ -13,7 +13,7 @@
   <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.61-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
-  <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-required-orange?style=flat-square"></a>
+  <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-supported-orange?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -32,11 +32,17 @@
 
 ---
 
-Claude Codex Forge combines **Claude Code** and **OpenAI's Codex** into a single workflow. Two agents beat one: Claude designs, Codex independently reviews, and the Engineering Council adjudicates when they disagree. What started as a set of workflow templates has grown — through continuous iteration — into a full engineering harness.
+Claude Codex Forge combines **Claude Code** and **OpenAI's Codex** into a single workflow. Either
+installed host can lead; `/opinion` selects a fresh reviewer automatically and visibly falls back to
+a fresh same-engine reviewer when the other engine is unavailable. What started as workflow
+templates has grown into a full engineering harness.
 
 ## What you get
 
-- **Dual-agent review** — `/codex review` (independent second opinion) + `/council` (5-advisor panel with Codex chairman, see [explainer](docs/explanation/engineering-council.md)) catch issues one agent alone would miss; two separately-trained models flag different concerns — disagreement is the signal. And Codex isn't limited to reading code: **[Investigate mode](docs/explanation/codex-investigate.md)** gives it real, sandboxed hands on your live systems (query a DB, hit a cloud API, reproduce a bug) when a question can't be answered from source alone — repo-confined, read-only, every finding cross-verified.
+- **Dual-engine review** — `/opinion` requests a fresh second opinion from Claude Code or Codex;
+  `/opinion investigate` adds disposable, sandboxed investigation when source alone is insufficient.
+  `/council` adds multi-perspective decision analysis, with automatic whole-topology fallback when
+  only one engine is available.
 - **Autonomous goal mode** — write a sharp PRD, then paste one `/goal` command and the agent drives the entire feature — plan → review → implement → review → verify → E2E → PR — on its own, escalating hard calls to the Council instead of stopping to ask. Optional and PRD-gated; you watch and steer any time by typing in the prompt, and PR creation is the one gate that always waits for your yes. See [explainer](docs/explanation/autonomous-goal.md).
 - **Discipline by construction** — workflow commands bake in TDD, research-before-design, and E2E testing. Hooks block dangerous Bash, enforce state updates, and gate commit/push/PR on explicit quality markers.
 - **Continuous memory** — auto-memory persists locally across sessions and compaction (rescued by the `PreCompact` hook); `docs/adr/`, `docs/CHANGELOG.md`, and `docs/solutions/` travel with the repo so every architecture decision, root cause, and pattern compounds across weeks and teammates via git. Per-developer Workflow / Done / Now / Next state lives in gitignored `.claude/local/state.md` — read by hooks on demand, kept out of Claude's auto-loaded context.
@@ -44,7 +50,9 @@ Claude Codex Forge combines **Claude Code** and **OpenAI's Codex** into a single
 
 ## Quick start
 
-**Prerequisites:** [Claude Code](https://code.claude.com/docs) · [Node.js 22+](https://nodejs.org) · Git 2.23+ · a [ChatGPT Plus/Pro/Business plan or OpenAI API key](https://developers.openai.com/codex/) for Codex CLI.
+**Prerequisites:** Claude Code, Codex, or both · Git 2.23+. Codex authentication is needed only when
+you want Codex to participate; Claude Code authentication is needed only when you want Claude to
+participate.
 
 ```bash
 # 1. Clone this harness repo (once per machine)
@@ -54,7 +62,7 @@ chmod +x ~/claude-codex-forge/setup.sh
 # 2. Global setup once per machine (installs the memory system)
 ~/claude-codex-forge/setup.sh --global
 
-# 3. Install Codex CLI + authenticate (required for dual-agent review)
+# 3. Optional: install and authenticate the other engine
 npm install -g @openai/codex   # or: brew install --cask codex
 codex login
 
@@ -62,11 +70,10 @@ codex login
 cd /path/to/your/project
 ~/claude-codex-forge/setup.sh -p "My Project"
 
-# 5. Start Claude Code, install the Superpowers plugin, restart
+# 5. Start either supported host
 claude
-> /plugin install superpowers@claude-plugins-official
 
-# 6. Restart Claude Code, then kick off your first workflow
+# 6. Kick off your first workflow
 > /new-feature my-feature
 ```
 
@@ -114,13 +121,14 @@ See [`docs/guides/upgrading.md`](docs/guides/upgrading.md) for the full walkthro
 
 ## How it works
 
-One feature goes from idea to merged PR across 14 enforced phases — from PRD through research, dual-reviewer design loops, TDD execution, parallel code review, simplify + verify + E2E, compound learnings, and PR reviewer handling.
+One feature goes from idea to merged PR across a host-neutral lifecycle: PRD, research, planning,
+TDD execution, fresh dual-lens review, simplification, verification, E2E, memory, and PR handling.
 
 See **[the full workflow diagram](docs/explanation/workflow.md)** for the complete view, or jump straight to:
 
 - **[Why a harness, not a template](docs/explanation/harness-philosophy.md)** — the two-agent design, discipline by construction, continuous memory
 - **[Autonomous goal mode](docs/explanation/autonomous-goal.md)** — paste one `/goal`, the agent drives PRD→PR; you watch and steer
-- **[Codex Investigate mode](docs/explanation/codex-investigate.md)** — give Codex real hands on live systems, safely
+- **[Investigation profile](docs/explanation/codex-investigate.md)** — use `/opinion investigate` for bounded live-system fact finding
 - **[Commands reference](docs/reference/commands.md)** — every slash command and subagent
 - **[Hooks reference](docs/reference/hooks.md)** — seven hook events that keep discipline structural
 
@@ -142,7 +150,7 @@ See **[the full workflow diagram](docs/explanation/workflow.md)** for the comple
 | **[Cheatsheet](docs/reference/cheatsheet.md)**                      | Copy-paste daily-workflow card                                              |
 | **[Workflow (full)](docs/explanation/workflow.md)**                 | 14-phase diagram with rationale                                             |
 | **[Autonomous Goal Mode](docs/explanation/autonomous-goal.md)**     | `/goal` PRD→PR autonomy — optional, PRD-gated, watch-and-steer              |
-| **[Codex Investigate Mode](docs/explanation/codex-investigate.md)** | Give Codex live-system access (DB/cloud/API) safely; works inside `/goal`   |
+| **[`/opinion investigate`](docs/explanation/codex-investigate.md)** | Bounded, independently reproduced live-system fact finding                |
 | **[Harness Philosophy](docs/explanation/harness-philosophy.md)**    | Why dual-agent, why discipline, why continuous memory                       |
 | **[Memory Architecture](docs/explanation/memory-architecture.md)**  | Global + project + auto-memory layers                                       |
 | **[Troubleshooting](docs/troubleshooting.md)**                      | Memory · hooks · permissions · MCP · plugins · Codex                        |
@@ -152,7 +160,9 @@ See **[the full workflow diagram](docs/explanation/workflow.md)** for the comple
 The pillars above cash out in specific, repo-verifiable behavior:
 
 - **Compaction rescue** — `PreCompact` hook flushes session learnings to auto-memory _before_ context compression, so nothing is dropped silently
-- **Review ordering enforced** — `/codex review` runs _first_ as an independent pass, then `/pr-review-toolkit:review-pr` (6 deep agents), then `/simplify`, then post-PR `/review-pr-comments`. Commits are blocked until quality markers are present.
+- **Review ordering enforced** — `/opinion` produces distinct code-spec and code-quality receipts
+  over one frozen candidate, followed by verify-app and E2E. Commits are blocked until the current
+  candidate-bound evidence is present.
 - **Worktree isolation** — `/new-feature` and `/fix-bug` auto-create git worktrees so parallel Claude sessions never share filesystem state
 - **E2E for user-facing changes** — `verify-e2e` subagent replays `tests/e2e/use-cases/*.md` as a growing regression suite; optional `--with-playwright` scaffolds deterministic `.spec.ts` for contributor PRs in CI
 

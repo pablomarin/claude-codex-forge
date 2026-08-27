@@ -30,7 +30,7 @@ done
 assert_contains "$REPO_ROOT/docs/prds/forge-goal.md" "Native host counters may reset; the authoritative Forge ceiling and consumed count never reset" "resume never resets the Forge budget"
 
 start_test "bounded stage rejects unresolved external runtime dependencies"
-scan_files="commands/review.md commands/prd/discuss.md commands/prd/create.md agents/research-first.md agents/verify-app.md agents/verify-e2e.md rules/workflow.md rules/critical-rules.md"
+scan_files="commands/opinion.md commands/prd/discuss.md commands/prd/create.md agents/research-first.md agents/verify-app.md agents/verify-e2e.md rules/workflow.md rules/critical-rules.md"
 if [[ "$stage" == development || "$stage" == complete ]]; then
     scan_files="$scan_files commands/new-feature.md commands/fix-bug.md commands/quick-fix.md"
 fi
@@ -67,10 +67,60 @@ if [[ "$stage" == development || "$stage" == complete ]]; then
     assert_contains "$REPO_ROOT/commands/quick-fix.md" "falls back automatically" "quick-fix has automatic reviewer fallback"
 fi
 
+if [[ "$stage" == complete ]]; then
+    start_test "final cutover owns goal composition and removes transitional dependencies"
+    assert_file_exists "$REPO_ROOT/commands/forge-goal.md" "canonical goal source exists"
+    assert_file_missing "$REPO_ROOT/commands/codex.md" "transitional codex shim is removed"
+    assert_file_exists "$REPO_ROOT/commands/opinion.md" "Forge uses the unreserved opinion command"
+    assert_file_missing "$REPO_ROOT/commands/review.md" "Forge does not shadow either host's reserved review command"
+    assert_contains "$MANAGED" $'canonical\tcommands/opinion.md\t.forge/workflows/opinion.md' "opinion has one canonical installed path"
+    assert_contains "$MANAGED" $'adapter\ttemplates/adapters/claude-command.template.md\t.claude/commands/opinion.md' "Claude installs opinion, not review"
+    assert_contains "$MANAGED" $'adapter\ttemplates/adapters/codex-skill.template.md\t.agents/skills/workflow-opinion/SKILL.md' "Codex installs opinion, not review"
+    if awk -F '\t' '$3 == ".claude/commands/review.md" || $3 == ".agents/skills/workflow-review/SKILL.md" {found=1} END {exit found ? 0 : 1}' "$MANAGED"; then
+        fail "managed manifest shadows a host-reserved review command"
+    else
+        pass "managed manifest leaves host-reserved review commands untouched"
+    fi
+    assert_contains "$MANAGED" $'canonical\tcommands/forge-goal.md\t.forge/workflows/goal.md' "goal has one canonical installed path"
+    assert_contains "$MANAGED" $'protected\t-\t.claude/commands/goal.md' "Claude native goal collision is protected"
+    assert_contains "$MANAGED" $'protected\t-\t.agents/skills/goal/SKILL.md' "Codex native goal collision is protected"
+    for retired in '.forge/workflows/codex.md' '.claude/commands/codex.md' '.agents/skills/workflow-codex/SKILL.md'; do
+        if awk -F '\t' -v retired="$retired" '$1 == "tombstone" && $3 == retired && $7 == "forge-proven-legacy" {found=1} END {exit found ? 0 : 1}' "$MANAGED"; then
+            pass "retired codex surface has a provenance-aware tombstone: $retired"
+        else
+            fail "retired codex surface lacks a provenance-aware tombstone: $retired"
+        fi
+    done
+    for settings in settings/settings.template.json settings/settings-windows.template.json; do
+        assert_not_contains "$REPO_ROOT/$settings" 'superpowers@claude-plugins-official' "$settings removes the Superpowers dependency"
+        assert_not_contains "$REPO_ROOT/$settings" 'pr-review-toolkit@claude-plugins-official' "$settings removes the PR toolkit dependency"
+        assert_not_contains "$REPO_ROOT/$settings" '"type": "prompt"' "$settings uses receipt-only subagent evaluation"
+    done
+    for surface in FORGE.template.md templates/adapters/CLAUDE.block.template.md templates/adapters/AGENTS.block.template.md commands/forge-goal.md; do
+        assert_contains "$REPO_ROOT/$surface" 'native `/goal`' "$surface composes native goal"
+        assert_contains "$REPO_ROOT/$surface" 'FORGE_GOAL_BUDGET_EXHAUSTED' "$surface consumes budget exhaustion"
+        assert_contains "$REPO_ROOT/$surface" 'FORGE_GOAL_STUCK_WARNING' "$surface consumes stuck warning"
+    done
+    for workflow in commands/finish-branch.md commands/review-pr-comments.md skills/release/SKILL.template.md; do
+        assert_contains "$REPO_ROOT/$workflow" '.forge/' "$workflow uses canonical Forge state or evidence"
+        assert_contains "$REPO_ROOT/$workflow" 'human authorization' "$workflow preserves external-mutation authority"
+    done
+    if grep -R -nF -- '`/codex`' "$REPO_ROOT/commands" "$REPO_ROOT/rules" "$REPO_ROOT/agents" "$REPO_ROOT/skills" >/dev/null 2>&1; then
+        fail "a live workflow/rule/agent/skill still invokes the transitional /codex command"
+    else
+        pass "no live workflow/rule/agent/skill invokes transitional /codex"
+    fi
+fi
+
 start_test "installed Claude and Codex adapters expose each converted workflow"
 INSTALL=$(scratch_dir workflow-parity)
 (cd "$INSTALL" && git init -q)
 printf '{"name":"workflow-parity"}\n' > "$INSTALL/package.json"
+if [[ "$stage" == complete ]]; then
+    mkdir -p "$INSTALL/.claude/commands" "$INSTALL/.agents/skills/goal"
+    printf 'custom claude goal\n' > "$INSTALL/.claude/commands/goal.md"
+    printf 'custom codex goal\n' > "$INSTALL/.agents/skills/goal/SKILL.md"
+fi
 LOG="$INSTALL/setup.log"
 # Keep this fixture deterministic and offline: identity selection is injected, so installed
 # host CLIs must not be probed by setup's configuration validator.
@@ -78,7 +128,7 @@ FIXTURE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 PATH="$FIXTURE_PATH" FORGE_ENGINE_IDENTITY_FIXTURE=1 run_setup "$INSTALL" "$LOG" -p WorkflowParity -t fullstack
 assert_equals "$?" "0" "setup materializes dual-host workflow fixture"
 
-converted="review prd/discuss prd/create"
+converted="opinion prd/discuss prd/create"
 if [[ "$stage" == development || "$stage" == complete ]]; then converted="$converted new-feature fix-bug quick-fix"; fi
 if [[ "$stage" == complete ]]; then converted="$converted finish-branch review-pr-comments"; fi
 for workflow in $converted; do
@@ -93,24 +143,21 @@ done
 if [[ "$stage" == complete ]]; then
     start_test "native goal composition does not shadow custom host goals"
     assert_file_exists "$INSTALL/.forge/workflows/goal.md" "canonical Forge goal contract installed"
-    assert_file_missing "$INSTALL/.claude/commands/goal.md" "Forge does not install a Claude goal command"
-    assert_file_missing "$INSTALL/.agents/skills/goal" "Forge does not install a Codex goal skill"
-    assert_contains "$INSTALL/CLAUDE.md" "native `/goal`" "Claude root composes its native goal"
-    assert_contains "$INSTALL/AGENTS.md" "native `/goal`" "Codex root composes its native goal"
-
-    COLLISION=$(scratch_dir workflow-goal-collision)
-    (cd "$COLLISION" && git init -q)
-    mkdir -p "$COLLISION/.claude/commands" "$COLLISION/.agents/skills/goal"
-    printf 'custom claude goal\n' > "$COLLISION/.claude/commands/goal.md"
-    printf 'custom codex goal\n' > "$COLLISION/.agents/skills/goal/SKILL.md"
-    CLOG="$COLLISION/setup.log"
-    PATH="$FIXTURE_PATH" FORGE_ENGINE_IDENTITY_FIXTURE=1 run_setup "$COLLISION" "$CLOG" -p GoalCollision -t fullstack
-    assert_equals "$(cat "$COLLISION/.claude/commands/goal.md")" "custom claude goal" "custom Claude goal is preserved"
-    assert_equals "$(cat "$COLLISION/.agents/skills/goal/SKILL.md")" "custom codex goal" "custom Codex goal is preserved"
-    assert_contains "$CLOG" "RUNTIME_READY=BLOCKED host=claude" "Claude collision blocks host readiness"
-    assert_contains "$CLOG" "rename .claude/commands/goal.md" "Claude collision prints exact rename guidance"
-    assert_contains "$CLOG" "RUNTIME_READY=BLOCKED host=codex" "Codex collision blocks host readiness"
-    assert_contains "$CLOG" "rename .agents/skills/goal/" "Codex collision prints exact rename guidance"
+    assert_equals "$(cat "$INSTALL/.claude/commands/goal.md")" "custom claude goal" "custom Claude goal is preserved"
+    assert_equals "$(cat "$INSTALL/.agents/skills/goal/SKILL.md")" "custom codex goal" "custom Codex goal is preserved"
+    if awk -F '\t' '$1 == "adapter" && ($3 == ".claude/commands/goal.md" || $3 == ".agents/skills/goal/SKILL.md") {found=1} END {exit found ? 0 : 1}' "$MANAGED"; then
+        fail "managed manifest shadows a native goal adapter"
+    else
+        pass "managed manifest installs no native goal adapter"
+    fi
+    assert_not_contains "$INSTALL/.forge/installed-files.tsv" $'.claude/commands/goal.md\t' "custom Claude goal is not Forge-owned"
+    assert_not_contains "$INSTALL/.forge/installed-files.tsv" $'.agents/skills/goal/SKILL.md\t' "custom Codex goal is not Forge-owned"
+    assert_contains "$INSTALL/CLAUDE.md" 'native `/goal`' "Claude root composes its native goal"
+    assert_contains "$INSTALL/AGENTS.md" 'native `/goal`' "Codex root composes its native goal"
+    assert_contains "$LOG" "RUNTIME_READY=BLOCKED host=claude" "Claude collision blocks host readiness"
+    assert_contains "$LOG" "rename .claude/commands/goal.md" "Claude collision prints exact rename guidance"
+    assert_contains "$LOG" "RUNTIME_READY=BLOCKED host=codex" "Codex collision blocks host readiness"
+    assert_contains "$LOG" "rename .agents/skills/goal/" "Codex collision prints exact rename guidance"
 fi
 
 report "test-workflow-parity.sh"

@@ -1,81 +1,38 @@
-# Review PR Comments
+# /review-pr-comments — Host-Neutral Review Feedback
 
-> **Process review comments left by automated reviewers (GitHub Copilot, Codex, Claude) or peer developers on your pull request.**
+Use after a PR receives automated or human feedback. The active Claude Code or Codex host remains
+the main agent for this session; reviewer choice is independent.
 
-## When to Use
+## 1. Read the Current Review Set
 
-- After creating a PR and waiting for automated/peer reviews
-- When review comments arrive on your GitHub pull request
-- Before merging — to address all feedback
+Resolve the current PR and fetch its review summaries, inline comments, unresolved conversations,
+base, and head SHA. If no PR exists, stop. Record the review-set fingerprint and current candidate
+in `.forge/local/state.md`; never treat stale comments or a previous candidate receipt as current.
 
----
+## 2. Evaluate Before Editing
 
-## Step 1: Fetch PR comments
+For each comment, identify the requested change and verify it against code, requirements, and project
+rules. Do not agree performatively:
 
-```bash
-# Find the PR number for current branch
-PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null)
+- valid finding — name the affected behavior and smallest correction;
+- already fixed/stale — cite the current evidence;
+- incorrect or conflicting — explain the technical objection;
+- ambiguous or consequential — dispatch a fresh `/opinion` with the relevant artifact and question.
 
-if [ -z "$PR_NUMBER" ]; then
-  echo "No PR found for current branch. Create a PR first."
-  exit 1
-fi
+Use automatic other-engine review with visible fresh same-engine fallback. A finding is not an
+engine failure and never triggers fallback.
 
-echo "PR #$PR_NUMBER"
+## 3. Repair and Re-Certify
 
-# Fetch review-level comments (approve/request changes with body)
-gh pr view $PR_NUMBER --json reviews --jq '.reviews[] | select(.body != "") | "[\(.author.login)] \(.body)"'
+Apply accepted fixes with TDD where behavior changes, then run focused owning checks. Run the
+Forge-owned simplification phase for code mutations. Stage all intended changes, freeze a new
+candidate, and rerun the final gates that the mutation can affect: distinct `code-spec` and
+`code-quality` reviews, `verify-app`, and applicable E2E. Persist candidate-bound receipts under
+`.forge/local/`; any later mutation invalidates affected evidence.
 
-# Fetch inline code review comments (line-level feedback)
-gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/comments" --jq '.[] | "[\(.user.login)] \(.path):\(.line) \(.body)"'
-```
+## 4. External Mutations
 
-**If no PR exists:** This command only applies after a PR has been created. Go back to the workflow and create a PR first.
-
-## Step 2: Process each comment
-
-For each review comment:
-
-1. **Read the comment** — understand what the reviewer is asking
-2. **Evaluate the feedback** — is it valid? Does it conflict with project conventions?
-3. **If valid** — make the fix
-4. **If questionable** — challenge it. Use `/superpowers:receiving-code-review` for rigorous evaluation before blindly implementing suggestions
-
-```
-/superpowers:receiving-code-review
-```
-
-> **IMPORTANT:** Do not blindly agree with every review comment. Verify technical accuracy before implementing. The receiving-code-review skill enforces this discipline.
-
-## Step 3: Re-run quality gates on changes
-
-After fixing review comments, verify no regressions:
-
-```
-/simplify
-```
-
-Then verify:
-
-```
-Task tool → subagent_type: "verify-app", prompt: "Run verification and report pass/fail verdict."
-```
-
-## Step 4: Push fixes
-
-```bash
-git add -A
-git commit -m "fix: address PR review comments"
-git push
-```
-
----
-
-## Checklist
-
-- [ ] Fetched all PR review comments
-- [ ] Evaluated each comment (don't blindly agree)
-- [ ] Fixed valid issues
-- [ ] Ran `/simplify` on changes
-- [ ] Verified via `verify-app` agent
-- [ ] Pushed fixes
+Show the exact commit and push mutations and pause for explicit human authorization. A reviewer,
+council, or native `/goal` cannot authorize them. After authorization, promote the exact candidate,
+commit, and push. Report which review comments are resolved, rejected with evidence, or still
+blocked. Do not merge; use `/finish-branch` only after separate merge authorization.

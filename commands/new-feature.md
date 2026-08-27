@@ -12,11 +12,16 @@ host is the main agent for this session; there is no permanent main engine.
    changed, resume the exact next unchecked durable step. Warn that simultaneous editing can
    overwrite work, but do not create a lock or lease.
 3. Confirm the branch is not the protected default branch. Create or adopt one isolated worktree.
-4. Before the first feature change, persist the intended base ref and resolved base SHA. The SHA is
+4. On new worktree creation, seed only `## State` (with `### Now` cleared), `## Open Questions`, and
+   `## Blockers` from the primary checkout, and persist that exact baseline at
+   `.forge/local/.state-seed-snapshot.md`. Never seed workflow, goal, authorization, or receipt
+   sections. An adopted worktree preserves its recorded snapshot; if it is missing, require an
+   explicit reconciliation baseline rather than guessing.
+5. Before the first feature change, persist the intended base ref and resolved base SHA. The SHA is
    immutable for the workflow and is passed to every candidate, dispatcher invocation, receipt,
    isolated repository, and review prompt. An adopted worktree reuses its recorded base; if ancestry
    is ambiguous and no base was recorded, require an explicit base rather than recomputing it.
-5. Replace the active `## Workflow` block and create this checklist:
+6. Replace the active `## Workflow` block and create this checklist:
 
    ```markdown
    - [ ] PRD approved

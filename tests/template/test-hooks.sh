@@ -15,6 +15,8 @@ source "$REPO_ROOT/tests/template/lib.sh"
 # Note: not sourcing test-fixtures.sh here — it runs its own tests at top
 # level. Helpers we need (make_state_md) are inlined locally where used.
 init_counters
+WORKFLOW_STAGE=$(sed -n 's/^# conversion-stage:[[:space:]]*//p' \
+    "$REPO_ROOT/manifests/workflow-capabilities.tsv" | head -1)
 
 # Local helper (mirrors make_state_md from test-fixtures.sh; kept inline to
 # avoid sourcing test-fixtures.sh which would re-run its own test cases).
@@ -2394,14 +2396,15 @@ while IFS=$'\t' read -r boundary command; do
     assert_contains "$V6BAD/$boundary.out" 'FORGE_STATE_INVALID' "installed $boundary names invalid canonical state"
 done < "$V6BAD/boundary-commands.tsv"
 
-start_test "installed Claude and Codex configs select one v6 subagent receipt evaluator"
+start_test "installed Claude and Codex configs select the stage-appropriate receipt evaluator"
 V6I=$(scratch_dir v6-installed-hooks)
 (cd "$V6I" && git init -q --initial-branch=main && git -c user.email=t@t -c user.name=t \
     commit -q --allow-empty -m init && HOME="$V6I/home" "$REPO_ROOT/setup.sh" -F \
     > "$V6I/setup.log" 2>&1)
-python3 - "$V6I" <<'PY' > "$V6I/hook-commands.tsv"
+python3 - "$V6I" "$WORKFLOW_STAGE" <<'PY' > "$V6I/hook-commands.tsv"
 import json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
+stage = sys.argv[2]
 claude = json.loads((root / ".claude/settings.json").read_text())
 codex = json.loads((root / ".codex/hooks.json").read_text())
 commands = []
@@ -2418,19 +2421,23 @@ for hook in codex["hooks"].get("subagent_stop", []):
         command = hook["command"]
         commands.append(("codex", " ".join(command) if isinstance(command, list) else command))
 assert [host for host, _ in commands] == ["claude", "codex"], commands
-assert len(prompt) == 1 and '"ok": false' in prompt[0], prompt
 def selected(agent_type):
     return [h for group in groups if re.search(group.get("matcher", ""), agent_type)
             for h in group.get("hooks", [])]
 native_v6 = selected("forge-v6-producer")
 native_legacy = selected("general-purpose")
 assert len(native_v6) == 1 and native_v6[0].get("forgeManagedId") == "subagent-review-receipt", native_v6
-assert len(native_legacy) == 1 and native_legacy[0].get("type") == "prompt", native_legacy
+if stage == "complete":
+    assert prompt == [], prompt
+    assert native_legacy == [], native_legacy
+else:
+    assert len(prompt) == 1 and '"ok": false' in prompt[0], prompt
+    assert len(native_legacy) == 1 and native_legacy[0].get("type") == "prompt", native_legacy
 assert "forge-subagent-review-v1" in (root / ".forge/workflow-capabilities.tsv").read_text()
 for host, command in commands:
     print(host + "\t" + command)
 PY
-assert_equals "$?" "0" "rendered host configs carry one command evaluator and one stage-gated legacy prompt"
+assert_equals "$?" "0" "rendered host configs carry the strict receipt evaluator without a final legacy prompt"
 assert_contains "$V6I/.forge/workflow-capabilities.tsv" 'forge-subagent-review-v1' \
     "positive producer/schema marker is shipped"
 
@@ -2469,11 +2476,11 @@ printf '%s' "$PAYLOAD" | (cd "$V6I" && sh -c "$CODEX_CMD") \
     > "$V6I/codex-findings.out" 2>&1
 assert_equals "$?" "2" "rendered Codex command rejects a non-clean receipt"
 
-start_test "installed legacy agent type keeps exactly one semantic prompt authoritative"
+start_test "installed legacy agent type is outside the final managed evaluator"
 LEGACY_PAYLOAD=$(printf '{"session_id":"legacy","cwd":"%s","hook_event_name":"SubagentStop","stop_hook_active":false,"agent_id":"legacy-task","agent_type":"general-purpose","agent_transcript_path":"/tmp/legacy.jsonl","last_assistant_message":"failed to complete the requested work","host":"claude"}' "$V6I")
 printf '%s' "$LEGACY_PAYLOAD" | (cd "$V6I" && CLAUDE_PROJECT_DIR="$V6I" sh -c "$CLAUDE_CMD") \
     > "$V6I/legacy-command.out" 2>&1
-assert_equals "$?" "0" "receipt command no-ops for an unconverted agent type while the legacy prompt remains authoritative"
+assert_equals "$?" "0" "receipt command no-ops if directly invoked for an unmanaged legacy agent type"
 
 start_test "installed successful Codex hooks emit one valid JSON document"
 python3 - "$V6I/.codex/hooks.json" <<'PY' > "$V6I/codex-success-hooks.tsv"
