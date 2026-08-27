@@ -33,6 +33,8 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-merge-settings.sh"
     "$REPO_ROOT/tests/template/test-runtime-identity.sh"
     "$REPO_ROOT/tests/template/test-goal-feasibility.sh"
+    "$REPO_ROOT/tests/template/test-runtime-qualification-schema.sh"
+    "$REPO_ROOT/tests/template/test-dual-engine-e2e.sh"
     "$REPO_ROOT/tests/template/test-bash-safety.sh"
     "$REPO_ROOT/tests/template/test-hooks.sh"
     "$REPO_ROOT/tests/template/test-default-branch.sh"

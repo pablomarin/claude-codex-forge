@@ -459,7 +459,7 @@ start_test "Claude and Codex wrapper names cover the same workflows, skills, and
 if [ -f "$MANIFEST" ]; then
     PARITY_DIR=$(scratch_dir dual-layout-parity)
     awk -F '\t' '$1 == "adapter" && $5 == "claude" && $3 ~ /^\.claude\/commands\// {name=$3; sub(/^\.claude\/commands\//,"",name); sub(/\.md$/,"",name); gsub(/\//,"-",name); print name}' "$MANIFEST" | sort > "$PARITY_DIR/claude-workflows"
-    awk -F '\t' '$1 == "adapter" && $5 == "codex" && $3 ~ /^\.agents\/skills\/workflow-/ {name=$3; sub(/^\.agents\/skills\/workflow-/,"",name); sub(/\/SKILL\.md$/,"",name); print name}' "$MANIFEST" | sort > "$PARITY_DIR/codex-workflows"
+    awk -F '\t' '$1 == "adapter" && $5 == "codex" && ($3 ~ /^\.agents\/skills\/workflow-/ || $3 == ".agents/skills/opinion/SKILL.md") {name=$3; sub(/^\.agents\/skills\/workflow-/,"",name); sub(/^\.agents\/skills\//,"",name); sub(/\/SKILL\.md$/,"",name); print name}' "$MANIFEST" | sort > "$PARITY_DIR/codex-workflows"
     if diff -u "$PARITY_DIR/claude-workflows" "$PARITY_DIR/codex-workflows" >/dev/null 2>&1; then pass "workflow wrapper names have Claude/Codex parity"; else fail "workflow wrapper parity mismatch"; fi
 
     awk -F '\t' '$1 == "adapter" && $5 == "claude" && $3 ~ /^\.claude\/skills\// {name=$3; sub(/^\.claude\/skills\//,"",name); sub(/\/SKILL\.md$/,"",name); print name}' "$MANIFEST" | sort > "$PARITY_DIR/claude-skills"

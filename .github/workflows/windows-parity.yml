@@ -8,8 +8,28 @@ on:
 jobs:
   powershell-51:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Require Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Windows PowerShell 5.1 is required; observed $($PSVersionTable.PSVersion)"
+          }
       - name: Run deterministic PowerShell 5.1 suites
         shell: powershell
-        run: .\tests\template\run-all.ps1
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\template\run-all.ps1 2>&1 |
+            Tee-Object -FilePath artifacts\windows-powershell-51.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\scripts\qualify-runtime-final.ps1 -WriteWindowsAttestation -ProjectRoot . `
+            -Output artifacts\windows-powershell-51.receipt
+      - name: Upload deterministic PowerShell result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-powershell-51
+          path: artifacts/
+          if-no-files-found: error
