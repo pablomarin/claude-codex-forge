@@ -87,7 +87,7 @@ assert_contains "$INSTALL/.forge/templates/review-result.template.txt" "review_m
     "installed result schema records review mode"
 assert_contains "$INSTALL/.claude/commands/opinion.md" ".forge/workflows/opinion.md" \
     "Claude opinion adapter loads the canonical review workflow"
-assert_contains "$INSTALL/.agents/skills/workflow-opinion/SKILL.md" ".forge/workflows/opinion.md" \
+assert_contains "$INSTALL/.agents/skills/opinion/SKILL.md" ".forge/workflows/opinion.md" \
     "Codex opinion adapter loads the canonical review workflow"
 
 report "test-resource-discipline.sh"

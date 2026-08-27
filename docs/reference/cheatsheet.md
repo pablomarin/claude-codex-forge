@@ -51,11 +51,12 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 │                                                             │
 │ DECISION ANALYSIS:                                          │
 │   /council <question>  ← Multi-perspective (5 advisors)     │
-│   /opinion <request>   ← Fresh opinion (other engine first) │
-│   /opinion investigate ← Bounded writable investigation    │
+│   Claude: /opinion     ← Fresh opinion (other engine first) │
+│   Codex:  $opinion     ← Same Forge opinion workflow       │
+│   Add: investigate     ← Bounded writable investigation    │
 │                                                             │
 │ QUALITY GATES (in order):                                   │
-│   /opinion             ← Code-spec + code-quality receipts  │
+│   /opinion | $opinion  ← Code-spec + code-quality receipts  │
 │   Simplification       ← Forge-owned cleanup phase          │
 │   verify-app           ← Run tests, lint, types (agent)     │
 │   verify-e2e           ← User-journey E2E (agent)           │

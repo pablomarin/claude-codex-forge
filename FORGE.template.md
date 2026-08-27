@@ -45,6 +45,9 @@ work, and any new external mutation pause for explicit human authorization. Ordi
 failure follows automatic visible fallback. If any authenticated native-goal Must behavior is not
 proven, report `BLOCKED` and do not claim that host is runtime-ready.
 
+For the Forge opinion workflow, Claude Code uses `/opinion`; Codex uses `$opinion`. Both entry
+points load the same canonical `.forge/workflows/opinion.md` contract.
+
 ## No Bugs Left Behind
 
 Fix every known reproducible or concretely reachable correctness, security, verification, or

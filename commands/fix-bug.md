@@ -52,9 +52,9 @@ Follow four phases without editing production code early:
 4. State the proven root cause and the production change that a regression test must catch.
 
 If reproduction is impossible, record `BLOCKED` with the missing environment/input rather than
-guessing. When investigation needs network or write access, use `/opinion investigate` with the
-profile and require an independent `investigation-repro` receipt before treating the hypothesis as
-actionable.
+guessing. When investigation needs network or write access, invoke the Forge opinion workflow's
+investigate profile (`/opinion investigate` in Claude Code; `$opinion investigate` in Codex) and
+require an independent `investigation-repro` receipt before treating the hypothesis as actionable.
 
 ## 2. Existing Solutions and Research
 
@@ -95,9 +95,9 @@ Plan-stage spec-loss is P1 when it could produce the wrong fix; this does **not*
 3. Run the owning tests and a direct control proving unrelated supported behavior remains intact.
 4. Refactor only after green.
 
-Fresh subagents may execute bounded plan tasks, but each must emit the required structured spec and
-quality task receipts. Pass the immutable base SHA through every handoff, candidate, receipt, and
-prompt.
+Invoke the active host's exact `forge-v6-producer` agent type for each bounded implementation task.
+Supply its acceptance criteria, immutable base SHA, and host runtime agent/task ID; the producer
+must emit the required structured spec and quality task receipts.
 
 ## 5. Preliminary E2E
 

@@ -73,9 +73,10 @@ For tech-specific scenarios (new project, existing project with/without Claude C
 
 ## Step 4: Optionally install the other engine
 
-Forge installs the same dual-host harness regardless of which engine is currently available. With
-both engines installed, `/opinion` defaults to the other engine. With only one, review and council
-fall back automatically and visibly to fresh same-engine sessions.
+Forge installs the same dual-host harness regardless of which engine is currently available. Use
+`/opinion` in Claude Code and `$opinion` in Codex. With both engines installed, the opinion workflow
+defaults to the other engine. With only one, review and council fall back automatically and visibly
+to fresh same-engine sessions.
 
 ## Step 5: Install Codex CLI (optional)
 

@@ -7,4 +7,5 @@ Keep Codex's native `/goal` and compose it over `.forge/workflows/goal.md`; neve
 host qualification. On `FORGE_GOAL_BUDGET_EXHAUSTED`, checkpoint and stop. Treat
 `FORGE_GOAL_STUCK_WARNING` as advisory. Resume the exact next durable step without resetting the
 persistent Forge count, and pause for user input or any new external mutation.
+Invoke the Forge opinion workflow with `$opinion`.
 <!-- forge:end v6 -->

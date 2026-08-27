@@ -49,7 +49,7 @@ Read any files referenced in the question. If an approach comparison table exist
 
 ### Live-state fact-finding (when a verdict hinges on real system/data state)
 
-If the question turns on actual system or data state — "is this migration safe given real row counts / distributions?", "does prod actually behave like X?" — gather **verified facts before advisors reason**, instead of having them speculate. Run `/opinion investigate` through `.forge/workflows/opinion.md` to dig into the live system. The same hard constraints apply, unchanged:
+If the question turns on actual system or data state — "is this migration safe given real row counts / distributions?", "does prod actually behave like X?" — gather **verified facts before advisors reason**, instead of having them speculate. Run the Forge opinion workflow's `investigate` profile (`/opinion investigate` in Claude Code; `$opinion investigate` in Codex) through `.forge/workflows/opinion.md`. The same hard constraints apply, unchanged:
 
 - Repo-confined Codex sandbox (`--sandbox workspace-write`, never `danger-full-access`), read-only / non-mutating, credentials from `.env` never in argv/logs.
 - **Never prompt the user** — provision Codex from what Claude already has. This holds inside a `/forge-goal` `/goal` run, where council fires autonomously and `AskUserQuestion` is reserved solely for PR creation.

@@ -6,8 +6,8 @@ forge-workflow	prd-create	/prd:create	forge	.forge/workflows/prd/create.md	workf
 forge-workflow	new-feature	/new-feature	forge	.forge/workflows/new-feature.md	workflow	claude,codex
 forge-workflow	fix-bug	/fix-bug	forge	.forge/workflows/fix-bug.md	workflow	claude,codex
 forge-workflow	quick-fix	/quick-fix	forge	.forge/workflows/quick-fix.md	workflow	claude,codex
-forge-workflow	review	/opinion	forge	.forge/workflows/opinion.md	workflow	claude,codex
-forge-workflow	investigation	/opinion investigate	forge	.forge/workflows/opinion.md	workflow-profile	claude,codex
+forge-workflow	review	claude:/opinion;codex:$opinion	forge	.forge/workflows/opinion.md	workflow	claude,codex
+forge-workflow	investigation	claude:/opinion investigate;codex:$opinion investigate	forge	.forge/workflows/opinion.md	workflow-profile	claude,codex
 forge-workflow	council	/council	forge	.forge/skills/council/SKILL.template.md	canonical-skill	claude,codex
 forge-workflow	goal-composition	native-/goal	forge	.forge/workflows/goal.md	root-composition	claude,codex
 forge-workflow	review-pr-comments	/review-pr-comments	forge	.forge/workflows/review-pr-comments.md	workflow	claude,codex

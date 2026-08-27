@@ -17,7 +17,8 @@ rules. Do not agree performatively:
 - valid finding — name the affected behavior and smallest correction;
 - already fixed/stale — cite the current evidence;
 - incorrect or conflicting — explain the technical objection;
-- ambiguous or consequential — dispatch a fresh `/opinion` with the relevant artifact and question.
+- ambiguous or consequential — dispatch the Forge opinion workflow with the active host entry point
+  (`/opinion` in Claude Code; `$opinion` in Codex), relevant artifact, and question.
 
 Use automatic other-engine review with visible fresh same-engine fallback. A finding is not an
 engine failure and never triggers fallback.

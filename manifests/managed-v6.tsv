@@ -53,6 +53,7 @@ canonical	skills/ui-design/references/ux-antipatterns.md	.forge/skills/ui-design
 canonical	agents/council-advisor.md	.forge/agents/council-advisor.md	all	shared	project	forge-canonical	.forge/agents/council-advisor.md	v6
 canonical	agents/research-first.md	.forge/agents/research-first.md	all	shared	project	forge-canonical	.forge/agents/research-first.md	v6
 canonical	agents/independent-reviewer.md	.forge/agents/independent-reviewer.md	all	shared	project	forge-canonical	.forge/agents/independent-reviewer.md	v6
+canonical	agents/forge-v6-producer.md	.forge/agents/forge-v6-producer.md	all	shared	project	forge-canonical	.forge/agents/forge-v6-producer.md	v6
 canonical	agents/verify-app.md	.forge/agents/verify-app.md	all	shared	project	forge-canonical	.forge/agents/verify-app.md	v6
 canonical	agents/verify-e2e.md	.forge/agents/verify-e2e.md	all	shared	project	forge-canonical	.forge/agents/verify-e2e.md	v6
 canonical	hooks/auto-approve-local-writes.ps1	.forge/hooks/auto-approve-local-writes.ps1	all	shared	project	forge-canonical	.forge/hooks/auto-approve-local-writes.ps1	v6
@@ -120,7 +121,7 @@ canonical	scripts/forge-goal-capture.ps1	.forge/bin/forge-goal-capture.ps1	all	s
 protected	-	.forge/bin/codex.identity	all	codex	global	operator-setup	-	dynamic
 protected	-	.forge/bin/codex.identity.sha256	all	codex	global	operator-seal	.forge/bin/codex.identity	dynamic
 adapter	templates/adapters/claude-command.template.md	.claude/commands/opinion.md	all	claude	project	forge-generated	.forge/workflows/opinion.md	v6
-adapter	templates/adapters/codex-skill.template.md	.agents/skills/workflow-opinion/SKILL.md	all	codex	project	forge-generated	.forge/workflows/opinion.md	v6
+adapter	templates/adapters/codex-skill.template.md	.agents/skills/opinion/SKILL.md	all	codex	project	forge-generated	.forge/workflows/opinion.md	v6
 adapter	templates/adapters/claude-command.template.md	.claude/commands/finish-branch.md	all	claude	project	forge-generated	.forge/workflows/finish-branch.md	v6
 adapter	templates/adapters/codex-skill.template.md	.agents/skills/workflow-finish-branch/SKILL.md	all	codex	project	forge-generated	.forge/workflows/finish-branch.md	v6
 adapter	templates/adapters/claude-command.template.md	.claude/commands/fix-bug.md	all	claude	project	forge-generated	.forge/workflows/fix-bug.md	v6
@@ -149,6 +150,8 @@ adapter	templates/adapters/claude-agent.template.md	.claude/agents/research-firs
 adapter	templates/adapters/codex-agent.template.toml	.codex/agents/research-first.toml	all	codex	project	forge-generated	.forge/agents/research-first.md	v6
 adapter	templates/adapters/claude-agent.template.md	.claude/agents/independent-reviewer.md	all	claude	project	forge-generated	.forge/agents/independent-reviewer.md	v6
 adapter	templates/adapters/codex-reviewer.template.toml	.codex/agents/independent-reviewer.toml	all	codex	project	forge-generated	.forge/agents/independent-reviewer.md	v6
+adapter	templates/adapters/claude-agent.template.md	.claude/agents/forge-v6-producer.md	all	claude	project	forge-generated	.forge/agents/forge-v6-producer.md	v6
+adapter	templates/adapters/codex-agent.template.toml	.codex/agents/forge-v6-producer.toml	all	codex	project	forge-generated	.forge/agents/forge-v6-producer.md	v6
 adapter	templates/adapters/claude-agent.template.md	.claude/agents/verify-app.md	all	claude	project	forge-generated	.forge/agents/verify-app.md	v6
 adapter	templates/adapters/codex-agent.template.toml	.codex/agents/verify-app.toml	all	codex	project	forge-generated	.forge/agents/verify-app.md	v6
 adapter	templates/adapters/claude-agent.template.md	.claude/agents/verify-e2e.md	all	claude	project	forge-generated	.forge/agents/verify-e2e.md	v6

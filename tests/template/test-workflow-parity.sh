@@ -75,7 +75,10 @@ if [[ "$stage" == complete ]]; then
     assert_file_missing "$REPO_ROOT/commands/review.md" "Forge does not shadow either host's reserved review command"
     assert_contains "$MANAGED" $'canonical\tcommands/opinion.md\t.forge/workflows/opinion.md' "opinion has one canonical installed path"
     assert_contains "$MANAGED" $'adapter\ttemplates/adapters/claude-command.template.md\t.claude/commands/opinion.md' "Claude installs opinion, not review"
-    assert_contains "$MANAGED" $'adapter\ttemplates/adapters/codex-skill.template.md\t.agents/skills/workflow-opinion/SKILL.md' "Codex installs opinion, not review"
+    assert_contains "$MANAGED" $'adapter\ttemplates/adapters/codex-skill.template.md\t.agents/skills/opinion/SKILL.md' "Codex installs the native opinion skill name"
+    assert_contains "$MANAGED" $'canonical\tagents/forge-v6-producer.md\t.forge/agents/forge-v6-producer.md' "producer has one canonical installed path"
+    assert_contains "$MANAGED" $'adapter\ttemplates/adapters/claude-agent.template.md\t.claude/agents/forge-v6-producer.md' "Claude installs the producer agent type"
+    assert_contains "$MANAGED" $'adapter\ttemplates/adapters/codex-agent.template.toml\t.codex/agents/forge-v6-producer.toml' "Codex installs the producer agent type"
     if awk -F '\t' '$3 == ".claude/commands/review.md" || $3 == ".agents/skills/workflow-review/SKILL.md" {found=1} END {exit found ? 0 : 1}' "$MANAGED"; then
         fail "managed manifest shadows a host-reserved review command"
     else
@@ -138,11 +141,15 @@ if [[ "$stage" == complete ]]; then converted="$converted finish-branch review-p
 for workflow in $converted; do
     canonical="$INSTALL/.forge/workflows/$workflow.md"
     claude_name=$(printf '%s' "$workflow" | tr '/' '-')
-    case "$workflow" in prd/discuss) claude_path="$INSTALL/.claude/commands/prd/discuss.md"; codex_path="$INSTALL/.agents/skills/workflow-prd-discuss/SKILL.md" ;; prd/create) claude_path="$INSTALL/.claude/commands/prd/create.md"; codex_path="$INSTALL/.agents/skills/workflow-prd-create/SKILL.md" ;; *) claude_path="$INSTALL/.claude/commands/$workflow.md"; codex_path="$INSTALL/.agents/skills/workflow-$claude_name/SKILL.md" ;; esac
+    case "$workflow" in opinion) claude_path="$INSTALL/.claude/commands/opinion.md"; codex_path="$INSTALL/.agents/skills/opinion/SKILL.md" ;; prd/discuss) claude_path="$INSTALL/.claude/commands/prd/discuss.md"; codex_path="$INSTALL/.agents/skills/workflow-prd-discuss/SKILL.md" ;; prd/create) claude_path="$INSTALL/.claude/commands/prd/create.md"; codex_path="$INSTALL/.agents/skills/workflow-prd-create/SKILL.md" ;; *) claude_path="$INSTALL/.claude/commands/$workflow.md"; codex_path="$INSTALL/.agents/skills/workflow-$claude_name/SKILL.md" ;; esac
     assert_file_exists "$canonical" "canonical workflow installed: $workflow"
     assert_file_exists "$claude_path" "Claude adapter installed: $workflow"
     assert_file_exists "$codex_path" "Codex adapter installed: $workflow"
 done
+
+assert_file_exists "$INSTALL/.forge/agents/forge-v6-producer.md" "canonical producer agent installed"
+assert_file_exists "$INSTALL/.claude/agents/forge-v6-producer.md" "Claude producer agent installed"
+assert_file_exists "$INSTALL/.codex/agents/forge-v6-producer.toml" "Codex producer agent installed"
 
 if [[ "$stage" == complete ]]; then
     start_test "native goal composition does not shadow custom host goals"

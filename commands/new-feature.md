@@ -86,9 +86,10 @@ the exit requirement of no P0/P1/P2 for the approved plan revision.
 
 ## 4. Implement with TDD
 
-Execute plan tasks in dependency order using the active host's fresh-subagent capability where
-available. Every task follows RED → GREEN → refactor and produces the structured spec/quality task
-receipts required by the subagent gate. Keep the immutable workflow base SHA in every handoff.
+Execute plan tasks in dependency order by invoking the active host's exact `forge-v6-producer`
+agent type. Supply the bounded acceptance criteria, immutable workflow base SHA, and host runtime
+agent/task ID in every handoff. Every task follows RED → GREEN → refactor and produces the
+structured spec/quality task receipts required by the SubagentStop gate.
 
 When a test fails unexpectedly, use the workflow's systematic-debugging phase: reproduce, identify
 root cause, add a failing regression test, make the smallest fix, and rerun the owning suite.

@@ -22,17 +22,18 @@ budget, exact resume, evidence, and human-authorization boundaries.
 
 ## Decision Analysis
 
-| Command                           | Purpose                    | Notes |
-| --------------------------------- | -------------------------- | ----- |
-| `/council <question>`             | Multi-perspective analysis | Uses both engines when available; otherwise reruns the whole topology on the main engine. |
-| `/opinion <request>`              | Fresh independent opinion  | Chooses Claude Code or Codex with automatic visible same-engine fallback. |
-| `/opinion investigate <request>`  | Bounded investigation      | Disposable candidate, declared read-only query channel, and independent reproduction. |
+| Host | Invocation | Purpose |
+| ---- | ---------- | ------- |
+| Claude Code | `/opinion <request>` | Fresh independent opinion |
+| Codex | `$opinion <request>` | Fresh independent opinion |
+| Claude Code | `/opinion investigate <request>` | Bounded investigation |
+| Codex | `$opinion investigate <request>` | Bounded investigation |
 
 ### `/opinion` profiles
 
-Forge deliberately uses `/opinion` because `/review` is reserved by both supported hosts. Ordinary
-requests are hermetic and read-only. Investigation is explicit: use `/opinion investigate` when the
-task needs network, execution, or a declared live-data query channel.
+Forge deliberately uses the name `opinion` because `review` is reserved by both supported hosts.
+Use `/opinion` in Claude Code and `$opinion` in Codex. Ordinary requests are hermetic and read-only;
+add `investigate` when the task needs network, execution, or a declared live-data query channel.
 
 | Profile           | Boundary | Use for |
 | ----------------- | -------- | ------- |
@@ -50,7 +51,7 @@ task needs network, execution, or a declared live-data query channel.
 
 | Command / Agent    | Purpose |
 | ------------------ | ------- |
-| `/opinion`         | Distinct fresh code-spec and code-quality receipts over one frozen candidate |
+| `/opinion` (Claude) / `$opinion` (Codex) | Distinct fresh code-spec and code-quality receipts over one frozen candidate |
 | Simplification phase | Forge-owned cleanup before final candidate freeze |
 | `verify-app` agent | Unit tests, migration check, lint, and types |
 | `verify-e2e` agent | User-journey E2E plus regression replay |

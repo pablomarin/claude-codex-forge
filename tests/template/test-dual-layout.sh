@@ -463,7 +463,7 @@ if [ -f "$MANIFEST" ]; then
     if diff -u "$PARITY_DIR/claude-workflows" "$PARITY_DIR/codex-workflows" >/dev/null 2>&1; then pass "workflow wrapper names have Claude/Codex parity"; else fail "workflow wrapper parity mismatch"; fi
 
     awk -F '\t' '$1 == "adapter" && $5 == "claude" && $3 ~ /^\.claude\/skills\// {name=$3; sub(/^\.claude\/skills\//,"",name); sub(/\/SKILL\.md$/,"",name); print name}' "$MANIFEST" | sort > "$PARITY_DIR/claude-skills"
-    awk -F '\t' '$1 == "adapter" && $5 == "codex" && $3 ~ /^\.agents\/skills\// && $3 !~ /^\.agents\/skills\/workflow-/ {name=$3; sub(/^\.agents\/skills\//,"",name); sub(/\/SKILL\.md$/,"",name); print name}' "$MANIFEST" | sort > "$PARITY_DIR/codex-skills"
+    awk -F '\t' '$1 == "adapter" && $5 == "codex" && $3 ~ /^\.agents\/skills\// && $3 !~ /^\.agents\/skills\/workflow-/ && $3 != ".agents/skills/opinion/SKILL.md" {name=$3; sub(/^\.agents\/skills\//,"",name); sub(/\/SKILL\.md$/,"",name); print name}' "$MANIFEST" | sort > "$PARITY_DIR/codex-skills"
     if diff -u "$PARITY_DIR/claude-skills" "$PARITY_DIR/codex-skills" >/dev/null 2>&1; then pass "skill wrapper names have Claude/Codex parity"; else fail "skill wrapper parity mismatch"; fi
 
     awk -F '\t' '$1 == "adapter" && $5 == "claude" && $3 ~ /^\.claude\/agents\// {name=$3; sub(/^\.claude\/agents\//,"",name); sub(/\.md$/,"",name); print name}' "$MANIFEST" | sort > "$PARITY_DIR/claude-agents"

@@ -7,4 +7,5 @@ shadow `.claude/commands/goal.md`. Require the human-created Forge authorization
 authenticated host qualification. Consume `FORGE_GOAL_BUDGET_EXHAUSTED` by checkpointing and
 stopping, and treat `FORGE_GOAL_STUCK_WARNING` as advisory. Resume the exact next durable step;
 native counters never reset persistent Forge counts. Pause for user input or external mutation. -->
+<!-- Invoke the Forge opinion workflow with `/opinion`. -->
 <!-- forge:end v6 -->

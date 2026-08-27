@@ -2399,8 +2399,12 @@ done < "$V6BAD/boundary-commands.tsv"
 start_test "installed Claude and Codex configs select the stage-appropriate receipt evaluator"
 V6I=$(scratch_dir v6-installed-hooks)
 (cd "$V6I" && git init -q --initial-branch=main && git -c user.email=t@t -c user.name=t \
-    commit -q --allow-empty -m init && HOME="$V6I/home" "$REPO_ROOT/setup.sh" -F \
+    commit -q --allow-empty -m init && PATH="/usr/bin:/bin:/usr/sbin:/sbin" FORGE_ENGINE_IDENTITY_FIXTURE=1 \
+    HOME="$V6I/home" "$REPO_ROOT/setup.sh" -F \
     > "$V6I/setup.log" 2>&1)
+assert_file_exists "$V6I/.forge/agents/forge-v6-producer.md" "real canonical producer type is installed"
+assert_file_exists "$V6I/.claude/agents/forge-v6-producer.md" "real Claude producer type is installed"
+assert_file_exists "$V6I/.codex/agents/forge-v6-producer.toml" "real Codex producer type is installed"
 python3 - "$V6I" "$WORKFLOW_STAGE" <<'PY' > "$V6I/hook-commands.tsv"
 import json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
@@ -2447,7 +2451,7 @@ CLAUDE_CMD=$(awk -F '\t' '$1=="claude"{print $2}' "$V6I/hook-commands.tsv")
 CODEX_CMD=$(awk -F '\t' '$1=="codex"{print $2}' "$V6I/hook-commands.tsv")
 printf '%s' "$PAYLOAD" | (cd "$V6I" && CLAUDE_PROJECT_DIR="$V6I" sh -c "$CLAUDE_CMD") \
     > "$V6I/claude-missing.out" 2>&1
-assert_equals "$?" "2" "rendered Claude command blocks a missing v6 receipt"
+assert_equals "$?" "2" "installed real producer type blocks a missing v6 receipt"
 printf '%s' "$PAYLOAD" | (cd "$V6I" && sh -c "$CODEX_CMD") \
     > "$V6I/codex-missing.out" 2>&1
 assert_equals "$?" "2" "rendered Codex command blocks the same missing v6 receipt"
@@ -2459,7 +2463,7 @@ for kind in spec quality; do
 done
 printf '%s' "$PAYLOAD" | (cd "$V6I" && CLAUDE_PROJECT_DIR="$V6I" sh -c "$CLAUDE_CMD") \
     > "$V6I/claude-clean.out" 2>&1
-assert_equals "$?" "0" "rendered Claude command allows fresh clean spec and quality receipts"
+assert_equals "$?" "0" "installed real producer type allows fresh clean spec and quality receipts"
 OUTSIDE_RECEIPTS="$V6I/outside-receipts"
 mkdir -p "$OUTSIDE_RECEIPTS"
 for kind in spec quality; do

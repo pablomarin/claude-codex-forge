@@ -2465,7 +2465,7 @@ assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'CreateNew' \
 
 start_test "Task 5 dispatcher surfaces are installed and every canonical workflow reference resolves"
 MANAGED_V6="$REPO_ROOT/manifests/managed-v6.tsv"
-for source in commands/opinion.md agents/independent-reviewer.md \
+for source in commands/opinion.md agents/independent-reviewer.md agents/forge-v6-producer.md \
   hooks/lib/agent-dispatch.sh hooks/lib/agent-dispatch.ps1 \
   hooks/lib/host-context.sh hooks/lib/host-context.ps1 \
   hooks/lib/authorized-action.sh hooks/lib/authorized-action.ps1 \
@@ -2478,6 +2478,18 @@ for source in commands/opinion.md agents/independent-reviewer.md \
         fail "$source is missing from managed-v6.tsv"
     fi
 done
+
+start_test "portable opinion invocation and strict producer type are explicit"
+assert_contains "$REPO_ROOT/manifests/workflow-capabilities.tsv" $'forge-workflow\treview\tclaude:/opinion;codex:$opinion' \
+    "capability map records each host-native opinion invocation"
+assert_contains "$REPO_ROOT/commands/opinion.md" 'Forge opinion workflow' \
+    "canonical opinion workflow does not claim slash-command portability"
+for workflow in new-feature fix-bug; do
+    assert_contains "$REPO_ROOT/commands/$workflow.md" '`forge-v6-producer`' \
+        "$workflow invokes the exact receipt-producing agent type"
+done
+assert_contains "$REPO_ROOT/FORGE.template.md" 'Claude Code uses `/opinion`; Codex uses `$opinion`' \
+    "canonical root explains host-native opinion invocation"
 
 references=$(rg -o --no-filename '\.forge/workflows/[A-Za-z0-9_./-]+\.md' \
   "$REPO_ROOT/commands" "$REPO_ROOT/rules" "$REPO_ROOT/skills" "$REPO_ROOT/agents" \
