@@ -1,14 +1,14 @@
 # Critical Rules
 
-- **CHECK BRANCH** - Never work on `main`
-- **USE WORKFLOW COMMANDS** - `/new-feature`, `/fix-bug`, or `/quick-fix`
-- **SYSTEMATIC DEBUGGING** - Use `/superpowers:systematic-debugging` for bugs
-- **DESIGN REVIEW** - Get a second opinion (Codex or user) on the plan BEFORE implementing
-- **CONTRARIAN GATE** - Never self-certify approach selection; Codex validates the skip
-- **TDD MANDATORY** - Red-Green-Refactor via Superpowers
-- **E2E TESTING** - Use the `verify-e2e` agent to execute **user-journey** use cases for any user-facing change. Each UC must be Intent → Steps → Verification → Persistence with the Intent describable to a non-developer in one sentence (no endpoints, code, or internal terms in the goal). Interface selection is **feature-surface-driven**: `CLAUDE.md ## E2E Configuration` is the capability envelope (which interfaces exist); the FEATURE determines which interface(s) the user actually touches — UI feature → UI UC, public/product API → API UC, CLI feature → CLI UC, cross-surface → multiple UCs. Internal endpoints backing a UI page → UI UC (the endpoint contract is integration-test territory). **No cheating in ARRANGE or VERIFY** — never raw DB writes (`psql -c "INSERT"`, `mysql -e "UPDATE"`, `mongosh --eval`), internal/undocumented endpoints, or file-injection on disk, even to seed test data. E2E setup goes through the app's public API, public signup/login, app CLI, UI, or documented seed commands (`make seed-dev`, `manage.py loaddata`). **If the sanctioned path is broken, FIX it** (see NO BUGS LEFT BEHIND below). See `.claude/rules/testing.md` for the full interface selection table and GOOD/BAD use case examples.
-- **UPDATE STATE** - `.claude/local/state.md` + `docs/CHANGELOG.md` (Stop hook reminds; PreToolUse hook gates commit/push/PR)
-- **RESEARCH FIRST** - WebSearch/WebFetch/Context7 before implementing
-- **CHALLENGE ME** - Don't blindly agree
-- **NO BUGS LEFT BEHIND** - Never defer known issues "for later." Fix everything found during reviews, testing, and implementation before moving on. If a reviewer or tool flags an issue, it gets fixed in the same branch — no "follow-up PR" for known problems. This includes deployment, infrastructure, and configuration issues, not just code bugs.
-- **GROUND YOUR CLAIMS** - State what you verified vs. what you're inferring, and say which. Never assert about code you haven't actually read — read it first and cite `file:line`, or flag the claim as unchecked. When uncertain, say "I haven't checked X" instead of answering fluently. Confident guessing is a defect, the same caliber as a known bug left behind.
+- **CHECK BRANCH** — Never implement on the protected default branch.
+- **USE CANONICAL WORKFLOWS** — Use `/new-feature`, `/fix-bug`, or `/quick-fix` as appropriate.
+- **TDD** — Write and observe a failing behavior test before production changes.
+- **RESEARCH FIRST** — Verify current library/API/provider behavior before design.
+- **INDEPENDENT DESIGN REVIEW** — A fresh reviewer or council must challenge the plan before implementation.
+- **STRUCTURED REVIEW** — Final code review requires separate clean spec and quality receipts over one frozen candidate.
+- **E2E USER JOURNEYS** — Use `verify-e2e` for user-facing behavior. Arrange and verify only through sanctioned user interfaces; see `.forge/rules/testing.md`.
+- **UPDATE STATE** — Keep `.forge/local/state.md` and applicable changelog material current.
+- **NO SILENT DEFERRAL** — Fix known reachable correctness, security, evidence, or configuration defects in active scope before shipping.
+- **GROUND YOUR CLAIMS** — Distinguish verified facts, inferences, unverified results, and blockers. Confident guessing is a defect. Bind every certification to the exact candidate.
+- **HUMAN AUTHORITY** — PR creation and other new external mutations require an explicit human-created authorization record.
+- **HOST FREEDOM** — Either host may resume at the next durable step; warn about simultaneous editing but do not lock the worktree.

@@ -1,10 +1,10 @@
 # PRD: /forge-goal — Autonomous PRD-to-PR-Ready Workflow
 
-**Version:** 1.2
-**Status:** Draft (revised after Codex second grounding audit)
-**Author:** Claude (Opus 4.7, 1M ctx) + Pablo Marin
+**Version:** 1.3
+**Status:** Approved contract; native-host qualification may remain BLOCKED until authenticated
+**Author:** Forge maintainers + Pablo Marin
 **Created:** 2026-05-14
-**Last Updated:** 2026-05-14
+**Last Updated:** 2026-08-27
 
 ---
 
@@ -44,12 +44,36 @@ Per Pablo's discussion answer 14: **most of the workflow machinery already exist
 - ❌ A new `/forge-goal` slash command — `/new-feature` and `/fix-bug` print the `/goal` command at the relevant checkpoint instead.
 - ❌ Mechanical replacement of "Ask the user" calls in `workflow.md` — council fires at the agent's discretion, not via instrumented call sites.
 - ❌ CI status gating on PR-ready — CI runs in parallel; the "PR open + reviewers clean + E2E report present" bar does not wait for CI.
-- ❌ Durable counter persistence across `--resume`.
+- ❌ Treating a native host's resettable session/turn/token counter as the authoritative Forge
+  budget. Native counters may reset; the persistent Forge authorization and turn records may not.
 - ❌ Multiple `/goal` per session — one per session is the rule.
 - ❌ Autonomous Codex during PRD phase — user invokes `/codex` on-demand only.
 - ❌ `/quick-fix` integration — trivial changes do not need autonomous loops.
 - ❌ Hard auto-abort on stuck detection — soft warning only.
 - ❌ Opt-in flag for downstream installs — every Forge install gets the capability automatically after upgrade.
+
+### Host-Neutral Durability Contract
+
+The active Claude Code or Codex session may provide its own native `/goal` counters and resume
+mechanics. Those host-local mechanics are useful telemetry, but they are not portable state. Forge
+owns the objective, nonce, authorization record, durable turn count, budget ceiling, checklist,
+candidate identity, and evidence receipts under `.forge/local/`. A host switch starts a new native
+session while resuming the same Forge record at the exact next unchecked step.
+
+| Behavior | Persistent Forge requirement | Native-host role |
+|---|---|---|
+| Objective/nonce creation | Create once and bind all later evidence and authorization to it | Start or compose native autonomy |
+| Budget exhaustion | Checkpoint exact phase/step and stop when the durable Forge ceiling is reached | May additionally report its resettable local counter |
+| Stuck warning | Emit periodically from durable turns without checklist progress | May warn earlier, never reset Forge progress |
+| User input or authorization | End autonomy; PR creation requires the human-created nonce/candidate authorization record | Surface the host's normal interaction pause |
+| Interrupted session | Preserve objective, ceiling, consumed durable turns, checklist, and evidence | Native session may disappear or reset counters |
+| Same-host resume | Resume the exact next unchecked durable step | Restore native context when supported |
+| Cross-host resume | Resume the exact next unchecked durable step without claiming session transfer | Start a fresh native goal/session over the same Forge record |
+| Candidate mutation | Invalidate each receipt whose fingerprint boundary changed | Host must rerun the affected final gate |
+| Terminal status | Record `complete`, `blocked`, or `cancelled`; never infer success from host exit | Stop native autonomy after Forge terminal status |
+
+Any Must behavior that the active authenticated host cannot compose is `BLOCKED`; Forge does not
+silently reduce the contract or claim runtime readiness.
 
 ## 3. User Personas
 
@@ -298,6 +322,7 @@ And CI green is NOT required for the goal to clear (CI runs in parallel)
 Given the autonomous loop has consumed its budget
 When /goal's exhaustion fires
 Then state.md is checkpointed with the current Phase, checklist state, and last action
+And the persistent Forge ceiling and consumed durable turn count are unchanged
 And I see a clear message: "stopped at Phase X, checklist Y at item Z; please take over manually"
 And NO silent retry or auto-restart occurs
 ```
@@ -305,6 +330,8 @@ And NO silent retry or auto-restart occurs
 **Acceptance Criteria:**
 
 - [ ] On budget exhaustion, state.md captures the current Phase and checklist progress
+- [ ] The objective, nonce, budget ceiling, and consumed durable turn count survive interruption,
+  same-host resume, and cross-host resume
 - [ ] The user-facing message names exactly where the loop stopped and what's done vs. pending
 - [ ] No automatic restart of `/goal` with the same condition
 - [ ] User can resume manually by continuing from the checkpointed phase
@@ -331,6 +358,7 @@ And NO silent retry or auto-restart occurs
 Given the autonomous loop has run N turns without state.md checklist progress
 When the stuck threshold is exceeded
 Then a soft warning appears in the transcript: "no measurable progress for N turns, consider intervening"
+And N is derived from the persistent Forge turn/progress record rather than a resettable native counter
 And the loop continues working
 And no auto-abort occurs
 ```
@@ -388,17 +416,20 @@ Then the loop terminates autonomy (matches native /goal behavior — any user in
 
 ```gherkin
 Given an autonomous loop was running and the session was interrupted
-When I run `claude --resume` or `claude --continue`
-Then the /goal condition is restored
-And the loop continues from where it left off
-And it is acceptable that the elapsed/turns/tokens counters reset
+When I resume in the same host or open the worktree in the other supported host
+Then the Forge objective, nonce, ceiling, consumed durable turns, checklist, and evidence records are restored
+And a new native session composes its own `/goal` over that durable record
+And the loop continues at the exact next unchecked step without repeating a completed durable step
 ```
 
 **Acceptance Criteria:**
 
-- [ ] `--resume`/`--continue` restores the active `/goal` (per Anthropic's documented behavior)
-- [ ] State.md persists across the interruption (it's on disk; not in session memory)
-- [ ] Counter reset is acceptable and documented
+- [ ] Same-host `--resume`/`--continue` resumes the durable Forge record even if the native counter resets
+- [ ] Cross-host resume starts a fresh native session and does not claim that native sessions transfer
+- [ ] `.forge/local/state.md` persists the objective, nonce, budget ceiling, consumed durable turns,
+  checklist, and next unchecked step
+- [ ] Native host counters may reset; the authoritative Forge ceiling and consumed count never reset
+- [ ] Existing candidate/evidence remains valid only when its recorded fingerprint still matches
 
 **Priority:** Should Have
 

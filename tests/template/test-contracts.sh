@@ -1710,7 +1710,8 @@ ST_TPL="$REPO_ROOT/state.template.md"
 assert_file_exists "$ST_TPL" "state.template.md exists"
 assert_contains "$ST_TPL" "## /goal session" "/goal session section documented"
 assert_contains "$ST_TPL" "## PR authorization" "PR authorization section documented"
-assert_contains "$ST_TPL" "Code review iteration" "reviewer-iteration head-SHA convention documented"
+assert_contains "$ST_TPL" "Spec review receipt" "structured spec-review receipt documented"
+assert_contains "$ST_TPL" "Quality review receipt" "structured quality-review receipt documented"
 assert_contains "$ST_TPL" "REPLACE semantics" "REPLACE semantics documented in state.template.md"
 # P1.2: state.template must NOT have a pre-populated empty /goal session table
 # (The section documents the FORMAT, not an empty instance.)
@@ -1948,23 +1949,20 @@ fi
 # appears in their error messages and in the canonical-stem comment block of
 # compute_plan_review_gate.
 # ---------------------------------------------------------------------------
-start_test "Per-iter clean-line vocabulary parity"
-
-# Canonical stems — changing either side requires changing both files +
-# updating this contract.
-PLAN_STEM='Plan review iteration .* — codex clean — plan='
-CODE_STEM='Code review iteration .* — codex clean — head='
+start_test "candidate-bound structured receipt vocabulary parity"
 
 ok=1
-for f in state.template.md rules/workflow.md commands/new-feature.md commands/fix-bug.md \
-         hooks/check-workflow-gates.sh hooks/check-workflow-gates.ps1 \
-         hooks/build-evidence.sh hooks/build-evidence.ps1; do
-    grep -qE "$PLAN_STEM" "$REPO_ROOT/$f" \
-        || { fail "$f missing canonical Plan review per-iter stem"; ok=0; }
-    grep -qE "$CODE_STEM" "$REPO_ROOT/$f" \
-        || { fail "$f missing canonical Code review per-iter stem"; ok=0; }
+for f in state.template.md rules/workflow.md commands/review.md; do
+    for token in "code-spec" "code-quality"; do
+        grep -qF "$token" "$REPO_ROOT/$f" \
+            || { fail "$f missing structured review lens: $token"; ok=0; }
+    done
 done
-[ "$ok" = "1" ] && pass "8 files carry both canonical stems"
+for f in state.template.md rules/workflow.md hooks/build-evidence.sh hooks/build-evidence.ps1; do
+    grep -qiF "candidate" "$REPO_ROOT/$f" \
+        || { fail "$f missing candidate binding"; ok=0; }
+done
+[ "$ok" = "1" ] && pass "structured review lenses remain bound to one candidate"
 
 # ---------------------------------------------------------------------------
 # Contract: "Ground Your Claims" rule parity across its three shipping copies

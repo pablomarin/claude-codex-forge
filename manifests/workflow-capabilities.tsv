@@ -1,5 +1,21 @@
 # v5 external behavior to v6 Forge-owned replacement. Tab-separated.
 # provider	behavior	v5-surface	owner	canonical-path	replacement-kind	hosts
+# conversion-stage: core
+forge-workflow	prd-discuss	/prd:discuss	forge	.forge/workflows/prd/discuss.md	workflow	claude,codex
+forge-workflow	prd-create	/prd:create	forge	.forge/workflows/prd/create.md	workflow	claude,codex
+forge-workflow	new-feature	/new-feature	forge	.forge/workflows/new-feature.md	workflow	claude,codex
+forge-workflow	fix-bug	/fix-bug	forge	.forge/workflows/fix-bug.md	workflow	claude,codex
+forge-workflow	quick-fix	/quick-fix	forge	.forge/workflows/quick-fix.md	workflow	claude,codex
+forge-workflow	review	/review	forge	.forge/workflows/review.md	workflow	claude,codex
+forge-workflow	investigation	review-investigate	forge	.forge/workflows/review.md	workflow-profile	claude,codex
+forge-workflow	council	/council	forge	.forge/skills/council/SKILL.template.md	canonical-skill	claude,codex
+forge-workflow	goal-composition	native-/goal	forge	.forge/workflows/goal.md	root-composition	claude,codex
+forge-workflow	review-pr-comments	/review-pr-comments	forge	.forge/workflows/review-pr-comments.md	workflow	claude,codex
+forge-workflow	finish-branch	/finish-branch	forge	.forge/workflows/finish-branch.md	workflow	claude,codex
+forge-workflow	release	/release	forge	.forge/skills/release/SKILL.template.md	canonical-skill	claude,codex
+forge-workflow	state-memory	state-and-memory	forge	.forge/local/state.md	durable-contract	claude,codex
+forge-workflow	verify-app	verify-app-agent	forge	.forge/agents/verify-app.md	canonical-agent	claude,codex
+forge-workflow	verify-e2e	verify-e2e-agent	forge	.forge/agents/verify-e2e.md	canonical-agent	claude,codex
 superpowers	brainstorming	/superpowers:brainstorming	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 superpowers	writing-plans	/superpowers:writing-plans	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 superpowers	subagent-driven-development	/superpowers:subagent-driven-development	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex

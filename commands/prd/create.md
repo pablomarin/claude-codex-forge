@@ -40,7 +40,7 @@ After creating PRD:
 1. Summarize what was created (section count, story count)
 2. Ask user to review
 3. Offer to make adjustments
-4. When approved, prompt to start technical design with `/superpowers:brainstorming`
+4. When approved, prompt to continue with `/new-feature {feature-name}` at technical design
 
 ## PRD Template
 
@@ -49,7 +49,7 @@ After creating PRD:
 
 **Version:** 1.0
 **Status:** Draft
-**Author:** Claude + {User}
+**Author:** Current Forge host + {User}
 **Created:** {date}
 **Last Updated:** {date}
 
@@ -180,7 +180,7 @@ And {additional result}
 
 | Version | Date   | Author        | Changes     |
 | ------- | ------ | ------------- | ----------- |
-| 1.0     | {date} | Claude + User | Initial PRD |
+| 1.0     | {date} | Forge host + User | Initial PRD |
 
 ## Appendix B: Approval
 
@@ -210,7 +210,7 @@ Before finalizing, verify PRD has:
 
 - Creates `docs/prds/{feature-name}.md`
 - PRD is ready for technical design phase
-- Prompt user to proceed with `/superpowers:brainstorming` when approved
+- Prompt user to continue with `/new-feature {feature-name}` when approved
 
 ## Error Handling
 
