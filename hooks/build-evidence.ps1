@@ -64,7 +64,20 @@ if (Test-Path -LiteralPath $stateHelper) {
     try {
         . $stateHelper
         $StateMd = Get-ForgeStatePath -Root (Get-Location).Path -Mode Read
-    } catch { $StateMd = "" }
+    } catch {
+        $canonicalSurface = $false
+        foreach ($surface in @(".forge\version", ".forge\local", ".forge\local\state.md")) {
+            if (Get-Item -LiteralPath (Join-Path (Get-Location).Path $surface) -Force -ErrorAction SilentlyContinue) { $canonicalSurface = $true; break }
+        }
+        $forgeRootItem = Get-Item -LiteralPath (Join-Path (Get-Location).Path ".forge") -Force -ErrorAction SilentlyContinue
+        if ($forgeRootItem -and ($forgeRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $canonicalSurface = $true }
+        if ($canonicalSurface) {
+            [Console]::Error.WriteLine([string]$_.Exception.Message)
+            [Console]::Error.WriteLine("FORGE_STATE_INVALID: canonical v6 state could not be resolved")
+            exit 2
+        }
+        $StateMd = ""
+    }
 }
 $StateIsV6 = (-not [string]::IsNullOrEmpty($StateMd)) -and (($StateMd -replace '\\', '/') -match '/\.forge/local/state\.md$')
 $StateLocalDir = ".forge/local"
@@ -78,7 +91,10 @@ if (($StateMd -replace '\\', '/') -match '/\.claude/local/state\.md$') { $StateL
 # (the repo ships against powershell.exe 5.1 per the default-branch.ps1 contract).
 # Helper absence → fail-open (0/"ok"/$true; see Compute-BreakerFields).
 # ---------------------------------------------------------------------------
-$ReviewBreakerPs1 = Join-Path (Get-Location) ".claude\hooks\lib\review-breaker.ps1"
+$ReviewBreakerPs1 = Join-Path (Get-Location) ".forge\hooks\lib\review-breaker.ps1"
+if (-not (Test-Path -LiteralPath $ReviewBreakerPs1)) {
+    $ReviewBreakerPs1 = Join-Path (Get-Location) ".claude\hooks\lib\review-breaker.ps1"
+}
 if (-not (Test-Path -LiteralPath $ReviewBreakerPs1)) {
     $ReviewBreakerPs1 = Join-Path (Get-Location) "hooks\lib\review-breaker.ps1"
 }
@@ -251,7 +267,7 @@ function Compute-ReviewerGate {
 # ---------------------------------------------------------------------------
 function Compute-BreakerFields {
     $result = @{ rounds = 0; breaker = 'ok'; breaker_ok = $true }
-    if (-not $ReviewBreakerAvailable) { return $result }
+    if (-not $StateIsV6 -or -not $ReviewBreakerAvailable) { return $result }
     if (-not (Test-Path $StateMd)) { return $result }
     $rsOut = Invoke-ReviewBreaker $StateMd
     $brk = 'ok'; $adj = 'no'
@@ -278,6 +294,7 @@ function Compute-BreakerFields {
 # ---------------------------------------------------------------------------
 function Compute-PlanReviewGate {
     $result = @{ clean = $false; matched_iteration = ""; matched_plan_sha = "" }
+    if (-not $StateIsV6) { return $result }
     if (-not (Test-Path $StateMd)) { return $result }
 
     $lines = Read-StateMdLines
@@ -336,6 +353,7 @@ function Compute-PlanReviewGate {
 function Parse-PRAuthorization {
     param([string]$HeadSha, [string]$GoalNonce)
     $result = @{ authorized = $false; authorized_at = ""; head_sha_at_auth = ""; nonce_at_auth = "" }
+    if (-not $StateIsV6) { return $result }
     if (-not (Test-Path $StateMd)) { return $result }
     if ([string]::IsNullOrEmpty($HeadSha)) { return $result }
     if ([string]::IsNullOrEmpty($GoalNonce)) { return $result }
@@ -603,7 +621,7 @@ $hashBytes = $sha256.ComputeHash($fpBytes)
 $sha256.Dispose()
 $ProgressFp = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
 
-# Side-channel: write fingerprint to .claude/local/forge-goal-last-fingerprint so
+# Side-channel: atomically publish a complete fingerprint for concurrent Stop hooks.
 # the stuck-detection logic in check-state-updated.ps1 can read it without
 # re-running build-evidence or parsing STDERR. One line — just the SHA256 value.
 # Best-effort: failure must not abort the evidence emission.
@@ -611,7 +629,9 @@ if (-not [string]::IsNullOrEmpty($ProgressFp)) {
     $sidechannel = Join-Path $StateLocalDir "forge-goal-last-fingerprint"
     try {
         $null = New-Item -ItemType Directory -Path $StateLocalDir -Force -ErrorAction SilentlyContinue
-        [System.IO.File]::WriteAllText($sidechannel, $ProgressFp + "`n")
+        $tempSidechannel = "$sidechannel.tmp.$PID"
+        [System.IO.File]::WriteAllText($tempSidechannel, $ProgressFp + "`n", (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $tempSidechannel -Destination $sidechannel -Force
     } catch {
         # Non-blocking: ignore write failures
     }
@@ -688,4 +708,5 @@ $json = '{' +
 [Console]::Error.WriteLine($json)
 [Console]::Error.WriteLine("FORGE_GOAL_EVIDENCE_END")
 
+if ($parsed.host -eq "codex") { Write-Output "{}" }
 exit 0

@@ -32,6 +32,15 @@ function Invoke-ReviewBreaker {
 
     $ErrorActionPreference = 'SilentlyContinue'
 
+    if (-not $StateFile) {
+        $root = & git rev-parse --show-toplevel 2>$null
+        if (-not $root) { $root = (Get-Location).Path }
+        $canonical = Join-Path $root ".forge\local\state.md"
+        $legacy = Join-Path $root ".claude\local\state.md"
+        if (Test-Path -LiteralPath $canonical -PathType Leaf) { $StateFile = $canonical }
+        elseif (Test-Path -LiteralPath $legacy -PathType Leaf) { $StateFile = $legacy }
+    }
+
     # Fail-safe (inert) block: missing state / no git -> breaker inert.
     function _emit_inert {
         return @(

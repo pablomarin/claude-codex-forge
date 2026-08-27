@@ -25,16 +25,17 @@
 
 # Read hook input from stdin
 $jsonInput = [Console]::In.ReadToEnd()
+function Exit-ForgeAllow { if ($data.host -eq "codex") { Write-Output "{}" }; exit 0 }
 
 # Parse JSON input
 try {
     $data = $jsonInput | ConvertFrom-Json
 } catch {
-    exit 0
+    Exit-ForgeAllow
 }
 
 $command = $data.tool_input.command
-if (-not $command) { exit 0 }
+if (-not $command) { Exit-ForgeAllow }
 
 # --- Only gate ship actions ---
 # Ship-verb detection tolerant of two common, fully-legitimate invocation forms
@@ -69,7 +70,7 @@ $isShip = $false
 if ($commandNorm -match "^\s*$shipVerb") { $isShip = $true }
 if ($commandNorm -match "[&|;]+\s*$shipVerb") { $isShip = $true }
 
-if (-not $isShip) { exit 0 }
+if (-not $isShip) { Exit-ForgeAllow }
 
 # --- Block compound ship commands ---
 # A compound like `git commit -m x && git push` validates evidence against the
@@ -121,8 +122,20 @@ if ($topLevel) {
     }
 }
 
-# --- Resolve canonical v6 state, with pre-migration v5 read compatibility. ---
+# Revalidate Forge-managed config at every ship boundary on both hosts.
 $hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$configCheck = Join-Path $hookDir "check-config-change.ps1"
+$forgeVersionPath = Join-Path (Get-Location).Path ".forge\version"
+$forgeVersion = if (Test-Path -LiteralPath $forgeVersionPath -PathType Leaf) { (@(Get-Content -LiteralPath $forgeVersionPath)[0]).Trim() } else { "" }
+if ($forgeVersion -eq "6" -and (Test-Path -LiteralPath $configCheck)) {
+    $null = '{}' | & $configCheck -Mode boundary -Root (Get-Location).Path 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -F and inspect the diff before shipping.")
+        exit 2
+    }
+}
+
+# --- Resolve canonical v6 state, with pre-migration v5 read compatibility. ---
 $stateHelper = Join-Path $hookDir "lib\state-path.ps1"
 if (-not (Test-Path -LiteralPath $stateHelper)) {
     $stateHelper = Join-Path (Get-Location) "hooks\lib\state-path.ps1"
@@ -132,15 +145,29 @@ if (Test-Path -LiteralPath $stateHelper) {
     try {
         . $stateHelper
         $stateFile = Get-ForgeStatePath -Root (Get-Location).Path -Mode Read
-    } catch { $stateFile = "" }
+    } catch {
+        $canonicalSurface = $false
+        foreach ($surface in @(".forge\version", ".forge\local", ".forge\local\state.md")) {
+            if (Get-Item -LiteralPath (Join-Path (Get-Location).Path $surface) -Force -ErrorAction SilentlyContinue) { $canonicalSurface = $true; break }
+        }
+        $forgeRootItem = Get-Item -LiteralPath (Join-Path (Get-Location).Path ".forge") -Force -ErrorAction SilentlyContinue
+        if ($forgeRootItem -and ($forgeRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $canonicalSurface = $true }
+        if ($canonicalSurface) {
+            [Console]::Error.WriteLine([string]$_.Exception.Message)
+            [Console]::Error.WriteLine("FORGE_STATE_INVALID: canonical v6 state could not be resolved")
+            exit 2
+        }
+        $stateFile = ""
+    }
 }
+$stateIsV6 = (-not [string]::IsNullOrEmpty($stateFile)) -and (($stateFile -replace '\\', '/') -match '/\.forge/local/state\.md$')
 
 if (-not (Test-Path $stateFile)) {
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Breadcrumb wording byte-equivalent to bash variant for AC-4 parity.
     [Console]::Error.WriteLine("ℹ check-workflow-gates: Forge state.md not found.")
     [Console]::Error.WriteLine("  If you have a legacy CONTINUITY.md, run setup --migrate before setup -R")
-    exit 0
+    Exit-ForgeAllow
 }
 
 $content = Get-Content $stateFile -Raw -ErrorAction SilentlyContinue
@@ -164,10 +191,14 @@ foreach ($line in (($content -replace "`r", "") -split "`n")) {
 }
 
 $cmdLine = ($workflowBlockLines | Select-String '\|\s*Command\s*\|' | Select-Object -First 1)
-if (-not $cmdLine) { exit 0 }
+if (-not $cmdLine) { Exit-ForgeAllow }
 
 $cmd = ($cmdLine -split '\|')[2].Trim()
-if (-not $cmd -or $cmd -eq "none" -or $cmd -eq ([char]0x2014).ToString() -or $cmd -eq "-") { exit 0 }
+if (-not $cmd -or $cmd -eq "none" -or $cmd -eq ([char]0x2014).ToString() -or $cmd -eq "-") { Exit-ForgeAllow }
+if (-not $stateIsV6) {
+    [Console]::Error.WriteLine("WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup --migrate, then setup -R.")
+    exit 2
+}
 
 # ---------------------------------------------------------------------------
 # Layer 2 — /forge-goal PR-create authorization guard (PS parity for .sh)
@@ -271,10 +302,8 @@ if ($command -match $prCreatePattern) {
 # separate pwsh interpreter (the repo ships against powershell.exe 5.1). The
 # function RETURNS the sentinel lines (string array) and never calls `exit` when
 # dot-sourced.
-$ReviewBreakerPs1 = Join-Path $topLevel ".claude\hooks\lib\review-breaker.ps1"
-if (-not (Test-Path -LiteralPath $ReviewBreakerPs1)) {
-    $ReviewBreakerPs1 = Join-Path $topLevel "hooks\lib\review-breaker.ps1"
-}
+$ReviewBreakerPs1 = if ($stateIsV6) { Join-Path $hookDir "lib\review-breaker.ps1" } else { Join-Path $topLevel ".claude\hooks\lib\review-breaker.ps1" }
+if (-not $stateIsV6 -and -not (Test-Path -LiteralPath $ReviewBreakerPs1)) { $ReviewBreakerPs1 = Join-Path $topLevel "hooks\lib\review-breaker.ps1" }
 $brkHead = ""
 try { $brkHead = ((git rev-parse HEAD 2>$null) -join "").Trim() } catch {}
 if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $stateFile)) {
@@ -344,7 +373,7 @@ if ($command -match "^\s*${envp}git${gitopt}\s+commit\b" -and
         foreach ($f in $stagedPaths) {
             if (-not (Test-IsDocPath $f)) { $allDocs = $false; break }
         }
-        if ($allDocs) { exit 0 }  # docs-only commit — skip gates, NO state mutation
+        if ($allDocs) { Exit-ForgeAllow }  # docs-only commit — skip gates, NO state mutation
     }
     # Empty staged diff → can't prove docs-only → fall through and enforce (fail-safe).
 }
@@ -667,4 +696,4 @@ if ($codePassLine -and $headShaCode) {
     }
 }
 
-exit 0
+Exit-ForgeAllow

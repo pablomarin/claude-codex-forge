@@ -19,6 +19,103 @@ source "$REPO_ROOT/tests/template/lib.sh"
 
 init_counters
 
+start_test "v6 state template carries host-neutral identity and receipt fields"
+assert_contains "$REPO_ROOT/state.template.md" '<!-- forge:state-schema v6 -->' \
+    "state schema is explicitly v6"
+assert_contains "$REPO_ROOT/state.template.md" '| Worktree root' \
+    "state binds the canonical worktree root"
+assert_contains "$REPO_ROOT/state.template.md" '| Git common directory' \
+    "state distinguishes linked worktrees with Git identity"
+assert_contains "$REPO_ROOT/state.template.md" '| Last active host' \
+    "state records the host that last advanced the workflow"
+assert_contains "$REPO_ROOT/state.template.md" '| Workflow base ref' \
+    "state freezes the workflow base ref"
+assert_contains "$REPO_ROOT/state.template.md" '| Workflow base SHA' \
+    "state freezes the resolved workflow base SHA"
+assert_contains "$REPO_ROOT/state.template.md" '| objective_hash' \
+    "goal state mirrors the externally authorized objective hash"
+assert_contains "$REPO_ROOT/state.template.md" '| evidence_path' \
+    "goal state points at canonical evidence"
+assert_contains "$REPO_ROOT/state.template.md" '| Spec review receipt' \
+    "state names the per-task spec-review receipt"
+assert_contains "$REPO_ROOT/state.template.md" '| Quality review receipt' \
+    "state names the per-task quality-review receipt"
+assert_contains "$REPO_ROOT/state.template.md" '| Council receipt' \
+    "state names the council receipt"
+
+start_test "Forge memory has isolated local and reviewable durable layers"
+MEM="$(scratch_dir forge-memory)"
+mkdir -p "$MEM/.forge/hooks" "$MEM/.forge/local/memory" "$MEM/.forge/memory"
+cp "$REPO_ROOT/hooks/pre-compact-memory.sh" "$MEM/.forge/hooks/pre-compact-memory.sh"
+printf '%s\n' 'local-only-learning' > "$MEM/.forge/local/memory/session.md"
+printf '%s\n' 'durable-team-learning' > "$MEM/.forge/memory/project.md"
+printf '{"trigger":"manual","cwd":"%s"}' "$MEM" \
+    | (cd "$MEM" && CLAUDE_PROJECT_DIR="$MEM" bash .forge/hooks/pre-compact-memory.sh) \
+    > "$MEM/precompact.out" 2>&1
+assert_contains "$MEM/precompact.out" '.forge/local/memory' \
+    "pre-compact reminder owns only volatile local memory"
+assert_not_contains "$MEM/precompact.out" 'auto memory' \
+    "pre-compact never redirects Forge continuity into private host memory"
+assert_contains "$REPO_ROOT/rules/memory.md" '.forge/memory/' \
+    "durable project memory is documented as an ordinary reviewed change"
+assert_contains "$REPO_ROOT/rules/memory.md" '.forge/local/memory/' \
+    "volatile developer memory is documented separately"
+
+start_test "linked worktrees isolate local continuity while Git propagates durable memory"
+MW_BASE=$(scratch_dir forge-memory-worktrees)
+MW_MAIN="$MW_BASE/main"
+MW_PEER="$MW_BASE/peer"
+mkdir -p "$MW_MAIN/.forge/memory"
+(cd "$MW_MAIN" && git init -q --initial-branch=main && git config user.email t@t && git config user.name t)
+printf '%s\n' 'durable-v1' > "$MW_MAIN/.forge/memory/project.md"
+(cd "$MW_MAIN" && git add .forge/memory/project.md && git commit -q -m durable-v1 && git worktree add -q -b peer "$MW_PEER")
+mkdir -p "$MW_MAIN/.forge/local/memory" "$MW_PEER/.forge/local/memory"
+printf '%s\n' 'claude-local' > "$MW_MAIN/.forge/local/memory/session.md"
+printf '%s\n' 'codex-local' > "$MW_PEER/.forge/local/memory/session.md"
+cat > "$MW_MAIN/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field | Value |
+| Command | /new-feature local-isolation |
+| Phase | 5 — Quality |
+| Next step | ship |
+### Checklist
+- [x] Code review loop — N/A: isolation fixture
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: isolation fixture
+EOF
+cat > "$MW_PEER/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field | Value |
+| Command | /new-feature local-isolation |
+| Phase | 5 — Quality |
+| Next step | review |
+### Checklist
+- [ ] Code review loop
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: isolation fixture
+EOF
+printf '{"cwd":"%s","tool_input":{"command":"git push"}}' "$MW_MAIN" \
+    | (cd "$MW_MAIN" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$MW_MAIN/gate.out" 2>&1
+assert_equals "$?" "0" "main worktree can satisfy only its own local gate state"
+printf '{"cwd":"%s","tool_input":{"command":"git push"}}' "$MW_PEER" \
+    | (cd "$MW_PEER" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$MW_PEER/gate.out" 2>&1
+assert_equals "$?" "2" "peer worktree cannot borrow the main worktree local gate state"
+assert_equals "$(cat "$MW_MAIN/.forge/local/memory/session.md")" "claude-local" \
+    "main local memory remains per-worktree"
+assert_equals "$(cat "$MW_PEER/.forge/local/memory/session.md")" "codex-local" \
+    "peer local memory remains per-worktree"
+assert_contains "$MW_PEER/.forge/memory/project.md" 'durable-v1' \
+    "committed durable memory is visible in the linked worktree"
+printf '%s\n' 'durable-v2' >> "$MW_MAIN/.forge/memory/project.md"
+(cd "$MW_MAIN" && git add .forge/memory/project.md && git commit -q -m durable-v2)
+(cd "$MW_PEER" && git merge -q --ff-only main)
+assert_contains "$MW_PEER/.forge/memory/project.md" 'durable-v2' \
+    "ordinary Git propagation shares reviewed durable memory"
+
 start_test "v5 state translator writes canonical v6 state and invalidates receipts"
 SM="$(scratch_dir state-migration)"
 mkdir -p "$SM/.claude/local"

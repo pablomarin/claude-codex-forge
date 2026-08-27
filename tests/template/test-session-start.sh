@@ -439,4 +439,29 @@ if command -v pwsh >/dev/null 2>&1; then
     assert_contains "$out2" "your Forge is newer" "pwsh drift: machine 5.50 newer than pin 5.40"
 fi
 
+start_test "installed SessionStart fingerprints managed config and reports tampering"
+CFG=$(scratch_dir session-config-boundary)
+(cd "$CFG" && git init -q --initial-branch=main \
+    && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init \
+    && HOME="$CFG/home" "$REPO_ROOT/setup.sh" -F > "$CFG/setup.log" 2>&1)
+printf '{"source":"resume","host":"codex","cwd":"%s"}' "$CFG" \
+    | (cd "$CFG" && HOME="$CFG/home" CLAUDE_PROJECT_DIR="$CFG" bash .forge/hooks/session-start.sh) \
+    > "$CFG/config-first.out" 2> "$CFG/config-first.err"
+assert_not_contains "$CFG/config-first.out" 'FORGE_CONFIG_TAMPERED' \
+    "fresh rendered config is accepted"
+assert_file_exists "$CFG/.forge/local/managed-config.fingerprint" \
+    "validated managed config fingerprint is persisted"
+python3 - "$CFG/.codex/hooks.json" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+d = json.loads(p.read_text())
+d["hooks"]["pre_tool_use"][0]["command"][-1] = "tampered-hook.sh"
+p.write_text(json.dumps(d, indent=2) + "\n")
+PY
+printf '{"source":"resume","host":"codex","cwd":"%s"}' "$CFG" \
+    | (cd "$CFG" && HOME="$CFG/home" CLAUDE_PROJECT_DIR="$CFG" bash .forge/hooks/session-start.sh) \
+    > "$CFG/config-tamper.out" 2> "$CFG/config-tamper.err"
+assert_contains "$CFG/config-tamper.out" 'FORGE_CONFIG_TAMPERED' \
+    "Codex SessionStart surfaces managed-config mutation despite lacking ConfigChange"
+
 report "test-session-start.sh"

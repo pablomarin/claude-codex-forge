@@ -23,6 +23,18 @@
         "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "post-tool-format.sh"]
       }
     ],
+    "subagent_stop": [
+      {
+        "forgeManagedId": "subagent-review-receipt",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "check-subagent-review.sh"]
+      }
+    ],
+    "pre_compact": [
+      {
+        "forgeManagedId": "precompact-memory",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "pre-compact-memory.sh"]
+      }
+    ],
     "stop": [
       {
         "forgeManagedId": "build-evidence",

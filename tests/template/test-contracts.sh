@@ -1588,8 +1588,8 @@ done
 #     stop_hook_active early-return in check-state-updated.{sh,ps1}.
 #
 #     The early-return takes different forms in each file:
-#       .sh  — `[ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0` (uppercase var, after parsing)
-#       .ps1 — `if ($data.stop_hook_active -eq $true) {`
+#       .sh  — `[ "$STOP_HOOK_ACTIVE" = "true" ] && forge_allow` (host-aware JSON allow)
+#       .ps1 — `if ($data.stop_hook_active -eq $true) {` followed by `Exit-ForgeAllow`
 #     We match on those exact guard patterns (not the comment that mentions
 #     stop_hook_active in lowercase, which appears in the parsing block and
 #     would give a false earlier line number via tail -1).
@@ -1597,13 +1597,22 @@ done
 for f in "$REPO_ROOT/hooks/check-state-updated.sh" "$REPO_ROOT/hooks/check-state-updated.ps1"; do
     [ -f "$f" ] || { fail "consumer missing: $f"; continue; }
     case "$(basename "$f")" in
-        check-state-updated.sh)  guard_pattern='STOP_HOOK_ACTIVE.*exit 0' ;;
+        check-state-updated.sh)  guard_pattern='STOP_HOOK_ACTIVE.*forge_allow' ;;
         check-state-updated.ps1) guard_pattern='data\.stop_hook_active' ;;
         *) fail "unexpected consumer file: $(basename "$f")"; continue ;;
     esac
     EVIDENCE_LINE=$(grep -n 'build-evidence' "$f" | head -1 | cut -d: -f1)
     EXIT_LINE=$(grep -En "$guard_pattern" "$f" | tail -1 | cut -d: -f1)
-    if [ -n "$EVIDENCE_LINE" ] && [ -n "$EXIT_LINE" ] && [ "$EVIDENCE_LINE" -lt "$EXIT_LINE" ]; then
+    ALLOW_OK=0
+    case "$(basename "$f")" in
+        check-state-updated.sh) [ -n "$EXIT_LINE" ] && ALLOW_OK=1 ;;
+        check-state-updated.ps1)
+            if [ -n "$EXIT_LINE" ] && sed -n "${EXIT_LINE},$((EXIT_LINE + 3))p" "$f" | grep -q 'Exit-ForgeAllow'; then
+                ALLOW_OK=1
+            fi
+            ;;
+    esac
+    if [ -n "$EVIDENCE_LINE" ] && [ -n "$EXIT_LINE" ] && [ "$ALLOW_OK" -eq 1 ] && [ "$EVIDENCE_LINE" -lt "$EXIT_LINE" ]; then
         pass "$(basename "$f") invokes build-evidence BEFORE stop_hook_active early-return"
     else
         fail "$(basename "$f") consumer ordering wrong (build-evidence line $EVIDENCE_LINE not before early-return line $EXIT_LINE)"
@@ -1800,7 +1809,7 @@ start_test "Layer 2 — PS guard runtime parity with Bash guard (nonce-mismatch 
 if command -v pwsh > /dev/null 2>&1; then
     # Test 1: nonce mismatch → both guards must exit 2 with "nonce mismatch" in stderr
     scratch=$(scratch_dir parity-nonce-mismatch)
-    mkdir -p "$scratch/.claude/local"
+    mkdir -p "$scratch/.forge/local"
     cat > "$scratch/.claude/local/state.md" <<'EOF'
 ## /goal session
 
@@ -1881,7 +1890,7 @@ start_test "Layer 2 — Bash guard uses LAST PR authorization line when multiple
 
 if command -v git > /dev/null 2>&1; then
     scratch=$(scratch_dir stale-dup-contract)
-    mkdir -p "$scratch/.claude/local"
+    mkdir -p "$scratch/.forge/local"
     (
         cd "$scratch"
         git init -q -b main >/dev/null 2>&1 || git init -q >/dev/null 2>&1
@@ -1890,7 +1899,8 @@ if command -v git > /dev/null 2>&1; then
         echo x > a; git add a; git commit -qm init >/dev/null 2>&1
         HEAD_SHA=$(git rev-parse HEAD)
 
-        cat > .claude/local/state.md <<EOF
+        cat > .forge/local/state.md <<EOF
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -2542,4 +2552,34 @@ fi
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
+start_test "Task 4 host-neutral review repairs have Bash and PowerShell parity"
+for hook in build-evidence check-state-updated check-workflow-gates; do
+    assert_contains "$REPO_ROOT/hooks/$hook.sh" 'FORGE_STATE_INVALID' \
+        "$hook.sh preserves invalid canonical-state failures"
+    assert_contains "$REPO_ROOT/hooks/$hook.ps1" 'FORGE_STATE_INVALID' \
+        "$hook.ps1 preserves invalid canonical-state failures"
+done
+assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" 'if (-not $StateIsV6) { return $result }' \
+    "PowerShell plan-review evidence is v6-only"
+assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" 'if (-not $StateIsV6) { return $result }' \
+    "PowerShell PR authorization evidence is v6-only"
+assert_contains "$REPO_ROOT/hooks/check-subagent-review.sh" "'.agent_type'" \
+    "Bash subagent evaluator uses the native agent_type field"
+assert_not_contains "$REPO_ROOT/hooks/check-subagent-review.sh" "'.producer'" \
+    "Bash subagent evaluator no longer depends on fabricated producer input"
+assert_contains "$REPO_ROOT/hooks/check-subagent-review.ps1" '$data.agent_type' \
+    "PowerShell subagent evaluator uses the native agent_type field"
+assert_not_contains "$REPO_ROOT/hooks/check-subagent-review.ps1" '$data.producer' \
+    "PowerShell subagent evaluator no longer depends on fabricated producer input"
+assert_contains "$REPO_ROOT/hooks/post-tool-format.sh" '.tool_input.command // .tool_input.patch' \
+    "Bash formatter reads documented Codex apply_patch command text first"
+assert_contains "$REPO_ROOT/hooks/post-tool-format.ps1" 'tool_input.command' \
+    "PowerShell formatter reads documented Codex apply_patch command text"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'forge-goal-authorize.ps1.sha256' \
+    "PowerShell goal hook verifies the installed writer seal"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'ReparsePoint' \
+    "PowerShell goal hook rejects reparse-point ancestors"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'CreateNew' \
+    "PowerShell checkpoint and marker publication uses no-clobber writes"
+
 report "test-contracts.sh"

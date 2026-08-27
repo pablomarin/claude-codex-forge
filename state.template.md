@@ -7,6 +7,20 @@
 > If you started a workflow with `/new-feature` or `/fix-bug`, the Workflow section below tracks your progress.
 > The Done / Now / Next sections capture your current focus across sessions.
 
+## Identity
+
+| Field                | Value |
+| -------------------- | ----- |
+| Worktree root        |       |
+| Git common directory |       |
+| Last active host     |       |
+| Workflow base ref    |       |
+| Workflow base SHA    |       |
+
+The worktree root and Git common directory are resolved physical paths. The workflow
+base ref and SHA remain immutable for one workflow. Switching between Claude and Codex
+changes only `Last active host`; it never restarts completed gates.
+
 ## Workflow
 
 | Field     | Value |
@@ -31,8 +45,12 @@ Format when active:
 | Field            | Value                                  |
 | ---------------- | -------------------------------------- |
 | nonce            | <uuid-v4-lowercase>                    |
+| objective_hash   | <externally-authorized-objective-hash> |
 | workflow_command | /new-feature <name> OR /fix-bug <name> |
 | issued_at        | <ISO-8601-UTC-timestamp>               |
+| turn_count       | <derived-from-hook-owned-records>       |
+| turn_ceiling     | <derived-from-external-authorization>   |
+| evidence_path    | .forge/local/evidence/latest.json       |
 
 **REPLACE semantics:** the entire `## /goal session` block (heading + table) is
 replaced atomically on each new autonomous-loop kickoff. A stale session from a
@@ -66,6 +84,17 @@ surface to user.
 
 ---
 
+## Receipts
+
+| Field                  | Value |
+| ---------------------- | ----- |
+| Spec review receipt    | .forge/local/reviews/<task-id>/spec.receipt |
+| Quality review receipt | .forge/local/reviews/<task-id>/quality.receipt |
+| Council receipt        | .forge/local/council/<council-id>/receipt.json |
+
+Each action receipt records `host=<claude|codex>`. Receipt paths are worktree-local;
+they cannot satisfy gates in a sibling worktree.
+
 ## State
 
 ### Done (recent 2-3 only)
@@ -98,7 +127,8 @@ surface to user.
 
 ## Update Rules
 
-You (Claude) are responsible for updating this file. The Stop hook reminds you of the active workflow; the PreToolUse hook gates commit/push/PR on the checklist.
+The currently active host is responsible for updating this file. The Stop hook reminds
+Claude or Codex of the active workflow; the ship hook gates commit/push/PR on the checklist.
 
 **On task completion:**
 

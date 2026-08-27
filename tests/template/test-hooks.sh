@@ -42,8 +42,8 @@ _make_state_md() {
     } > "$scratch/.claude/local/state.md"
 }
 
-HOOK_SH="$REPO_ROOT/hooks/check-workflow-gates.sh"
-HOOK_PS="$REPO_ROOT/hooks/check-workflow-gates.ps1"
+HOOK_SH="$REPO_ROOT/tests/template/test-workflow-gate-v6-wrapper.sh"
+HOOK_PS="$REPO_ROOT/tests/template/test-workflow-gate-v6-wrapper.ps1"
 
 # ---------------------------------------------------------------------------
 # Fixture helper: write a CONTINUITY.md with a Workflow table + checklist in
@@ -660,7 +660,7 @@ cat > "$S_HC/CONTINUITY.md" <<'EOF'
 ### Checklist
 - [ ] Code review loop
 EOF
-out_hc=$(cd "$S_HC" && echo '{"tool_input":{"command":"git commit -m foo"}}' | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>&1)
+out_hc=$(cd "$S_HC" && echo '{"tool_input":{"command":"git commit -m foo"}}' | bash "$HOOK_SH" 2>&1)
 rc_hc=$?
 
 if echo "$out_hc" | grep -qF "state.md not found"; then
@@ -839,7 +839,7 @@ cat > "$S_GATE/.claude/local/state.md" <<'EOF'
 EOF
 
 printf '{"tool_input":{"command":"git commit -m test"}}' > "$S_GATE/.hook-input.json"
-(cd "$S_GATE" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh" < "$S_GATE/.hook-input.json") > "$S_GATE/.hook-stdout" 2> "$S_GATE/.hook-stderr"
+(cd "$S_GATE" && bash "$HOOK_SH" < "$S_GATE/.hook-input.json") > "$S_GATE/.hook-stdout" 2> "$S_GATE/.hook-stderr"
 rc_gate=$?
 
 assert_equals "$rc_gate" "0" \
@@ -880,7 +880,7 @@ cat > "$S_GATE2/.claude/local/state.md" <<'EOF'
 EOF
 
 printf '{"tool_input":{"command":"git commit -m test"}}' > "$S_GATE2/.hook-input.json"
-(cd "$S_GATE2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh" < "$S_GATE2/.hook-input.json") > "$S_GATE2/.hook-stdout" 2> "$S_GATE2/.hook-stderr"
+(cd "$S_GATE2" && bash "$HOOK_SH" < "$S_GATE2/.hook-input.json") > "$S_GATE2/.hook-stdout" 2> "$S_GATE2/.hook-stderr"
 rc_gate2=$?
 
 assert_equals "$rc_gate2" "0" \
@@ -998,7 +998,7 @@ EOF
     cd "$scratch"
     INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
     OUT="$scratch/.out"
-    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo "$INPUT" | bash "$HOOK_SH" >"$OUT" 2>&1
     echo $? > "$scratch/.exit"
 )
 
@@ -1017,7 +1017,7 @@ start_test "env-prefixed gh pr create still hits PR-auth guard (no auth line →
     cd "$scratch"
     INPUT='{"tool_name":"Bash","tool_input":{"command":"GH_TOKEN=x gh pr create --title test"}}'
     OUT="$scratch/.out2"
-    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo "$INPUT" | bash "$HOOK_SH" >"$OUT" 2>&1
     echo $? > "$scratch/.exit2"
 )
 EXIT=$(cat "$scratch/.exit2")
@@ -1069,7 +1069,7 @@ EOF
 
     INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
     OUT="$scratch/.out"
-    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo "$INPUT" | bash "$HOOK_SH" >"$OUT" 2>&1
     echo $? > "$scratch/.exit"
 )
 
@@ -1119,7 +1119,7 @@ EOF
 
     INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
     OUT="$scratch/.out"
-    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo "$INPUT" | bash "$HOOK_SH" >"$OUT" 2>&1
     echo $? > "$scratch/.exit"
 )
 
@@ -1154,7 +1154,7 @@ EOF
     cd "$scratch"
     INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
     OUT="$scratch/.out"
-    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo "$INPUT" | bash "$HOOK_SH" >"$OUT" 2>&1
     echo $? > "$scratch/.exit"
 )
 
@@ -1196,7 +1196,7 @@ EOF
     cd "$scratch"
     INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
     OUT="$scratch/.out"
-    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo "$INPUT" | bash "$HOOK_SH" >"$OUT" 2>&1
     echo $? > "$scratch/.exit"
 )
 
@@ -1247,7 +1247,7 @@ EOF
 
     INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
     OUT="$scratch/.out"
-    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo "$INPUT" | bash "$HOOK_SH" >"$OUT" 2>&1
     echo $? > "$scratch/.exit"
 )
 
@@ -1298,7 +1298,7 @@ EOF
 
     INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
     OUT="$scratch/.out"
-    echo "$INPUT" | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" >"$OUT" 2>&1
+    echo "$INPUT" | bash "$HOOK_SH" >"$OUT" 2>&1
     echo $? > "$scratch/.exit"
 )
 
@@ -1327,7 +1327,8 @@ start_test "Layer 2 — check-state-updated emits FORGE_GOAL_STUCK_WARNING after
 
 | Field            | Value |
 | ---------------- | ----- |
-| nonce            | test-nonce-stuck-detection |
+| nonce            | 11111111-1111-4111-8111-111111111111 |
+| objective_hash   | stuck-detection-objective |
 | workflow_command | /new-feature foo |
 | issued_at        | 2026-05-16T10:00:00Z |
 
@@ -1475,7 +1476,8 @@ cat > "$V32B_WORKTREE/.forge/local/state.md" <<'EOF'
 
 | Field            | Value |
 | ---------------- | ----- |
-| nonce            | v532b-worktree-nonce |
+| nonce            | 22222222-2222-4222-8222-222222222222 |
+| objective_hash   | worktree-stuck-objective |
 | workflow_command | /new-feature bar |
 | issued_at        | 2026-05-18T10:00:00Z |
 
@@ -1583,7 +1585,7 @@ cd "$S16"
 git init -q .
 git -c user.email=test@test -c user.name=test commit -q --allow-empty -m init
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S16/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S16/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 
@@ -1615,7 +1617,7 @@ sed "s/__FAKE_PLAN_SHA__/$PLAN_SHA/g; s/__FAKE_HEAD_SHA__/$HEAD_SHA/g" \
     > .claude/local/state.md
 
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S17/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S17/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 
@@ -1634,7 +1636,7 @@ git init -q . && git add -A && git -c user.email=test@test -c user.name=test com
 cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/plan-review-pass-wrong-sha.md" \
    .claude/local/state.md
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S18/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S18/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 
@@ -1654,7 +1656,7 @@ git init -q . && git -c user.email=test@test -c user.name=test commit -q --allow
 cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/code-review-pass-no-evidence.md" \
    .claude/local/state.md
 echo '{"tool_input":{"command":"git push origin HEAD"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S19/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S19/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 
@@ -1676,7 +1678,7 @@ sed "s/__FAKE_HEAD_SHA__/$HEAD_SHA/g" \
     "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/code-review-pass-evidence-ok.md" \
     > .claude/local/state.md
 echo '{"tool_input":{"command":"gh pr create --title test"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S20/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S20/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 
@@ -1696,7 +1698,7 @@ git -c user.email=test@test -c user.name=test commit --allow-empty -m second -q
 cp "$REPO_ROOT/tests/template/fixtures/state-md-workflow-gate-evidence/code-review-pass-wrong-head.md" \
    .claude/local/state.md
 echo '{"tool_input":{"command":"git commit -m next"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S21/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S21/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 
@@ -1735,7 +1737,7 @@ cat > .claude/local/state.md <<EOF
 - [x] E2E verified — N/A: harness work
 EOF
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S22/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S22/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 assert_equals "$rc" "0" "Plan review loop N/A skips per-iter evidence check"
@@ -1765,7 +1767,7 @@ cat > .claude/local/state.md <<'EOF'
 - [x] E2E verified — N/A: harness work
 EOF
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S23/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S23/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 assert_equals "$rc" "0" "Code review loop N/A skips per-iter evidence check"
@@ -1798,7 +1800,7 @@ cat > .claude/local/state.md <<'EOF'
 - [x] E2E verified — N/A: harness work
 EOF
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S23B/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S23B/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 assert_equals "$rc" "2" "plan clean line missing plan_sha= is blocked"
@@ -1832,7 +1834,7 @@ cat > .claude/local/state.md <<'EOF'
 - [x] E2E verified — N/A: harness work
 EOF
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S23C/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S23C/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 assert_equals "$rc" "2" "deleted plan file is blocked"
@@ -1865,7 +1867,7 @@ cat > "$S23D/.claude/local/state.md" <<'EOF'
 - [x] E2E verified — N/A: harness work
 EOF
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | (cd "$S23D" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23D/.hook-stderr"
+    | (cd "$S23D" && bash "$HOOK_SH") 2>"$S23D/.hook-stderr"
 rc=$?
 assert_equals "$rc" "0" "no git repo → code-review evidence check skipped, checklist gates still pass"
 
@@ -1891,7 +1893,7 @@ cat > "$S23E/.claude/local/state.md" <<'EOF'
 - [x] E2E verified — N/A: harness work
 EOF
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | (cd "$S23E" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23E/.hook-stderr"
+    | (cd "$S23E" && bash "$HOOK_SH") 2>"$S23E/.hook-stderr"
 rc=$?
 assert_equals "$rc" "2" "no git repo → unchecked Code review loop still blocks"
 
@@ -1923,7 +1925,7 @@ cat > "$S23F/.state-lf.md" <<'EOF'
 EOF
 sed 's/$/\r/' "$S23F/.state-lf.md" > "$S23F/.claude/local/state.md"
 echo '{"tool_input":{"command":"git commit -m test"}}' \
-    | (cd "$S23F" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23F/.hook-stderr"
+    | (cd "$S23F" && bash "$HOOK_SH") 2>"$S23F/.hook-stderr"
 rc=$?
 assert_equals "$rc" "2" "CRLF state.md does NOT silently bypass gates (exit 2)"
 assert_contains "$S23F/.hook-stderr" "Code review loop" "stderr names the unchecked gate despite CRLF"
@@ -1954,7 +1956,7 @@ cat > "$S23G/.claude/local/state.md" <<'EOF'
 - [x] E2E verified — N/A: harness work
 EOF
 printf '{"tool_input":{"command":"git commit -m x && git push"}}' \
-    | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23G/.hook-stderr"
+    | (cd "$S23G" && bash "$HOOK_SH") 2>"$S23G/.hook-stderr"
 rc=$?
 assert_equals "$rc" "2" "compound commit && push is blocked"
 assert_contains "$S23G/.hook-stderr" "compound ship command" \
@@ -1969,7 +1971,7 @@ for leadcmd in \
     "true && git push" \
     "echo hi && gh pr create --title t"; do
     printf '{"tool_input":{"command":"%s"}}' "$leadcmd" \
-        | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>"$S23G/.hook-stderr"
+        | (cd "$S23G" && bash "$HOOK_SH") 2>"$S23G/.hook-stderr"
     rc=$?
     assert_equals "$rc" "2" "leading-nonship chain blocked: $leadcmd"
 done
@@ -1995,7 +1997,7 @@ for shipform in \
     # sends properly-escaped JSON.
     esc=$(printf '%s' "$shipform" | sed 's/\\/\\\\/g; s/"/\\"/g')
     printf '{"tool_input":{"command":"%s"}}' "$esc" \
-        | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>/dev/null
+        | (cd "$S23G" && bash "$HOOK_SH") 2>/dev/null
     rc=$?
     assert_equals "$rc" "2" "env-prefix / git -C ship form detected + gated: $shipform"
 done
@@ -2006,7 +2008,7 @@ for safecmd in "git status" "npm test" "git log --oneline" "echo done && ls" \
     "git -C . status" "FOO=bar npm test"; do
     esc=$(printf '%s' "$safecmd" | sed 's/\\/\\\\/g; s/"/\\"/g')
     printf '{"tool_input":{"command":"%s"}}' "$esc" \
-        | (cd "$S23G" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") 2>/dev/null
+        | (cd "$S23G" && bash "$HOOK_SH") 2>/dev/null
     rc=$?
     assert_equals "$rc" "0" "non-ship command not gated: $safecmd"
 done
@@ -2036,7 +2038,7 @@ cat > .claude/local/state.md <<EOF
 - [x] E2E verified — N/A: harness work
 EOF
 echo '{"tool_input":{"command":"git commit -m x"}}' \
-    | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>"$S23H/.hook-stderr"
+    | bash "$HOOK_SH" 2>"$S23H/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
 assert_equals "$rc" "0" "plain single git commit with gates satisfied → exit 0 (not flagged as compound)"
@@ -2322,6 +2324,509 @@ if command -v pwsh >/dev/null 2>&1; then
 else
     printf "  %s·%s skipped: pwsh not installed\n" "$C_DIM" "$C_RESET"
 fi
+
+# ===========================================================================
+# Forge v6 host-neutral hook policy.
+# These cases execute commands selected from rendered downstream host configs;
+# a source-only/direct-script assertion would not prove either host invokes it.
+# ===========================================================================
+start_test "legacy workflow context cannot satisfy any v6 ship receipt gate"
+V5I=$(scratch_dir v5-installed-noncertifying)
+(cd "$V5I" && git init -q --initial-branch=main && git config user.email t@t && git config user.name t \
+    && git commit -qm init --allow-empty)
+mkdir -p "$V5I/.claude/local" "$V5I/.claude/hooks/lib"
+cp "$REPO_ROOT/hooks/check-workflow-gates.sh" "$V5I/.claude/hooks/check-workflow-gates.sh"
+cp "$REPO_ROOT/hooks/lib/state-path.sh" "$V5I/.claude/hooks/lib/state-path.sh"
+cp "$REPO_ROOT/hooks/lib/review-breaker.sh" "$V5I/.claude/hooks/lib/review-breaker.sh"
+V5_HEAD=$(git -C "$V5I" rev-parse HEAD)
+cat > "$V5I/.claude/local/state.md" <<EOF
+## Workflow
+| Field | Value |
+| Command | /new-feature legacy |
+| Phase | 5 — Quality |
+| Next step | ship |
+### Checklist
+- [x] Plan review loop (1 iterations) — PASS
+- [x] Code review loop (1 iterations) — PASS
+- [x] Code review iteration 1 — codex clean — head=\`$V5_HEAD\`
+- [x] Code review iteration 1 — pr-toolkit clean — head=\`$V5_HEAD\`
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: legacy fixture
+## /goal session
+| Field | Value |
+| nonce | 11111111-1111-4111-8111-111111111111 |
+- [x] PR creation authorized — \`2026-08-27T00:00:00Z\` — nonce=\`11111111-1111-4111-8111-111111111111\` — head=\`$V5_HEAD\`
+EOF
+cat > "$V5I/.claude/settings.json" <<'EOF'
+{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"$CLAUDE_PROJECT_DIR/.claude/hooks/check-workflow-gates.sh"}]}]}}
+EOF
+V5_GATE_CMD=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["PreToolUse"][0]["hooks"][0]["command"])' "$V5I/.claude/settings.json")
+printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V5I" \
+    | (cd "$V5I" && CLAUDE_PROJECT_DIR="$V5I" sh -c "$V5_GATE_CMD") > "$V5I/gate.out" 2>&1
+assert_equals "$?" "2" "legacy reviewer, goal, and authorization lines cannot authorize shipping"
+assert_contains "$V5I/gate.out" 'migrat' "legacy ship block directs the developer to migrate"
+
+start_test "installed v6 boundaries reject an aliased canonical state path"
+V6BAD=$(scratch_dir v6-installed-invalid-state)
+(cd "$V6BAD" && git init -q --initial-branch=main && git config user.email t@t && git config user.name t \
+    && git commit -qm init --allow-empty && HOME="$V6BAD/home" "$REPO_ROOT/setup.sh" -F > setup.log 2>&1)
+mv "$V6BAD/.forge/local" "$V6BAD/.forge/local.real"
+mkdir -p "$V6BAD/outside"
+printf '<!-- forge:state-schema v6 -->\n' > "$V6BAD/outside/state.md"
+ln -s "$V6BAD/outside" "$V6BAD/.forge/local"
+python3 - "$V6BAD" <<'PY' > "$V6BAD/boundary-commands.tsv"
+import json, pathlib, sys
+r=pathlib.Path(sys.argv[1]); c=json.loads((r/'.claude/settings.json').read_text())
+for event, wanted in [('PreToolUse','workflow-gates'),('Stop','build-evidence'),('Stop','state-updated')]:
+  for g in c['hooks'][event]:
+    for h in g.get('hooks',[]):
+      if h.get('forgeManagedId')==wanted: print(wanted+'\t'+h['command'])
+PY
+while IFS=$'\t' read -r boundary command; do
+    case "$boundary" in
+      workflow-gates) boundary_payload=$(printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V6BAD") ;;
+      *) boundary_payload=$(printf '{"cwd":"%s","host":"claude","stop_hook_active":true}' "$V6BAD") ;;
+    esac
+    printf '%s' "$boundary_payload" | (cd "$V6BAD" && CLAUDE_PROJECT_DIR="$V6BAD" sh -c "$command") \
+        > "$V6BAD/$boundary.out" 2>&1
+    assert_equals "$?" "2" "installed $boundary preserves canonical state resolver rejection"
+    assert_contains "$V6BAD/$boundary.out" 'FORGE_STATE_INVALID' "installed $boundary names invalid canonical state"
+done < "$V6BAD/boundary-commands.tsv"
+
+start_test "installed Claude and Codex configs select one v6 subagent receipt evaluator"
+V6I=$(scratch_dir v6-installed-hooks)
+(cd "$V6I" && git init -q --initial-branch=main && git -c user.email=t@t -c user.name=t \
+    commit -q --allow-empty -m init && HOME="$V6I/home" "$REPO_ROOT/setup.sh" -F \
+    > "$V6I/setup.log" 2>&1)
+python3 - "$V6I" <<'PY' > "$V6I/hook-commands.tsv"
+import json, pathlib, re, sys
+root = pathlib.Path(sys.argv[1])
+claude = json.loads((root / ".claude/settings.json").read_text())
+codex = json.loads((root / ".codex/hooks.json").read_text())
+commands = []
+prompt = []
+groups = claude["hooks"].get("SubagentStop", [])
+for group in claude["hooks"].get("SubagentStop", []):
+    for hook in group.get("hooks", []):
+        if hook.get("type") == "command" and hook.get("forgeManagedId") == "subagent-review-receipt":
+            commands.append(("claude", hook["command"]))
+        if hook.get("type") == "prompt":
+            prompt.append(hook.get("prompt", ""))
+for hook in codex["hooks"].get("subagent_stop", []):
+    if hook.get("forgeManagedId") == "subagent-review-receipt":
+        command = hook["command"]
+        commands.append(("codex", " ".join(command) if isinstance(command, list) else command))
+assert [host for host, _ in commands] == ["claude", "codex"], commands
+assert len(prompt) == 1 and '"ok": false' in prompt[0], prompt
+def selected(agent_type):
+    return [h for group in groups if re.search(group.get("matcher", ""), agent_type)
+            for h in group.get("hooks", [])]
+native_v6 = selected("forge-v6-producer")
+native_legacy = selected("general-purpose")
+assert len(native_v6) == 1 and native_v6[0].get("forgeManagedId") == "subagent-review-receipt", native_v6
+assert len(native_legacy) == 1 and native_legacy[0].get("type") == "prompt", native_legacy
+assert "forge-subagent-review-v1" in (root / ".forge/workflow-capabilities.tsv").read_text()
+for host, command in commands:
+    print(host + "\t" + command)
+PY
+assert_equals "$?" "0" "rendered host configs carry one command evaluator and one stage-gated legacy prompt"
+assert_contains "$V6I/.forge/workflow-capabilities.tsv" 'forge-subagent-review-v1' \
+    "positive producer/schema marker is shipped"
+
+mkdir -p "$V6I/.forge/local/reviews/task-42"
+PAYLOAD=$(printf '{"session_id":"session-42","transcript_path":"/tmp/main.jsonl","cwd":"%s","permission_mode":"default","hook_event_name":"SubagentStop","stop_hook_active":false,"agent_id":"task-42","agent_type":"forge-v6-producer","agent_transcript_path":"/tmp/agent-42.jsonl","last_assistant_message":"done","host":"claude"}' "$V6I")
+CLAUDE_CMD=$(awk -F '\t' '$1=="claude"{print $2}' "$V6I/hook-commands.tsv")
+CODEX_CMD=$(awk -F '\t' '$1=="codex"{print $2}' "$V6I/hook-commands.tsv")
+printf '%s' "$PAYLOAD" | (cd "$V6I" && CLAUDE_PROJECT_DIR="$V6I" sh -c "$CLAUDE_CMD") \
+    > "$V6I/claude-missing.out" 2>&1
+assert_equals "$?" "2" "rendered Claude command blocks a missing v6 receipt"
+printf '%s' "$PAYLOAD" | (cd "$V6I" && sh -c "$CODEX_CMD") \
+    > "$V6I/codex-missing.out" 2>&1
+assert_equals "$?" "2" "rendered Codex command blocks the same missing v6 receipt"
+
+HEAD_V6=$(git -C "$V6I" rev-parse HEAD)
+for kind in spec quality; do
+    printf 'format=forge-subagent-review-v1\ntask_id=task-42\nkind=%s\nverdict=clean\nhead=%s\n' \
+        "$kind" "$HEAD_V6" > "$V6I/.forge/local/reviews/task-42/$kind.receipt"
+done
+printf '%s' "$PAYLOAD" | (cd "$V6I" && CLAUDE_PROJECT_DIR="$V6I" sh -c "$CLAUDE_CMD") \
+    > "$V6I/claude-clean.out" 2>&1
+assert_equals "$?" "0" "rendered Claude command allows fresh clean spec and quality receipts"
+OUTSIDE_RECEIPTS="$V6I/outside-receipts"
+mkdir -p "$OUTSIDE_RECEIPTS"
+for kind in spec quality; do
+    printf 'format=forge-subagent-review-v1\ntask_id=task-link\nkind=%s\nverdict=clean\nhead=%s\n' \
+        "$kind" "$HEAD_V6" > "$OUTSIDE_RECEIPTS/$kind.receipt"
+done
+ln -s "$OUTSIDE_RECEIPTS" "$V6I/.forge/local/reviews/task-link"
+LINK_PAYLOAD=$(printf '{"session_id":"session-link","cwd":"%s","hook_event_name":"SubagentStop","stop_hook_active":false,"agent_id":"task-link","agent_type":"forge-v6-producer","agent_transcript_path":"/tmp/agent-link.jsonl","last_assistant_message":"done","host":"codex"}' "$V6I")
+printf '%s' "$LINK_PAYLOAD" | (cd "$V6I" && sh -c "$CODEX_CMD") \
+    > "$V6I/codex-link.out" 2>&1
+assert_equals "$?" "2" "rendered Codex command rejects a receipt-directory symlink escape"
+sed -i.bak 's/verdict=clean/verdict=findings/' "$V6I/.forge/local/reviews/task-42/quality.receipt"
+printf '%s' "$PAYLOAD" | (cd "$V6I" && sh -c "$CODEX_CMD") \
+    > "$V6I/codex-findings.out" 2>&1
+assert_equals "$?" "2" "rendered Codex command rejects a non-clean receipt"
+
+start_test "installed legacy agent type keeps exactly one semantic prompt authoritative"
+LEGACY_PAYLOAD=$(printf '{"session_id":"legacy","cwd":"%s","hook_event_name":"SubagentStop","stop_hook_active":false,"agent_id":"legacy-task","agent_type":"general-purpose","agent_transcript_path":"/tmp/legacy.jsonl","last_assistant_message":"failed to complete the requested work","host":"claude"}' "$V6I")
+printf '%s' "$LEGACY_PAYLOAD" | (cd "$V6I" && CLAUDE_PROJECT_DIR="$V6I" sh -c "$CLAUDE_CMD") \
+    > "$V6I/legacy-command.out" 2>&1
+assert_equals "$?" "0" "receipt command no-ops for an unconverted agent type while the legacy prompt remains authoritative"
+
+start_test "installed successful Codex hooks emit one valid JSON document"
+python3 - "$V6I/.codex/hooks.json" <<'PY' > "$V6I/codex-success-hooks.tsv"
+import json, pathlib, sys
+d = json.loads(pathlib.Path(sys.argv[1]).read_text())
+wanted = {
+    "session-start", "bash-safety", "workflow-gates", "format",
+    "precompact-memory", "build-evidence", "state-updated",
+}
+rows = []
+for hooks in d["hooks"].values():
+    for hook in hooks:
+        if hook.get("forgeManagedId") in wanted:
+            command = hook["command"]
+            rows.append((hook["forgeManagedId"], " ".join(command) if isinstance(command, list) else command))
+assert {name for name, _ in rows} == wanted, rows
+for name, command in sorted(rows):
+    print(name + "\t" + command)
+PY
+while IFS=$'\t' read -r managed_id installed_command; do
+    case "$managed_id" in
+        session-start) SUCCESS_PAYLOAD=$(printf '{"cwd":"%s","source":"clear","host":"codex"}' "$V6I") ;;
+        bash-safety) SUCCESS_PAYLOAD=$(printf '{"cwd":"%s","host":"codex","tool_input":{"command":"git status"}}' "$V6I") ;;
+        workflow-gates) SUCCESS_PAYLOAD=$(printf '{"cwd":"%s","host":"codex","tool_input":{"command":"git status"}}' "$V6I") ;;
+        format) SUCCESS_PAYLOAD=$(printf '{"cwd":"%s","host":"codex","tool_name":"Read","tool_input":{}}' "$V6I") ;;
+        precompact-memory) SUCCESS_PAYLOAD=$(printf '{"cwd":"%s","host":"codex","trigger":"manual"}' "$V6I") ;;
+        build-evidence) SUCCESS_PAYLOAD=$(printf '{"cwd":"%s","host":"codex","stop_hook_active":true}' "$V6I") ;;
+        state-updated) SUCCESS_PAYLOAD=$(printf '{"cwd":"%s","host":"codex","stop_hook_active":true}' "$V6I") ;;
+    esac
+    printf '%s' "$SUCCESS_PAYLOAD" | (cd "$V6I" && sh -c "$installed_command") \
+        > "$V6I/$managed_id.stdout" 2> "$V6I/$managed_id.stderr"
+    assert_equals "$?" "0" "rendered Codex $managed_id allow path exits zero"
+    if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$V6I/$managed_id.stdout" 2>/dev/null; then
+        pass "rendered Codex $managed_id allow path emits valid JSON"
+    else
+        fail "rendered Codex $managed_id allow path did not emit one valid JSON document"
+    fi
+done < "$V6I/codex-success-hooks.tsv"
+for ps_hook in check-bash-safety check-workflow-gates check-state-updated pre-compact-memory; do
+    assert_contains "$REPO_ROOT/hooks/$ps_hook.ps1" 'Write-Output "{}"' \
+        "PowerShell $ps_hook allow path has the same JSON contract"
+done
+assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" 'Write-Output "{}"' \
+    "PowerShell evidence producer has the same JSON contract"
+
+start_test "rendered ship gate blocks managed-config mutation on both host boundaries"
+printf '{"cwd":"%s"}' "$V6I" | (cd "$V6I" && bash .forge/hooks/check-config-change.sh --verify-boundary "$V6I") \
+    > "$V6I/config-seed.out" 2>&1
+assert_equals "$?" "0" "fresh installed managed config establishes a validated fingerprint"
+python3 - "$V6I/.claude/settings.json" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1]); d = json.loads(p.read_text())
+for group in d["hooks"]["PreToolUse"]:
+    for hook in group.get("hooks", []):
+        if hook.get("forgeManagedId") == "workflow-gates":
+            hook["command"] = "tampered-workflow-gate.sh"
+p.write_text(json.dumps(d, indent=2) + "\n")
+PY
+printf '{"cwd":"%s","tool_input":{"command":"git push"}}' "$V6I" \
+    | (cd "$V6I" && bash .forge/hooks/check-workflow-gates.sh) \
+    > "$V6I/config-ship.out" 2>&1
+assert_equals "$?" "2" "ship boundary blocks a changed Forge-managed hook"
+assert_contains "$V6I/config-ship.out" 'FORGE_CONFIG_TAMPERED' \
+    "ship failure names managed config tampering"
+
+start_test "Codex apply_patch payload extracts paths without executing patch text"
+PATCH_S=$(scratch_dir codex-post-format)
+mkdir -p "$PATCH_S/src" "$PATCH_S/bin"
+printf 'print(1)\n' > "$PATCH_S/src/app.py"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$FORGE_FORMAT_TRACE"\n' > "$PATCH_S/bin/uv"
+chmod +x "$PATCH_S/bin/uv"
+printf '[tool.ruff]\n' > "$PATCH_S/pyproject.toml"
+PATCH_PAYLOAD=$(python3 - "$PATCH_S" <<'PY'
+import json, sys
+root = sys.argv[1]
+print(json.dumps({
+  "cwd": root,
+  "tool_name": "apply_patch",
+  "tool_input": {"command": "*** Begin Patch\n*** Update File: src/app.py\n@@\n-print(1)\n+print(2)\n*** End Patch\n; touch PATCH_TEXT_EXECUTED"}
+}))
+PY
+)
+printf '%s' "$PATCH_PAYLOAD" | (cd "$PATCH_S" && PATH="$PATCH_S/bin:$PATH" \
+    FORGE_FORMAT_TRACE="$PATCH_S/trace" bash "$REPO_ROOT/hooks/post-tool-format.sh")
+assert_file_exists "$PATCH_S/trace" "Codex patch path reaches the formatter"
+assert_file_missing "$PATCH_S/PATCH_TEXT_EXECUTED" "patch text is parsed as data and never executed"
+PATCH_OUT=$(scratch_dir codex-post-format-outside)
+printf 'print(3)\n' > "$PATCH_OUT/out.py"
+ln -s "$PATCH_OUT" "$PATCH_S/link-outside"
+rm -f "$PATCH_S/trace"
+PATCH_ESCAPE=$(python3 - "$PATCH_S" <<'PY'
+import json, sys
+print(json.dumps({
+  "cwd": sys.argv[1], "host": "codex", "tool_name": "apply_patch",
+  "tool_input": {"command": "*** Begin Patch\n*** Update File: link-outside/out.py\n*** End Patch"},
+}))
+PY
+)
+printf '%s' "$PATCH_ESCAPE" | (cd "$PATCH_S" && PATH="$PATCH_S/bin:$PATH" \
+    FORGE_FORMAT_TRACE="$PATCH_S/trace" bash "$REPO_ROOT/hooks/post-tool-format.sh") >/dev/null
+assert_file_missing "$PATCH_S/trace" "formatter rejects a patch path that escapes through a symlinked parent"
+
+start_test "goal turn budget is external, no-clobber, host-neutral, and checkpoint-first"
+GB=$(scratch_dir goal-budget-hook)
+GB_HOME=$(scratch_dir goal-budget-home)
+mkdir -p "$GB/.forge/local" "$GB_HOME/.forge/goal-authorizations"
+(cd "$GB" && git init -q --initial-branch=main && git -c user.email=t@t -c user.name=t \
+    commit -q --allow-empty -m init)
+printf '6\n' > "$GB/.forge/version"
+GB_NONCE=88888888-8888-4888-8888-888888888888
+GB_OBJECTIVE=objective-42
+cat > "$GB/.forge/local/state.md" <<EOF
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field | Value |
+| Command | /new-feature budget |
+| Phase | 4 — Implementation |
+| Next step | resume-exact-checkpoint |
+## /goal session
+| Field | Value |
+| nonce | $GB_NONCE |
+| objective_hash | $GB_OBJECTIVE |
+| turn_count | 0 |
+| turn_ceiling | 99 |
+| workflow_command | /new-feature budget |
+EOF
+GB_ROOT=$(cd "$GB" && pwd -P)
+GB_COMMON=$(git -C "$GB" rev-parse --git-common-dir); case "$GB_COMMON" in /*) ;; *) GB_COMMON="$GB_ROOT/$GB_COMMON";; esac
+GB_COMMON=$(cd "$GB_COMMON" && pwd -P)
+GB_PID=$(printf '%s\n%s\n' "$GB_ROOT" "$GB_COMMON" | shasum -a 256 | awk '{print $1}')
+mkdir -p "$GB_HOME/.forge/goal-authorizations/$GB_PID" "$GB_HOME/.forge/bin"
+GB_WRITER_REV=$(shasum -a 256 "$REPO_ROOT/scripts/forge-goal-authorize.sh" | awk '{print $1}')
+GB_WRITER="$GB_HOME/.forge/bin/forge-goal-authorize"
+sed -e "s|__FORGE_WRITER_PATH__|$GB_WRITER|g" \
+    -e "s|__FORGE_AUTHORIZATION_ROOT__|$GB_HOME/.forge/goal-authorizations|g" \
+    -e "s|__FORGE_WRITER_REVISION__|$GB_WRITER_REV|g" \
+    "$REPO_ROOT/scripts/forge-goal-authorize.sh" > "$GB_WRITER"
+chmod +x "$GB_WRITER"
+shasum -a 256 "$GB_WRITER" | awk '{print $1}' > "$GB_WRITER.sha256"
+cat > "$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE.auth" <<EOF
+format=forge-goal-authorization-v1
+project_root=$GB_ROOT
+git_common_dir=$GB_COMMON
+project_id=$GB_PID
+objective_hash=$GB_OBJECTIVE
+nonce=$GB_NONCE
+ceiling=2
+approval_channel=physical-operator-action
+issue_id=test-human-1
+writer_revision=$GB_WRITER_REV
+EOF
+GB_PAYLOAD_1=$(printf '{"cwd":"%s","host":"claude","session_id":"s1","turn_id":"turn-1","stop_hook_active":true}' "$GB")
+(printf '%s' "$GB_PAYLOAD_1" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/t1a.out" 2>&1; echo $? > "$GB/t1a.rc") &
+g1=$!
+(printf '%s' "$GB_PAYLOAD_1" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/t1b.out" 2>&1; echo $? > "$GB/t1b.rc") &
+g2=$!
+wait "$g1"; wait "$g2"
+assert_equals "$(cat "$GB/t1a.rc"):$(cat "$GB/t1b.rc")" "0:0" \
+    "concurrent duplicate Stop events both complete without an authority race"
+TURN_DIR="$GB/.forge/local/goal-counters/$GB_NONCE/turns"
+PROTECTED_TURN_DIR="$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE.ledger/turns"
+assert_not_contains "$GB/t1a.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
+    "first concurrent duplicate Stop never observes a partial mirror"
+assert_not_contains "$GB/t1b.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
+    "second concurrent duplicate Stop never observes a partial mirror"
+assert_equals "$(find "$TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "1" \
+    "duplicate concurrent Stop events charge one canonical local turn"
+assert_equals "$(find "$PROTECTED_TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "1" \
+    "protected ledger mirrors the Task 2 local turn contract"
+assert_contains "$TURN_DIR/turn-1" 'format=forge-goal-turn-v1' \
+    "local record uses the Task 2 no-clobber turn schema"
+assert_contains "$TURN_DIR/turn-1" 'host=claude' \
+    "turn record binds the host that actually advanced the goal"
+GB_AUTH="$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE.auth"
+cp "$GB_AUTH" "$GB/auth.original"
+python3 - "$GB_AUTH" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text().replace("ceiling=2\n", "ceiling=99\n"))
+PY
+GB_PAYLOAD_AUTH_TAMPER=$(printf '{"cwd":"%s","host":"codex","session_id":"s2","turn_id":"turn-auth-tamper","stop_hook_active":true}' "$GB")
+printf '%s' "$GB_PAYLOAD_AUTH_TAMPER" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
+    > "$GB/auth-tamper.out" 2>&1
+assert_equals "$?" "2" "ceiling replacement is a blocking authority failure"
+assert_contains "$GB/auth-tamper.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
+    "protected activation binding rejects a valid-shaped ceiling replacement"
+assert_equals "$(find "$PROTECTED_TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "1" \
+    "authorization replacement cannot increase the protected count"
+cp "$GB/auth.original" "$GB_AUTH"
+GB_PAYLOAD_2=$(printf '{"cwd":"%s","host":"codex","session_id":"s2","turn_id":"turn-2","stop_hook_active":true}' "$GB")
+printf '%s' "$GB_PAYLOAD_2" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
+    > "$GB/t2.out" 2>&1
+assert_contains "$GB/t2.out" 'FORGE_GOAL_BUDGET_EXHAUSTED' \
+    "host switch continues the same nonce and emits exhaustion at the external ceiling"
+MARKER="$GB/.forge/local/goal-counters/$GB_NONCE/budget-exhausted.marker"
+assert_contains "$MARKER" 'next_step=resume-exact-checkpoint' \
+    "exact next-step checkpoint is persisted before exhaustion is emitted"
+assert_contains "$MARKER" 'paused=true' \
+    "marker contract matches the native feasibility pause oracle"
+assert_equals "$(head -1 "$MARKER")" 'FORGE_GOAL_BUDGET_EXHAUSTED' \
+    "Task 4 producer emits the exact Task 2 and Task 9 marker sentinel"
+assert_contains "$GB/.forge/local/goal-counters/$GB_NONCE/checkpoint" 'turn_count=2' \
+    "checkpoint records the externally derived count before the marker"
+assert_contains "$GB/.forge/local/goal-counters/$GB_NONCE/checkpoint" 'host=codex' \
+    "Claude plan checkpoint resumes in Codex without resetting completed turns"
+sed -i.bak 's/objective_hash | objective-42/objective_hash | forged-objective/' "$GB/.forge/local/state.md"
+GB_PAYLOAD_3=$(printf '{"cwd":"%s","host":"codex","session_id":"s2","turn_id":"turn-3","stop_hook_active":true}' "$GB")
+printf '%s' "$GB_PAYLOAD_3" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
+    > "$GB/tamper.out" 2>&1
+assert_equals "$?" "2" "state/objective rebinding is a blocking authority failure"
+assert_contains "$GB/tamper.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
+    "project state cannot reset or rebind the immutable authorization"
+assert_equals "$(find "$TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "2" \
+    "tampered state cannot increase the charged count"
+mv "$GB/.forge/local/state.md.bak" "$GB/.forge/local/state.md"
+rm -f "$TURN_DIR/turn-1"
+GB_PAYLOAD_4=$(printf '{"cwd":"%s","host":"claude","session_id":"s3","turn_id":"turn-4","stop_hook_active":true}' "$GB")
+printf '%s' "$GB_PAYLOAD_4" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
+    > "$GB/deletion-tamper.out" 2>&1
+assert_equals "$?" "0" "a missing local mirror is recovered from protected authority"
+assert_contains "$TURN_DIR/turn-1" 'format=forge-goal-turn-v1' \
+    "recoverable local deletion is restored from the protected ledger"
+rm -f "$PROTECTED_TURN_DIR/turn-2"
+GB_PAYLOAD_PROTECTED_DELETE=$(printf '{"cwd":"%s","host":"claude","session_id":"s3","turn_id":"turn-protected-delete","stop_hook_active":true}' "$GB")
+printf '%s' "$GB_PAYLOAD_PROTECTED_DELETE" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
+    > "$GB/protected-deletion.out" 2>&1
+assert_equals "$?" "2" "deleting protected authority is a blocking failure"
+assert_contains "$GB/protected-deletion.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
+    "protected deletion is never repaired from the editable local mirror"
+# Restore the protected record solely to isolate the fresh-nonce fixtures below.
+cp "$TURN_DIR/turn-2" "$PROTECTED_TURN_DIR/turn-2"
+
+GB_NONCE_2=99999999-9999-4999-8999-999999999999
+GB_OBJECTIVE_2=objective-43
+cat > "$GB/.forge/local/state.md" <<EOF
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field | Value |
+| Command | /new-feature budget-two |
+| Phase | 4 — Implementation |
+| Next step | new-human-goal |
+## /goal session
+| Field | Value |
+| nonce | $GB_NONCE_2 |
+| objective_hash | $GB_OBJECTIVE_2 |
+| turn_count | 0 |
+| turn_ceiling | 999 |
+| workflow_command | /new-feature budget-two |
+EOF
+cat > "$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE_2.auth" <<EOF
+format=forge-goal-authorization-v1
+project_root=$GB_ROOT
+git_common_dir=$GB_COMMON
+project_id=$GB_PID
+objective_hash=$GB_OBJECTIVE_2
+nonce=$GB_NONCE_2
+ceiling=1
+approval_channel=physical-operator-action
+issue_id=test-human-2
+writer_revision=$GB_WRITER_REV
+EOF
+GB_AUTH_2="$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE_2.auth"
+cp "$GB_AUTH_2" "$GB/auth-two.original"
+sed -i.bak "s/writer_revision=$GB_WRITER_REV/writer_revision=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/" "$GB_AUTH_2"
+GB_PAYLOAD_WRITER_TAMPER=$(printf '{"cwd":"%s","host":"claude","session_id":"s4","turn_id":"turn-writer-tamper","stop_hook_active":true}' "$GB")
+printf '%s' "$GB_PAYLOAD_WRITER_TAMPER" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
+    > "$GB/writer-tamper.out" 2>&1
+assert_equals "$?" "2" "authorization must bind the exact sealed installed writer revision"
+assert_contains "$GB/writer-tamper.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
+    "valid-shaped but unsealed writer revision is rejected"
+cp "$GB/auth-two.original" "$GB_AUTH_2"
+GB_PAYLOAD_NEW=$(printf '{"cwd":"%s","host":"claude","session_id":"s4","turn_id":"turn-1","stop_hook_active":true}' "$GB")
+printf '%s' "$GB_PAYLOAD_NEW" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
+    > "$GB/new-nonce.out" 2>&1
+NEW_TURN_DIR="$GB/.forge/local/goal-counters/$GB_NONCE_2/turns"
+assert_equals "$(find "$NEW_TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "1" \
+    "only a separately human-authorized nonce starts a fresh budget"
+assert_contains "$GB/.forge/local/goal-counters/$GB_NONCE_2/budget-exhausted.marker" 'turn_ceiling=1' \
+    "new nonce still derives its ceiling only from the immutable authorization"
+
+write_goal_fixture() {
+    local nonce="$1" objective="$2" next="$3"
+    cat > "$GB/.forge/local/state.md" <<EOF
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field | Value |
+| Command | /new-feature hardening |
+| Phase | 4 — Implementation |
+| Next step | $next |
+## /goal session
+| Field | Value |
+| nonce | $nonce |
+| objective_hash | $objective |
+| workflow_command | /new-feature hardening |
+EOF
+    cat > "$GB_HOME/.forge/goal-authorizations/$GB_PID/$nonce.auth" <<EOF
+format=forge-goal-authorization-v1
+project_root=$GB_ROOT
+git_common_dir=$GB_COMMON
+project_id=$GB_PID
+objective_hash=$objective
+nonce=$nonce
+ceiling=1
+approval_channel=physical-operator-action
+issue_id=test-$nonce
+writer_revision=$GB_WRITER_REV
+EOF
+}
+
+GB_NONCE_3=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+write_goal_fixture "$GB_NONCE_3" objective-ancestor ancestor-checkpoint
+mkdir -p "$GB/outside-counter"
+ln -s "$GB/outside-counter" "$GB/.forge/local/goal-counters/$GB_NONCE_3"
+printf '{"cwd":"%s","host":"claude","session_id":"s5","turn_id":"turn-ancestor","stop_hook_active":true}' "$GB" \
+    | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/ancestor.out" 2>&1
+assert_equals "$?" "2" "aliased goal-counter ancestor blocks before charging"
+assert_contains "$GB/ancestor.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
+    "goal-counter ancestor alias is reported as authority tampering"
+
+GB_NONCE_4=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+write_goal_fixture "$GB_NONCE_4" objective-checkpoint publish-checkpoint
+mkdir -p "$GB/.forge/local/goal-counters/$GB_NONCE_4/checkpoint"
+printf '{"cwd":"%s","host":"codex","session_id":"s6","turn_id":"turn-checkpoint","stop_hook_active":true}' "$GB" \
+    | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/checkpoint-failure.out" 2>&1
+assert_equals "$?" "2" "checkpoint no-clobber failure blocks exhaustion publication"
+assert_file_missing "$GB/.forge/local/goal-counters/$GB_NONCE_4/budget-exhausted.marker" \
+    "marker is absent when checkpoint publication cannot be verified"
+assert_not_contains "$GB/checkpoint-failure.out" 'FORGE_GOAL_BUDGET_EXHAUSTED:' \
+    "checkpoint failure never emits a lying exhaustion sentinel"
+
+GB_NONCE_5=cccccccc-cccc-4ccc-8ccc-cccccccccccc
+write_goal_fixture "$GB_NONCE_5" objective-marker publish-marker
+mkdir -p "$GB/.forge/local/goal-counters/$GB_NONCE_5/budget-exhausted.marker"
+printf '{"cwd":"%s","host":"codex","session_id":"s7","turn_id":"turn-marker","stop_hook_active":true}' "$GB" \
+    | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/marker-failure.out" 2>&1
+assert_equals "$?" "2" "marker no-clobber failure blocks the Stop boundary"
+assert_file_missing "$GB/.forge/local/goal-counters/$GB_NONCE_5/checkpoint" \
+    "a pre-existing partial marker blocks before any checkpoint publication"
+assert_not_contains "$GB/marker-failure.out" 'FORGE_GOAL_BUDGET_EXHAUSTED:' \
+    "marker failure never emits a lying exhaustion sentinel"
+
+GB_NONCE_6=dddddddd-dddd-4ddd-8ddd-dddddddddddd
+write_goal_fixture "$GB_NONCE_6" objective-race concurrent-checkpoint
+GB_RACE_PAYLOAD=$(printf '{"cwd":"%s","host":"codex","session_id":"s8","turn_id":"turn-race","stop_hook_active":true}' "$GB")
+(printf '%s' "$GB_RACE_PAYLOAD" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/race-a.out" 2>&1; echo $? > "$GB/race-a.rc") & gr1=$!
+(printf '%s' "$GB_RACE_PAYLOAD" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/race-b.out" 2>&1; echo $? > "$GB/race-b.rc") & gr2=$!
+wait "$gr1"; wait "$gr2"
+assert_equals "$(cat "$GB/race-a.rc"):$(cat "$GB/race-b.rc")" "0:0" \
+    "concurrent checkpoint publication is idempotent"
+assert_contains "$GB/.forge/local/goal-counters/$GB_NONCE_6/checkpoint" 'turn_count=1' \
+    "concurrent Stop publishes one verified checkpoint"
+assert_equals "$(head -1 "$GB/.forge/local/goal-counters/$GB_NONCE_6/budget-exhausted.marker")" \
+    'FORGE_GOAL_BUDGET_EXHAUSTED' "concurrent Stop publishes one truthful marker"
 
 # ===========================================================================
 # Report

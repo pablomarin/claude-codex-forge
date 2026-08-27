@@ -89,7 +89,8 @@ assert_contains "$S3/evidence" '"session_nonce":"00000000-0000-0000-0000-0000000
     "evidence reads canonical v6 state"
 mv "$S3/.forge/local/state.md" "$S3/.forge/local/state.invalid"
 (cd "$S3" && bash "$REPO_ROOT/hooks/build-evidence.sh") >"$S3/invalid-evidence" 2>&1
-assert_contains "$S3/invalid-evidence" '"session_nonce":null' \
+assert_equals "$?" "2" "invalid/missing v6 state fails the evidence boundary closed"
+assert_contains "$S3/invalid-evidence" 'FORGE_STATE_INVALID' \
     "invalid/missing v6 state never reuses legacy goal evidence"
 
 start_test "stamped exact v5 refresh translates state, installs both hosts, and reports categories"
@@ -521,16 +522,20 @@ write_active_v5_state "$S19" "HOOK_SETTINGS_CHECKPOINT"
 run_refresh "$S19" "$S19/refresh.log" -F
 assert_equals "$?" "0" "full released v5.61 settings migrate with proven hooks"
 python3 -c 'import json,sys
-d=json.load(open(sys.argv[1])); seen={}; inline=[]
-for blocks in d.get("hooks",{}).values():
+d=json.load(open(sys.argv[1])); seen={}; inline=[]; managed=[]
+for event,blocks in d.get("hooks",{}).items():
   for block in blocks:
     for hook in block.get("hooks",[]):
       c=hook.get("command","")
       if "COMPACTION IMMINENT" in c: inline.append(c)
       if "/hooks/" in c and c.startswith("$CLAUDE_PROJECT_DIR/"):
-        name=c.rsplit("/",1)[-1]; seen.setdefault(name,[]).append(c)
+        mid=hook.get("forgeManagedId")
+        if mid: managed.append((mid,event,c))
+        else:
+          name=c.rsplit("/",1)[-1]; seen.setdefault(name,[]).append(c)
 bad={k:v for k,v in seen.items() if len(v)!=1 or "/.claude/hooks/" not in v[0]}
-raise SystemExit(1 if bad or len(inline)!=1 else 0)' "$S19/.claude/settings.json"
+expected_managed=[("subagent-review-receipt","SubagentStop","$CLAUDE_PROJECT_DIR/.forge/hooks/check-subagent-review.sh")]
+raise SystemExit(1 if bad or managed!=expected_managed or len(inline)!=1 else 0)' "$S19/.claude/settings.json"
 assert_equals "$?" "0" "installed event/matcher config executes each proven hook exactly once"
 assert_contains "$S19/.claude/hooks/session-start.sh" '.forge/hooks/session-start.sh' \
     "preserved v5 registration resolves through a thin canonical delegate"

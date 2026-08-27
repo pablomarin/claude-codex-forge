@@ -14,3 +14,4 @@ pr-review-toolkit	comment-analyzer	comment-analyzer-agent	forge	.forge/workflows
 pr-review-toolkit	type-design-analyzer	type-design-analyzer-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 pr-review-toolkit	review-pr	/pr-review-toolkit:review-pr	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 frontend-design	frontend-design	frontend-design-skill	forge	.forge/skills/ui-design/SKILL.template.md	canonical-skill	claude,codex
+forge	subagent-review-receipt	forge-v6-producer	forge	.forge/local/reviews/<task-id>/{spec,quality}.receipt	forge-subagent-review-v1	claude,codex

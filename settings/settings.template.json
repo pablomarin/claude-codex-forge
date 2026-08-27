@@ -68,6 +68,7 @@
         "hooks": [
           {
             "type": "command",
+            "forgeManagedId": "session-start",
             "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/session-start.sh"
           }
         ]
@@ -79,10 +80,12 @@
         "hooks": [
           {
             "type": "command",
+            "forgeManagedId": "build-evidence",
             "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/build-evidence.sh"
           },
           {
             "type": "command",
+            "forgeManagedId": "state-updated",
             "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/check-state-updated.sh"
           }
         ]
@@ -90,12 +93,22 @@
     ],
     "SubagentStop": [
       {
-        "matcher": "",
+        "matcher": "^forge-v6-producer$",
+        "hooks": [
+          {
+            "type": "command",
+            "forgeManagedId": "subagent-review-receipt",
+            "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/check-subagent-review.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "^(?!forge-v6-producer$).+",
         "hooks": [
           {
             "type": "prompt",
             "model": "sonnet",
-            "prompt": "Evaluate the subagent's output quality. Consider:\n1. Did the subagent complete its assigned task?\n2. Is the output useful and actionable?\n3. Were there any errors or issues?\n\nYou MUST respond with ONLY a JSON object in one of these formats:\n{\"ok\": true} - if the subagent completed successfully\n{\"ok\": false, \"reason\": \"explanation of what went wrong\"} - if issues were found\n\nRespond with ONLY the JSON object, no other text."
+            "prompt": "Legacy evaluator stage-gated through Task 9. This matcher is disjoint from the forge-v6-producer command receipt evaluator. Evaluate the subagent's output quality. Consider:\n1. Did the subagent complete its assigned task?\n2. Is the output useful and actionable?\n3. Were there any errors or issues?\n\nYou MUST respond with ONLY a JSON object in one of these formats:\n{\"ok\": true} - if the subagent completed successfully\n{\"ok\": false, \"reason\": \"explanation of what went wrong\"} - if issues were found\n\nRespond with ONLY the JSON object, no other text."
           }
         ]
       }
@@ -106,11 +119,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .forge/local/state.md).' >&2; exit 0",
-            "timeout": 10
-          },
-          {
-            "type": "command",
+            "forgeManagedId": "precompact-memory",
             "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/pre-compact-memory.sh"
           }
         ]
@@ -122,6 +131,7 @@
         "hooks": [
           {
             "type": "command",
+            "forgeManagedId": "config-change",
             "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/check-config-change.sh"
           }
         ]
@@ -133,10 +143,12 @@
         "hooks": [
           {
             "type": "command",
+            "forgeManagedId": "bash-safety",
             "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/check-bash-safety.sh"
           },
           {
             "type": "command",
+            "forgeManagedId": "workflow-gates",
             "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/check-workflow-gates.sh"
           }
         ]
@@ -148,6 +160,7 @@
         "hooks": [
           {
             "type": "command",
+            "forgeManagedId": "auto-approve-local",
             "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/auto-approve-local-writes.sh"
           }
         ]
@@ -159,6 +172,7 @@
         "hooks": [
           {
             "type": "command",
+            "forgeManagedId": "post-format",
             "command": "$CLAUDE_PROJECT_DIR/.forge/hooks/post-tool-format.sh"
           }
         ]

@@ -64,7 +64,15 @@ STATE_MD=""
 if [ -f "$STATE_HELPER" ]; then
     # shellcheck disable=SC1090
     . "$STATE_HELPER"
-    STATE_MD=$(forge_state_path "$(pwd)" read 2>/dev/null || true)
+    if ! STATE_MD=$(forge_state_path "$(pwd)" read); then
+        if [ -e .forge/version ] || [ -L .forge/version ] \
+            || [ -e .forge/local/state.md ] || [ -L .forge/local/state.md ] \
+            || [ -e .forge/local ] || [ -L .forge/local ] || [ -L .forge ]; then
+            echo "FORGE_STATE_INVALID: canonical v6 state could not be resolved" >&2
+            exit 2
+        fi
+        STATE_MD=""
+    fi
 fi
 STATE_IS_V6=false
 case "$STATE_MD" in */.forge/local/state.md) STATE_IS_V6=true ;; esac
@@ -73,7 +81,8 @@ case "$STATE_MD" in */.claude/local/state.md) STATE_LOCAL_DIR=".claude/local" ;;
 
 # Convergence-breaker helper (ADR 0009) — dual-path: installed location first,
 # Forge-internal source fallback. Absence is fail-open (see compute_breaker_fields).
-RS=".claude/hooks/lib/review-breaker.sh"
+RS=".forge/hooks/lib/review-breaker.sh"
+[ -f "$RS" ] || RS=".claude/hooks/lib/review-breaker.sh"
 [ -f "$RS" ] || RS="hooks/lib/review-breaker.sh"
 
 # ---------------------------------------------------------------------------
@@ -278,7 +287,7 @@ compute_breaker_fields() {
     POST_CERT_ROUNDS=0
     BREAKER="ok"
     BREAKER_OK="true"
-    [ -f "$RS" ] && [ -f "$STATE_MD" ] || return 0
+    [ "$STATE_IS_V6" = true ] && [ -f "$RS" ] && [ -f "$STATE_MD" ] || return 0
     local rs_out rounds brk adj
     rs_out=$(bash "$RS" "$STATE_MD" 2>/dev/null || echo "")
     rounds=$(echo "$rs_out" | sed -n 's/^POST_CERT_ROUNDS://p' | tail -1)
@@ -302,7 +311,7 @@ compute_plan_review_gate() {
     # Scope extraction to ## Workflow / ### Checklist (mirror compute_reviewer_gate
     # scoping above). A whole-file grep would pick up stray "Plan review iteration"
     # lines in migrated content or in docs/CHANGELOG.md excerpts pasted into state.md.
-    [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
+    [ "$STATE_IS_V6" = true ] && [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
 
     local checklist
     checklist=$(tr -d '\r' < "$STATE_MD" | awk '
@@ -542,14 +551,17 @@ else
 fi
 rm -f "$FP_TMP"
 
-# Side-channel: write fingerprint to .claude/local/forge-goal-last-fingerprint so
+# Side-channel: atomically publish a complete fingerprint for concurrent Stop hooks.
 # the stuck-detection logic in check-state-updated.sh can read it without
 # re-running build-evidence or parsing STDERR. One line — just the SHA256 value.
 # Best-effort: failure here must not abort the evidence emission.
 FINGERPRINT_SIDECHANNEL="$STATE_LOCAL_DIR/forge-goal-last-fingerprint"
 if [ -n "$PROGRESS_FP" ]; then
     mkdir -p "$STATE_LOCAL_DIR" 2>/dev/null || true
-    printf '%s\n' "$PROGRESS_FP" > "$FINGERPRINT_SIDECHANNEL" 2>/dev/null || true
+    FP_SIDE_TMP="$FINGERPRINT_SIDECHANNEL.tmp.$$"
+    if printf '%s\n' "$PROGRESS_FP" > "$FP_SIDE_TMP" 2>/dev/null; then
+        mv "$FP_SIDE_TMP" "$FINGERPRINT_SIDECHANNEL" 2>/dev/null || rm -f "$FP_SIDE_TMP"
+    fi
 fi
 
 # Task 5: git + PR + E2E field strings
@@ -608,4 +620,5 @@ E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
     echo "FORGE_GOAL_EVIDENCE_END"
 } >&2
 
+printf '%s' "$INPUT" | grep -qE '"host"[[:space:]]*:[[:space:]]*"codex"' && printf '{}\n'
 exit 0

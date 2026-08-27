@@ -20,6 +20,20 @@ try {
 
 $context = "Current branch: $branch"
 
+# Both hosts validate managed config at SessionStart. This event is advisory;
+# the ship boundary performs the same check and blocks.
+$projectRoot = ""
+if ($data -and $data.cwd) { $projectRoot = [string]$data.cwd }
+if (-not $projectRoot) { $projectRoot = $env:CLAUDE_PROJECT_DIR }
+if (-not $projectRoot) { $projectRoot = (Get-Location).Path }
+$top = git -C $projectRoot rev-parse --show-toplevel 2>$null
+if ($LASTEXITCODE -eq 0 -and $top) { $projectRoot = $top }
+$configCheck = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "check-config-change.ps1"
+if (Test-Path -LiteralPath $configCheck) {
+    $null = '{}' | & $configCheck -Mode boundary -Root $projectRoot 2>$null
+    if ($LASTEXITCODE -ne 0) { $context += " (FORGE_CONFIG_TAMPERED: managed config changed; run setup -F and inspect the diff before shipping)" }
+}
+
 $hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $stateHelper = Join-Path $hookDir "lib\state-path.ps1"
 if (-not (Test-Path -LiteralPath $stateHelper)) { $stateHelper = Join-Path (Get-Location) "hooks\lib\state-path.ps1" }

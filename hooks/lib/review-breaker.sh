@@ -13,6 +13,12 @@ set -u
 POST_CERT_REVIEW_ROUND_LIMIT=3   # canonical home — mirrored to prose by test-contracts.sh
 
 STATE="${1:-}"
+if [ -z "$STATE" ]; then
+    ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    if [ -f "$ROOT/.forge/local/state.md" ]; then STATE="$ROOT/.forge/local/state.md"
+    elif [ -f "$ROOT/.claude/local/state.md" ]; then STATE="$ROOT/.claude/local/state.md"
+    fi
+fi
 emit_inert() { echo "CERTIFIED:no"; echo "POST_CERT_ROUNDS:0"; echo "BREAKER:ok"; echo "ADJUDICATED:no"; exit 0; }
 
 [ -n "$STATE" ] && [ -f "$STATE" ] || emit_inert

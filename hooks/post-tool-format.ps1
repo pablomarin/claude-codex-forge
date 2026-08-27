@@ -1,118 +1,40 @@
-# .claude/hooks/post-tool-format.ps1
-# This hook runs after Edit or Write tool is used.
-# It automatically formats the modified file based on its type.
-#
-# Requirements: PowerShell 5.1+
-# Optional: ruff (for Python), prettier (for JS/TS/JSON/MD)
-#
-# Security: Follows Anthropic best practices
-# - Validates and sanitizes inputs
-# - Blocks path traversal attacks
-# - Skips sensitive files
+# PostToolUse formatter for Claude Write/Edit and Codex apply_patch payloads.
+$ErrorActionPreference = "SilentlyContinue"
+$raw = [Console]::In.ReadToEnd(); try { $data = $raw | ConvertFrom-Json } catch { Write-Output "{}"; exit 0 }
+$tool = if ($data.tool_name) { [string]$data.tool_name } else { [string]$data.tool }
+$cwd = if ($data.cwd) { [string]$data.cwd } elseif ($env:CLAUDE_PROJECT_DIR) { $env:CLAUDE_PROJECT_DIR } else { (Get-Location).Path }
+$root = git -C $cwd rev-parse --show-toplevel 2>$null; if ($LASTEXITCODE -ne 0 -or -not $root) { $root = $cwd }
+try { $root = (Resolve-Path -LiteralPath $root -ErrorAction Stop).Path } catch { Write-Output "{}"; exit 0 }
+$paths = @()
+if ($tool -eq "Write" -or $tool -eq "Edit") { if ($data.tool_input.file_path) { $paths += [string]$data.tool_input.file_path } }
+elseif ($tool -eq "apply_patch") {
+    $patch = if ($data.tool_input.command) { [string]$data.tool_input.command } elseif ($data.tool_input.patch) { [string]$data.tool_input.patch } else { [string]$data.input }
+    foreach ($line in ($patch -split "`r?`n")) { if ($line -match '^\*\*\* (?:Add|Update) File: (.+)$') { $paths += $matches[1] } }
+} else { Write-Output "{}"; exit 0 }
 
-# Read the hook input from stdin
-$jsonInput = [Console]::In.ReadToEnd()
-
-# Parse JSON input
-try {
-    $data = $jsonInput | ConvertFrom-Json
-} catch {
-    exit 0
+foreach ($filePath in @($paths | Select-Object -Unique)) {
+    if (-not $filePath -or ("/$filePath/" -match '/\.\./')) { continue }
+    $abs = if ([IO.Path]::IsPathRooted($filePath)) { $filePath } else { Join-Path $root $filePath }
+    $rootPrefix = $root.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $abs.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+    # Physical-parent containment prevents an in-repository junction/symlink
+    # from redirecting formatter writes outside the worktree.
+    if ((Test-Path -LiteralPath $abs) -and ((Get-Item -LiteralPath $abs).Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+    $parentPath = Split-Path -Parent $abs
+    try { $physicalParent = (Resolve-Path -LiteralPath $parentPath -ErrorAction Stop).Path } catch { continue }
+    $physical = Join-Path $physicalParent ([IO.Path]::GetFileName($abs))
+    if (-not $physical.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+    $abs = $physical
+    $name=[IO.Path]::GetFileName($abs)
+    if ($name -like '.env*' -or $name -like '*.key' -or $name -like '*.pem' -or $name -like '*.secret' -or $name -like '*credential*' -or $name -like '*password*' -or $name -like '*.p12' -or $name -like '*.pfx') { continue }
+    if ($abs -match '[\\/](?:\.git|node_modules|\.ssh|secrets)[\\/]') { continue }
+    $ext=[IO.Path]::GetExtension($abs).ToLowerInvariant()
+    if ($ext -eq '.py') {
+        $search=Split-Path -Parent $abs; $ruffRoot=$null
+        while ($search) { if (Test-Path -LiteralPath (Join-Path $search 'pyproject.toml')) { $ruffRoot=$search; break }; $parent=Split-Path -Parent $search; if ($parent -eq $search) { break }; $search=$parent }
+        if ($ruffRoot) { Push-Location $ruffRoot; try { uv run ruff check --fix $abs 2>$null } catch {}; try { uv run ruff format $abs 2>$null } catch {}; Pop-Location }
+    } elseif ($ext -in @('.ts','.tsx','.js','.jsx')) { try { npx prettier --write $abs 2>$null } catch {} }
+    elseif ($ext -eq '.json' -and $name -ne 'package-lock.json') { try { npx prettier --write $abs 2>$null } catch {} }
 }
-
-# Extract file path
-$filePath = $data.tool_input.file_path
-
-if (-not $filePath) {
-    exit 0
-}
-
-# Security: Block path traversal
-if ($filePath -match '\.\.') {
-    Write-Error "Security: Path traversal blocked"
-    exit 0
-}
-
-# Security: Skip sensitive files
-$fileName = [System.IO.Path]::GetFileName($filePath)
-$sensitivePatterns = @('.env*', '*.key', '*.pem', '*.secret', '*credential*', '*password*', '*.p12', '*.pfx')
-foreach ($pattern in $sensitivePatterns) {
-    if ($fileName -like $pattern) {
-        exit 0
-    }
-}
-
-# Skip files in sensitive directories
-$sensitiveDirs = @('.git', 'node_modules', '.ssh', 'secrets')
-foreach ($dir in $sensitiveDirs) {
-    if ($filePath -match [regex]::Escape($dir)) {
-        exit 0
-    }
-}
-
-# Get file extension
-$extension = [System.IO.Path]::GetExtension($filePath).ToLower()
-
-# Format based on file type
-switch ($extension) {
-    ".py" {
-        # Python files — format with ruff, using the nearest pyproject.toml as config.
-        # Walks up from the edited file to find the project root (works for
-        # monorepo layouts like backend/src/ or apps/api/, not just flat repos).
-        # Runs `ruff check --fix` and `ruff format` independently so a lint
-        # failure does not skip formatting.
-
-        # Normalize to absolute path
-        if ([System.IO.Path]::IsPathRooted($filePath)) {
-            $absPath = $filePath
-        } elseif ($env:CLAUDE_PROJECT_DIR) {
-            $absPath = Join-Path $env:CLAUDE_PROJECT_DIR $filePath
-        } else {
-            $absPath = Join-Path (Get-Location) $filePath
-        }
-
-        # Walk up from the file's directory looking for pyproject.toml
-        $searchDir = Split-Path -Parent $absPath
-        $ruffRoot = $null
-        while ($searchDir -and (Test-Path $searchDir)) {
-            if (Test-Path (Join-Path $searchDir "pyproject.toml")) {
-                $ruffRoot = $searchDir
-                break
-            }
-            $parent = Split-Path -Parent $searchDir
-            if ($parent -eq $searchDir) { break }
-            $searchDir = $parent
-        }
-
-        if ($ruffRoot) {
-            Push-Location $ruffRoot
-            try {
-                uv run ruff check --fix $absPath 2>$null
-            } catch {}
-            try {
-                uv run ruff format $absPath 2>$null
-            } catch {}
-            Pop-Location
-        }
-        # If no pyproject.toml found anywhere above: skip silently.
-    }
-    { $_ -in ".ts", ".tsx", ".js", ".jsx" } {
-        # TypeScript/JavaScript files - format with prettier
-        npx prettier --write $filePath 2>$null
-    }
-    ".json" {
-        # JSON files - format with prettier (skip package-lock.json)
-        if ($fileName -eq "package-lock.json") { exit 0 }
-        npx prettier --write $filePath 2>$null
-    }
-    ".md" {
-        # Markdown is intentionally NOT auto-formatted (v5.56) — mirrors the .sh hook.
-        # The harness ships hand-authored markdown (rules/, commands/, skills/, agents/,
-        # docs/) using an escaped-backtick convention (\`...\`) and sentinel/byte-pinned
-        # blocks enforced by tests/template/test-contracts.sh. prettier 3.x corrupts it
-        # (merges escaped-backtick continuation lines, strips spaces around inline code),
-        # garbling prose and breaking byte-identical contracts. Skip it.
-    }
-}
-
+Write-Output "{}"
 exit 0

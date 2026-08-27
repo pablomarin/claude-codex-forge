@@ -1,55 +1,25 @@
-# .claude\hooks\pre-compact-memory.ps1 (also used globally at ~\.claude\hooks\)
-# This hook runs BEFORE context compaction.
-# It outputs a reminder for Claude to save learnings to auto memory.
-#
-# The prompt-based PreCompact hook in settings.json handles the actual
-# memory save instruction. This script provides additional context about
-# the current session state.
-
-$ErrorActionPreference = "Stop"
-
-# Read JSON input from stdin
-$jsonInput = $input | Out-String
-if ([string]::IsNullOrWhiteSpace($jsonInput)) {
-    $jsonInput = '{}'
-}
-
+# PreCompact owns only the volatile Forge memory layer. PowerShell 5.1 compatible.
+$ErrorActionPreference = "SilentlyContinue"
+$raw = [Console]::In.ReadToEnd()
+function Exit-ForgeAllow { if ($data.host -eq "codex") { Write-Output "{}" }; exit 0 }
+$trigger = "unknown"
+$cwd = ""
 try {
-    $inputObj = $jsonInput | ConvertFrom-Json
-} catch {
-    $inputObj = @{}
-}
-
-$trigger = if ($inputObj.trigger) { $inputObj.trigger } else { "unknown" }
-$sessionId = if ($inputObj.session_id) { $inputObj.session_id } else { "unknown" }
-$cwd = if ($inputObj.cwd) { $inputObj.cwd } else { (Get-Location).Path }
-
-# Determine the auto memory directory for this project
+    $data = $raw | ConvertFrom-Json
+    if ($data.trigger) { $trigger = $data.trigger }
+    if ($data.cwd) { $cwd = $data.cwd }
+} catch {}
+$root = $env:CLAUDE_PROJECT_DIR
+if (-not $root) { $root = $cwd }
+if (-not $root) { $root = (Get-Location).Path }
 try {
-    $gitRoot = (git -C $cwd rev-parse --show-toplevel 2>$null)
-    if (-not $gitRoot) { $gitRoot = $cwd }
-} catch {
-    $gitRoot = $cwd
-}
-
-$projectKey = $gitRoot -replace '[/\\:]', '-'
-$memoryDir = Join-Path $HOME ".claude" "projects" $projectKey "memory"
-
-# Check if MEMORY.md exists and get its size
-$memoryExists = $false
-$memoryLines = 0
-$memoryFile = Join-Path $memoryDir "MEMORY.md"
-if (Test-Path $memoryFile) {
-    $memoryExists = $true
-    $memoryLines = (Get-Content $memoryFile | Measure-Object -Line).Lines
-}
-
-# Count topic files
-$topicFiles = 0
-if (Test-Path $memoryDir) {
-    $topicFiles = (Get-ChildItem -Path $memoryDir -Filter "*.md" -File | Where-Object { $_.Name -ne "MEMORY.md" } | Measure-Object).Count
-}
-
-# Output context as additional information (shown in verbose mode)
-Write-Output "Pre-compact memory check: trigger=$trigger, memory_exists=$memoryExists, memory_lines=$memoryLines, topic_files=$topicFiles"
-exit 0
+    $top = git -C $root rev-parse --show-toplevel 2>$null
+    if ($LASTEXITCODE -eq 0 -and $top) { $root = $top }
+} catch {}
+try { $root = (Resolve-Path -LiteralPath $root -ErrorAction Stop).Path } catch { Exit-ForgeAllow }
+$memoryDir = Join-Path $root ".forge\local\memory"
+New-Item -ItemType Directory -Path $memoryDir -Force | Out-Null
+$topicFiles = @(Get-ChildItem -LiteralPath $memoryDir -Filter "*.md" -File -ErrorAction SilentlyContinue).Count
+[Console]::Error.WriteLine("Pre-compact Forge memory: trigger=$trigger, local=.forge/local/memory, topic_files=$topicFiles")
+[Console]::Error.WriteLine("Save volatile drafts only under .forge/local/memory; promote vetted learnings to .forge/memory through review.")
+Exit-ForgeAllow

@@ -73,6 +73,57 @@ OUT="$scratch/.out"
 assert_contains "$OUT" '"session_nonce":null' "session_nonce null when section missing"
 assert_contains "$OUT" '"workflow_command":null' "workflow_command null when section missing"
 
+start_test "legacy state remains readable but cannot certify v6 evidence"
+scratch=$(scratch_dir bevidence-legacy-noncertifying)
+mkdir -p "$scratch/.claude/local" "$scratch/docs/plans"
+(
+    cd "$scratch"
+    git init -q -b main
+    git config user.email t@t
+    git config user.name t
+    printf 'legacy plan\n' > docs/plans/legacy.md
+    git add docs/plans/legacy.md
+    git commit -qm init
+)
+LEGACY_HEAD=$(git -C "$scratch" rev-parse HEAD)
+LEGACY_PLAN_SHA=$(shasum -a 256 "$scratch/docs/plans/legacy.md" | awk '{print $1}')
+cat > "$scratch/.claude/local/state.md" <<EOF
+## Workflow
+| Field | Value |
+| Command | /new-feature legacy |
+| Phase | 5 — Quality |
+| Next step | ship |
+### Checklist
+- [x] Plan review loop (1 iterations) — PASS
+- [x] Plan review iteration 1 — codex clean — plan=\`docs/plans/legacy.md\` — plan_sha=\`$LEGACY_PLAN_SHA\`
+- [x] Code review loop (1 iterations) — PASS
+- [x] Code review iteration 1 — codex clean — head=\`$LEGACY_HEAD\`
+- [x] Code review iteration 1 — pr-toolkit clean — head=\`$LEGACY_HEAD\`
+## /goal session
+| Field | Value |
+| nonce | 11111111-1111-4111-8111-111111111111 |
+| workflow_command | /new-feature legacy |
+- [x] PR creation authorized — \`2026-08-27T00:00:00Z\` — nonce=\`11111111-1111-4111-8111-111111111111\` — head=\`$LEGACY_HEAD\`
+EOF
+(cd "$scratch" && printf '{"cwd":"%s","host":"claude"}' "$scratch" | bash "$REPO_ROOT/hooks/build-evidence.sh") > "$scratch/.out" 2>&1
+assert_contains "$scratch/.out" '"phase":"5 — Quality"' "legacy structural workflow context is retained"
+assert_contains "$scratch/.out" '"reviewer_gate":{"clean_same_iteration":false' "legacy Code review PASS cannot certify"
+assert_contains "$scratch/.out" '"plan_review_gate":{"clean_same_iteration":false' "legacy plan review PASS cannot certify"
+assert_contains "$scratch/.out" '"session_nonce":null' "legacy goal evidence is non-certifying"
+assert_contains "$scratch/.out" '"pr_authorization":{"authorized":false' "legacy authorization is non-certifying"
+
+start_test "invalid canonical v6 state makes the evidence boundary fail closed"
+scratch=$(scratch_dir bevidence-invalid-v6-state)
+(cd "$scratch" && git init -q -b main && git config user.email t@t && git config user.name t && git commit -qm init --allow-empty)
+mkdir -p "$scratch/.forge/local" "$scratch/outside"
+printf '6\n' > "$scratch/.forge/version"
+printf '<!-- forge:state-schema v6 -->\n' > "$scratch/outside/state.md"
+rmdir "$scratch/.forge/local"
+ln -s "$scratch/outside" "$scratch/.forge/local"
+(cd "$scratch" && printf '{"cwd":"%s","host":"codex"}' "$scratch" | bash "$REPO_ROOT/hooks/build-evidence.sh") > "$scratch/.out" 2>&1
+assert_equals "$?" "2" "v6 state resolver rejection is preserved by build-evidence"
+assert_contains "$scratch/.out" 'FORGE_STATE_INVALID' "evidence failure names the invalid canonical state"
+
 start_test "build-evidence.sh parses workflow checklist counts and reviewer rows"
 
 scratch=$(scratch_dir bevidence-workflow)
@@ -609,6 +660,29 @@ else
     start_test "build-evidence.ps1 smoke (skipped — pwsh not installed)"
     pass "skipped (no pwsh)"
 fi
+
+start_test "concurrent canonical Stop evidence leaves one complete atomic fingerprint"
+CS=$(scratch_dir evidence-concurrent)
+mkdir -p "$CS/.forge/local"
+printf '6\n' > "$CS/.forge/version"
+cat > "$CS/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field | Value |
+| Command | /new-feature concurrent-stop |
+| Phase | 4 — Implementation |
+| Next step | verify-concurrency |
+### Checklist
+- [ ] Code review loop
+EOF
+(cd "$CS" && bash "$REPO_ROOT/hooks/build-evidence.sh" > "$CS/one.out" 2>&1) & c1=$!
+(cd "$CS" && bash "$REPO_ROOT/hooks/build-evidence.sh" > "$CS/two.out" 2>&1) & c2=$!
+wait "$c1"; r1=$?; wait "$c2"; r2=$?
+assert_equals "$r1:$r2" "0:0" "either concurrent Stop order completes"
+assert_matches "$CS/.forge/local/forge-goal-last-fingerprint" '^[0-9a-f]{64}$' \
+    "concurrent evidence publishes only a complete final fingerprint"
+assert_contains "$CS/one.out" 'FORGE_GOAL_EVIDENCE_END' "first Stop emits complete evidence"
+assert_contains "$CS/two.out" 'FORGE_GOAL_EVIDENCE_END' "second Stop emits the same complete schema"
 
 # lib.sh's EXIT trap prints the summary; no explicit call needed.
 report "build-evidence.sh" >&2

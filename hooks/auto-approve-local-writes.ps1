@@ -1,9 +1,8 @@
-# .claude/hooks/auto-approve-local-writes.ps1
-# PermissionRequest hook: auto-approve Write/Edit on .claude/local/**
+# PermissionRequest hook: auto-approve Write/Edit on .forge/local/**
 #
 # Workaround for anthropics/claude-code#36593 — Claude Code v2.1.80+
 # regression where path-scoped Write/Edit allow rules in settings.json
-# don't auto-approve. The workflow file .claude/local/state.md is written
+# don't auto-approve. The workflow file .forge/local/state.md is written
 # on every /new-feature, /fix-bug, and Phase update; without this hook,
 # CC v2.1.80+ prompts the user on every state-md write.
 #
@@ -61,9 +60,9 @@ if ($Abs -match '^/') {
     $Collapsed = ($Segments -join "/")
 }
 
-# Segment match: must contain /.claude/local/ as a directory boundary.
+# Segment match: must contain /.forge/local/ as a directory boundary.
 # Case-insensitive on Windows file systems.
-if ($Collapsed -imatch '/\.claude/local/') {
+if ($Collapsed -imatch '/\.(forge|claude)/local/') {
     $Output = @{
         hookSpecificOutput = @{
             hookEventName = "PermissionRequest"
