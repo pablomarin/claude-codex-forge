@@ -7,7 +7,8 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 ROOT=$(cd "$SELF_DIR/../.." && pwd -P)
 AGENT_DISPATCH="$SELF_DIR/agent-dispatch.sh"
 HOST_CONTEXT="$SELF_DIR/host-context.sh"
-CAPABILITIES="$ROOT/manifests/host-capabilities.tsv"
+CAPABILITIES="$ROOT/host-capabilities.tsv"
+[ -f "$CAPABILITIES" ] || CAPABILITIES="$ROOT/manifests/host-capabilities.tsv"
 hash_stream() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'; else sha256sum | awk '{print $1}'; fi; }
 die() { printf 'BLOCKED[council]: %s\n' "$*" >&2; exit 2; }
 usage() { cat <<'EOF'

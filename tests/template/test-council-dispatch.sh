@@ -13,12 +13,12 @@ make_fixture() {
     local name="$1" include_other="$2" root repo lib fakebin
     root=$(mktemp -d "${TMPDIR:-/tmp}/council-$name.XXXXXX"); _SCRATCH_DIRS+=("$root")
     repo="$root/repo"; lib="$repo/.forge/hooks/lib"; fakebin="$root/bin"
-    mkdir -p "$lib" "$repo/.forge/manifests" "$fakebin"
+    mkdir -p "$lib" "$repo/.forge" "$fakebin"
     cp "$DISPATCH" "$lib/council-dispatch.sh"
     printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "${FAKE_MAIN:-claude}"' > "$lib/host-context.sh"
     printf '%s\n' \
       $'model-council-advisor\tclaude\tqualified' $'model-council-chair\tclaude\tqualified' \
-      $'model-council-advisor\tcodex\tqualified' $'model-council-chair\tcodex\tqualified' > "$repo/.forge/manifests/host-capabilities.tsv"
+      $'model-council-advisor\tcodex\tqualified' $'model-council-chair\tcodex\tqualified' > "$repo/.forge/host-capabilities.tsv"
     cat > "$lib/agent-dispatch.sh" <<'FAKE'
 #!/usr/bin/env bash
 # Task-5 exact transport markers used by council preflight: resume) session_id
@@ -109,5 +109,17 @@ FAKE_FAIL_MATCH= run_fixture
 if [ "$RUN_RC" -ne 0 ]; then pass "linked council receipt root blocks before dispatch"; else fail "linked council receipt root was followed"; fi
 assert_equals "$(find "$FIXTURE_ROOT/outside-council" -mindepth 1 | wc -l | tr -d ' ')" 0 \
   "linked council target remains untouched"
+
+start_test "PowerShell council uses the installed capability path and suppresses dispatcher stdout"
+if grep -Fq '$capabilities = Join-Path $root '\''host-capabilities.tsv'\''' "$REPO_ROOT/hooks/lib/council-dispatch.ps1"; then
+    pass "PowerShell council reads the installed capability location"
+else
+    fail "PowerShell council must read .forge/host-capabilities.tsv"
+fi
+if [ "$(grep -Fc '$null = & $agent' "$REPO_ROOT/hooks/lib/council-dispatch.ps1")" -ge 2 ]; then
+    pass "PowerShell council keeps dispatcher stdout out of function return values"
+else
+    fail "PowerShell council must suppress advisor and chairman dispatcher stdout"
+fi
 
 report "test-council-dispatch.sh"

@@ -5,13 +5,13 @@ $passes = 0
 function Assert-True([bool]$Condition,[string]$Message) { if(!$Condition){throw $Message};$script:passes++;Write-Host "  PASS: $Message" }
 function New-Fixture([string]$Name) {
   $dir=Join-Path ([IO.Path]::GetTempPath()) ("forge-council-$Name-"+[Guid]::NewGuid().ToString('N'));$repo=Join-Path $dir 'repo';$lib=Join-Path $repo '.forge\hooks\lib';$bin=Join-Path $dir 'bin'
-  New-Item -ItemType Directory -Force -Path $lib,(Join-Path $repo '.forge\manifests'),$bin|Out-Null
+  New-Item -ItemType Directory -Force -Path $lib,(Join-Path $repo '.forge'),$bin|Out-Null
   Copy-Item -LiteralPath $source -Destination (Join-Path $lib 'council-dispatch.ps1')
   @'
 param([string]$Mode)
 Write-Output $(if($env:FAKE_MAIN){$env:FAKE_MAIN}else{'claude'})
 '@ | Set-Content (Join-Path $lib 'host-context.ps1')
-  @("model-council-advisor`tclaude`tqualified","model-council-chair`tclaude`tqualified","model-council-advisor`tcodex`tqualified","model-council-chair`tcodex`tqualified")|Set-Content (Join-Path $repo '.forge\manifests\host-capabilities.tsv')
+  @("model-council-advisor`tclaude`tqualified","model-council-chair`tclaude`tqualified","model-council-advisor`tcodex`tqualified","model-council-chair`tcodex`tqualified")|Set-Content (Join-Path $repo '.forge\host-capabilities.tsv')
   @'
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
 # Task-5 preflight markers: 'resume' SessionId
@@ -22,6 +22,7 @@ $match="$engine`:$seat`:$conversation";if($env:FAKE_FAIL_MATCH -eq $match -and !
 if($conversation -eq 'new'){Set-Content -LiteralPath $sessionOut -Value "sid-$seat"};if($conversation -eq 'resume' -and $sessionId -ne "sid-$seat"){exit 18}
 if($role -eq 'council-chair'){if((Get-Content -Raw $prompt) -notmatch 'Anonymous peer reviews:'){exit 19}}
 @('schema_version=1','verdict=CLEAN','max_severity=NONE','blocked_class=none',"engine=$engine","author=$seat")|Set-Content -LiteralPath $output
+Write-Output 'Review completed. Receipt: fake'
 exit 0
 '@ | Set-Content (Join-Path $lib 'agent-dispatch.ps1')
   '@exit /b 0'|Set-Content (Join-Path $bin 'claude.cmd');'@exit /b 0'|Set-Content (Join-Path $bin 'codex.cmd')
