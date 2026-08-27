@@ -57,14 +57,29 @@ If the question turns on actual system or data state — "is this migration safe
 
 Advisors then reason over **verified facts**, and the chairman cites the evidence packet in the verdict. Council itself never grants write access — fact-finding is strictly read-only.
 
-## Step 2: Load Advisor Profiles
+## Step 2: Load Advisor Profiles and Dispatch Topology
 
-Read `references/advisors.md` to get the 5 advisor personas and their engine assignments.
+Read `references/advisors.md` to get the five advisor personas. Engine assignment
+is runtime data: invoke `.forge/hooks/lib/council-dispatch.sh` (or `.ps1`) from
+the protected host context with the question, candidate, and workflow base. It
+uses three main-engine advisors, two other-engine advisors, and an other-engine
+chairman when healthy. It creates five fresh advisor sessions, resumes each for
+one anonymous peer-review turn, and creates a fresh chairman session.
+
+Every Task 5 dispatch must use `--fallback-policy none`, a distinct `--seat-id`,
+the stable question hash, and `--conversation new|resume` exact-id transport.
+Never dispatch a single advisor to a different engine after a failure: a
+non-main runtime failure discards the complete mixed attempt and reruns all
+eleven turns on main. A main-engine failure blocks the council.
 
 **For standalone mode:** Use all 5 advisors. If Codex is unavailable, use only the Claude-engine advisors (Simplifier, Scalability Hawk, Pragmatist).
 **For auto-trigger mode:** Start with the 3 quick-council advisors (Simplifier, Contrarian, Pragmatist). If Codex is unavailable, use Simplifier + Pragmatist only (skip Contrarian — user validates instead).
 
-## Step 3: Dispatch Advisors IN PARALLEL
+## Step 3: Legacy Manual Dispatch Reference (DO NOT EXECUTE)
+
+The canonical dispatch is Step 2's `council-dispatch` topology. The historical
+manual/parallel commands below are reference material only and must not be run
+in addition to the dispatcher.
 
 **CRITICAL: All advisors must dispatch simultaneously.**
 

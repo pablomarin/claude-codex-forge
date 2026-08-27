@@ -2367,6 +2367,10 @@ $references
 EOF
 assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-agent-dispatch.sh' \
     "deterministic dispatcher suite is registered"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-council-dispatch.sh' \
+    "council topology suite is registered"
+assert_contains "$REPO_ROOT/hooks/lib/council-dispatch.sh" 'same-engine-fallback' \
+    "council dispatcher records whole-topology fallback"
 assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-authorized-action.sh' \
     "human-action boundary suite is registered"
 assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Invoke-IndependentReproduction' \

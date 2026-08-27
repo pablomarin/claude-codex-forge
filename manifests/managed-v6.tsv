@@ -84,6 +84,8 @@ canonical	hooks/lib/codex-worktree-dispatch.sh	.forge/hooks/lib/codex-worktree-d
 canonical	hooks/lib/codex-worktree-dispatch.ps1	.forge/hooks/lib/codex-worktree-dispatch.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/codex-worktree-dispatch.ps1	v6
 canonical	hooks/lib/agent-dispatch.ps1	.forge/hooks/lib/agent-dispatch.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/agent-dispatch.ps1	v6
 canonical	hooks/lib/agent-dispatch.sh	.forge/hooks/lib/agent-dispatch.sh	all	shared	project	forge-canonical	.forge/hooks/lib/agent-dispatch.sh	v6
+canonical	hooks/lib/council-dispatch.sh	.forge/hooks/lib/council-dispatch.sh	all	shared	project	forge-canonical	.forge/hooks/lib/council-dispatch.sh	v6
+canonical	hooks/lib/council-dispatch.ps1	.forge/hooks/lib/council-dispatch.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/council-dispatch.ps1	v6
 canonical	hooks/lib/authorized-action.ps1	.forge/hooks/lib/authorized-action.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/authorized-action.ps1	v6
 canonical	hooks/lib/authorized-action.sh	.forge/hooks/lib/authorized-action.sh	all	shared	project	forge-canonical	.forge/hooks/lib/authorized-action.sh	v6
 canonical	hooks/lib/candidate-fingerprint.ps1	.forge/hooks/lib/candidate-fingerprint.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/candidate-fingerprint.ps1	v6

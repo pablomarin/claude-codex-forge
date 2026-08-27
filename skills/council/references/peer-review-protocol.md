@@ -6,6 +6,18 @@
 
 ## Dispatch Rules
 
+### Dynamic six-seat topology (CRITICAL)
+
+Use `.forge/hooks/lib/council-dispatch.sh` (or `.ps1`) under the protected host
+context. It starts five fresh advisor sessions, resumes those exact sessions for
+anonymous peer critique, then starts one fresh chairman session: six sessions
+and eleven turns. The healthy assignment is three advisor seats on the main
+engine, two advisor seats plus chairman on the other engine. Every seat uses
+`fallback_policy=none`. A known unavailable other engine starts one all-main
+attempt; a runtime other-engine failure discards the entire partial council and
+reruns all six fresh sessions on main. A main-engine failure blocks; there is no
+per-seat fallback.
+
 ### Parallelism (CRITICAL)
 
 All advisors dispatch IN PARALLEL. The only serial dependency is the chairman, which runs after all advisors complete.
