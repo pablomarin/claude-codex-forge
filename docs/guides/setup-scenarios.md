@@ -1,98 +1,83 @@
 # Setup Scenarios
 
-Common project configurations. All assume you have already completed [global setup](../getting-started.md#step-2-global-setup-once-per-machine).
+Forge always installs one `.forge/` harness and both native adapter surfaces. You choose the main
+agent simply by opening Claude Code or Codex for the current task.
 
-## Scenario A: New Project
-
-Starting a brand new project with no existing files.
-
-**macOS / Linux:**
+## Fresh Project, One Engine Installed
 
 ```bash
-# 1. Create and enter your project
-mkdir my-new-project
-cd my-new-project
+cd /path/to/project
 git init
-
-# 2. Run setup
-~/claude-codex-forge/setup.sh -p "My New Project"
-
-# 3. Start Claude Code and install plugin
-claude
+~/claude-codex-forge/setup.sh -p "My Project"
+claude # or codex
 ```
 
-**Windows (PowerShell):**
+The missing engine's adapter is still materialized for later. Review continues with a fresh
+same-engine process and prints a fallback reason; council runs all seats and its chairman on the
+installed engine. Installing and authenticating the other CLI later requires no project redesign.
+
+## Fresh Project, Both Engines Installed
+
+Run the same setup command. Start either host:
+
+```bash
+claude
+# later, from the same worktree after the Claude session stops
+codex
+```
+
+The current host is main for that action. Review prefers the other engine, while state, receipts,
+memory pointers, plans, and checkpoints stay under `.forge/` for cross-host resume.
+
+## Existing v5 Project
+
+Do not layer v6 beside the old managed harness. Pull Forge and run the authoritative transaction:
+
+```bash
+git -C ~/claude-codex-forge pull
+cd /path/to/project
+~/claude-codex-forge/setup.sh -F
+```
+
+Windows PowerShell:
 
 ```powershell
-# 1. Create and enter your project
-mkdir my-new-project
-cd my-new-project
-git init
-
-# 2. Run setup
-& $HOME\claude-codex-forge\setup.ps1 -p "My New Project"
-
-# 3. Start Claude Code and install plugin
-claude
+git -C $HOME\claude-codex-forge pull
+Set-Location C:\path\to\project
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh # or -R
 ```
 
-Then install the Superpowers plugin (if not already done — see [getting-started Step 4](../getting-started.md#step-4-install-the-superpowers-plugin-once-per-machine)). Restart Claude Code.
+The transaction preserves user-owned content, migrates active state, removes only proven
+Forge-owned legacy files, and stops on ambiguous ownership. Read [Upgrading](upgrading.md) before
+resolving a blocked report.
 
-> Plugins are pre-configured in `.claude/settings.json`. You only need to install Superpowers once per machine.
+## Global Refresh
 
-**Done!** Now [customize your project](customize-project.md).
-
----
-
-## Scenario B: Existing Project WITHOUT Claude Code
-
-You have a project but haven't set up Claude Code automation yet.
-
-**macOS / Linux:**
+Global files have their own transaction and are never changed by project setup:
 
 ```bash
-# 1. Go to your project
-cd /path/to/your/existing/project
-
-# 2. Run setup
-~/claude-codex-forge/setup.sh -p "My Project Name"
-
-# 3. Start Claude Code
-claude
+~/claude-codex-forge/setup.sh --global -F
 ```
-
-**Windows (PowerShell):**
 
 ```powershell
-# 1. Go to your project
-cd C:\path\to\your\existing\project
-
-# 2. Run setup
-& $HOME\claude-codex-forge\setup.ps1 -p "My Project Name"
-
-# 3. Start Claude Code
-claude
+& $HOME\claude-codex-forge\setup.ps1 -Global -FullRefresh # or -Global -R
 ```
 
-Install the Superpowers plugin if not already done (see [getting-started Step 4](../getting-started.md#step-4-install-the-superpowers-plugin-once-per-machine)). Restart Claude Code.
+## Linked Worktree
 
-```bash
-# 4. Commit the new files
-git add .claude/ .mcp.json CLAUDE.md docs/ .gitignore
-git commit -m "chore: add Claude Code automation setup"
-git push
+Project files may be refreshed from the canonical repository root. Codex's hook registry is shared
+through the Git common directory and must be registered from the primary checkout. When setup sees
+a linked worktree it leaves that registry alone and prints:
+
+```text
+CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration
+Run: cd '<primary-checkout>' && '<forge-clone>/setup.sh'
 ```
 
-**Done!** Now [customize your project](customize-project.md).
+Run that exact command, complete Codex's trust ceremony in the primary checkout, then reopen the
+linked worktree. Each hook event is still routed back to the event worktree's own `.forge/` state.
 
----
+## Playwright Scaffold
 
-## Scenario C: Existing Project WITH Claude Code (Upgrade)
-
-See [Upgrading](upgrading.md) — dedicated guide for upgrading existing setups.
-
----
-
-## Optional: Add Playwright CI Bridge
-
-For fullstack / typescript projects, append `--with-playwright` to either Scenario A or B. See [Playwright CI Bridge](playwright-ci-bridge.md) for details.
+For a fresh TypeScript/full-stack install, add `--with-playwright` (PowerShell:
+`-WithPlaywright`). Full refresh is intentionally separate; do not combine those flags.

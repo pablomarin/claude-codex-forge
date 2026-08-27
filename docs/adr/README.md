@@ -31,3 +31,4 @@ Each ADR follows the [Nygard 2011 template](https://www.cognitect.com/blog/2011/
 | [0007](0007-codex-investigate-mode-capability-gated.md) | Codex Investigate mode — capability-gated, sandbox-enforced                            | Accepted (2026-05-27) |
 | [0008](0008-state-continuity-round-trip.md)             | Per-developer continuity narrative round-trips through main (seed + guarded fold-back) | Accepted (2026-06-02) |
 | [0009](0009-scoped-review-certification.md)             | Convergence breaker for the code-review loop (scoped engine built, deferred)           | Accepted (2026-06-06) |
+| [0010](0010-dual-engine-canonical-harness.md)            | One canonical dual-engine harness with native host adapters                            | Accepted (2026-08-27) |

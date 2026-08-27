@@ -2529,4 +2529,146 @@ assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Reserve-OwnedReviewPa
 assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" 'receipt_hash=' \
     "PowerShell host launcher uses a protected current-session receipt"
 
+# ---------------------------------------------------------------------------
+# Contract: v6 public documentation describes the active dual-host surface.
+# Historical CHANGELOG and superseded ADRs are intentionally outside this
+# contract: they preserve the terminology of the releases they describe.
+# ---------------------------------------------------------------------------
+start_test "v6 public docs expose one canonical dual-host contract"
+README="$REPO_ROOT/README.md"
+GETTING_STARTED="$REPO_ROOT/docs/getting-started.md"
+UPGRADING="$REPO_ROOT/docs/guides/upgrading.md"
+PARALLEL="$REPO_ROOT/docs/guides/parallel-sessions.md"
+WORKFLOW_DOC="$REPO_ROOT/docs/explanation/workflow.md"
+GOAL_DOC="$REPO_ROOT/docs/explanation/autonomous-goal.md"
+INVESTIGATE_DOC="$REPO_ROOT/docs/explanation/codex-investigate.md"
+COUNCIL_DOC="$REPO_ROOT/docs/explanation/engineering-council.md"
+MEMORY_DOC="$REPO_ROOT/docs/explanation/memory-architecture.md"
+COMMANDS_DOC="$REPO_ROOT/docs/reference/commands.md"
+STRUCTURE_DOC="$REPO_ROOT/docs/reference/file-structure.md"
+HOOKS_DOC="$REPO_ROOT/docs/reference/hooks.md"
+CHEATSHEET_DOC="$REPO_ROOT/docs/reference/cheatsheet.md"
+TROUBLESHOOTING_DOC="$REPO_ROOT/docs/troubleshooting.md"
+ADR_0010="$REPO_ROOT/docs/adr/0010-dual-engine-canonical-harness.md"
+
+assert_contains "$README" 'Claude Code uses `/opinion`; Codex uses `$opinion`' \
+    "README gives both host-native opinion invocations"
+assert_contains "$COMMANDS_DOC" 'Claude Code: `/opinion investigate`' \
+    "commands reference gives Claude investigation invocation"
+assert_contains "$COMMANDS_DOC" 'Codex: `$opinion investigate`' \
+    "commands reference gives Codex investigation invocation"
+assert_contains "$COMMANDS_DOC" '`review` is reserved by both supported hosts' \
+    "commands reference explains why Forge uses opinion instead of review"
+assert_contains "$README" './setup.sh -F' \
+    "README leads legacy installs to authoritative Unix full refresh"
+assert_contains "$README" './setup.ps1 -FullRefresh' \
+    "README leads legacy installs to authoritative Windows full refresh"
+assert_contains "$UPGRADING" 'PRESERVED_COMPAT_BLOCKED' \
+    "upgrade guide explains compatibility blockers"
+assert_contains "$UPGRADING" 'scripts/recover-full-refresh.sh' \
+    "upgrade guide explains explicit recovery"
+
+assert_contains "$GETTING_STARTED" '| Claude Code | `2.1.237`' \
+    "compatibility table records the qualified Claude baseline"
+assert_contains "$GETTING_STARTED" '| Codex CLI | `0.144.1`' \
+    "compatibility table records the qualified Codex baseline"
+assert_contains "$GETTING_STARTED" 'MATERIALIZED' \
+    "getting started distinguishes installed files"
+assert_contains "$GETTING_STARTED" 'RUNTIME_READY' \
+    "getting started distinguishes host readiness"
+
+assert_contains "$STRUCTURE_DOC" '.forge/instructions.md' \
+    "file structure names the canonical instructions"
+assert_contains "$MEMORY_DOC" '.forge/local/state.md' \
+    "memory guide names the canonical shared state"
+assert_contains "$HOOKS_DOC" '.forge/local/reviews/' \
+    "hook guide names artifact-bound receipt storage"
+assert_contains "$PARALLEL" 'Do not edit the same worktree from both hosts simultaneously' \
+    "parallel guide warns against simultaneous same-worktree edits"
+assert_contains "$HOOKS_DOC" 'primary checkout' \
+    "hook guide explains Codex linked-worktree routing"
+assert_contains "$TROUBLESHOOTING_DOC" 'CODEX_HOOKS: BLOCKED' \
+    "troubleshooting covers blocked Codex hook registration"
+
+assert_contains "$WORKFLOW_DOC" 'one broad review' \
+    "workflow documents the bounded review shape"
+assert_contains "$WORKFLOW_DOC" 'P3' \
+    "workflow documents non-blocking low-confidence findings"
+assert_contains "$WORKFLOW_DOC" 'P0/P1' \
+    "workflow preserves reachable high-severity blockers"
+assert_contains "$CHEATSHEET_DOC" 'one repair and one closure' \
+    "cheatsheet states the default review-loop bound"
+assert_contains "$GOAL_DOC" 'same native `/goal`' \
+    "goal guide explains host-native composition"
+assert_contains "$INVESTIGATE_DOC" 'explicit authorization' \
+    "investigation guide requires explicit capability authorization"
+assert_contains "$COUNCIL_DOC" 'three advisors use the current host' \
+    "council guide documents the healthy topology"
+assert_contains "$COUNCIL_DOC" 'whole council' \
+    "council guide documents whole-topology fallback"
+
+assert_file_exists "$ADR_0010" "dual-engine architecture decision exists"
+assert_contains "$ADR_0010" '### Canonical Harness and Host Adapters' \
+    "ADR records the canonical/adapters facet"
+assert_contains "$ADR_0010" '### Fresh-Run Review Independence' \
+    "ADR records reviewer independence"
+assert_contains "$ADR_0010" '### Manifest-Driven Full Refresh' \
+    "ADR records authoritative migration"
+
+start_test "v6 active docs do not regress to one-host commands or ownership"
+ACTIVE_V6_DOCS=(
+    "$GETTING_STARTED" "$REPO_ROOT/docs/guides/setup-scenarios.md"
+    "$UPGRADING" "$PARALLEL" "$WORKFLOW_DOC" "$GOAL_DOC" "$INVESTIGATE_DOC"
+    "$COUNCIL_DOC" "$MEMORY_DOC" "$COMMANDS_DOC" "$STRUCTURE_DOC" "$HOOKS_DOC"
+    "$REPO_ROOT/docs/reference/permissions.md" "$CHEATSHEET_DOC" "$TROUBLESHOOTING_DOC"
+    "$REPO_ROOT/docs/explanation/harness-philosophy.md"
+    "$REPO_ROOT/docs/guides/customize-project.md"
+    "$REPO_ROOT/docs/guides/multi-project-isolation.md"
+)
+for active_doc in "${ACTIVE_V6_DOCS[@]}"; do
+    assert_not_contains "$active_doc" '`/codex`' \
+        "$(basename "$active_doc") has no retired /codex command"
+done
+README_ACTIVE=$(awk '/^## Version history/{exit} {print}' "$README")
+if printf '%s\n' "$README_ACTIVE" | grep -qF '`/codex`'; then
+    fail "README live sections contain the retired /codex command"
+else
+    pass "README live sections have no retired /codex command (historical rows preserved)"
+fi
+STALE_SETUP=$(grep -nHE 'setup\.sh (-f|--upgrade)|setup\.ps1[^[:cntrl:]]*-(Force|Upgrade)' \
+    "${ACTIVE_V6_DOCS[@]}" 2>/dev/null || true)
+if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh (-f|--upgrade)|setup\.ps1[^[:cntrl:]]*-(Force|Upgrade)'; then
+    STALE_SETUP="README live sections contain an obsolete incremental/force-upgrade instruction${STALE_SETUP:+$'\n'$STALE_SETUP}"
+fi
+if [ -z "$STALE_SETUP" ]; then
+    pass "active v6 docs use authoritative full refresh rather than old force/upgrade commands"
+else
+    fail "active v6 docs contain obsolete force/upgrade commands: $STALE_SETUP"
+fi
+assert_not_contains "$README" 'Per-developer Workflow / Done / Now / Next state lives in gitignored `.claude/local/state.md`' \
+    "README no longer assigns shared state ownership to .claude"
+for canonical_state_doc in "$GETTING_STARTED" "$REPO_ROOT/docs/guides/setup-scenarios.md" \
+    "$UPGRADING" "$PARALLEL" "$WORKFLOW_DOC" "$GOAL_DOC" "$INVESTIGATE_DOC" \
+    "$COUNCIL_DOC" "$MEMORY_DOC" "$COMMANDS_DOC" "$STRUCTURE_DOC" "$HOOKS_DOC" \
+    "$REPO_ROOT/docs/reference/permissions.md" "$CHEATSHEET_DOC" \
+    "$REPO_ROOT/docs/explanation/harness-philosophy.md" \
+    "$REPO_ROOT/docs/guides/customize-project.md" \
+    "$REPO_ROOT/docs/guides/multi-project-isolation.md"; do
+    assert_not_contains "$canonical_state_doc" '.claude/local/state.md' \
+        "$(basename "$canonical_state_doc") does not assign active state to the legacy host path"
+done
+assert_not_contains "$WORKFLOW_DOC" 'Codex is always the reviewer' \
+    "workflow does not hardcode Codex as reviewer"
+assert_not_contains "$REPO_ROOT/state.template.md" 'Codex is mandatory in this repo' \
+    "state template does not hardcode Codex as the required reviewer"
+assert_contains "$REPO_ROOT/state.template.md" 'fresh same-engine reviewer' \
+    "state template documents visible same-engine reviewer fallback"
+
+start_test "6.0 release and ADR index are published without rewriting history"
+assert_contains "$REPO_ROOT/docs/adr/README.md" '0010-dual-engine-canonical-harness.md' \
+    "ADR index includes the dual-engine decision"
+FIRST_CHANGELOG_VERSION=$(grep -m1 '^## [0-9]' "$REPO_ROOT/docs/CHANGELOG.md")
+assert_equals "$FIRST_CHANGELOG_VERSION" '## 6.0 — 2026-08-27' \
+    "6.0 is the top changelog release"
+
 report "test-contracts.sh"

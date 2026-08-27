@@ -8,18 +8,20 @@ One coding agent will confidently ship the wrong thing. Two will disagree — an
 
 The harness uses **Claude Code** (Anthropic) and **OpenAI's Codex** together:
 
-- **Claude designs.** It proposes plans, writes code, explains tradeoffs.
-- **Codex reviews independently.** It reads the same plan or diff without seeing Claude's reasoning, and flags issues Claude missed.
-- **Engineering Council adjudicates ambiguity.** When the two disagree or when a strategic choice has real risk, a 5-advisor council (3 Claude personas + 2 Codex personas + Codex chairman) runs in parallel and returns a verdict with mandatory minority reports.
+- **The current host is main.** Claude Code or Codex proposes plans, writes code, and explains tradeoffs.
+- **A fresh reviewer checks independently.** Forge prefers the other engine and visibly falls back to a fresh same-engine reviewer on launch/capability failure.
+- **Engineering Council adjudicates ambiguity.** A healthy council runs three main-engine advisors, two other-engine advisors, and an other-engine chairman; an unavailable other engine triggers one all-main attempt.
 
-This is not "more review is better." It's **two separately-trained models with different failure modes**. Codex catches things Claude consistently misses; Claude catches things Codex consistently misses. Without Codex, you lose that diversity — the workflow still runs, but every step falls back to user review.
+This is not "more review is better." It's independent context and, when healthy, two engines with
+different failure modes. When the other engine is unavailable, Forge uses a visible fresh
+same-engine reviewer or all-main council rather than pretending diversity.
 
 ## Discipline by construction
 
 You can skip good practice when it feels optional. The harness makes it structural:
 
 - `/new-feature` and `/fix-bug` commands bake in TDD, research-before-design, approach comparison, and a contrarian gate — you follow them or you don't ship
-- `check-workflow-gates.sh` literally blocks `git commit`, `git push`, and `gh pr create` until `.claude/local/state.md` shows `Code review loop`, `Simplified`, and `Verified` markers
+- `check-workflow-gates.sh` blocks `git commit`, `git push`, and `gh pr create` until `.forge/local/state.md` contains candidate-bound review and verification evidence
 - `check-bash-safety.sh` blocks dangerous Bash patterns before they run (pipe-to-shell, reverse shells, credential exfiltration)
 - `ConfigChange` hook logs every modification to `.claude/settings.json` so permission escalation is auditable
 - Every Stop turn reminds Claude to update state; `check-state-updated.sh` is advisory (gating moved to PreToolUse) but still nags if state goes stale and gates `docs/CHANGELOG.md` updates when 4+ files have changed
@@ -31,23 +33,25 @@ Discipline is guided by commands and **guarded by hooks**. You can still overrid
 Sessions end. State doesn't.
 
 - **Auto-memory** persists locally across sessions and context compaction (the `PreCompact` hook rescues learnings _before_ compression, so nothing gets dropped silently)
-- **`.claude/local/state.md`** — Done / Now / Next, updated every turn, gitignored per-developer state (hooks read on demand)
+- **`.forge/local/state.md`** — host-neutral workflow, goal, and evidence checkpoint; gitignored per-developer/worktree state (hooks read on demand)
 - **`docs/adr/`** — architecture decisions, append-only, travels with the repo
 - **`docs/CHANGELOG.md`** — historical record, travels with the repo
 - **`docs/solutions/`** — bug root causes + patterns, indexed by problem type, travels with the repo via git
 
-Three of those travel with the repo. Auto-memory and `.claude/local/state.md` stay local/per-worktree (they don't sync across teammates), but the git-tracked files mean every root cause, decision, and pattern compounds across weeks and teammates. The same bug never needs to be debugged twice.
+Three of those travel with the repo. Auto-memory and `.forge/local/state.md` stay local/per-worktree (they don't sync across teammates), but the git-tracked files mean every root cause, decision, and pattern compounds across weeks and teammates. The same bug never needs to be debugged twice.
 
 ## Team-scale by default
 
 One GitHub repo becomes the hub:
 
 - Shared `CLAUDE.md` — project description, tech stack, commands
-- Shared `.claude/rules/` — coding standards, workflow rules, security baseline
-- Shared `.claude/commands/` — custom slash commands all developers use
+- Shared `.forge/rules/` — canonical coding standards, workflow rules, security baseline
+- Shared `.forge/workflows/` — canonical workflows used through each host's adapters
 - Shared hooks — consistent quality gates across the team
 
-Multiple developers run parallel Claude sessions via **auto-created git worktrees** (`/new-feature` and `/fix-bug` spawn them). Each session is isolated — own branch, own filesystem, own auto-memory — but loads the same project context. You can have three Claude sessions working on three features simultaneously without them mixing state.
+Multiple developers run parallel Claude Code or Codex sessions via **auto-created git worktrees**
+(`/new-feature` and `/fix-bug` spawn them). Each worktree has its own branch, filesystem, and
+`.forge/local/` state. Forge warns against simultaneous editing of one worktree and adds no locks.
 
 ## Inheritance
 

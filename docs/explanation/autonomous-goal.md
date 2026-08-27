@@ -1,10 +1,16 @@
 # Autonomous Goal Mode (`/forge-goal`)
 
-> **TL;DR** — After your PRD is written and approved, the Forge offers you a choice: drive the rest of the feature **manually**, phase by phase, or paste **one `/goal` command** and let the agent run the whole lifecycle — plan → review → implement → review → verify → E2E → PR — **autonomously**, escalating hard calls to the Engineering Council instead of stopping to ask you. Either way, you stay in the chair: watch the run and steer it any time by typing in the prompt.
+> **TL;DR** — After your PRD is approved, Forge can compose the current host's native `/goal`
+> over the shared workflow state. It runs toward PR-ready autonomously while human-only authority
+> boundaries still pause.
 
 ## What it is
 
-`/forge-goal` is the Forge's autonomous execution loop. It turns an approved PRD into an open pull request without you hand-driving each of the 14 workflow phases. It is **not** a separate command you install — it's the Claude Code built-in `/goal`, invoked with a Forge-composed instruction that `/new-feature` (or `/fix-bug`) hands you at the right checkpoint. The behavior of the agent _during_ an autonomous run is governed by `rules/workflow.md` ("Council During `/forge-goal` Autonomous Run").
+`/forge-goal` is Forge's composition contract for the native `/goal` provided by Claude Code or
+Codex. Forge does not install or shadow `/goal`; `/new-feature` or `/fix-bug` offers it at the right
+checkpoint, and `.forge/workflows/goal.md` defines the shared behavior.
+Both hosts resume the same native `/goal` composition contract from canonical Forge state, while
+the host-native session itself remains fresh.
 
 ## It is optional — and it starts only after the PRD
 
@@ -20,12 +26,20 @@ There is no autonomous behavior before this point, and no surprise escalation of
 
 ## What runs without you — and what still stops for you
 
-During an autonomous run the agent's pause-for-user discipline inverts. Instead of stopping to ask you about every fork, it makes progress and routes judgment calls to the **Engineering Council** (the multi-advisor panel with a Codex chairman — see [The Engineering Council](engineering-council.md)). Concretely:
+During an autonomous run the agent makes progress and routes non-destructive judgment calls to the
+**Engineering Council** (whose chairman runs on the other engine when both are healthy — see
+[The Engineering Council](engineering-council.md)). Concretely:
 
 - **Big decisions → Council, not you.** An ambiguous product/technical choice, a reviewer recommending a plan revision, a high-impact fork — the agent invokes `/council`, applies the chairman's verdict, and continues. No prompt.
-- **The plan-review and code-review loops run to convergence** on their own (Claude + Codex; Codex + PR-toolkit), with the per-iteration clean-evidence gates from v5.39 enforcing that "PASS" actually means clean.
-- **The ONE hard human gate is PR creation.** Before `gh pr create`, the agent stops and asks you to authorize — that single `AskUserQuestion` is the only human-authority signal in the loop. It will not open a PR without your yes.
-- **If something genuinely can't proceed** (the council itself fails, a tool repeatedly errors, an investigation needs write access), the loop **halts and writes a blocker** to `.claude/local/state.md` — it does not guess or force its way through. You take over.
+- **Review is bounded.** Each candidate gets one broad review, one repair, and one closure review;
+  P3 or speculative concerns do not keep autonomy open. Reachable P0/P1 security, correctness, or
+  data-integrity defects still block.
+- **Human-authority gates remain human.** PR creation, merge, deploy, publish, destructive work,
+  secrets, and every new external mutation pause for explicit authorization.
+- **If something genuinely can't proceed**, the loop halts and writes the exact blocker and next
+  step to `.forge/local/state.md`; it does not guess or force its way through.
+- **Host switches preserve the Forge objective, nonce, durable budget, and next step, not the native
+  session.** The other host starts a fresh native session from shared state.
 
 ## You should watch — and you can always steer
 

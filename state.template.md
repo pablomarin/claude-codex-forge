@@ -165,7 +165,7 @@ Claude or Codex of the active workflow; the ship hook gates commit/push/PR on th
 2. Compute `plan_sha` with `shasum -a 256 <path>` (macOS), `sha256sum <path>` (Linux), or `(Get-FileHash -Algorithm SHA256 <path>).Hash` (PowerShell).
 3. When checking the loop-complete checkbox `- [x] Plan review loop (<N> iterations) — PASS`, the per-iter clean line for iteration N must be present AND its `plan_sha` must match the current plan file content. The PreToolUse `check-workflow-gates` hook enforces this on ship actions.
 4. If a fix changes the plan, re-run reviewers and append a NEW iteration row; do NOT mutate existing rows.
-5. Escape (the ONLY one — Codex is mandatory in this repo): `- [x] Plan review loop — N/A: <reason>`. An N/A line skips the per-iter evidence check on ship actions and is caught by human reviewers at PR time. It does NOT set the evidence gate clean — a `/goal` autonomous run cannot self-complete on N/A; it halts for a human if Codex is genuinely unavailable.
+5. Reviewer selection is not an escape: prefer the other engine, then visibly dispatch a fresh same-engine reviewer when that engine is missing or lacks the required capability. Do not halt solely because the preferred engine is unavailable. A justified `- [x] Plan review loop — N/A: <reason>` still does NOT set the evidence gate clean; `/goal` can complete only from a real current-artifact receipt, and blocks only if the fallback also fails.
 
 **On PR creation authorization (during a `/forge-goal`-driven run):**
 

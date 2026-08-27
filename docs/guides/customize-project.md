@@ -4,9 +4,12 @@ Files you should review and edit after running the setup script.
 
 ## 1. Edit CLAUDE.md
 
-Your `CLAUDE.md` is **intentionally short** (~50 lines) — just your project description, tech stack, and commands. All workflow rules, coding standards, and principles live in `.claude/rules/` files that are auto-loaded by Claude Code with the same priority.
+Keep user-owned root instructions concise. Canonical workflow rules, coding standards, and principles
+live in `.forge/rules/`; bounded `CLAUDE.md` and `AGENTS.md` adapters point both hosts at Forge.
 
-**Why this matters:** When you run `setup.sh --upgrade`, your `CLAUDE.md` is preserved (never overwritten), `settings.json` is intelligently merged (your custom permissions kept), and `.claude/rules/` files are safely updated to the latest standards.
+**Why this matters:** When you run the authoritative `setup.sh -F`, user text outside bounded Forge
+marker blocks is preserved while canonical `.forge/` content and generated host adapters are
+reconciled with ownership checks.
 
 Fill in the placeholders:
 
@@ -27,11 +30,14 @@ cd src && uv run pytest # Run tests
 cd frontend && pnpm build # Build frontend
 ```
 
-> **Why so slim?** Official best practices recommend keeping CLAUDE.md under 60-100 lines. Shorter files = better Claude performance. Everything else lives in `.claude/rules/` which loads automatically.
+> **Why so slim?** Host root instructions stay focused while canonical shared policy lives in
+> `.forge/instructions.md` and `.forge/rules/`.
 
-## 2. Per-developer state file (`.claude/local/state.md`)
+## 2. Per-developer state file (`.forge/local/state.md`)
 
-`setup.sh` installs a starter `.claude/local/state.md` for your current developer state — Workflow row, Done / Now / Next, Open Questions, Blockers. The path is gitignored and **not** auto-loaded into Claude's context; hooks read it on demand to remind you to keep it current and to gate `git commit` / `git push` / `gh pr create`.
+`setup.sh` installs a starter `.forge/local/state.md` for host-neutral workflow, goal, and evidence
+state. The path is gitignored; Claude Code and Codex hooks read it on demand to resume the exact next
+step and gate `git commit`, `git push`, and `gh pr create`.
 
 You don't normally edit this file by hand — `/new-feature`, `/fix-bug`, and `/quick-fix` rewrite the Workflow section as part of Pre-Flight, and the Stop hook nudges you to update Done / Now / Next at the end of each turn. The starter content is:
 
@@ -61,7 +67,7 @@ You don't normally edit this file by hand — `/new-feature`, `/fix-bug`, and `/
 
 Project goal lives in `CLAUDE.md` under the `## Project Overview` → `### Goal` subsection. Architecture decisions live as per-file ADRs in `docs/adr/NNNN-*.md` (one file per decision; `docs/adr/template.md` is the starter).
 
-**When a `/forge-goal`-driven workflow is active**, additional sections appear in `.claude/local/state.md`:
+**When a `/forge-goal`-driven workflow is active**, additional sections appear in `.forge/local/state.md`:
 
 - `## /goal session` — table with the autonomous-loop session nonce, originating workflow command, and issued-at timestamp. Absent when no loop is active; written by the workflow command checkpoint and REPLACED (not appended) on each new kickoff.
 - `## PR authorization` — single authorization line written when the user authorizes PR creation via the `AskUserQuestion` modal at the PR-create gate. Contains the timestamp, session nonce, and HEAD SHA at the moment of authorization. REPLACED (not appended) on each re-authorization.
@@ -150,7 +156,8 @@ The `/review-pr-comments` command works by processing review comments left on yo
 
 Once configured, the workflow becomes: create PR → automated reviewers leave comments → `/review-pr-comments` processes those comments → push fixes → merge.
 
-> **No automated reviewers?** The workflow still works — you just skip the `/review-pr-comments` step. All pre-PR quality gates (Codex second opinion, deep review, /simplify, verify-app, verify-e2e) still catch issues before the PR is created.
+> **No automated reviewers?** The workflow still works — you just skip `/review-pr-comments`.
+> Pre-PR gates still include fresh opinion review, simplification, verify-app, and verify-e2e.
 
 ## 7. Verify Setup
 

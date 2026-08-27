@@ -18,7 +18,8 @@ checkpoint; hooks validate its current candidate evidence before commit/push/PR.
 
 `/goal` remains each host's native command; Forge never installs a command or skill with that name.
 The root adapter composes native autonomy over `.forge/workflows/goal.md`, including persistent
-budget, exact resume, evidence, and human-authorization boundaries.
+budget, exact resume, evidence, and human-authorization boundaries. The Forge objective, nonce, and
+next step survive a host switch; the native Claude Code or Codex session does not transfer.
 
 ## Decision Analysis
 
@@ -26,14 +27,16 @@ budget, exact resume, evidence, and human-authorization boundaries.
 | ---- | ---------- | ------- |
 | Claude Code | `/opinion <request>` | Fresh independent opinion |
 | Codex | `$opinion <request>` | Fresh independent opinion |
-| Claude Code | `/opinion investigate <request>` | Bounded investigation |
-| Codex | `$opinion investigate <request>` | Bounded investigation |
+| Claude Code | `/opinion investigate <request>` | Bounded investigation (Claude Code: `/opinion investigate`) |
+| Codex | `$opinion investigate <request>` | Bounded investigation (Codex: `$opinion investigate`) |
 
-### `/opinion` profiles
+### Opinion profiles
 
 Forge deliberately uses the name `opinion` because `review` is reserved by both supported hosts.
 Use `/opinion` in Claude Code and `$opinion` in Codex. Ordinary requests are hermetic and read-only;
 add `investigate` when the task needs network, execution, or a declared live-data query channel.
+The current host remains main; automatic selection prefers the other engine and visibly falls back
+to a fresh same-engine reviewer on launch or capability failure.
 
 | Profile           | Boundary | Use for |
 | ----------------- | -------- | ------- |
@@ -51,10 +54,14 @@ add `investigate` when the task needs network, execution, or a declared live-dat
 
 | Command / Agent    | Purpose |
 | ------------------ | ------- |
-| `/opinion` (Claude) / `$opinion` (Codex) | Distinct fresh code-spec and code-quality receipts over one frozen candidate |
 | Simplification phase | Forge-owned cleanup before final candidate freeze |
+| Claude `/opinion` / Codex `$opinion` | Distinct fresh code-spec and code-quality receipts over the frozen candidate |
 | `verify-app` agent | Unit tests, migration check, lint, and types |
 | `verify-e2e` agent | User-journey E2E plus regression replay |
+
+Review uses one broad pass, one repair pass, and one closure pass limited to named findings and
+direct regressions. P3, cosmetic, and speculative concerns do not keep the loop open; reachable
+P0/P1 security, correctness, or data-integrity failures still block.
 
 ## Research Enforcement (Pre-Design — Phase 2)
 
@@ -68,7 +75,7 @@ For bug fixes, targeted research runs after root-cause isolation (Phase 2.5 of `
 | --------------------- | ------------------------------------ | --------------------------------------------------------------- |
 | `/review-pr-comments` | Address automated PR review comments | Requires GitHub Copilot, Codex, or Claude PR reviews configured |
 
-## Built-in Commands
+## Claude Code Built-in Commands
 
 | Command        | Purpose                                             |
 | -------------- | --------------------------------------------------- |
@@ -104,9 +111,8 @@ Run from a fresh `claude-codex-forge` clone.
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-p "Project Name"`                | Project name (required for fresh installs)                                                                                                                                                                                                                                                                            |
 | `-t python\|typescript\|fullstack` | Pick the language profile (controls which `rules/*.md` get installed)                                                                                                                                                                                                                                                 |
-| `-f`                               | Force-overwrite refreshable templates (rules, commands, hooks, settings)                                                                                                                                                                                                                                              |
-| `--upgrade`                        | Same as `-f` plus a template-drift summary at the end                                                                                                                                                                                                                                                                 |
-| `--global`                         | Install global files into `~/.claude/`                                                                                                                                                                                                                                                                                |
+| `-F`, `--full-refresh`             | Authoritative v6 refresh: reconcile canonical `.forge/` content and generated host adapters with ownership checks                                                                                                                                                                                                     |
+| `--global`                         | Install canonical global policy under `~/.forge/` plus bounded Claude Code and Codex adapters                                                                                                                                                                                                                         |
 | `--with-playwright`                | Scaffold Playwright config + auth fixture + reference CI workflow                                                                                                                                                                                                                                                     |
 | `--playwright-dir <path>`          | Override autodetected scaffolding directory for monorepos                                                                                                                                                                                                                                                             |
-| `--migrate`                        | Run the legacy-state-file migration assistant: extracts Goal into `CLAUDE.md`, decisions into `docs/adr/`, and Done/Now/Next into `.claude/local/state.md`. Idempotent; original file preserved byte-for-byte. Flags any dangling `@`-import in `CLAUDE.md`. See `docs/guides/upgrading.md` for the full walkthrough. |
+| `--migrate`                        | Legacy CONTINUITY migration only: extracts Goal into `CLAUDE.md`, decisions into `docs/adr/`, and Done/Now/Next into `.forge/local/state.md`; preserves the original byte-for-byte                                                                                                                                     |

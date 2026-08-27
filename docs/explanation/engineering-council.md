@@ -1,6 +1,6 @@
 # The Engineering Council
 
-> Fight sycophancy with model diversity. Five advisors argue, a chairman from a different model synthesizes, dissent is preserved.
+> Five advisors argue, an independent chairman synthesizes, and dissent is preserved.
 
 A single agent — even a careful one — converges on the first plausible answer. Pair-of-eyes review helps but quickly settles on shared blind spots. The Council is the harness's answer to that drift: **structurally forced disagreement** between perspectives that have different incentives, run on models with different training data, before any code gets written.
 
@@ -10,36 +10,41 @@ When it fires, you get five short verdicts in parallel, a synthesized chairman r
 
 ## The five advisors
 
-Each advisor is a persona prompt, not a separate agent type. The personas are defined in `.claude/skills/council/references/advisors.md` and edited per project.
+Each advisor is a persona prompt, not a separate agent type. The personas are defined in
+`.forge/skills/council/references/advisors.md` and edited per project.
 
 | Advisor              | Engine | Optimizes for                                                                             | Will say things like                                                   |
 | -------------------- | ------ | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| **Simplifier**       | Claude | Minimal complexity, fewest moving parts, smallest surface area                            | "Does this need to exist? What if we don't build it?"                  |
-| **Scalability Hawk** | Claude | Performance, reliability, observability, graceful degradation                             | "What breaks first at 10× load? What's the blast radius?"              |
-| **Pragmatist**       | Claude | Clear first steps, unblocked progress, minimal dependencies, realistic scope              | "What's the first concrete action? What's the 'done' line?"            |
-| **Contrarian**       | Codex  | Finding what everyone else missed; breaking the plan before production does               | "What assumption, if wrong, makes the whole thing fail?"               |
-| **Maintainer**       | Codex  | Readability, clear intent, minimal cognitive load, good error messages, obvious data flow | "Will the test names explain the failure? Are names self-documenting?" |
+| **Simplifier**       | Main  | Minimal complexity, fewest moving parts, smallest surface area                            | "Does this need to exist? What if we don't build it?"                  |
+| **Scalability Hawk** | Main  | Performance, reliability, observability, graceful degradation                             | "What breaks first at 10× load? What's the blast radius?"              |
+| **Pragmatist**       | Main  | Clear first steps, unblocked progress, minimal dependencies, realistic scope              | "What's the first concrete action? What's the 'done' line?"            |
+| **Contrarian**       | Other | Finding what everyone else missed; breaking the plan before production does               | "What assumption, if wrong, makes the whole thing fail?"               |
+| **Maintainer**       | Other | Readability, clear intent, minimal cognitive load, good error messages, obvious data flow | "Will the test names explain the failure? Are names self-documenting?" |
 
 The full persona texts (thinking style, biases, prompted questions) live in `advisors.md` — that file is the source of truth and the dispatcher injects it into each advisor at runtime.
 
 ---
 
-## Why three Claude advisors and two Codex advisors
+## Why three main-engine advisors and two other-engine advisors
 
-Diversity isn't aesthetic — it's the whole mechanism. Claude and Codex are independently trained on different data with different fine-tuning histories, so they fail in different directions. Claude tends to be optimistic, agreeable, and verbose; Codex tends to be cautious, terse, and quick to flag what's broken. A council of five Claudes would echo. A council of five Codexes would also echo — just in a different key.
+Diversity isn't aesthetic — it's the whole mechanism. The host in which the developer is working is
+main for that council. With both engines healthy, three advisor seats run on main, two advisor seats
+run on the other engine, and the chairman also runs on the other engine. Forge supports Claude Code
+and Codex today; Grok is a future possibility, not a configured engine or seat.
+In short, three advisors use the current host, while two advisors and the chairman use the other.
 
-The split matches each persona's role:
-
-- **Simplifier, Scalability Hawk, Pragmatist** are constructive — they evaluate the plan on its own terms. Claude does this well.
-- **Contrarian and Maintainer** are adversarial in different ways — the Contrarian looks for fatal flaws, the Maintainer asks whether a future reader can survive the code. Codex's terser, more skeptical default style is a better fit.
-
-When Codex isn't available, the Codex advisors (Contrarian, Maintainer) are **skipped** — only the Claude advisors run — and you become the chairman. The Contrarian _gate_ (the auto-trigger pre-check) is replaced by your manual validation of the "default wins" claim. The workflow degrades gracefully; it just loses the model-diversity guarantee. (See "Without Codex" below for the full degradation map.)
+If the other engine is known unavailable, Forge starts one fresh all-main council. If it fails during
+a mixed attempt, Forge discards the partial topology and reruns all five advisors plus chairman fresh
+on main. The whole council falls back together; a main-engine failure blocks and seats never fall
+back individually.
 
 ---
 
-## The chairman synthesizes — Codex by default, you as fallback
+## The chairman synthesizes independently
 
-After the five (or three) advisors return, a chairman synthesizes the result. Codex runs the chairman by default; if Codex isn't installed, the harness skips synthesis and shows you the raw advisor outputs so **you** become the chairman. Either way, the synthesis pass has to be done by a viewpoint that _didn't write any of the advisor responses_ — if Claude wrote three of the five and then synthesized, Claude would risk the same drift the Council is designed to prevent.
+After the five advisors return and anonymously peer-review one another, a fresh chairman synthesizes
+the result. The other engine chairs a healthy mixed council; a fresh main-engine session chairs the
+all-main fallback.
 
 ### Two output vocabularies — don't conflate them
 
@@ -49,7 +54,7 @@ After the five (or three) advisors return, a chairman synthesizes the result. Co
 - **CONDITIONAL** — approve if the named conditions are addressed
 - **OBJECT** — the plan has a flaw the advisor cannot live with
 
-(See `.claude/skills/council/references/output-schema.md` for the full per-advisor schema.)
+(See `.forge/skills/council/references/output-schema.md` for the full per-advisor schema.)
 
 **The chairman** produces a structured document, not a single token:
 
@@ -99,7 +104,9 @@ There are two entry points.
 /council <question or decision>
 ```
 
-Runs all five advisors when Codex is installed. On machines without Codex, only the three Claude advisors run and you become the chairman (see "Without Codex" below). Use the command when you're facing a real fork-in-the-road and want a structured second opinion before committing. Examples that fit:
+Runs all five advisors plus the chairman using the healthy mixed topology or one visible all-main
+fallback. Use the command when you're facing a real fork-in-the-road and want a structured second
+opinion before committing. Examples that fit:
 
 - "Should we use Approach A or B for the migration?"
 - "Is this auth design sound, or am I missing a class of attack?"
@@ -111,8 +118,9 @@ What doesn't fit: questions with a clear answer, requests for advice on tactics 
 
 The workflows fire the Council automatically, but with a cheaper gate first. The flow:
 
-1. **Approach Comparison** (Phase 3.1b) — Claude fills a fixed-axis comparison table for 2-3 candidate approaches and picks a default.
-2. **Contrarian Gate** (Phase 3.1c) — a single Codex call validates the "default wins" claim. Returns one of:
+1. **Approach Comparison** (Phase 3.1b) — the main host fills a fixed-axis comparison table for 2-3 candidate approaches and picks a default.
+2. **Contrarian Gate** (Phase 3.1c) — a fresh opinion from the other engine (or visible fresh
+   same-engine fallback) validates the "default wins" claim. Returns one of:
    - **VALIDATE** → skip the Council, proceed with default. This is the common case.
    - **OBJECT** → check if there's a falsifying test under 30 minutes; if yes, run the spike instead. If no AND the decision touches a high-impact surface, fire the 3-advisor council.
    - **INSUFFICIENT** → fire the 3-advisor council. Ambiguity = risk.
@@ -123,9 +131,11 @@ The workflows fire the Council automatically, but with a cheaper gate first. The
    - No majority verdict (3-way split with no clear winner)
 4. **Full Council (5 advisors)** — adds Scalability Hawk + Maintainer.
 
-The 3-then-5 escalation keeps cost proportional to risk: low-stakes calls hit only the Contrarian gate (one Codex call), routine architectural calls fire three advisors, and only genuinely ambiguous high-impact decisions burn all five.
+The 3-then-5 escalation keeps cost proportional to risk: low-stakes calls hit only the Contrarian
+gate (one fresh opinion), routine architectural calls fire three advisors, and only genuinely
+ambiguous high-impact decisions use all five.
 
-**High-impact surfaces** that automatically force escalation (canonical list — `.claude/skills/council/references/peer-review-protocol.md` is the single source of truth; if the two ever drift, that file wins):
+**High-impact surfaces** that automatically force escalation (canonical list — `.forge/skills/council/references/peer-review-protocol.md` is the single source of truth; if the two ever drift, that file wins):
 
 - **Schema/database migrations** — DDL changes, new tables, column alterations
 - **Public API contracts** — endpoint additions/removals, request/response shape changes
@@ -150,24 +160,18 @@ The chairman's `### Recommendation` will typically land on one of three outcomes
 
 ---
 
-## Without Codex
+## When the other engine is unavailable
 
-If `codex` isn't installed, the Council degrades — it doesn't break:
-
-| Component          | Replacement                                          |
-| ------------------ | ---------------------------------------------------- |
-| Codex advisors     | Skipped — only Claude advisors run                   |
-| Contrarian gate    | You validate the "default wins" claim manually       |
-| Chairman synthesis | You are the chairman — raw outputs shown, you decide |
-
-You lose the model-diversity guarantee but the structure (parallel perspectives, mandatory dissent capture, explicit verdict) still works. The harness announces "Codex not installed. Running Claude advisors only — you'll be the chairman" so you know what you're getting.
+Forge announces the missing or failed other engine and starts one fresh all-main council, including a
+fresh chairman. The receipt records the fallback topology and reason. A failure on main blocks the
+verdict rather than producing a partial council.
 
 ---
 
 ## See also
 
 - `/council <question>` — see [`docs/reference/commands.md`](../reference/commands.md) for invocation details
-- Persona definitions — `.claude/skills/council/references/advisors.md` (edit per project)
-- Dispatch and escalation rules — `.claude/skills/council/references/peer-review-protocol.md`
-- Output schema — `.claude/skills/council/references/output-schema.md`
+- Persona definitions — `.forge/skills/council/references/advisors.md` (edit per project)
+- Dispatch and escalation rules — `.forge/skills/council/references/peer-review-protocol.md`
+- Output schema — `.forge/skills/council/references/output-schema.md`
 - Why two agents at all — [`docs/explanation/harness-philosophy.md`](harness-philosophy.md)

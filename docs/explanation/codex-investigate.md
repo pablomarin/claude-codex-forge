@@ -1,13 +1,14 @@
-# `/opinion investigate` Profile
+# Opinion `investigate` Profile
 
-> **TL;DR** — `/opinion investigate` asks a fresh Claude Code or Codex reviewer to work inside a
+> **TL;DR** — Claude Code's `/opinion investigate` or Codex's `$opinion investigate` asks a fresh
+> reviewer to work inside a
 > disposable, repo-confined candidate with only explicitly declared capabilities. It can reproduce
 > a bug or query a live system without mutating the developer's real worktree; findings require an
 > independent primary/control reproduction before they become actionable.
 
 ## Why it matters
 
-Ordinary `/opinion` review is hermetic: read-only and without network. That is the right posture for
+Ordinary opinion review is hermetic: read-only and without network. That is the right posture for
 reviewing code, but source alone cannot answer every operational question. A hermetic reviewer cannot:
 
 - run a SQL query to see what the data actually says,
@@ -46,16 +47,18 @@ Giving an autonomous agent live access sounds risky — so the safety is structu
 Investigation can run inside native `/goal` when all required capabilities are already authorized.
 It cannot authorize credentials, a new external mutation, PR creation, or destructive work; those
 boundaries checkpoint and return to the developer.
+Every non-hermetic capability therefore requires explicit authorization before dispatch.
 
 ## How it triggers — and who chooses
 
-**The command is explicit.** Use `/opinion` for hermetic review and `/opinion investigate` when the
-request needs a disposable writable candidate, network, execution, or a declared live-data channel.
-The dispatcher—not a permanent main-engine choice—selects Claude Code or Codex.
+**The command is explicit.** Claude Code uses `/opinion` and `/opinion investigate`; Codex uses
+`$opinion` and `$opinion investigate`. Both `/review` names remain reserved. The dispatcher prefers
+the other engine and visibly falls back to a fresh same-engine child on launch/capability failure;
+there is no permanent main-engine choice.
 
 Investigation is appropriate for project credentials, external systems (DB/cloud/API), live data,
-or non-hermetic execution. A plain `/opinion` never silently escalates to those capabilities. See
-the [`/opinion` profiles](../reference/commands.md#opinion-profiles) for the exact mechanics.
+or non-hermetic execution. A plain opinion request never silently escalates to those capabilities.
+See the [opinion profiles](../reference/commands.md#opinion-profiles) for the exact mechanics.
 
 ## Accepted residual
 

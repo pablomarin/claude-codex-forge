@@ -22,7 +22,10 @@ The `post-tool-format.sh` hook that ships with this harness walks up from any ed
 
 ### Worktrees for parallel work — via `/new-feature` and `/fix-bug`
 
-Each active feature gets its own worktree under `.worktrees/<name>/` with its own filesystem state. Running three Claude sessions on three features in parallel works without cross-contamination. Each worktree reuses the same `.venv/` / `node_modules/` via symlinks from the main worktree, so you don't pay the dependency-install cost every time.
+Each active feature gets its own worktree under `.worktrees/<name>/` with its own filesystem state.
+Claude Code and Codex sessions can work in separate worktrees without cross-contamination. Forge
+warns against simultaneous edits in one worktree and does not add locks. Each worktree reuses the
+same `.venv/` / `node_modules/` via symlinks from the main worktree.
 
 ## What the harness does NOT switch for you
 
@@ -67,7 +70,7 @@ Intentionally narrow for v1:
 
 ### `setup.sh` says my Python version is missing but I just installed it
 
-Some version managers require a shell restart before their shims are on `PATH`. Close and reopen the terminal, then rerun `setup.sh --upgrade`. If you use `uv`, run `uv python install <version>` — it's immediate.
+Some version managers require a shell restart before their shims are on `PATH`. Close and reopen the terminal, then rerun `setup.sh -F`. If you use `uv`, run `uv python install <version>` — it's immediate.
 
 ### I don't use version managers and setup.sh warns anyway
 
@@ -83,6 +86,6 @@ Not via a flag — the warning is useful most of the time and silent when you ha
 
 ## Related guides
 
-- [Parallel Development](parallel-sessions.md) — worktree isolation for multiple Claude sessions on the same project
+- [Parallel Development](parallel-sessions.md) — worktree isolation for multiple host sessions on one project
 - [Getting Started](../getting-started.md) — overall install steps with prerequisites
-- [Upgrading](upgrading.md) — `setup.sh --upgrade` mechanics
+- [Upgrading](upgrading.md) — authoritative `setup.sh -F` refresh mechanics

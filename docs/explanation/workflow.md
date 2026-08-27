@@ -27,7 +27,7 @@ How a feature goes from idea to merged PR.
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. DESIGN + REVIEW LOOP (iterates until no P0/P1/P2)        │
+│ 4. DESIGN + BOUNDED REVIEW                                 │
 │                                                             │
 │    ┌───────────────────────────────────────────┐            │
 │    │ a. /superpowers:brainstorming             │            │
@@ -42,7 +42,7 @@ How a feature goes from idea to merged PR.
 │    └──────────────────┬────────────────────────┘            │
 │                       ▼                                     │
 │    ┌───────────────────────────────────────────┐            │
-│    │ c. Main host + /opinion review the plan   │◄──┐        │
+│    │ c. Main host + fresh opinion review plan  │◄──┐        │
 │    │    → Two independent validations          │   │        │
 │    │    → Other engine, else fresh same-engine │   │        │
 │    └──────────────────┬────────────────────────┘   │        │
@@ -74,10 +74,10 @@ How a feature goes from idea to merged PR.
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 6. CODE REVIEW LOOP (repeats until no P0/P1/P2 issues)      │
+│ 6. PRELIMINARY REVIEW (fixes still allowed)                │
 │                                                             │
 │    ┌──────────────────────┐ ┌────────────────────────────┐  │
-│    │ /opinion code-spec   │ │ /opinion code-quality       │ │
+│    │ Fresh code-spec lens │ │ Fresh code-quality lens     │ │
 │    │ → Fresh requirements │ │ → Fresh quality lens        │ │
 │    │   conformance lens   │ │   on the same candidate     │ │
 │    └──────────┬───────────┘ └─────────────┬───────────────┘ │
@@ -89,19 +89,20 @@ How a feature goes from idea to merged PR.
 │                          No (P3s acceptable)     ┌────┘     │
 │                          ▼                       │          │
 │               Reviews passed ✓       ◄───────────┘          │
-│                                      (run both again)       │
+│                         (closure: named findings only)      │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 7. CODE SIMPLIFY                                            │
-│    /simplify                                                │
+│ 7. SIMPLIFY + FREEZE                                       │
+│    Forge-owned simplification phase                        │
 │    → Cleans up architecture, improves readability           │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 8. VERIFY                                                   │
+│ 8. FINAL REVIEW + VERIFY                                    │
+│    → Fresh opinion receipts over the frozen candidate      │
 │    "Use the verify-app agent"                               │
 │    → Unit tests + migrations + lint + types                 │
 └─────────────────────────────────────────────────────────────┘
@@ -124,7 +125,7 @@ How a feature goes from idea to merged PR.
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ 11. COMMIT & CREATE PR                                      │
-│    → Update .claude/local/state.md (Done/Now/Next)          │
+│    → Update .forge/local/state.md (Done/Now/Next)           │
 │    → Update docs/CHANGELOG.md (if 3+ files changed)         │
 │    → git add, commit, push to origin                        │
 │    → gh pr create                                           │
@@ -158,7 +159,11 @@ How a feature goes from idea to merged PR.
 
 ## `/forge-goal` Autonomous Loop (Layer 2)
 
-When the workflow's gate checkpoint passes (PRD-complete for `/new-feature`; Plan-Approved for `/fix-bug`), the workflow command offers an autonomous-loop kickoff. The user copies the printed `/goal <condition>` command into their next message; the agent then drives plan → plan-review → implement → code-review-loop → E2E → PR-ready without further phase-by-phase prompting.
+When the workflow's gate checkpoint passes (PRD-complete for `/new-feature`; Plan-Approved for
+`/fix-bug`), Forge composes the current host's native `/goal` over the shared objective, nonce,
+durable budget, checklist, evidence, authorization, and exact next step in `.forge/local/state.md`.
+Claude Code and Codex sessions are not transferable: switching hosts starts a fresh native session
+from that checkpoint.
 
 ### Checkpoint placement asymmetry
 
@@ -171,17 +176,18 @@ When the workflow's gate checkpoint passes (PRD-complete for `/new-feature`; Pla
 
 ### What the loop does
 
-- Reads `.claude/local/state.md` each turn (the workflow checklist + `/goal session` nonce)
-- Surfaces evidence each turn via `hooks/build-evidence.sh` (Layer 1) — a JSON blob between `FORGE_GOAL_EVIDENCE_BEGIN/END` markers on STDERR
-- The native Anthropic `/goal` verifier reads the transcript on each Stop event and decides whether the completion condition holds
-- Stops only at the PR-creation gate (AskUserQuestion authorizes; the `check-workflow-gates` hook enforces nonce + HEAD match before `gh pr create` runs)
+- Reads `.forge/local/state.md` each turn (the workflow checklist + objective nonce)
+- Surfaces candidate-bound evidence via `.forge/hooks/build-evidence.sh`
+- Uses the active host's qualified native `/goal`; a native exit alone is never completion proof
+- Stops for user input, PR creation, merge/deploy/publish, destructive or security-sensitive work,
+  and every new external mutation
 - Invokes `/council` instead of pausing for the user on any other ambiguous decision
 
 ### When NOT to use it
 
 - Trivial changes (`/quick-fix` flow) — autonomous loop is overkill
 - When you want to review each phase by hand
-- When `/goal` is unavailable on your Claude Code version (requires CC 2.1.139+)
+- When the active host cannot prove all native-goal Must behaviors (`RUNTIME_READY=BLOCKED`)
 
 ### Disabling it
 
@@ -193,12 +199,22 @@ Based on Boris Cherny's key insight:
 
 > "Probably the most important thing to get great results out of Claude Code — **give Claude a way to verify its work**. If Claude has that feedback loop, it will **2-3x the quality** of the final result."
 
-The harness operationalizes that insight across every phase:
+The harness operationalizes that insight across every phase for whichever host is main:
 
-- **Research** gives Claude current docs (not stale training data)
-- **Plan review loop** gives Claude a second set of eyes _before_ writing code
-- **TDD** gives Claude executable tests as its verification loop
-- **Code review loop** gives Claude parallel reviewers _after_ writing code
-- **Simplify + verify + E2E** give Claude three more verification passes before commit
-- **PR reviewers + `/review-pr-comments`** give Claude automated reviewers _after_ the PR is open
-- **`docs/solutions/` + auto-memory** give Claude learning feedback so the same bug is never debugged twice
+- **Research** gives the main host current docs (not stale training data)
+- **Plan review** gives it a fresh second opinion _before_ writing code
+- **TDD** gives it executable tests as its verification loop
+- **Code review** gives it fresh spec and quality lenses on one frozen candidate
+- **Simplify + verify + E2E** add candidate-bound evidence before commit
+- **PR reviewers + `/review-pr-comments`** add review _after_ the PR is open
+- **`docs/solutions/` + Forge memory** preserve verified learning
+
+Review is deliberately bounded: one broad review, one repair pass, and one closure review limited to
+named findings and direct regressions. P3, cosmetic, and speculative concerns do not keep the loop
+open. A reachable P0/P1 security, correctness, or data-integrity defect still blocks; one surgical
+repair and verification is allowed before Forge surfaces any remaining blocker to the developer.
+
+The active host invokes the opinion workflow with its native name: Claude Code uses `/opinion` and
+Codex uses `$opinion`. Both hosts reserve `/review` for native behavior. Host switches preserve
+`.forge/local/state.md`, but simultaneous editing can overwrite work; Forge warns and does not add
+locks or leases.

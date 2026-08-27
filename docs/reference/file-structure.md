@@ -1,109 +1,83 @@
 # File Structure
 
-After setup, your project should have:
+After a Forge v6 full refresh, the shared harness is canonical under `.forge/`; host directories
+contain generated adapters and managed settings, not duplicate policy.
+Canonical project instructions live at `.forge/instructions.md`.
 
 ```
 your-project/
-├── CLAUDE.md                          # Project description (slim, user-owned)
-├── .mcp.json                          # MCP servers (Playwright + Context7)
+├── CLAUDE.md                          # User text + bounded Claude Code adapter
+├── AGENTS.md                          # User text + bounded Codex adapter
+├── .mcp.json                          # Shared MCP server definitions
 ├── docs/
 │   ├── CHANGELOG.md                   # Historical record
-│   ├── adr/                           # Architecture Decision Records (per-file, append-only)
-│   │   ├── README.md                  # Index
-│   │   ├── template.md                # Blank ADR starter
-│   │   └── NNNN-*.md                  # One file per decision
+│   ├── adr/                           # Architecture Decision Records
 │   ├── prds/                          # Product requirements
-│   │   ├── {feature}.md               # Structured PRD
-│   │   └── {feature}-discussion.md    # Refinement conversation log
-│   ├── plans/                         # Design docs from Superpowers
-│   │   └── YYYY-MM-DD-{feature}.md
-│   └── solutions/                     # Compounded learnings (searchable)
-│       ├── build-errors/
-│       ├── test-failures/
-│       ├── runtime-errors/
-│       ├── performance-issues/
-│       ├── database-issues/
-│       ├── security-issues/
-│       ├── ui-bugs/
-│       ├── integration-issues/
-│       ├── logic-errors/
-│       └── patterns/                  # Consolidated when 3+ similar
-├── .claude/
-│   ├── settings.json                  # Permissions + Hooks (NOT MCP servers)
-│   ├── local/                         # Per-developer, gitignored
-│   │   └── state.md                   # Workflow + Done/Now/Next (NOT auto-loaded)
+│   ├── plans/                         # Design plans
+│   └── solutions/                     # Compounded learnings
+├── .forge/                            # Canonical, engine-neutral harness
+│   ├── version                         # Layout version
+│   ├── instructions.md                 # Canonical project policy
+│   ├── state.template.md               # Canonical state template
+│   ├── managed-files.tsv               # Ownership/materialization manifest
+│   ├── workflows/                      # Shared workflow definitions
+│   │   ├── opinion.md                  # Claude /opinion; Codex $opinion
+│   │   ├── goal.md                     # Native /goal composition contract
+│   │   ├── new-feature.md
+│   │   ├── fix-bug.md
+│   │   ├── quick-fix.md
+│   │   ├── finish-branch.md
+│   │   └── review-pr-comments.md
+│   ├── rules/                          # Shared standards
+│   ├── agents/                         # Canonical agent role definitions
+│   ├── skills/                         # Canonical skills and references
 │   ├── hooks/
 │   │   ├── lib/
-│   │   │   ├── default-branch.sh      # Shared helper: detect repo's default branch (.ps1 on Windows)
-│   │   │   ├── codex-pty.sh           # PTY shim wrapping `codex exec` (workaround for openai/codex#19945; .ps1 on Windows)
-│   │   │   └── codex-pty-helper.py    # Python pty.fork + waitpid helper invoked by codex-pty.sh
-│   │   ├── session-start.sh           # SessionStart: branch context + drift warning (.ps1 on Windows)
-│   │   ├── check-state-updated.sh     # Stop: enforce state updates (.ps1 on Windows)
-│   │   ├── check-bash-safety.sh       # PreToolUse: audit log + block dangerous patterns (.ps1 on Windows)
-│   │   ├── post-tool-format.sh        # PostToolUse: auto-format on save (.ps1 on Windows)
-│   │   ├── pre-compact-memory.sh      # PreCompact: save learnings (.ps1 on Windows)
-│   │   └── check-config-change.sh     # ConfigChange: log config modifications (.ps1 on Windows)
-│   ├── agents/                        # Custom subagents
-│   │   ├── verify-app.md              # Unit tests + lint + types + migrations
-│   │   ├── verify-e2e.md              # User-journey E2E (API / UI / CLI) + regression suite
-│   │   ├── research-first.md          # Pre-design library/API research (Context7 + official docs)
-│   │   └── council-advisor.md         # Engineering Council advisor (persona via prompt)
-│   ├── commands/                      # Custom slash commands (ENFORCED)
-│   │   ├── new-feature.md             # /new-feature - Full feature workflow
-│   │   ├── fix-bug.md                 # /fix-bug - Bug fix workflow
-│   │   ├── quick-fix.md               # /quick-fix - Trivial changes only
-│   │   ├── finish-branch.md           # /finish-branch - Merge PR + cleanup workflow
-│   │   ├── opinion.md                 # /opinion - Host-neutral fresh review/investigation
-│   │   ├── review-pr-comments.md      # /review-pr-comments - Process PR feedback
-│   │   └── prd/
-│   │       ├── discuss.md             # /prd:discuss command
-│   │       └── create.md              # /prd:create command
-│   ├── rules/                         # Auto-loaded standards (safe to overwrite)
-│   │   ├── principles.md              # Top-level principles + design philosophy
-│   │   ├── workflow.md                # Decision matrix for choosing commands
-│   │   ├── worktree-policy.md         # Git worktree isolation rules
-│   │   ├── critical-rules.md          # Non-negotiable rules (branch safety, TDD)
-│   │   ├── memory.md                  # How to use persistent memory
-│   │   ├── security.md                # Security standards
-│   │   ├── testing.md                 # Testing standards
-│   │   ├── api-design.md              # API design standards
-│   │   ├── python-style.md            # Python coding style
-│   │   ├── typescript-style.md        # TypeScript coding style
-│   │   ├── frontend-design.md         # Frontend design baseline (TS/fullstack)
-│   │   ├── database.md                # Database conventions
-│   │   └── skill-audit.md             # Third-party skill security checklist
-│   └── skills/                        # Skills (release for all, ui-design for TS/fullstack)
-│       ├── release/                   # /release — environment promotion PRs
-│       │   └── SKILL.md               # Create release PRs (dev→test, test→prod)
-│       ├── council/                   # /council — multi-perspective decisions
-│       │   ├── SKILL.md               # Orchestrator: dispatch, gate, synthesis
-│       │   └── references/            # 3 reference guides (loaded on demand)
-│       │       ├── advisors.md              # 5 advisor profiles with engine assignments
-│       │       ├── output-schema.md         # Structured output for advisors + chairman
-│       │       └── peer-review-protocol.md  # Dispatch, escalation, minority reports
-│       └── ui-design/                 # /ui-design — full design system
-│           ├── SKILL.md               # Core: design thinking + creative direction
-│           └── references/            # Loaded on demand
-│               ├── animation-techniques.md  # SVG waves, particles, Framer Motion, GSAP
-│               ├── typography-and-color.md  # Fluid clamp, OKLCH, dark mode
-│               ├── polish-checklist.md      # Post-build quality audit
-│               └── media-assets.md          # Stock photos, AI image gen, video
-└── ...
+│   │   │   ├── agent-dispatch.sh       # Fresh reviewer selection/fallback (.ps1)
+│   │   │   ├── council-dispatch.sh     # Dynamic council topology (.ps1)
+│   │   │   ├── codex-worktree-dispatch.sh # Trusted linked-worktree router (.ps1)
+│   │   │   ├── codex-pty.sh            # PTY shim wrapping codex exec (.ps1)
+│   │   │   ├── codex-pty-helper.py     # Unix pty.fork helper
+│   │   │   ├── host-context.sh         # Current-host adapter (.ps1)
+│   │   │   └── state-path.sh           # Canonical state resolver (.ps1)
+│   │   ├── session-start.sh              # Branch/drift context (.ps1)
+│   │   ├── check-workflow-gates.sh       # Candidate evidence gates (.ps1)
+│   │   ├── check-external-mutation-auth.sh # Human mutation boundary (.ps1)
+│   │   └── pre-compact-memory.sh         # Local memory reminder (.ps1)
+│   ├── bin/                            # Runtime checks and trusted helpers
+│   ├── local/                          # Per-developer/worktree; gitignored
+│   │   ├── state.md                    # Workflow, goal nonce, exact next step
+│   │   ├── memory/                     # Volatile memory drafts
+│   │   ├── reviews/                    # Review prompts, outputs, receipts
+│   │   └── evidence/                   # Candidate-bound verification evidence
+│   └── memory/                         # Project-owned durable memory; Git-tracked
+├── .claude/                           # Generated Claude Code adapters/settings
+│   ├── settings.json
+│   ├── commands/                       # Slash-command adapters
+│   ├── agents/                         # Claude agent adapters
+│   └── skills/                         # Claude skill adapters
+├── .agents/                           # Generated Codex skill adapters
+│   └── skills/
+└── .codex/                            # Managed Codex config, hooks, agent adapters
+    ├── config.toml
+    ├── hooks.json
+    └── agents/
 ```
 
-## Global files (created by `setup.sh --global`)
+The Codex hook registration may originate in the primary checkout, but
+`codex-worktree-dispatch.{sh,ps1}` validates the event's absolute `cwd`, Git common directory, and
+non-symlink canonical hook before routing execution to that linked worktree's `.forge/hooks/`.
+
+## Global Files
 
 ```
-~/.claude/
-├── CLAUDE.md                          # Global instructions + memory management
-├── settings.json                      # Global hooks (PreCompact, Stop)
-└── hooks/
-    ├── pre-compact-memory.sh          # PreCompact script (macOS/Linux)
-    └── pre-compact-memory.ps1         # PreCompact script (Windows)
+~/.forge/
+├── instructions.md                    # Canonical global engine-neutral policy
+└── bin/                               # Trusted goal authorization/capture helpers
 
-~/.claude/projects/<project>/memory/   # Auto memory (Claude writes this)
-├── MEMORY.md                          # Index (first 200 lines loaded every session)
-├── debugging.md                       # Debugging patterns (on-demand)
-├── patterns.md                        # Code patterns (on-demand)
-└── ...                                # Other topic files Claude creates
+~/.claude/CLAUDE.md                  # Bounded Claude Code adapter
+~/.codex/AGENTS.md                   # Bounded Codex adapter
 ```
+
+Setup preserves personal text outside Forge-owned marker blocks. `.forge/local/` and
+`.forge/memory/` are protected ownership boundaries and are never wholesale overwritten.

@@ -31,17 +31,17 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 ├─────────────────────────────────────────────────────────────┤
 │ cd ~/claude-codex-forge && git pull                         │
 │ cd /your/project                                            │
-│ ~/claude-codex-forge/setup.sh --upgrade                     │
+│ ~/claude-codex-forge/setup.sh -F                            │
 │                                                             │
-│ → Updates hooks, commands, rules (overwrites)               │
-│ → Merges settings.json + .mcp.json (adds new, keeps yours)  │
-│ → Never touches CLAUDE.md (your project description)        │
+│ → Reconciles canonical .forge + generated host adapters    │
+│ → Preserves user text outside bounded Forge marker blocks  │
 ├─────────────────────────────────────────────────────────────┤
 │ DAILY WORKFLOW (Hooks enforce this!)                        │
 ├─────────────────────────────────────────────────────────────┤
 │ START:                                                      │
 │   claude                               ← Start Claude Code  │
-│   Hooks read .claude/local/state.md    ← gitignored state   │
+│   codex                                ← Or start Codex     │
+│   Hooks read .forge/local/state.md     ← shared checkpoint │
 │                                                             │
 │ THEN RUN ONE OF THESE COMMANDS:                             │
 │   /new-feature <name>  ← Full workflow (Research→PRD→Plan)  │
@@ -50,22 +50,24 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 │   /finish-branch       ← Merge PR + cleanup + restart       │
 │                                                             │
 │ DECISION ANALYSIS:                                          │
-│   /council <question>  ← Multi-perspective (5 advisors)     │
+│   /council <question>  ← 3 main + 2 other; other chairs    │
 │   Claude: /opinion     ← Fresh opinion (other engine first) │
-│   Codex:  $opinion     ← Same Forge opinion workflow       │
-│   Add: investigate     ← Bounded writable investigation    │
+│   Codex:  $opinion     ← Same canonical opinion workflow   │
+│   Claude: /opinion investigate; Codex: $opinion investigate    │
+│   /review is reserved by both hosts                            │
 │                                                             │
 │ QUALITY GATES (in order):                                   │
-│   /opinion | $opinion  ← Code-spec + code-quality receipts  │
 │   Simplification       ← Forge-owned cleanup phase          │
+│   Claude /opinion | Codex $opinion ← Frozen review receipts │
 │   verify-app           ← Run tests, lint, types (agent)     │
 │   verify-e2e           ← User-journey E2E (agent)           │
 │   /review-pr-comments  ← Address PR comments (post)         │
+│   Stop: 1 broad review → 1 repair → 1 closure              │
+│   P3/speculative stops; reachable P0/P1 still blocks           │
 │                                                             │
 │ MEMORY COMMANDS:                                            │
-│   /memory              ← View/edit memory files             │
-│   "Remember X"         ← Save to auto memory                │
-│   "Forget X"           ← Remove from auto memory            │
+│   .forge/local/memory/ ← Volatile per-worktree drafts       │
+│   .forge/memory/       ← Durable reviewed project memory    │
 ├─────────────────────────────────────────────────────────────┤
 │ SHORTCUTS                                                   │
 ├─────────────────────────────────────────────────────────────┤
@@ -76,3 +78,6 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 │ Escape     → Interrupt Claude                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+The default bound is one broad review, one repair and one closure; reopen only for a reachable
+P0/P1 security, correctness, or data-integrity risk.
