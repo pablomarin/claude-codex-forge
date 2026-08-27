@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -u
+log="${FAKE_CODEX_LOG:-}"
+[ -z "$log" ] || printf '%s\n' "$*" >> "$log"
+out=""
+joined="$*"
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output-last-message" ] && [ "$#" -gt 1 ]; then out="$2"; shift 2; else shift; fi
+done
+[ -z "${FORGE_DISPATCH_SESSION_ID:-}" ] || case "$joined" in
+  *'exec resume '*) ;;
+  *'--json'*) printf '{"type":"thread.started","thread_id":"%s"}\n' "$FORGE_DISPATCH_SESSION_ID" ;;
+esac
+emit() { if [ -n "$out" ]; then printf '%s\n' "$@" > "$out"; else printf '%s\n' "$@"; fi; }
+clean_envelope() {
+  emit 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' \
+    "forge_canary_hash=${FORGE_DISPATCH_CANARY_HASH:-MISSING}" \
+    "forge_config_hash=${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" \
+    "forge_qualification_revision=${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}"
+}
+qualified_envelope() {
+  emit "$@" "forge_canary_hash=${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "forge_config_hash=${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "forge_qualification_revision=${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}"
+}
+case "${FAKE_CODEX_BEHAVIOR:-clean}" in
+  clean) clean_envelope ;;
+  findings) qualified_envelope 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|reachable defect' ;;
+  blocked-artifact) qualified_envelope 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=artifact' ;;
+  blocked-engine) qualified_envelope 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=engine' ;;
+  contradictory) qualified_envelope 'schema_version=1' 'verdict=CLEAN' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|contradiction' ;;
+  malformed) emit 'This is prose, not an envelope.' ;;
+  empty) [ -z "$out" ] || : > "$out" ;;
+  exit) exit 23 ;;
+  timeout) sleep 30 ;;
+  delayed-clean) sleep 1; clean_envelope ;;
+  investigate)
+    mkdir -p "$FORGE_CANDIDATE_ROOT/tests/reproductions"
+    printf 'bounded reproduction\n' > "$FORGE_CANDIDATE_ROOT/tests/reproductions/claimed.txt"
+    qualified_envelope 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'replay_path=tests/reproductions/claimed.txt' ;;
+  repro)
+    [ -z "${FORGE_REPRO_RUNNER:-}" ] || "$FORGE_REPRO_RUNNER"
+    qualified_envelope 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'hypothesis_hash=hypothesis-literal' 'primary_check_hash=primary-literal' 'control_hash=control-literal' 'primary_status=EXPECTED' 'control_status=EXPECTED' 'repro_status=REPRODUCED' ;;
+  repro-no-control)
+    qualified_envelope 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'hypothesis_hash=hypothesis-literal' 'primary_check_hash=primary-literal' 'control_hash=MISSING' 'primary_status=EXPECTED' 'control_status=MISSING' 'repro_status=REPRODUCED' ;;
+  repro-boundary)
+    case "$joined" in *'--sandbox workspace-write'*) ;; *) exit 69 ;; esac
+    [ -n "${FORGE_REPRO_RUNNER:-}" ] && [ -x "$FORGE_REPRO_RUNNER" ] || exit 70
+    FORGE_REPRO_NO_NETWORK=1 "$FORGE_REPRO_RUNNER"
+    clean_envelope ;;
+  require-auth)
+    [ -s "${CODEX_HOME:-}/auth.json" ] || exit 68
+    clean_envelope ;;
+  mutate-malformed)
+    : > "${FORGE_CANDIDATE_ROOT:?}/fallback-dirty"
+    emit 'prose only' ;;
+  *) exit 64 ;;
+esac
+[ -z "${FAKE_MUTATE_REAL:-}" ] || printf 'raced\n' >> "$FAKE_MUTATE_REAL"

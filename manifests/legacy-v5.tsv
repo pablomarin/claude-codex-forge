@@ -1,4 +1,5 @@
 # Forge 5.50-5.61 ownership inventory. Tab-separated; destinations are relative to the declared scope.
+# The proven v5 /codex bytes migrate to v6's host-neutral review workflow; they are never copied as policy.
 # kind	source	destination	scope	platform	host	ownership	selector	proof
 legacy	CLAUDE.template.md	CLAUDE.md	project	all	claude	mixed-regions	regions:project-root	region-hash
 legacy	GLOBAL-CLAUDE.template.md	.claude/CLAUDE.md	global	all	claude	mixed-regions	regions:global-root	region-hash

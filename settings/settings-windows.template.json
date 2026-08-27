@@ -44,7 +44,11 @@
       "Bash(*.forge/goal-captures*:*)",
       "Bash(*.forge/goal-authorizations*:*)",
       "Bash(*forge-goal-authorize*:*)",
-      "Bash(*forge-goal-capture*:*)"
+      "Bash(*forge-goal-capture*:*)",
+      "Read(~/.forge/host-contexts/**)",
+      "Write(~/.forge/host-contexts/**)",
+      "Edit(~/.forge/host-contexts/**)",
+      "Bash(*.forge/host-contexts*:*)"
     ],
     "ask": [
       "Bash(gh pr create:*)",
@@ -61,7 +65,7 @@
     "allowUnsandboxedCommands": false,
     "filesystem": {
       "denyRead": ["~/.forge/goal-captures"],
-      "denyWrite": ["~/.forge/bin", "~/.forge/goal-captures", "~/.forge/goal-authorizations"]
+      "denyWrite": ["~/.forge/bin", "~/.forge/goal-captures", "~/.forge/goal-authorizations", "~/.forge/host-contexts"]
     }
   },
   "hooks": {
@@ -69,6 +73,11 @@
       {
         "matcher": "startup|resume|clear|compact",
         "hooks": [
+          {
+            "type": "command",
+            "forgeManagedId": "host-context",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/lib/host-context.ps1\" -Mode hook -Host claude"
+          },
           {
             "type": "command",
             "forgeManagedId": "session-start",
@@ -153,6 +162,11 @@
             "type": "command",
             "forgeManagedId": "workflow-gates",
             "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/check-workflow-gates.ps1\""
+          },
+          {
+            "type": "command",
+            "forgeManagedId": "external-mutation-auth",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/check-external-mutation-auth.ps1\""
           }
         ]
       }

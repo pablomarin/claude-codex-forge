@@ -2831,4 +2831,24 @@ assert_equals "$(head -1 "$GB/.forge/local/goal-counters/$GB_NONCE_6/budget-exha
 # ===========================================================================
 # Report
 # ===========================================================================
+start_test "Task 5 native host binding and external-mutation hooks are registered"
+for config in "$REPO_ROOT/settings/settings.template.json" "$REPO_ROOT/settings/settings-windows.template.json" "$REPO_ROOT/settings/codex-hooks.template.json"; do
+    assert_contains "$config" '"forgeManagedId": "host-context"' \
+        "$(basename "$config") registers native host context"
+    assert_contains "$config" '"forgeManagedId": "external-mutation-auth"' \
+        "$(basename "$config") registers external mutation defense"
+done
+assert_contains "$REPO_ROOT/settings/settings.template.json" 'host-context.sh\" hook --host claude' \
+    "Claude Unix SessionStart binds the Claude host"
+assert_contains "$REPO_ROOT/settings/settings-windows.template.json" 'host-context.ps1\" -Mode hook -Host claude' \
+    "Claude Windows SessionStart binds the Claude host"
+assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" '[".forge/hooks/lib/host-context.sh", "hook", "--host", "codex"]' \
+    "Codex SessionStart binds the Codex host"
+for config in "$REPO_ROOT/settings/settings.template.json" "$REPO_ROOT/settings/settings-windows.template.json"; do
+    assert_contains "$config" 'Read(~/.forge/host-contexts/**)' \
+        "$(basename "$config") prevents agents from reading protected host receipts"
+    assert_contains "$config" 'Write(~/.forge/host-contexts/**)' \
+        "$(basename "$config") prevents agents from writing protected host receipts"
+done
+
 report "test-hooks.sh"

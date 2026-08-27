@@ -20,6 +20,8 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-fixtures.sh"
     "$REPO_ROOT/tests/template/test-dual-layout.sh"
     "$REPO_ROOT/tests/template/test-platform-parity.sh"
+    "$REPO_ROOT/tests/template/test-agent-dispatch.sh"
+    "$REPO_ROOT/tests/template/test-authorized-action.sh"
     "$REPO_ROOT/tests/template/test-build-evidence.sh"
     "$REPO_ROOT/tests/template/test-contracts.sh"
     "$REPO_ROOT/tests/template/test-state-roundtrip.sh"

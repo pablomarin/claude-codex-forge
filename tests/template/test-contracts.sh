@@ -1998,7 +1998,7 @@ done
 # The two copies live between <!-- DEV-DEMO-BEGIN --> / <!-- DEV-DEMO-END -->
 # sentinels and MUST be byte-identical (same pattern as the DRIFT-PREFLIGHT
 # blocks). The block must carry its load-bearing stems, and the Gate-2
-# diagram-edge honesty rule must appear in commands/codex.md + rules/workflow.md.
+# diagram-edge honesty rule must appear in host-neutral review + rules/workflow.md.
 start_test "Developer Demo block parity (new-feature ↔ fix-bug) + Gate-2 honesty rule"
 
 extract_demo_block() {
@@ -2025,14 +2025,14 @@ done
 # Gate-2 diagram-honesty rule must be present in both review surfaces, with its
 # load-bearing parts (not just the phrase): the rule names "diagram edge", binds
 # to "file:line" evidence, and is a "P1" finding.
-for surface in commands/codex.md rules/workflow.md; do
+for surface in commands/review.md rules/workflow.md; do
     for token in "diagram edge" "file:line" "P1"; do
         grep -qiF -- "$token" "$REPO_ROOT/$surface" \
             || { fail "$surface missing Gate-2 honesty-rule token: $token"; ok=0; }
     done
 done
 
-[ "$ok" = "1" ] && pass "DEV-DEMO block carries required stems + Gate-2 honesty rule present in codex.md & workflow.md"
+[ "$ok" = "1" ] && pass "DEV-DEMO block carries required stems + Gate-2 honesty rule present in review.md & workflow.md"
 
 # ---------------------------------------------------------------------------
 # Contract: plan-stage "spec-loss is P1" severity rule parity (v5.50)
@@ -2060,217 +2060,16 @@ grep -qF -- "no P0/P1/P2 from all available reviewers on the same pass" "$REPO_R
 [ "$ok" = "1" ] && pass "plan-stage spec-loss=P1 rule present in all 3 surfaces; strict exit preserved"
 
 # ---------------------------------------------------------------------------
-# Contract: /codex hermetic modes capture the verdict via --output-last-message
+# Contract: Task 5 host-neutral review replaces direct /codex launch policy.
 # ---------------------------------------------------------------------------
-# `codex exec [review]` dumps a multi-MB transcript (banner + full diff +
-# reasoning) to stdout; the clean verdict is the LAST message. Without
-# `--output-last-message`, Claude has to hand-extract the verdict from megabytes
-# (the fragile pattern that caused a field misreport — see the council v5.27
-# two-file fix in skills/council/references/peer-review-protocol.md). Investigate
-# mode (D) already captures the OLM file; this asserts the three hermetic modes
-# (A Code Review / B Design Review / C General) do too.
-start_test "/codex hermetic modes (A/B/C) capture the verdict via --output-last-message"
-
+start_test "host-neutral review command and transitional codex shim"
+REVIEW_MD="$REPO_ROOT/commands/review.md"
 CODEX_MD="$REPO_ROOT/commands/codex.md"
-# Print the lines of a `## ` section, from its heading to the next `## ` heading.
-# index() is a LITERAL match — avoids regex trouble with the ")" in "## A) ...".
-codex_section() { awk -v s="$1" 'index($0,s){f=1;next} f&&/^## /{f=0} f' "$CODEX_MD"; }
-
-ok=1
-for mode in "## A) Code Review Mode" "## B) Design Review Mode" "## C) General Mode"; do
-    sec=$(codex_section "$mode")
-    # The clean verdict goes to an OLM file. Match flag+path adjacency (only the
-    # COMMAND has "--output-last-message /tmp/codex_response.txt"; the Step-3 prose
-    # says "the --output-last-message file (`/tmp/codex_response.txt`)" — flag and
-    # path non-adjacent) so a regression dropping the flag from the command is caught.
-    echo "$sec" | grep -qF -- "--output-last-message /tmp/codex_response.txt" \
-        || { fail "codex.md '$mode' command lacks --output-last-message /tmp/codex_response.txt (no clean verdict file)"; ok=0; }
-    # ...AND the verbose stdout is redirected to a forensic log so the multi-MB
-    # transcript never enters Claude's context (the half that actually achieves
-    # the goal — adding only --output-last-message still streams stdout to Claude).
-    # Match the EXACT redirect (only present in the command, not the Step-3 prose
-    # that merely names the forensic file) — so the test catches a regression that
-    # drops the redirect from the command while keeping the explanatory prose.
-    echo "$sec" | grep -qF -- "> /tmp/codex_response_full.txt 2>&1" \
-        || { fail "codex.md '$mode' command lacks the '> /tmp/codex_response_full.txt 2>&1' forensic redirect (stdout still dumped to Claude)"; ok=0; }
+assert_contains "$CODEX_MD" ".forge/workflows/review.md" "codex shim delegates to canonical review workflow"
+assert_not_contains "$CODEX_MD" "codex-pty.sh exec" "codex shim carries no direct engine launch policy"
+for stem in "--engine auto|claude|codex" "code-spec" "code-quality" "investigation-repro" "human-executed"; do
+    assert_contains "$REVIEW_MD" "$stem" "review workflow carries load-bearing dispatch stem: $stem"
 done
-# The stale-OLM clear must use a hook-safe truncate (`: > /tmp/...`), NOT
-# `rm -f /tmp/...` — check-bash-safety.sh blocks `rm -[rf]* /<path>` as
-# root-targeting, which would block the /codex block at runtime.
-if grep -qE 'rm[[:space:]]+-[rf]*[[:space:]]+/tmp/codex_response' "$CODEX_MD"; then
-    fail "codex.md uses 'rm -f /tmp/codex_response*' — check-bash-safety blocks it; use ': > /tmp/...' truncate instead"
-else
-    pass "codex.md clears the stale OLM with a hook-safe truncate (no blocked 'rm -f /tmp/...')"
-fi
-# ---------------------------------------------------------------------------
-# Contract: /codex reviewer calibration + finding triage (v5.59)
-#
-# Codex reliably finds real bugs but over-flagged low-ROI edge cases and proposed
-# machinery-heavy remedies, grinding the revision loops (field hit: a plan-review
-# loop where Codex demanded per-driver-average machinery that a one-line prompt
-# reservation closed). TWO levers counter it and both must ship: the producer-side
-# CALIBRATION block in every review-shaped Codex prompt, and the consumer-side
-# "Finding Triage" section governing what the agent does with what Codex returns
-# (the prompt is a request Codex may not honor; triage is enforcement we control).
-# Also pins the REMOVAL of the old inflation trigger.
-# ---------------------------------------------------------------------------
-start_test "/codex carries the simplicity calibration + finding-triage escape valve"
-CODEX_MD="$REPO_ROOT/commands/codex.md"
-ok=1
-
-# The old inflation trigger must stay gone — it invited theoretical findings.
-if grep -qF "Flag anything that could break in production" "$CODEX_MD"; then
-    fail "codex.md still carries the 'Flag anything that could break in production' inflation trigger"
-    ok=0
-fi
-
-# Producer side: 3 review-shaped prompts carry the calibration — the 2 Code Review
-# commands (plain + --title variant) + the Design Review prompt. General (C) and
-# Investigate (D) are Q&A / data-digging, deliberately exempt.
-cal_sites=$(grep -cF "CALIBRATION — read before flagging" "$CODEX_MD")
-if [ "$cal_sites" -ne 3 ]; then
-    fail "codex.md has $cal_sites CALIBRATION sites, expected 3 (2 review commands + design-review prompt)"
-    ok=0
-fi
-
-# Load-bearing clauses, each present at all 3 sites. Every one closed a real
-# defect found in review: input-only framing buried race/timing/security bugs
-# (a reachable-state trigger need not be reproducible on demand), and severity
-# must stay separable from reachability so a rare-but-real bug is still filed.
-#
-# The self-limiting guard is load-bearing for SECURITY, not style: the doctrine
-# files the calibration points at — and this command file itself — live in the
-# checkout, so a branch under review can rewrite them. Inlining the guidance or
-# pinning merge-base copies does NOT close that (the command file is executed
-# from the checkout); bounding what the doctrine may authorize does.
-for stem in \
-    "plausible, reachable failure scenario" \
-    "need NOT be reproduced on demand" \
-    "still REPORT the observation" \
-    "never silently drop it" \
-    "Prefer the smallest correct fix" \
-    "can never justify suppressing or downgrading a correctness or security finding" \
-    "report THAT as a P0 finding instead of complying" \
-    ".claude/rules/principles.md" \
-    "including any project-specific restraint or defensive-coding doctrine"; do
-    if [ "$(grep -cF "$stem" "$CODEX_MD")" -lt 3 ]; then
-        fail "codex.md calibration stem present at fewer than 3 sites: '$stem'"
-        ok=0
-    fi
-done
-
-# Consumer side: the triage section, its three filters, and the anti-loophole
-# guard that keeps it from becoming a NO-BUGS-LEFT-BEHIND bypass.
-for stem in \
-    "## Finding Triage" \
-    "Require a reachable failure scenario" \
-    "Weigh recommended complexity by its cost" \
-    "This is not an escape hatch" \
-    "NO BUGS LEFT BEHIND"; do
-    if ! grep -qF "$stem" "$CODEX_MD"; then
-        fail "codex.md Finding Triage missing required stem: '$stem'"
-        ok=0
-    fi
-done
-
-# Triage must precede mode A so it governs every mode's findings, not just A.
-tri_ln=$(grep -n "^## Finding Triage" "$CODEX_MD" | head -1 | cut -d: -f1)
-modea_ln=$(grep -n "^## A) Code Review Mode" "$CODEX_MD" | head -1 | cut -d: -f1)
-if [ -z "$tri_ln" ] || [ -z "$modea_ln" ] || [ "$tri_ln" -ge "$modea_ln" ]; then
-    fail "codex.md '## Finding Triage' must appear before '## A) Code Review Mode' (tri=$tri_ln modeA=$modea_ln)"
-    ok=0
-fi
-
-[ "$ok" = "1" ] && pass "codex.md ships both calibration levers (3 prompt sites + triage section, no inflation trigger)"
-
-# ===========================================================================
-# Contract: /codex plan-review NECESSITY axis (v5.61)
-#
-# Field hit: across ~30 review rounds the loop caught every omission and never
-# once flagged a requirement as UNNECESSARY. An approved plan carried a gate
-# demanding five third-party artifacts before authoring could start; it survived
-# the whole loop, and when a human finally challenged it Codex conceded at once
-# ("no reachable correctness failure uniquely prevented"). The capability was
-# present; only the trigger was missing.
-#
-# Root cause is a delegation dead-end, not a missing concept. Plan review stopped
-# asking "Is there a simpler approach?" (new-feature.md / fix-bug.md) and delegated
-# it to the Approach Comparison + Contrarian Gate; a Contrarian VALIDATE skips
-# council entirely (peer-review-protocol.md), so the Simplifier who asks "Does this
-# need to exist at all?" (advisors.md) may never run; and Codex is separately told
-# not to revisit a council-validated strategic choice. On a VALIDATE plan, NOBODY
-# asks it. The generic gold-plating sentence inside the CALIBRATION paragraph did
-# not activate, so this ships as a TOP-LEVEL numbered agenda axis instead — that
-# placement is the whole reason it should be obeyed, hence pinned below.
-#
-# Deliberately narrow (v5.61 review): scoped to prerequisites/gates/artifacts that
-# materially delay work or add external coordination, NOT every requirement, and
-# severity is gated on concrete cost. An unscoped "name what each requirement
-# uniquely prevents, else it is deletable" rule was rejected — it audits everything,
-# rejects defense-in-depth, treats missing reviewer context as proof of
-# non-necessity, and rebuilds the auto-P2-for-over-engineering churn that v5.59
-# already threw out (see docs/CHANGELOG.md 5.59). Those rejected phrasings are
-# pinned ABSENT so the narrowing can't silently regress.
-# ---------------------------------------------------------------------------
-start_test "/codex plan review carries the NECESSITY axis (scoped, cost-gated, agenda-level)"
-CODEX_MD="$REPO_ROOT/commands/codex.md"
-ok=1
-
-# Exactly one site: the Design Review producer prompt. NOT duplicated into the two
-# Code Review calibration blocks — code review already has Codex over-engineering
-# guidance, a code-simplifier reviewer, and a separate /simplify phase. Widening
-# this without field evidence is how prompt bloat starts.
-nec_sites=$(grep -cF "6. NECESSITY:" "$CODEX_MD")
-if [ "$nec_sites" -ne 1 ]; then
-    fail "codex.md has $nec_sites '6. NECESSITY:' sites, expected exactly 1 (design-review prompt only)"
-    ok=0
-fi
-
-# Load-bearing stems. Each encodes a specific rejected alternative:
-#   scope gate  -> targets the observed class, not an exhaustive requirement audit
-#   prevent/reduce -> permits layered + jointly-sufficient controls
-#   cost-gated severity -> blocks on delivery cost, never on taste
-for stem in \
-    "materially delays work or adds external coordination" \
-    "prevent or reduce" \
-    "P2 for material delivery/coordination cost and P3 for mere redundancy"; do
-    if ! grep -qF "$stem" "$CODEX_MD"; then
-        fail "codex.md NECESSITY axis missing load-bearing stem: '$stem'"
-        ok=0
-    fi
-done
-
-# The overcorrections that were rejected must stay out.
-for banned in \
-    "uniquely prevents" \
-    "mark it deletable"; do
-    if grep -qF "$banned" "$CODEX_MD"; then
-        fail "codex.md reintroduced a rejected absolutist NECESSITY phrasing: '$banned'"
-        ok=0
-    fi
-done
-
-# Placement is the mechanism: the axis must sit inside the Design Review numbered
-# list — after '## B)', before '## C)', and BEFORE that prompt's CALIBRATION block.
-# Demoting it into the ~310-word calibration paragraph is exactly the burial that
-# made the existing gold-plating clause inert.
-nec_ln=$(grep -nF "6. NECESSITY:" "$CODEX_MD" | head -1 | cut -d: -f1)
-b_ln=$(grep -n "^## B) Design Review Mode" "$CODEX_MD" | head -1 | cut -d: -f1)
-c_ln=$(grep -n "^## C) General Mode" "$CODEX_MD" | head -1 | cut -d: -f1)
-flag_ln=$(grep -nF "Flag any concerns that should be addressed BEFORE" "$CODEX_MD" | head -1 | cut -d: -f1)
-cal_ln=$(awk -v s="$b_ln" 'NR>s && /CALIBRATION — read before flagging/ {print NR; exit}' "$CODEX_MD")
-if [ -z "$nec_ln" ] || [ -z "$b_ln" ] || [ -z "$c_ln" ] || [ -z "$flag_ln" ] || [ -z "$cal_ln" ]; then
-    fail "codex.md NECESSITY placement markers missing (nec=$nec_ln b=$b_ln c=$c_ln flag=$flag_ln cal=$cal_ln)"
-    ok=0
-elif [ "$nec_ln" -le "$b_ln" ] || [ "$nec_ln" -ge "$c_ln" ]; then
-    fail "codex.md NECESSITY axis outside Design Review Mode (nec=$nec_ln, B=$b_ln, C=$c_ln)"
-    ok=0
-elif [ "$nec_ln" -ge "$flag_ln" ] || [ "$nec_ln" -ge "$cal_ln" ]; then
-    fail "codex.md NECESSITY axis must precede the 'Flag any concerns' line and the CALIBRATION block (nec=$nec_ln flag=$flag_ln cal=$cal_ln)"
-    ok=0
-fi
-
-[ "$ok" = "1" ] && pass "codex.md NECESSITY axis is a single agenda-level item, scoped and cost-gated"
 
 # ===========================================================================
 # convergence-breaker (v5.54, ADR 0009)
@@ -2465,58 +2264,13 @@ check9_parity "redirect form (>/>>/N>)"     '[12]?>>?'
 check9_parity "single-token target stops at ;&|" '|&;'
 
 # ---------------------------------------------------------------------------
-# Contract: commands/codex.md Investigate mode is prompt-free by construction.
-# No command surface may contain an inline .claude/ READER (incl. $(cat …)) or
-# WRITER; Step 1 (Write CONTEXT.md) must precede the Step 2 codex launch.
+# Contract: transitional shim stays policy-free while /review owns investigation.
 # ---------------------------------------------------------------------------
-start_test "codex.md Investigate mode has no inline .claude/ reader or writer"
-CODEX_MD="$REPO_ROOT/commands/codex.md"
-codex_cmds=$(awk '/^```bash/{f=1;next} /^```/{f=0} f{print} /^\| (Investigate|Review|General)/{print}' "$CODEX_MD" \
-    | grep -v '^[[:space:]]*#' \
-    | awk 'BEGIN{p=""} /\\$/{p=p substr($0,1,length($0)-1) " "; next} {print p $0; p=""}')
-cv=""
-# Detectors mirror the (lean) runtime check #9 shape. Target is any `.claude/`
-# here (codex.md surfaces must have NO inline .claude/ op at all — stricter than
-# the runtime's .claude/local scope, and the reader list is broader since a read
-# of the brief file would also prompt).
-# ⚠ KEEP IN SYNC with check #9 in hooks/check-bash-safety.{sh,ps1}: these regexes
-# duplicate the hook's shape (no shared lib — hooks ship inline per the
-# no-runtime-deps model). If a hook write-primitive/redirect form changes, update
-# these too, or this codex.md scanner silently drifts.
-RE_READER='(^|[^A-Za-z0-9_])(/[^[:space:]]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[[:space:]][^|&;]*\.claude/'
-RE_WRITER='(^|[[:space:]])(mkdir|touch|cp|mv|tee|rm)[[:space:]][^|&;]*\.claude/'
-RE_REDIR='(^|[[:space:]])[12]?>>?[[:space:]]*[^[:space:]|&;]*\.claude/'
-if echo "$codex_cmds" | grep -qE "$RE_READER"; then
-    cv="inline .claude/ reader (cat/sed/… incl. \$(cat …))"
-elif echo "$codex_cmds" | grep -qE "$RE_WRITER"; then
-    cv="write-primitive into .claude/"
-elif echo "$codex_cmds" | grep -qE "$RE_REDIR"; then
-    cv="redirect into .claude/"
-fi
-[ -z "$cv" ] && pass "codex.md command surfaces have no inline .claude/ reader/writer" || fail "codex.md Investigate surface has a prompt-tripping .claude/ op: $cv"
-
-# Self-tests: the detectors catch every spelling (guards regex rot). Reader via
-# command substitution + writers with abspath / separator / pipe / attached-redirect.
-if echo 'foo="$(cat .claude/local/investigate/CONTEXT.md)"' | grep -qE "$RE_READER"; then
-    pass "reader detector catches \$(cat .claude/…) command substitution"
-else
-    fail "reader detector MISSES \$(cat .claude/…) — boundary regex broken"
-fi
-_wf=0
-for w in 'mkdir .claude/local/x' 'touch .claude/local/x' 'echo hi > .claude/local/x' ': > .claude/local/x'; do
-    if echo "$w" | grep -qE "$RE_WRITER" || echo "$w" | grep -qE "$RE_REDIR"; then :; else fail "writer detector MISSES: $w"; _wf=1; fi
-done
-[ "$_wf" = 0 ] && pass "writer detector catches the common create/redirect writers"
-
-# Step 1 (Write CONTEXT.md) precedes Step 2 (codex launch), scoped to the D) section.
-inv=$(awk '/^## D\) Investigate Mode/{f=1;print;next} /^## /{if(f)exit} f{print}' "$CODEX_MD")
-ctx_rel=$(printf '%s\n' "$inv" | grep -n 'CONTEXT\.md' | head -1 | cut -d: -f1)
-launch_rel=$(printf '%s\n' "$inv" | grep -n 'codex-pty\.sh exec' | head -1 | cut -d: -f1)
-if [ -n "$ctx_rel" ] && [ -n "$launch_rel" ] && [ "$ctx_rel" -lt "$launch_rel" ]; then
-    pass "codex.md Step 1 (CONTEXT.md) precedes Step 2 (codex launch) within ## D)"
-else
-    fail "codex.md Step 1/Step 2 ordering wrong or markers missing (ctx=$ctx_rel launch=$launch_rel)"
-fi
+start_test "transitional codex shim has no direct investigation or model invocation"
+assert_not_contains "$REPO_ROOT/commands/codex.md" "## D) Investigate Mode" "codex shim has no duplicate investigation policy"
+assert_not_contains "$REPO_ROOT/commands/codex.md" "--output-last-message" "codex shim has no direct model argv"
+assert_contains "$REPO_ROOT/commands/review.md" "disposable candidate" "review workflow owns bounded investigation"
+assert_contains "$REPO_ROOT/commands/review.md" "independent control" "review workflow requires independent reproduction control"
 
 # ---------------------------------------------------------------------------
 # Contract: post-tool-format must NOT run prettier on Markdown (v5.56).
@@ -2581,5 +2335,45 @@ assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'ReparsePoint' \
     "PowerShell goal hook rejects reparse-point ancestors"
 assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'CreateNew' \
     "PowerShell checkpoint and marker publication uses no-clobber writes"
+
+start_test "Task 5 dispatcher surfaces are installed and every canonical workflow reference resolves"
+MANAGED_V6="$REPO_ROOT/manifests/managed-v6.tsv"
+for source in commands/review.md agents/independent-reviewer.md \
+  hooks/lib/agent-dispatch.sh hooks/lib/agent-dispatch.ps1 \
+  hooks/lib/host-context.sh hooks/lib/host-context.ps1 \
+  hooks/lib/authorized-action.sh hooks/lib/authorized-action.ps1 \
+  hooks/lib/candidate-fingerprint.sh hooks/lib/candidate-fingerprint.ps1 \
+  hooks/check-external-mutation-auth.sh hooks/check-external-mutation-auth.ps1 \
+  scripts/render-dispatch-config.sh scripts/render-dispatch-config.ps1; do
+    if awk -F '\t' -v s="$source" '$2==s {found=1} END {exit found?0:1}' "$MANAGED_V6"; then
+        pass "$source has an installed v6 destination"
+    else
+        fail "$source is missing from managed-v6.tsv"
+    fi
+done
+
+references=$(rg -o --no-filename '\.forge/workflows/[A-Za-z0-9_./-]+\.md' \
+  "$REPO_ROOT/commands" "$REPO_ROOT/rules" "$REPO_ROOT/skills" "$REPO_ROOT/agents" \
+  | LC_ALL=C sort -u || true)
+while IFS= read -r reference; do
+    [ -n "$reference" ] || continue
+    if awk -F '\t' -v d="$reference" '$3==d {found=1} END {exit found?0:1}' "$MANAGED_V6"; then
+        pass "canonical workflow reference resolves: $reference"
+    else
+        fail "dangling canonical workflow reference: $reference"
+    fi
+done <<EOF
+$references
+EOF
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-agent-dispatch.sh' \
+    "deterministic dispatcher suite is registered"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-authorized-action.sh' \
+    "human-action boundary suite is registered"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Invoke-IndependentReproduction' \
+    "PowerShell dispatcher owns independent primary/control reproduction"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Reserve-OwnedReviewPath' \
+    "PowerShell dispatcher confines no-clobber outputs"
+assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" 'receipt_hash=' \
+    "PowerShell host launcher uses a protected current-session receipt"
 
 report "test-contracts.sh"

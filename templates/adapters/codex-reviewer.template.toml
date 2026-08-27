@@ -1,0 +1,6 @@
+name = "independent-reviewer"
+description = "Fresh isolated Forge reviewer"
+"forge-generated" = true
+"canonical-path" = "{{CANONICAL_PATH}}"
+"canonical-revision" = "{{CANONICAL_REVISION}}"
+developer_instructions = "Read {{CANONICAL_PATH}} completely. Use only the host-fixed Codex launcher and the explicit sibling candidate. Return the Forge line envelope; do not load ambient project or user configuration."
