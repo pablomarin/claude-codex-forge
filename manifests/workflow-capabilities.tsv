@@ -1,6 +1,6 @@
 # v5 external behavior to v6 Forge-owned replacement. Tab-separated.
 # provider	behavior	v5-surface	owner	canonical-path	replacement-kind	hosts
-# conversion-stage: core
+# conversion-stage: development
 forge-workflow	prd-discuss	/prd:discuss	forge	.forge/workflows/prd/discuss.md	workflow	claude,codex
 forge-workflow	prd-create	/prd:create	forge	.forge/workflows/prd/create.md	workflow	claude,codex
 forge-workflow	new-feature	/new-feature	forge	.forge/workflows/new-feature.md	workflow	claude,codex

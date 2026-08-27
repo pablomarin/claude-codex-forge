@@ -16,6 +16,13 @@ source "$REPO_ROOT/tests/template/lib.sh"
 
 init_counters
 
+WORKFLOW_STAGE=$(sed -n 's/^# conversion-stage:[[:space:]]*//p' \
+    "$REPO_ROOT/manifests/workflow-capabilities.tsv" | head -1)
+HOST_NEUTRAL_WORKFLOWS=0
+case "$WORKFLOW_STAGE" in
+    development|complete) HOST_NEUTRAL_WORKFLOWS=1 ;;
+esac
+
 # ---------------------------------------------------------------------------
 # Contract 0: v6 layout suites must stay in the deterministic driver
 # ---------------------------------------------------------------------------
@@ -95,6 +102,7 @@ fi
 # ---------------------------------------------------------------------------
 # Contract 2: SUGGESTED_PATH header must be consumed by callers
 # ---------------------------------------------------------------------------
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "SUGGESTED_PATH header ↔ caller persistence instructions"
 
 # Agent defines SUGGESTED_PATH in its response header.
@@ -480,6 +488,18 @@ assert_contains "$NF" "skipped in regression mode" \
 assert_contains "$FB" "skipped in regression mode" \
     "fix-bug.md Phase 5.4b explains hard-SHAPE skip in regression"
 
+else
+start_test "host-neutral E2E callers delegate detailed validation to the canonical agent"
+for caller in "$NF" "$FB"; do
+    name=$(basename "$caller")
+    assert_contains "$caller" "verify-e2e" "$name invokes the canonical E2E role"
+    assert_contains "$caller" 'SUGGESTED_PATH:' "$name consumes the canonical report-path header"
+    assert_contains "$caller" 'SURFACE_COVERAGE_WARNING' "$name handles the canonical coverage warning"
+    assert_contains "$caller" 'FAIL_INVALID_USE_CASE' "$name handles invalid use cases"
+    assert_contains "$caller" '.forge/local/' "$name keeps reports in canonical local evidence"
+done
+fi
+
 # ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers
 # setup.sh writes .claude/playwright-dir. Commands must read it.
@@ -490,10 +510,17 @@ assert_contains "$REPO_ROOT/setup.sh" ".claude/playwright-dir" \
     "setup.sh writes marker file"
 assert_contains "$REPO_ROOT/setup.ps1" "playwright-dir" \
     "setup.ps1 writes marker file (Windows parity)"
-assert_contains "$NF" ".claude/playwright-dir" \
-    "commands/new-feature.md reads marker file"
-assert_contains "$FB" ".claude/playwright-dir" \
-    "commands/fix-bug.md reads marker file"
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
+    assert_contains "$NF" ".claude/playwright-dir" \
+        "commands/new-feature.md reads marker file"
+    assert_contains "$FB" ".claude/playwright-dir" \
+        "commands/fix-bug.md reads marker file"
+else
+    assert_not_contains "$NF" ".claude/playwright-dir" \
+        "new-feature.md has no Claude-private Playwright dependency"
+    assert_not_contains "$FB" ".claude/playwright-dir" \
+        "fix-bug.md has no Claude-private Playwright dependency"
+fi
 
 # ---------------------------------------------------------------------------
 # Contract 3b: settings.template.json Stop hook ordering
@@ -883,6 +910,7 @@ fi
 # ---------------------------------------------------------------------------
 # Contract: DRIFT-PREFLIGHT-NEW blocks in new-feature.md and fix-bug.md byte-identical
 # ---------------------------------------------------------------------------
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "DRIFT-PREFLIGHT-NEW blocks byte-identical across new-feature.md and fix-bug.md"
 
 NF="$REPO_ROOT/commands/new-feature.md"
@@ -919,6 +947,16 @@ elif [[ "$NF_AL" == "$FB_AL" ]]; then
 else
     fail "DRIFT-PREFLIGHT-ALREADY blocks differ between new-feature.md and fix-bug.md"
     diff <(printf '%s' "$NF_AL") <(printf '%s' "$FB_AL") | head -10
+fi
+
+else
+start_test "host-neutral workflows rely on the shared session-start drift advisory"
+for caller in "$NF" "$FB"; do
+    name=$(basename "$caller")
+    assert_contains "$caller" '.forge/instructions.md' "$name loads canonical installed instructions"
+    assert_contains "$caller" 'Last active host' "$name records host-switch continuity"
+    assert_not_contains "$caller" 'DRIFT-PREFLIGHT-' "$name has no duplicated host-specific drift block"
+done
 fi
 
 # ---------------------------------------------------------------------------
@@ -1234,6 +1272,7 @@ fi
 # AC-2 byte-identical STATE-INIT contract: the bash block in commands/new-feature.md
 # and commands/fix-bug.md between # STATE-INIT-BEGIN and # STATE-INIT-END markers
 # must be byte-identical (mirrors the existing DRIFT-PREFLIGHT-NEW contract from PR #1).
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "state-init-block-byte-identical-across-commands"
 extract_state_init() {
     awk '/^# STATE-INIT-BEGIN/{flag=1} flag{print} /^# STATE-INIT-END/{flag=0}' "$1"
@@ -1262,6 +1301,16 @@ for f in "$NF" "$FB"; do
     assert_contains "$f" "empty placeholder"                       "$bn seed resets Now to its empty placeholder"
     assert_contains "$f" "gate sections are NOT seeded"            "$bn seed excludes gate sections"
 done
+else
+start_test "host-neutral development workflows use canonical state ownership"
+for f in "$NF" "$FB"; do
+    bn=$(basename "$f")
+    assert_contains "$f" '.forge/state.template.md' "$bn initializes from the canonical state template"
+    assert_contains "$f" '.forge/local/state.md' "$bn uses canonical developer-owned state"
+    assert_contains "$f" "file read/write capabilities" "$bn avoids host-private shell state writes"
+    assert_contains "$f" 'Last active host' "$bn persists host-switch continuity"
+done
+fi
 
 # ---------------------------------------------------------------------------
 # Contract: guarded fold-back (state-continuity-roundtrip, v5.52)
@@ -1295,6 +1344,7 @@ assert_contains "$FBR" "## /goal session"              "finish-branch fold names
 # Byte-drift guard: the EXTRACT-FOLDABLE block must be identical (modulo indentation)
 # across new-feature.md step 2b, fix-bug.md step 2b, and finish-branch.md 2.2b — a silent
 # drift between the seed-snapshot extraction and the fold extraction breaks divergence detection.
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "EXTRACT-FOLDABLE block identical (indent-normalized) across the three command files"
 norm_ef() { sed -n '/^[[:space:]]*# EXTRACT-FOLDABLE-BEGIN/,/^[[:space:]]*# EXTRACT-FOLDABLE-END/p' "$1" | sed 's/^[[:space:]]*//'; }
 ef_nf=$(norm_ef "$NF"); ef_fb=$(norm_ef "$FB"); ef_fbr=$(norm_ef "$FBR")
@@ -1305,6 +1355,7 @@ elif [ "$ef_nf" = "$ef_fb" ] && [ "$ef_nf" = "$ef_fbr" ]; then
 else
     fail "EXTRACT-FOLDABLE block drifted across command files"
     diff <(printf '%s' "$ef_nf") <(printf '%s' "$ef_fbr") | head -10
+fi
 fi
 
 # Contract: state.template documents the round-trip (state-continuity-roundtrip, v5.52)
@@ -1327,6 +1378,7 @@ assert_file_exists "$REPO_ROOT/docs/adr/0008-state-continuity-round-trip.md" "AD
 # This test enumerates all common write patterns. If a future regression invents
 # a new way to write files (e.g., `dd of=...`, `python -c 'open(...)'`), we'll
 # add it here when we see it.
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "state-init-block-has-no-bash-writes-under-dot-claude"
 for cmd_file in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md"; do
     block=$(extract_state_init "$cmd_file")
@@ -1476,6 +1528,14 @@ for cmd_file in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
         pass "$name Step 2b prose uses Read+Write tools, no banned writes"
     fi
 done
+else
+start_test "host-neutral state initialization has no host-private path"
+for f in "$NF" "$FB"; do
+    bn=$(basename "$f")
+    assert_not_contains "$f" '.claude/local/state.md' "$bn does not depend on Claude-private state"
+    assert_not_contains "$f" '.codex/' "$bn does not depend on Codex-private state"
+done
+fi
 
 # ---------------------------------------------------------------------------
 # Contract: codex-pty shim — env vars + issue refs + helper present
@@ -1648,6 +1708,7 @@ done
 # ---------------------------------------------------------------------------
 # Contract: /forge-goal Layer 2 — workflow commands have their checkpoint sections
 # ---------------------------------------------------------------------------
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "Layer 2 — /new-feature has PRD-Complete Checkpoint with correct content"
 
 NF="$REPO_ROOT/commands/new-feature.md"
@@ -1689,6 +1750,16 @@ else
 fi
 # P1.4: REPLACE semantics documented
 assert_contains "$FB" "REPLACE" "fix-bug.md documents REPLACE semantics for /goal session and PR auth"
+else
+start_test "host-neutral development workflows compose native goal with durable Forge authority"
+for f in "$NF" "$FB"; do
+    bn=$(basename "$f")
+    assert_contains "$f" 'native `/goal`' "$bn composes the active host native goal"
+    assert_contains "$f" 'nonce' "$bn binds persistent authorization to an objective nonce"
+    assert_contains "$f" 'human' "$bn keeps PR mutation human-authorized"
+    assert_not_contains "$f" 'AskUserQuestion' "$bn has no Claude-only prompt syntax"
+done
+fi
 
 # ---------------------------------------------------------------------------
 # Contract: /forge-goal Layer 2 — rules/workflow.md has council-during-/goal rule
@@ -1999,6 +2070,7 @@ done
 # diagram-edge honesty rule must appear in host-neutral review + rules/workflow.md.
 start_test "Developer Demo block parity (new-feature ↔ fix-bug) + Gate-2 honesty rule"
 
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 extract_demo_block() {
     awk '/<!-- DEV-DEMO-BEGIN/{f=1} f{print} /<!-- DEV-DEMO-END/{f=0}' "$1"
 }
@@ -2019,6 +2091,16 @@ fi
 for stem in "git diff --name-status" "git merge-base" "default-branch.sh" "body-file" "Evidence" "file:line" "Safe-Mermaid"; do
     echo "$NF_DEMO" | grep -qF -- "$stem" || { fail "DEV-DEMO block missing required stem: $stem"; ok=0; }
 done
+
+else
+ok=1
+for workflow in commands/new-feature.md commands/fix-bug.md; do
+    grep -qF 'Developer Demo' "$REPO_ROOT/$workflow" \
+        || { fail "$workflow does not invoke Developer Demo honesty"; ok=0; }
+    grep -qF 'file:line' "$REPO_ROOT/$workflow" \
+        || { fail "$workflow does not require file:line evidence"; ok=0; }
+done
+fi
 
 # Gate-2 diagram-honesty rule must be present in both review surfaces, with its
 # load-bearing parts (not just the phrase): the rule names "diagram edge", binds
@@ -2046,7 +2128,16 @@ start_test "Plan-stage spec-loss=P1 rule parity (workflow ↔ new-feature ↔ fi
 
 ok=1
 for surface in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
-    for token in "spec-loss is P1" "wrong feature to be built" "does **not** relax the exit"; do
+    if [ "$HOST_NEUTRAL_WORKFLOWS" = "1" ] && [ "$surface" != "rules/workflow.md" ]; then
+        if [ "$surface" = "commands/fix-bug.md" ]; then
+            required_tokens=("spec-loss is P1" "wrong fix" "does **not** relax")
+        else
+            required_tokens=("spec-loss is P1" "wrong feature" "does **not** relax")
+        fi
+    else
+        required_tokens=("spec-loss is P1" "wrong feature to be built" "does **not** relax the exit")
+    fi
+    for token in "${required_tokens[@]}"; do
         grep -qF -- "$token" "$REPO_ROOT/$surface" \
             || { fail "$surface missing plan-stage spec-loss token: $token"; ok=0; }
     done
@@ -2169,11 +2260,19 @@ start_test "convergence-breaker: /goal council carve-out + convergence-breaker p
 # reminder DO-bullet) — `never substitute /council` must appear >= 2 per command.
 for f in commands/new-feature.md commands/fix-bug.md; do
     bn=$(basename "$f")
-    CNT=$(grep -c "never substitute /council" "$REPO_ROOT/$f" || true)
-    if [ "$CNT" -ge 2 ]; then
-        pass "$bn carries the breaker carve-out at both /goal sites ($CNT)"
+    if [ "$HOST_NEUTRAL_WORKFLOWS" = "1" ]; then
+        if grep -qF 'only a human may adjudicate a tripped breaker' "$REPO_ROOT/$f"; then
+            pass "$bn keeps breaker adjudication human-only"
+        else
+            fail "$bn does not keep breaker adjudication human-only"
+        fi
     else
-        fail "$bn breaker carve-out missing from a /goal site (found $CNT, need >=2)"
+        CNT=$(grep -c "never substitute /council" "$REPO_ROOT/$f" || true)
+        if [ "$CNT" -ge 2 ]; then
+            pass "$bn carries the breaker carve-out at both /goal sites ($CNT)"
+        else
+            fail "$bn breaker carve-out missing from a /goal site (found $CNT, need >=2)"
+        fi
     fi
 done
 for f in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do

@@ -1,129 +1,30 @@
-# Quick Fix Workflow
+# /quick-fix — Host-Neutral Small-Change Workflow
 
-> **For trivial changes only.** If in doubt, use `/new-feature` or `/fix-bug` instead.
+Use only for a clearly understood, low-risk change that touches at most three files, needs no
+architecture decision, and has an obvious verification path. Otherwise use `/fix-bug` or
+`/new-feature`.
 
----
+## Steps
 
-## When to Use This
+1. Read `.forge/local/state.md`, resolve the active host, and record `Last active host`. Resume the
+   next unchecked step after a host switch. Warn about simultaneous editing; do not lock the tree.
+2. Confirm the branch is not protected. Persist the intended base ref and immutable resolved base SHA
+   before the first change.
+3. State the acceptance check and affected files. If behavior changes, write and observe a failing
+   test first; documentation-only corrections use a direct rendered/static check instead.
+4. Make the smallest change and run the owning focused check.
+5. Update applicable solution/changelog material. Run the Forge-owned simplification phase only
+   when code changed.
+6. Force-stage only explicitly approved ignored artifacts, then `git add -A`; freeze the staged-clean
+   candidate.
+7. Run a fresh `code-quality` review, `verify-app`, and applicable E2E read-only against that same
+   candidate. User-facing changes require the feature/regression journey matrix; non-user-facing
+   changes may record E2E N/A with a concrete supported reason.
+8. Any mutation invalidates affected evidence. Restage, refreeze, and rerun the affected final gates.
+9. Promote the exact candidate and commit. Update `.forge/local/state.md` and verified memory.
+10. Show any push/PR mutation and pause for explicit human authorization. Stop after the requested
+    external action; do not merge unless separately authorized.
 
-- Typo fixes
-- Comment updates
-- Single-line bug fixes with obvious cause
-- Config tweaks
-- Documentation-only changes
-- Changes touching **fewer than 3 files**
-- **No architectural impact**
-
-**If ANY of these apply, use the full workflow instead:**
-
-- You're not 100% sure of the fix
-- Multiple files need changes
-- The fix involves business logic
-- Tests need to be added/modified
-- Database/API changes involved
-- **User-facing behavior changed** — UI, API response, CLI output, navigation, permissions. Quick-fix skips E2E verification; any user-facing change requires the `verify-e2e` agent via `/fix-bug`. Trivial = no behavior change (typos, comments, dead code removal, internal refactors that preserve behavior).
-
----
-
-## Pre-Flight Check
-
-1. **Verify branch**: You must NOT be on `main`. If on main:
-   ```bash
-   git checkout -b "fix/$ARGUMENTS"
-   ```
-
----
-
-## Research Check
-
-Quick fixes skip the full research-first agent. However, if this change touches an external dependency or API (version bump, API call change, new library import):
-
-- Check the library's current docs via Context7 or WebSearch before implementing
-- Verify no breaking changes between your version and the one you're targeting
-
-If purely internal (typo fix, config change, style cleanup): no research needed.
-
----
-
-## The Fix
-
-1. Make the change
-2. Verify it works (run relevant tests or check manually)
-
----
-
-## Quality Gates (STILL REQUIRED)
-
-### Verify (USE SUBAGENT - saves context window)
-
-**MUST use the verify-app subagent** - Do NOT run tests yourself.
-
-Using a subagent keeps test output out of your context window, preserving tokens for actual work.
-
-**Invoke the subagent:**
-
-```
-Use the Task tool with:
-- subagent_type: "verify-app"
-- prompt: "Run verification on current changes and report pass/fail verdict."
-```
-
-> **Note:** Quick-fix doesn't create worktrees. For parallel development, use `/new-feature` or `/fix-bug` instead.
-
-**Only use fallback if Task tool fails:**
-
-```bash
-pytest && ruff check . && mypy .  # Python
-npm test && npm run lint && npm run typecheck  # Node
-```
-
----
-
-## Finish
-
-### Update state files
-
-1. **.claude/local/state.md**: Update Done (keep 2-3 recent), Now, Next
-
-### Commit the changes
-
-```bash
-git add -A
-git commit -m "fix: [descriptive message]"
-```
-
-**Note:** Quick fixes are typically committed directly to the current branch. Since quick-fix doesn't create worktrees or feature branches, there's no PR/merge workflow - just commit and you're done.
-
-**If you want to create a PR instead** (e.g., for review):
-
-```bash
-git push -u origin HEAD
-gh pr create --base main --fill
-```
-
----
-
-## Checklist Summary
-
-- [ ] On fix branch (not main)
-- [ ] Change is truly trivial (< 3 files, no arch impact)
-- [ ] Change verified manually or with tests
-- [ ] Verified via `verify-app` agent
-- [ ] .claude/local/state.md updated
-- [ ] Changes committed
-
----
-
-## Escalation
-
-If during the fix you discover:
-
-- The change is more complex than expected
-- Tests are failing unexpectedly
-- You need to touch more files
-
-**STOP and switch to the full workflow:**
-
-```
-/fix-bug
-```
+Reviewer `auto` uses the other installed engine and falls back automatically to a fresh same-engine
+reviewer on launch/capability failure. A finding is not fallback. Reports and receipts remain under
+`.forge/local/` and do not become post-verification source changes.

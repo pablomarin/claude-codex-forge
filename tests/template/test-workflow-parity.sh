@@ -47,12 +47,35 @@ for relative in $scan_files; do
     fi
 done
 
+if [[ "$stage" == development || "$stage" == complete ]]; then
+    start_test "development workflows preserve portable continuity and candidate gates"
+    for workflow in new-feature fix-bug quick-fix; do
+        file="$REPO_ROOT/commands/$workflow.md"
+        for contract in "Last active host" "simultaneous editing" "base ref" "base SHA" "git add -A" "candidate" "authorization"; do
+            assert_contains "$file" "$contract" "$workflow preserves $contract"
+        done
+        assert_contains "$file" "do not" "$workflow warns without adding a lock"
+    done
+    for workflow in new-feature fix-bug; do
+        file="$REPO_ROOT/commands/$workflow.md"
+        for contract in "TDD" "Preliminary" "simplification" "code-spec" "code-quality" "verify-app" "E2E" "mutation" ".forge/local/"; do
+            assert_contains "$file" "$contract" "$workflow preserves $contract"
+        done
+    done
+    assert_contains "$REPO_ROOT/commands/new-feature.md" "same-engine reviewer" "new-feature has automatic reviewer fallback"
+    assert_contains "$REPO_ROOT/commands/fix-bug.md" "same-engine fallback" "fix-bug has automatic reviewer fallback"
+    assert_contains "$REPO_ROOT/commands/quick-fix.md" "falls back automatically" "quick-fix has automatic reviewer fallback"
+fi
+
 start_test "installed Claude and Codex adapters expose each converted workflow"
 INSTALL=$(scratch_dir workflow-parity)
 (cd "$INSTALL" && git init -q)
 printf '{"name":"workflow-parity"}\n' > "$INSTALL/package.json"
 LOG="$INSTALL/setup.log"
-FORGE_ENGINE_IDENTITY_FIXTURE=1 run_setup "$INSTALL" "$LOG" -p WorkflowParity -t fullstack
+# Keep this fixture deterministic and offline: identity selection is injected, so installed
+# host CLIs must not be probed by setup's configuration validator.
+FIXTURE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+PATH="$FIXTURE_PATH" FORGE_ENGINE_IDENTITY_FIXTURE=1 run_setup "$INSTALL" "$LOG" -p WorkflowParity -t fullstack
 assert_equals "$?" "0" "setup materializes dual-host workflow fixture"
 
 converted="review prd/discuss prd/create"
@@ -81,7 +104,7 @@ if [[ "$stage" == complete ]]; then
     printf 'custom claude goal\n' > "$COLLISION/.claude/commands/goal.md"
     printf 'custom codex goal\n' > "$COLLISION/.agents/skills/goal/SKILL.md"
     CLOG="$COLLISION/setup.log"
-    FORGE_ENGINE_IDENTITY_FIXTURE=1 run_setup "$COLLISION" "$CLOG" -p GoalCollision -t fullstack
+    PATH="$FIXTURE_PATH" FORGE_ENGINE_IDENTITY_FIXTURE=1 run_setup "$COLLISION" "$CLOG" -p GoalCollision -t fullstack
     assert_equals "$(cat "$COLLISION/.claude/commands/goal.md")" "custom claude goal" "custom Claude goal is preserved"
     assert_equals "$(cat "$COLLISION/.agents/skills/goal/SKILL.md")" "custom codex goal" "custom Codex goal is preserved"
     assert_contains "$CLOG" "RUNTIME_READY=BLOCKED host=claude" "Claude collision blocks host readiness"
