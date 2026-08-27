@@ -20,6 +20,34 @@ try {
 
 $context = "Current branch: $branch"
 
+$hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$stateHelper = Join-Path $hookDir "lib\state-path.ps1"
+if (-not (Test-Path -LiteralPath $stateHelper)) { $stateHelper = Join-Path (Get-Location) "hooks\lib\state-path.ps1" }
+if (Test-Path -LiteralPath $stateHelper) {
+    try {
+        . $stateHelper
+        $root = $env:CLAUDE_PROJECT_DIR
+        if (-not $root) { $root = (Get-Location).Path }
+        $stateMd = Get-ForgeStatePath -Root $root -Mode Read
+        if ($stateMd -and (Test-Path -LiteralPath $stateMd)) {
+            $rawState = (Get-Content -LiteralPath $stateMd -Raw -ErrorAction SilentlyContinue) -replace "`r", ""
+            $workflowLines = @(); $inWorkflow = $false
+            foreach ($line in ($rawState -split "`n")) {
+                if ($line -match '^## Workflow$') { $inWorkflow = $true; continue }
+                if ($inWorkflow -and $line -match '^## ') { break }
+                if ($inWorkflow) { $workflowLines += $line }
+            }
+            $cmdLine = $workflowLines | Select-String '\|\s*Command\s*\|' | Select-Object -First 1
+            $phaseLine = $workflowLines | Select-String '\|\s*Phase\s*\|' | Select-Object -First 1
+            $resumeCmd = if ($cmdLine) { ($cmdLine -split '\|')[2].Trim() } else { "" }
+            $resumePhase = if ($phaseLine) { ($phaseLine -split '\|')[2].Trim() } else { "" }
+            if ($resumeCmd -and $resumeCmd -ne "none" -and $resumeCmd -ne "-" -and $resumeCmd -ne ([char]0x2014).ToString()) {
+                $context = "$context (Forge resume: $resumeCmd; phase: $resumePhase)"
+            }
+        }
+    } catch {}
+}
+
 if ($source -eq "startup" -or $source -eq "resume") {
     # Dot-source (not subprocess) — works in both PowerShell 5.1 (powershell.exe)
     # and 7 (pwsh). Spawning pwsh would fail on stock Windows.

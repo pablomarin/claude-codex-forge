@@ -135,14 +135,22 @@ fi
 _TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null || true)
 [ -n "$_TOPLEVEL" ] && [ -d "$_TOPLEVEL" ] && cd "$_TOPLEVEL" 2>/dev/null || true
 
-# --- Check for active workflow (post PR #2: state file is .claude/local/state.md) ---
-STATE_FILE=".claude/local/state.md"
+# --- Resolve canonical v6 state, with pre-migration v5 read compatibility. ---
+HOOK_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)
+STATE_HELPER="$HOOK_DIR/lib/state-path.sh"
+[ -f "$STATE_HELPER" ] || STATE_HELPER="hooks/lib/state-path.sh"
+STATE_FILE=""
+if [ -f "$STATE_HELPER" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_HELPER"
+    STATE_FILE=$(forge_state_path "$(pwd)" read 2>/dev/null || true)
+fi
 
 if [ ! -f "$STATE_FILE" ]; then
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Emit friendly breadcrumb on stderr, exit 0 (don't gate — nothing to enforce).
-    echo "ℹ check-workflow-gates: $STATE_FILE not found." >&2
-    echo "  If you have a legacy CONTINUITY.md and just upgraded, run setup --migrate" >&2
+    echo "ℹ check-workflow-gates: Forge state.md not found." >&2
+    echo "  If you have a legacy CONTINUITY.md, run setup --migrate before setup -F." >&2
     exit 0
 fi
 

@@ -1,3 +1,4 @@
+<!-- forge:state-schema v6 -->
 # Project State (per-developer, gitignored)
 
 > This file holds your active workflow state. It is NOT shared with the team.
@@ -143,7 +144,7 @@ You (Claude) are responsible for updating this file. The Stop hook reminds you o
 The continuity narrative **round-trips** through main so it survives worktree teardown (it is otherwise gitignored and dies with the worktree). The **foldable** sections are `### Done` / `### Next` / `### Deferred` (under `## State`), plus `## Open Questions` and `## Blockers`. The **gate** sections (`## Workflow`, `## /goal session`, `## PR authorization`) NEVER travel — they stay worktree-local with their REPLACE/singleton semantics.
 
 1. A fresh worktree's foldable narrative is copied **verbatim** from main's `state.md`, with `### Now` cleared (a new feature has no active "Now").
-2. A narrative-only **seed snapshot** is written to `.claude/local/.state-seed-snapshot.md` (gitignored, worktree-local) — a record of main's foldable narrative at seed time, used by `/finish-branch` to detect divergence.
+2. A narrative-only **seed snapshot** is written to `.forge/local/.state-seed-snapshot.md` (gitignored, worktree-local) — a record of main's foldable narrative at seed time, used by `/finish-branch` to detect divergence.
 
 **On `/finish-branch` (round-trip fold-back, BEFORE the worktree is removed):**
 

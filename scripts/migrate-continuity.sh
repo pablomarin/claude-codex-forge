@@ -22,26 +22,48 @@ SENTINEL_PREFIX="<!-- forge:migrated"
 SENTINEL_TODAY="<!-- forge:migrated $(date +%Y-%m-%d) -->"
 
 LEGACY_FILE="CONTINUITY.md"
+STATE_FILE=".forge/local/state.md"
+LEGACY_STATE_FILE=".claude/local/state.md"
+RECEIPT_FILE=".forge/local/migration-evidence/continuity-state-v5-v6.json"
+
+write_translation_receipt() {
+    [ -f "$LEGACY_STATE_FILE" ] && [ -f "$STATE_FILE" ] || return 0
+    command -v python3 >/dev/null 2>&1 || {
+        echo "x Python 3 is required to bind continuity migration evidence." >&2
+        return 1
+    }
+    python3 "$SCRIPT_DIR/scripts/merge-settings.py" write-continuity-receipt \
+        --source "$LEGACY_STATE_FILE" --destination "$STATE_FILE" --receipt "$RECEIPT_FILE"
+}
+
+# A continuity migration may precede full refresh. In that case translate the
+# active v5 state first so all subsequent writes already use the canonical v6
+# path. The original remains untouched for the full-refresh ownership backup.
+if [ ! -f "$STATE_FILE" ] && [ -f ".claude/local/state.md" ]; then
+    bash "$SCRIPT_DIR/scripts/migrate-state-v5-v6.sh" ".claude/local/state.md" "$STATE_FILE" || exit 1
+fi
 
 if [ ! -f "$LEGACY_FILE" ]; then
+    write_translation_receipt || exit 1
     # ASCII-safe output for AC-4 byte-equivalence with PS mirror.
     echo "!  No CONTINUITY.md found in this directory. Nothing to migrate."
     exit 0
 fi
 
 # Idempotency check -- if either target already has the sentinel, this is a rerun.
-# Sentinel locations: top-of-file in .claude/local/state.md AND in CLAUDE.md.
+# Sentinel locations: top-of-file in canonical .forge/local/state.md AND in CLAUDE.md.
 # Sentinel is written UNCONDITIONALLY at the start of migration (see below) --
 # so even repos with no Goal / no decisions / no Done content still get marked.
 already_migrated() {
     [ -f "CLAUDE.md" ] && grep -qF "$SENTINEL_PREFIX" CLAUDE.md 2>/dev/null && return 0
-    [ -f ".claude/local/state.md" ] && grep -qF "$SENTINEL_PREFIX" .claude/local/state.md 2>/dev/null && return 0
+    [ -f "$STATE_FILE" ] && grep -qF "$SENTINEL_PREFIX" "$STATE_FILE" 2>/dev/null && return 0
     return 1
 }
 
 if already_migrated; then
+    write_translation_receipt || exit 1
     # Use -E (regex), NOT -F (fixed-string + regex metachars don't mix).
-    existing=$(grep -hoE '<!-- forge:migrated [^>]*-->' CLAUDE.md .claude/local/state.md 2>/dev/null | head -1)
+    existing=$(grep -hoE '<!-- forge:migrated [^>]*-->' CLAUDE.md "$STATE_FILE" 2>/dev/null | head -1)
     # Strip "<!-- forge:migrated " prefix and " -->" suffix to get the date alone.
     existing_date=$(echo "$existing" | sed -E 's/^<!-- forge:migrated[[:space:]]+//; s/[[:space:]]+-->$//')
     if [ -n "$existing_date" ]; then
@@ -49,7 +71,7 @@ if already_migrated; then
     else
         echo "Already migrated."
     fi
-    echo "  Sentinel marker detected in CLAUDE.md or .claude/local/state.md."
+    echo "  Sentinel marker detected in CLAUDE.md or .forge/local/state.md."
     echo "  No content was modified. To force a fresh migration, remove the marker line(s) and rerun."
     exit 0
 fi
@@ -58,17 +80,22 @@ fi
 # This guarantees idempotency even when the legacy CONTINUITY.md has no Goal,
 # no Decisions table, or empty Done -- repos that migrate "nothing" still get
 # marked as migrated, so rerun is a no-op (Codex iter-2 P0 fix).
-if [ ! -f ".claude/local/state.md" ]; then
+if [ ! -f "$STATE_FILE" ]; then
     # state.md will be present on -f / --upgrade installs; if standalone --migrate
     # was invoked without first running -f, bail with a clear message.
     # (P3 fix: don't pre-create .claude/local/ before this check -- on the failure
     # path it leaves an empty .claude/local/ directory behind in the user's repo.)
-    echo "x .claude/local/state.md not found." >&2
-    echo "  Run setup -f first to install the state template, then rerun --migrate." >&2
+    echo "x .forge/local/state.md not found." >&2
+    echo "  Run setup -F first to install/translate the canonical state, then rerun --migrate." >&2
     exit 1
 fi
-# Prepend sentinel to state.md (line 1).
-{ echo "$SENTINEL_TODAY"; cat .claude/local/state.md; } > .claude/local/state.md.tmp && mv .claude/local/state.md.tmp .claude/local/state.md
+# Keep the v6 schema marker on line 1; insert the continuity sentinel on line 2.
+if head -1 "$STATE_FILE" | grep -qxF '<!-- forge:state-schema v6 -->'; then
+    { head -1 "$STATE_FILE"; echo "$SENTINEL_TODAY"; tail -n +2 "$STATE_FILE"; } > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+else
+    echo "x canonical state schema marker missing." >&2
+    exit 1
+fi
 
 # If CLAUDE.md exists, prepend sentinel as a comment line on line 1 (matches
 # state.md treatment + AC-10 amendment). Forge dogfood result confirmed line-1
@@ -213,7 +240,7 @@ EOF
     done <<< "$decisions_section"
 fi
 
-# --- (c) Extract volatile sections to .claude/local/state.md ---
+# --- (c) Extract volatile sections to canonical .forge/local/state.md ---
 # state.md presence already verified at the top (sentinel-write block).
 # Done: keep the LAST 3 entries (most recent), not the first.
 # POSIX awk: use [[:space:]] not \s (BSD awk + portability).
@@ -244,9 +271,9 @@ if [ -n "$done_section" ]; then
         in_done && /^### / { in_done=0 }
         in_done { next }
         { print }
-    ' .claude/local/state.md > "$tmp" && mv "$tmp" .claude/local/state.md
+    ' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
     rm -f "$content_file"
-    moved_sections+=("Done (last 3 entries) -> .claude/local/state.md")
+    moved_sections+=("Done (last 3 entries) -> .forge/local/state.md")
 fi
 
 # Now/Next: same idea, replace placeholder content with migrated content.
@@ -274,9 +301,9 @@ for section in Now Next; do
             in_sec && /^### / { in_sec=0; print; next }
             in_sec { next }
             { print }
-        ' .claude/local/state.md > "$tmp" && mv "$tmp" .claude/local/state.md
+        ' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
         rm -f "$content_file"
-        moved_sections+=("$section -> .claude/local/state.md")
+        moved_sections+=("$section -> .forge/local/state.md")
     fi
 done
 
@@ -302,13 +329,17 @@ if [ -f "CLAUDE.md" ] && grep -qE '^@CONTINUITY\.md\b' CLAUDE.md; then
         - Comments or labels that reference CONTINUITY.md as a location
 
       CONTINUITY.md no longer exists -- its content moved to CLAUDE.md
-      (durable), docs/adr/ (decisions), and .claude/local/state.md
+      (durable), docs/adr/ (decisions), and .forge/local/state.md
       (volatile). Remove these references; the 'preserve project-specific
       content' rule does NOT apply to CONTINUITY pointers -- they are
       stale infrastructure references.
 
     (Not in Claude Code? See docs/guides/upgrading.md \"Manual fallback\".)")
 fi
+
+# Bind the exact surviving v5 source to the final canonical state after all
+# sentinel and continuity edits. Full refresh never trusts path coincidence.
+write_translation_receipt || exit 1
 
 # --- (e) Print summary (ASCII-safe characters for AC-4 byte-equivalence with PS) ---
 echo "Migration complete."

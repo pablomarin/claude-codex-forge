@@ -1316,12 +1316,13 @@ start_test "Layer 2 — check-state-updated emits FORGE_GOAL_STUCK_WARNING after
 
 (
     scratch=$(scratch_dir checkstate-stuck)
-    mkdir -p "$scratch/.claude/local" "$scratch/.claude/hooks"
+    mkdir -p "$scratch/.forge/local" "$scratch/.claude/hooks"
     cp "$REPO_ROOT/hooks/build-evidence.sh" "$scratch/.claude/hooks/build-evidence.sh"
     chmod +x "$scratch/.claude/hooks/build-evidence.sh"
 
     # state.md with /forge-goal active (non-empty nonce)
-    cat > "$scratch/.claude/local/state.md" <<'EOF'
+    cat > "$scratch/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -1343,6 +1344,7 @@ start_test "Layer 2 — check-state-updated emits FORGE_GOAL_STUCK_WARNING after
 - [ ] Item 1
 - [ ] Item 2
 EOF
+    printf '6\n' > "$scratch/.forge/version"
 
     # v5.32: fire BOTH Stop hooks per turn — build-evidence first (writes
     # fingerprint side-channel), then check-state-updated (reads it for
@@ -1388,7 +1390,7 @@ start_test "v5.32 — build-evidence reads state.md from stdin.cwd, not its own 
 
 V32A_MAIN=$(scratch_dir v532-main-repo)
 V32A_WORKTREE=$(scratch_dir v532-worktree)
-mkdir -p "$V32A_MAIN/.claude/local" "$V32A_WORKTREE/.claude/local"
+mkdir -p "$V32A_MAIN/.claude/local" "$V32A_WORKTREE/.forge/local"
 
 # Main repo has NO /goal session.
 cat > "$V32A_MAIN/.claude/local/state.md" <<'EOF'
@@ -1400,7 +1402,8 @@ cat > "$V32A_MAIN/.claude/local/state.md" <<'EOF'
 EOF
 
 # Worktree has an ACTIVE /goal session with a recognizable nonce.
-cat > "$V32A_WORKTREE/.claude/local/state.md" <<'EOF'
+cat > "$V32A_WORKTREE/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -1421,6 +1424,7 @@ cat > "$V32A_WORKTREE/.claude/local/state.md" <<'EOF'
 
 - [ ] Item 1
 EOF
+printf '6\n' > "$V32A_WORKTREE/.forge/version"
 
 # Init both as git repos (build-evidence runs git commands too).
 ( cd "$V32A_MAIN" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
@@ -1454,7 +1458,7 @@ start_test "v5.32 — check-state-updated stuck-detection honors stdin.cwd"
 
 V32B_MAIN=$(scratch_dir v532-main-repo-b)
 V32B_WORKTREE=$(scratch_dir v532-worktree-b)
-mkdir -p "$V32B_MAIN/.claude/local" "$V32B_WORKTREE/.claude/local"
+mkdir -p "$V32B_MAIN/.claude/local" "$V32B_WORKTREE/.forge/local"
 
 # Main has no /goal session.
 cat > "$V32B_MAIN/.claude/local/state.md" <<'EOF'
@@ -1465,7 +1469,8 @@ cat > "$V32B_MAIN/.claude/local/state.md" <<'EOF'
 EOF
 
 # Worktree has active session.
-cat > "$V32B_WORKTREE/.claude/local/state.md" <<'EOF'
+cat > "$V32B_WORKTREE/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -1485,6 +1490,7 @@ cat > "$V32B_WORKTREE/.claude/local/state.md" <<'EOF'
 ### Checklist
 - [ ] X
 EOF
+printf '6\n' > "$V32B_WORKTREE/.forge/version"
 
 ( cd "$V32B_MAIN" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
 ( cd "$V32B_WORKTREE" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
@@ -1493,16 +1499,16 @@ INPUT_V32B=$(printf '{"stop_hook_active":true,"cwd":"%s"}' "$V32B_WORKTREE")
 
 # Fire 5 cycles: build-evidence + check-state-updated, both from CWD=main
 # with stdin.cwd=worktree. Stuck-detection should accumulate inside the
-# WORKTREE's .claude/local (not the main repo's).
+# WORKTREE's .forge/local (not the main repo's).
 for i in 1 2 3 4 5; do
     ( cd "$V32B_MAIN" && echo "$INPUT_V32B" | bash "$REPO_ROOT/hooks/build-evidence.sh" > /dev/null 2>&1 )
     ( cd "$V32B_MAIN" && echo "$INPUT_V32B" | bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$V32B_MAIN/.out.$i" 2>&1 )
 done
 
 # Counter file MUST exist inside the worktree, NOT inside main.
-assert_file_exists "$V32B_WORKTREE/.claude/local/forge-goal-stuck-count" \
+assert_file_exists "$V32B_WORKTREE/.forge/local/forge-goal-stuck-count" \
     "stuck-counter file written to worktree (stdin.cwd target)"
-assert_file_missing "$V32B_MAIN/.claude/local/forge-goal-stuck-count" \
+assert_file_missing "$V32B_MAIN/.forge/local/forge-goal-stuck-count" \
     "stuck-counter file NOT written to main repo (proves cwd-redirect)"
 assert_contains "$V32B_MAIN/.out.5" "FORGE_GOAL_STUCK_WARNING" \
     "stuck-warning fires on turn 5 even with stdin.cwd redirect"
@@ -1520,9 +1526,10 @@ assert_contains "$V32B_MAIN/.out.5" "FORGE_GOAL_STUCK_WARNING" \
 start_test "v5.32 — subdirectory stdin.cwd normalizes to repo root (P2-1)"
 
 V32C=$(scratch_dir v532-subdir-cwd)
-mkdir -p "$V32C/.claude/local" "$V32C/apps/web/src"
+mkdir -p "$V32C/.forge/local" "$V32C/apps/web/src"
 
-cat > "$V32C/.claude/local/state.md" <<'EOF'
+cat > "$V32C/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -1542,6 +1549,7 @@ cat > "$V32C/.claude/local/state.md" <<'EOF'
 ### Checklist
 - [ ] X
 EOF
+printf '6\n' > "$V32C/.forge/version"
 
 ( cd "$V32C" && git init -q && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
 

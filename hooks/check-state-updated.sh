@@ -68,6 +68,18 @@ elif TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$TOPLEVEL" ]
     cd "$TOPLEVEL" 2>/dev/null || true
 fi
 
+HOOK_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)
+STATE_HELPER="$HOOK_DIR/lib/state-path.sh"
+[ -f "$STATE_HELPER" ] || STATE_HELPER="hooks/lib/state-path.sh"
+STATE_MD=""
+if [ -f "$STATE_HELPER" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_HELPER"
+    STATE_MD=$(forge_state_path "$(pwd)" read 2>/dev/null || true)
+fi
+STATE_LOCAL_DIR=".forge/local"
+case "$STATE_MD" in */.claude/local/state.md) STATE_LOCAL_DIR=".claude/local" ;; esac
+
 # Note: build-evidence is no longer invoked inline. It runs as its own Stop
 # hook entry (registered in settings.template.json) BEFORE this one — so its
 # STDERR output is rendered as informational hook output rather than being
@@ -88,9 +100,9 @@ fi
 # format "<count>|<fingerprint_sha256>".
 # ---------------------------------------------------------------------------
 _forge_goal_stuck_check() {
-    local state_md=".claude/local/state.md"
-    local fp_file=".claude/local/forge-goal-last-fingerprint"
-    local counter_file=".claude/local/forge-goal-stuck-count"
+    local state_md="$STATE_MD"
+    local fp_file="$STATE_LOCAL_DIR/forge-goal-last-fingerprint"
+    local counter_file="$STATE_LOCAL_DIR/forge-goal-stuck-count"
 
     # Only proceed if /forge-goal is active: state.md must have a non-empty
     # nonce in the ## /goal session table. Best-effort: if missing, skip silently.
@@ -132,7 +144,7 @@ _forge_goal_stuck_check() {
     fi
 
     # Persist updated counter.
-    mkdir -p ".claude/local" 2>/dev/null || true
+    mkdir -p "$STATE_LOCAL_DIR" 2>/dev/null || true
     printf '%s|%s\n' "$new_count" "$current_fp" > "$counter_file" 2>/dev/null || true
 
     # Emit warning if threshold reached (>= 5 consecutive identical fingerprints).
@@ -184,8 +196,8 @@ CHANGELOG_IN_BRANCH=$(git diff --name-only "$BRANCH_BASE" HEAD 2>/dev/null | gre
 # State file is gitignored. Emit breadcrumb only when a legacy CONTINUITY.md
 # is present (signals user upgraded but hasn't migrated yet) — avoids spamming
 # every Stop event in repos that never had CONTINUITY.md.
-if [ ! -f ".claude/local/state.md" ] && [ -f "CONTINUITY.md" ]; then
-    echo "ℹ check-state-updated: .claude/local/state.md not found, but CONTINUITY.md exists." >&2
+if [ ! -f "$STATE_MD" ] && [ -f "CONTINUITY.md" ]; then
+    echo "ℹ check-state-updated: Forge state.md not found, but CONTINUITY.md exists." >&2
     echo "  Run setup --migrate to move your content to the new structure." >&2
     # Continue to CHANGELOG check — gates are independent.
 fi
@@ -199,8 +211,8 @@ fi
 # and `xargs` would join them with spaces — yielding garbage like
 # "WORKFLOW: none /lifecycle | Phase: n/a shipping". Scope first, then match.
 WORKFLOW_REMINDER=""
-if [ -f ".claude/local/state.md" ]; then
-    WORKFLOW_BLOCK=$(awk '/^## Workflow$/{flag=1;next} flag && /^## /{flag=0} flag' .claude/local/state.md 2>/dev/null)
+if [ -f "$STATE_MD" ]; then
+    WORKFLOW_BLOCK=$(tr -d '\r' < "$STATE_MD" | awk '/^## Workflow$/{flag=1;next} flag && /^## /{flag=0} flag' 2>/dev/null)
     WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -E '\|\s*Command\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
     if [ -n "$WORKFLOW_CMD" ] && [ "$WORKFLOW_CMD" != "none" ] && [ "$WORKFLOW_CMD" != "—" ] && [ "$WORKFLOW_CMD" != "-" ]; then
         WORKFLOW_PHASE=$(echo "$WORKFLOW_BLOCK" | grep -E '\|\s*Phase\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)

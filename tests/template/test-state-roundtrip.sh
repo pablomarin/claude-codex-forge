@@ -19,6 +19,52 @@ source "$REPO_ROOT/tests/template/lib.sh"
 
 init_counters
 
+start_test "v5 state translator writes canonical v6 state and invalidates receipts"
+SM="$(scratch_dir state-migration)"
+mkdir -p "$SM/.claude/local"
+write_state_source="$SM/.claude/local/state.md"
+{
+    printf '# Project State\n\n## Workflow\n\nCHECKPOINT_SURVIVES\n\n### Checklist\n\n'
+    printf '%s\n' '- [x] Code review iteration 2 — codex clean — head=`abcdef0123456789abcdef0123456789abcdef01`'
+    printf '%s\n\n' '- Narrative review iteration remains developer context.'
+    printf '## /goal session\n\nDeveloper narrative about a prior goal must survive.\n\n'
+    printf '| Field | Value |\n| --- | --- |\n'
+    printf '| nonce | 00000000-0000-4000-8000-000000000001 |\n'
+    printf '| workflow_command | /new-feature receipt-test |\n'
+    printf '| issued_at | 2026-08-27T00:00:00Z |\n\n'
+    printf '## PR authorization\n\n'
+    printf '%s\n' '- [x] PR creation authorized — `2026-08-27T00:00:00Z` — nonce=`00000000-0000-4000-8000-000000000001` — head=`abcdef0123456789abcdef0123456789abcdef01`'
+    printf '%s\n\n' '- Narrative PR authorization wording is not a receipt.'
+    printf '## State\n\n### Now\n\n'
+    printf '%s\n\n' '- Preserve the code review loop and plan review iteration phrases in narrative.'
+    printf '## Update Rules\n\n'
+    printf '%s\n' '- `- [x] Code review iteration <N> — codex clean — head=`<sha>`` is documentation.'
+} > "$write_state_source"
+(cd "$SM" && "$REPO_ROOT/scripts/migrate-state-v5-v6.sh") > "$SM/migrate.log" 2>&1
+assert_equals "$?" "0" "state migration helper succeeds"
+assert_contains "$SM/.forge/local/state.md" '<!-- forge:state-schema v6 -->' \
+    "canonical state is schema-versioned"
+assert_contains "$SM/.forge/local/state.md" 'CHECKPOINT_SURVIVES' \
+    "checkpoint narrative survives state translation"
+assert_not_contains "$SM/.forge/local/state.md" 'old-goal' \
+    "legacy goal receipt is invalidated"
+assert_not_contains "$SM/.forge/local/state.md" '[x] PR creation authorized' \
+    "legacy authorization receipt is invalidated"
+assert_not_contains "$SM/.forge/local/state.md" '00000000-0000-4000-8000-000000000001' \
+    "structurally valid legacy goal receipt rows are invalidated"
+assert_not_contains "$SM/.forge/local/state.md" 'Code review iteration 2 — codex clean' \
+    "structurally valid checklist review receipt is invalidated"
+assert_contains "$SM/.forge/local/state.md" 'Narrative review iteration remains developer context.' \
+    "review-like checklist narrative is preserved verbatim"
+assert_contains "$SM/.forge/local/state.md" 'Developer narrative about a prior goal must survive.' \
+    "goal-section narrative is preserved verbatim"
+assert_contains "$SM/.forge/local/state.md" 'Narrative PR authorization wording is not a receipt.' \
+    "authorization-section narrative is preserved verbatim"
+assert_contains "$SM/.forge/local/state.md" 'Preserve the code review loop and plan review iteration phrases in narrative.' \
+    "state narrative containing review phrases is preserved verbatim"
+assert_contains "$SM/.forge/local/state.md" 'Code review iteration <N>' \
+    "instructional review examples outside the checklist survive translation"
+
 NF="$REPO_ROOT/commands/new-feature.md"
 FBR="$REPO_ROOT/commands/finish-branch.md"
 

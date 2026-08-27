@@ -57,7 +57,19 @@ elif TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$TOPLEVEL" ]
     cd "$TOPLEVEL" 2>/dev/null || true
 fi
 
-STATE_MD=".claude/local/state.md"
+HOOK_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)
+STATE_HELPER="$HOOK_DIR/lib/state-path.sh"
+[ -f "$STATE_HELPER" ] || STATE_HELPER="hooks/lib/state-path.sh"
+STATE_MD=""
+if [ -f "$STATE_HELPER" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_HELPER"
+    STATE_MD=$(forge_state_path "$(pwd)" read 2>/dev/null || true)
+fi
+STATE_IS_V6=false
+case "$STATE_MD" in */.forge/local/state.md) STATE_IS_V6=true ;; esac
+STATE_LOCAL_DIR=".forge/local"
+case "$STATE_MD" in */.claude/local/state.md) STATE_LOCAL_DIR=".claude/local" ;; esac
 
 # Convergence-breaker helper (ADR 0009) — dual-path: installed location first,
 # Forge-internal source fallback. Absence is fail-open (see compute_breaker_fields).
@@ -157,7 +169,7 @@ fi
 parse_goal_session() {
     # Echo "nonce|workflow_command" or empty if section missing.
     # Section format: Markdown table under `## /goal session` heading.
-    [ -f "$STATE_MD" ] || return 0
+    [ "$STATE_IS_V6" = true ] && [ -f "$STATE_MD" ] || return 0
 
     # CRLF normalize FIRST, then awk-scope (Codex P1.7 fix from plan-review).
     local block
@@ -210,7 +222,7 @@ compute_reviewer_gate() {
     # Args: $1 = current HEAD sha
     # Output: "clean_same_iteration|matched_iteration|matched_head"
     local head_sha="$1"
-    [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
+    [ "$STATE_IS_V6" = true ] && [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
     [ -z "$head_sha" ] && { echo "false||"; return 0; }
 
     # Single awk pass: scope to ## Workflow / ### Checklist, extract reviewer rows
@@ -360,7 +372,7 @@ parse_pr_authorization() {
     # Return authorized=true ONLY if extracted nonce matches GOAL_NONCE AND
     # extracted head matches HEAD_SHA. Otherwise authorized=false (but emit values for debugging).
 
-    [ -f "$STATE_MD" ] || { echo "false|||"; return 0; }
+    [ "$STATE_IS_V6" = true ] && [ -f "$STATE_MD" ] || { echo "false|||"; return 0; }
     [ -z "$HEAD_SHA" ] && { echo "false|||"; return 0; }
     [ -z "$GOAL_NONCE" ] && { echo "false|||"; return 0; }
 
@@ -534,9 +546,9 @@ rm -f "$FP_TMP"
 # the stuck-detection logic in check-state-updated.sh can read it without
 # re-running build-evidence or parsing STDERR. One line — just the SHA256 value.
 # Best-effort: failure here must not abort the evidence emission.
-FINGERPRINT_SIDECHANNEL=".claude/local/forge-goal-last-fingerprint"
+FINGERPRINT_SIDECHANNEL="$STATE_LOCAL_DIR/forge-goal-last-fingerprint"
 if [ -n "$PROGRESS_FP" ]; then
-    mkdir -p ".claude/local" 2>/dev/null || true
+    mkdir -p "$STATE_LOCAL_DIR" 2>/dev/null || true
     printf '%s\n' "$PROGRESS_FP" > "$FINGERPRINT_SIDECHANNEL" 2>/dev/null || true
 fi
 

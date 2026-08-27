@@ -17,6 +17,8 @@ param(
     [Alias("f")]
     [switch]$Force,
 
+    [Alias("R")][switch]$FullRefresh,
+
     [Alias("u")]
     [switch]$Upgrade,
 
@@ -31,11 +33,16 @@ param(
     [string]$PlaywrightDir
 )
 
-# Upgrade implies force for hooks/commands/rules
-if ($Upgrade) { $Force = $true }
-
 # Script directory (where templates live)
 $ScriptDir = $PSScriptRoot
+
+if ($FullRefresh -and ($Force -or $Upgrade -or $Migrate -or $WithPlaywright)) {
+    [Console]::Error.WriteLine("ERROR: FullRefresh and Force/Upgrade/Migrate/WithPlaywright cannot be combined.")
+    exit 1
+}
+
+# Upgrade implies force for hooks/commands/rules
+if ($Upgrade) { $Force = $true }
 
 # Colors function
 function Write-Color {
@@ -57,6 +64,7 @@ function Show-Usage {
     Write-Host "  -p, -Project NAME   Project name (default: directory name)"
     Write-Host "  -t, -Tech STACK     Tech stack: python, typescript, fullstack (default: fullstack)"
     Write-Host "  -f, -Force          Overwrite existing files"
+    Write-Host "  -R, -FullRefresh    Authoritative transactional v5 -> v6 harness refresh"
     Write-Host "  -Migrate            Migrate legacy CONTINUITY.md content to the new structure"
     Write-Host "  -g, -Global         Set up global memory system (~/.claude/)"
     Write-Host "  -w, -WithPlaywright Install Playwright framework templates (requires -Tech fullstack or typescript)"
@@ -66,6 +74,7 @@ function Show-Usage {
     Write-Host "  .\setup.ps1 -p `"My Project`"          # Custom project name"
     Write-Host "  .\setup.ps1 -t python                # Python-only project"
     Write-Host "  .\setup.ps1 -f                       # Force overwrite existing files"
+    Write-Host "  .\setup.ps1 -R                       # Ownership-aware full harness refresh"
     Write-Host "  .\setup.ps1 -Migrate                 # Migrate CONTINUITY.md to .claude/local/state.md + ADRs"
     Write-Host "  .\setup.ps1 -Global                  # Set up global memory (run once per machine)"
     Write-Host "  .\setup.ps1 -Global -f               # Force overwrite global settings"
@@ -76,6 +85,17 @@ function Show-Usage {
 if ($Help) {
     Show-Usage
     exit 0
+}
+
+if ($FullRefresh) {
+    $refreshHelper = Join-Path (Join-Path $ScriptDir "scripts") "full-refresh.ps1"
+    if (-not (Test-Path -LiteralPath $refreshHelper -PathType Leaf)) {
+        [Console]::Error.WriteLine("BLOCKED: full-refresh helper not found: $refreshHelper")
+        exit 1
+    }
+    if ($Global) { & $refreshHelper -Target $HOME -Scope global }
+    else { & $refreshHelper -Target (Get-Location).Path -Scope project }
+    exit $LASTEXITCODE
 }
 
 # --- Migration dispatch (PR #2 / continuity-split) -------------------------
@@ -123,7 +143,12 @@ function Test-V6PreflightNoLegacy {
             $family = $tail.Split('/')[0]
             if (-not (Test-Path (Join-Path $Root ".claude\$family"))) { continue }
         } else { continue }
-        throw "BLOCKED: full refresh is not available in this checkpoint"
+        if ($Upgrade) {
+            if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness requires authoritative refresh. Run: & '$ScriptDir\setup.ps1' -Global -R" }
+            throw "BLOCKED: legacy Forge harness requires authoritative refresh. Run: & '$ScriptDir\setup.ps1' -R"
+        }
+        if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness detected. Run: & '$ScriptDir\setup.ps1' -Global -R" }
+        throw "BLOCKED: legacy Forge harness detected. Run: & '$ScriptDir\setup.ps1' -R"
     }
 }
 

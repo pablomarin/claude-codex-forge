@@ -1246,7 +1246,9 @@ for mode in default force upgrade; do
     esac
     rc=$?
     [ "$rc" -ne 0 ] && pass "$mode v5 preflight exits nonzero" || fail "$mode v5 preflight unexpectedly succeeded"
-    assert_contains "$legacy/setup.log" 'BLOCKED: full refresh is not available in this checkpoint' "$mode prints truthful checkpoint remediation"
+    assert_contains "$legacy/setup.log" 'authoritative refresh' "$mode prints executable full-refresh remediation"
+    assert_contains "$legacy/setup.log" 'setup.sh' "$mode remediation identifies the Forge installer"
+    assert_contains "$legacy/setup.log" '-F' "$mode remediation uses authoritative -F"
     assert_hash_equals "$legacy/.claude/settings.json" "$before" "$mode leaves v5 settings byte-preserved"
     assert_file_missing "$legacy/.forge/version" "$mode writes no v6 version beside v5"
 done
@@ -1290,7 +1292,9 @@ for mode in default force upgrade; do
     esac
     rc=$?
     [ "$rc" -ne 0 ] && pass "$mode global v5 preflight exits nonzero" || fail "$mode global v5 preflight unexpectedly succeeded"
-    assert_contains "$global_legacy/setup.log" 'BLOCKED: full refresh is not available in this checkpoint' "$mode global mode prints checkpoint blocker"
+    assert_contains "$global_legacy/setup.log" 'authoritative refresh' "$mode global mode prints full-refresh remediation"
+    assert_contains "$global_legacy/setup.log" '--global' "$mode global remediation preserves global scope"
+    assert_contains "$global_legacy/setup.log" '-F' "$mode global remediation uses authoritative -F"
     assert_hash_equals "$global_legacy/.claude/settings.json" "$global_before" "$mode global mode preserves v5 settings bytes"
     assert_file_missing "$global_legacy/.forge/version" "$mode global mode writes no v6 surface"
 done
@@ -1345,7 +1349,8 @@ for surface in skill agent; do
         esac
         rc=$?
         [ "$rc" -ne 0 ] && pass "$surface-only $mode preflight exits nonzero" || fail "$surface-only $mode preflight materialized v6 beside legacy policy"
-        assert_contains "$legacy/setup.log" 'BLOCKED: full refresh is not available in this checkpoint' "$surface-only $mode prints checkpoint blocker"
+        assert_contains "$legacy/setup.log" 'authoritative refresh' "$surface-only $mode prints full-refresh remediation"
+        assert_contains "$legacy/setup.log" '-F' "$surface-only $mode remediation is executable"
         after=$(find "$legacy/.claude" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)
         assert_equals "$after" "$before" "$surface-only $mode preflight performs no write"
         assert_file_missing "$legacy/.forge/version" "$surface-only $mode writes no v6 version"

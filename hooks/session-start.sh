@@ -17,6 +17,23 @@ fi
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 CONTEXT="Current branch: $BRANCH"
 
+# State resume is engine-neutral: both host adapters point at the same canonical
+# state. A v5 fallback is accepted only before migration by state-path.sh.
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+STATE_HELPER="$HOOK_DIR/lib/state-path.sh"
+[ -f "$STATE_HELPER" ] || STATE_HELPER="hooks/lib/state-path.sh"
+if [ -f "$STATE_HELPER" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_HELPER"
+    STATE_MD=$(forge_state_path "${CLAUDE_PROJECT_DIR:-.}" read 2>/dev/null || true)
+    if [ -f "$STATE_MD" ]; then
+        WORKFLOW_BLOCK=$(tr -d '\r' < "$STATE_MD" | awk '/^## Workflow$/{f=1;next} f && /^## /{f=0} f')
+        RESUME_CMD=$(printf '%s\n' "$WORKFLOW_BLOCK" | grep -iE '\|[[:space:]]*Command[[:space:]]*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
+        RESUME_PHASE=$(printf '%s\n' "$WORKFLOW_BLOCK" | grep -iE '\|[[:space:]]*Phase[[:space:]]*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
+        case "$RESUME_CMD" in ""|none|-|—) ;; *) CONTEXT="$CONTEXT (Forge resume: $RESUME_CMD; phase: $RESUME_PHASE)" ;; esac
+    fi
+fi
+
 # Fetch + drift check ONLY on startup or resume (not clear/compact).
 if [[ "$SOURCE" == "startup" || "$SOURCE" == "resume" ]]; then
     HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"

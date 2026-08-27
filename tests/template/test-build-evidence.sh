@@ -13,6 +13,21 @@ source "$REPO_ROOT/tests/template/lib.sh"
 
 init_counters
 
+# Older fixtures intentionally keep their historical `.claude/local` spelling.
+# Promote a byte-copy to the v6 canonical path before invoking the real hook so
+# receipt assertions never accidentally certify legacy evidence.
+run_evidence() {
+    if [ -f .claude/local/state.md ] && [ ! -f .forge/local/state.md ]; then
+        mkdir -p .forge/local
+        {
+            printf '<!-- forge:state-schema v6 -->\n'
+            cat .claude/local/state.md
+        } > .forge/local/state.md
+        printf '6\n' > .forge/version
+    fi
+    bash "$REPO_ROOT/hooks/build-evidence.sh"
+}
+
 start_test "build-evidence.sh emits markers + valid JSON on empty state.md"
 
 scratch=$(scratch_dir bevidence)
@@ -21,7 +36,7 @@ cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
    "$scratch/.claude/local/state.md"
 
 OUT="$scratch/.out"
-( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+( cd "$scratch" && run_evidence ) >"$OUT" 2>&1
 EXIT=$?
 
 assert_equals "$EXIT" "0" "exit code is 0"
@@ -38,7 +53,7 @@ cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/with-goal-session
    "$scratch/.claude/local/state.md"
 
 OUT="$scratch/.out"
-( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+( cd "$scratch" && run_evidence ) >"$OUT" 2>&1
 
 assert_contains "$OUT" '"session_nonce":"00000000-0000-0000-0000-000000000001"' \
     "session_nonce extracted from table"
@@ -53,7 +68,7 @@ cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
    "$scratch/.claude/local/state.md"
 
 OUT="$scratch/.out"
-( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+( cd "$scratch" && run_evidence ) >"$OUT" 2>&1
 
 assert_contains "$OUT" '"session_nonce":null' "session_nonce null when section missing"
 assert_contains "$OUT" '"workflow_command":null' "workflow_command null when section missing"
@@ -66,7 +81,7 @@ cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/mid-workflow.md" 
    "$scratch/.claude/local/state.md"
 
 OUT="$scratch/.out"
-( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+( cd "$scratch" && run_evidence ) >"$OUT" 2>&1
 
 assert_contains "$OUT" '"phase":"1 — Research"' "phase parsed from Workflow table"
 assert_contains "$OUT" '"next_step":"Run research-first"' "next_step parsed from Workflow table"
@@ -86,7 +101,7 @@ sed 's/$/\r/' \
     > "$scratch/.claude/local/state.md"
 
 OUT="$scratch/.out"
-( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+( cd "$scratch" && run_evidence ) >"$OUT" 2>&1
 
 # Without CRLF normalization, ## /goal session anchor fails and session_nonce stays null.
 # With the fix, parsing succeeds even on CRLF input.
@@ -112,7 +127,7 @@ OUT="$scratch/.out"
     git add a.txt
     git commit -q -m "init"
     EXPECTED_HEAD=$(git rev-parse HEAD)
-    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+    run_evidence >"$OUT" 2>&1
     echo "$EXPECTED_HEAD" > "$scratch/.expected_head"
     exit $?
 )
@@ -144,7 +159,7 @@ OUT="$scratch/.out"
     git add a
     git commit -qm "init"
     # Prepend fake-bin so the stub gh takes priority over the real one
-    PATH="$scratch/fake-bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+    PATH="$scratch/fake-bin:$PATH" run_evidence >"$OUT" 2>&1
 )
 EXIT=$?
 
@@ -193,7 +208,7 @@ BRANCH_OFF_TS_FILE="$scratch/.branch_off_ts"
         sleep 2 && touch "$REPORT"  # crude but reliable fallback
     fi
 
-    PATH="$scratch/fake-bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" >"$OUT" 2>&1
+    PATH="$scratch/fake-bin:$PATH" run_evidence >"$OUT" 2>&1
 )
 EXIT=$?
 
@@ -225,7 +240,7 @@ mkdir -p "$scratch/.claude/local"
         "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
         > .claude/local/state.md
 
-    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out" 2>&1
+    run_evidence >"$scratch/.out" 2>&1
 )
 
 OUT="$scratch/.out"
@@ -253,7 +268,7 @@ mkdir -p "$scratch/.claude/local"
     cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
        .claude/local/state.md
 
-    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out" 2>&1
+    run_evidence >"$scratch/.out" 2>&1
 )
 
 OUT="$scratch/.out"
@@ -326,7 +341,7 @@ STUB
         "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/all-green.md" \
         > .claude/local/state.md
 
-    PATH="$scratch/bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out" 2>&1
+    PATH="$scratch/bin:$PATH" run_evidence >"$scratch/.out" 2>&1
 )
 
 OUT="$scratch/.out"
@@ -351,7 +366,7 @@ mkdir -p "$scratch/.claude/local"
     cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/pr-authorized.md" \
        .claude/local/state.md
 
-    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out" 2>&1
+    run_evidence >"$scratch/.out" 2>&1
 )
 
 OUT="$scratch/.out"
@@ -376,8 +391,8 @@ mkdir -p "$scratch/.claude/local"
        .claude/local/state.md
 
     # Run twice on identical state
-    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out1" 2>&1
-    bash "$REPO_ROOT/hooks/build-evidence.sh" >"$scratch/.out2" 2>&1
+    run_evidence >"$scratch/.out1" 2>&1
+    run_evidence >"$scratch/.out2" 2>&1
 )
 
 # Assert fingerprint is 64-char SHA256 (strict pattern check)
@@ -403,7 +418,7 @@ sed "s/__PLAN_SHA__/$PLAN_SHA/g" \
     > "$scratch/.claude/local/state.md"
 
 OUT="$scratch/.out"
-( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+( cd "$scratch" && run_evidence ) >"$OUT" 2>&1
 
 assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":true' \
     "plan_review_gate.clean_same_iteration is true when evidence is fresh"
@@ -421,7 +436,7 @@ cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/plan-review-na.md
    "$scratch/.claude/local/state.md"
 
 OUT="$scratch/.out"
-( cd "$scratch" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$OUT" 2>&1
+( cd "$scratch" && run_evidence ) >"$OUT" 2>&1
 
 assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":false' \
     "plan_review_gate stays false on an N/A escape (no real Codex evidence)"
@@ -486,7 +501,7 @@ STUB
     elif touch -t "$(date -r "$future" +%Y%m%d%H%M.%S 2>/dev/null)" "$r/tests/e2e/reports/r.md" 2>/dev/null; then :
     else sleep 2 && touch "$r/tests/e2e/reports/r.md"; fi
     GATE_OUT="$r/.bev.out"
-    ( cd "$r" && PATH="$r/bin:$PATH" bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$GATE_OUT" 2>&1
+    ( cd "$r" && PATH="$r/bin:$PATH" run_evidence ) >"$GATE_OUT" 2>&1
 }
 
 # bev_breaker_state <repo> <head> <extra>: active ## Workflow whose breaker is
@@ -568,7 +583,7 @@ mkdir -p "$R/.claude/local"
   echo "- [x] Code review iteration 1 — pr-toolkit clean — head=\`${H}\`"
 } > "$R/.claude/local/state.md"
 GATE_OUT="$R/.bev.out"
-( cd "$R" && bash "$REPO_ROOT/hooks/build-evidence.sh" ) >"$GATE_OUT" 2>&1
+( cd "$R" && run_evidence ) >"$GATE_OUT" 2>&1
 assert_contains "$GATE_OUT" '"post_cert_rounds":0' "helper absent → post_cert_rounds 0 (fail-open)"
 assert_contains "$GATE_OUT" '"breaker":"ok"' "helper absent → breaker ok (fail-open)"
 assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":true' "helper absent → legacy pair still computes clean"

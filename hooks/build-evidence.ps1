@@ -54,7 +54,21 @@ if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
     }
 }
 
-$StateMd = ".claude/local/state.md"
+$hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$stateHelper = Join-Path $hookDir "lib\state-path.ps1"
+if (-not (Test-Path -LiteralPath $stateHelper)) {
+    $stateHelper = Join-Path (Get-Location) "hooks\lib\state-path.ps1"
+}
+$StateMd = ""
+if (Test-Path -LiteralPath $stateHelper) {
+    try {
+        . $stateHelper
+        $StateMd = Get-ForgeStatePath -Root (Get-Location).Path -Mode Read
+    } catch { $StateMd = "" }
+}
+$StateIsV6 = (-not [string]::IsNullOrEmpty($StateMd)) -and (($StateMd -replace '\\', '/') -match '/\.forge/local/state\.md$')
+$StateLocalDir = ".forge/local"
+if (($StateMd -replace '\\', '/') -match '/\.claude/local/state\.md$') { $StateLocalDir = ".claude/local" }
 
 # ---------------------------------------------------------------------------
 # Convergence-breaker helper (ADR 0009): resolve it the SAME way the gate does —
@@ -112,6 +126,7 @@ function Read-StateMdLines {
 # ---------------------------------------------------------------------------
 function Parse-GoalSession {
     $result = @{ nonce = ""; workflow_command = "" }
+    if (-not $StateIsV6) { return $result }
     $lines = Read-StateMdLines
     $inSection = $false
     foreach ($line in $lines) {
@@ -176,6 +191,7 @@ function Parse-Workflow {
 function Compute-ReviewerGate {
     param([string]$HeadSha)
     $result = @{ clean = $false; matched_iteration = ""; matched_head = "" }
+    if (-not $StateIsV6) { return $result }
     if ([string]::IsNullOrEmpty($HeadSha)) { return $result }
     if (-not (Test-Path $StateMd)) { return $result }
 
@@ -592,9 +608,9 @@ $ProgressFp = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
 # re-running build-evidence or parsing STDERR. One line — just the SHA256 value.
 # Best-effort: failure must not abort the evidence emission.
 if (-not [string]::IsNullOrEmpty($ProgressFp)) {
-    $sidechannel = ".claude/local/forge-goal-last-fingerprint"
+    $sidechannel = Join-Path $StateLocalDir "forge-goal-last-fingerprint"
     try {
-        $null = New-Item -ItemType Directory -Path ".claude/local" -Force -ErrorAction SilentlyContinue
+        $null = New-Item -ItemType Directory -Path $StateLocalDir -Force -ErrorAction SilentlyContinue
         [System.IO.File]::WriteAllText($sidechannel, $ProgressFp + "`n")
     } catch {
         # Non-blocking: ignore write failures

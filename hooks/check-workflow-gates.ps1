@@ -121,14 +121,25 @@ if ($topLevel) {
     }
 }
 
-# --- Check for active workflow (post PR #2: state file is .claude/local/state.md) ---
-$stateFile = ".claude/local/state.md"
+# --- Resolve canonical v6 state, with pre-migration v5 read compatibility. ---
+$hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$stateHelper = Join-Path $hookDir "lib\state-path.ps1"
+if (-not (Test-Path -LiteralPath $stateHelper)) {
+    $stateHelper = Join-Path (Get-Location) "hooks\lib\state-path.ps1"
+}
+$stateFile = ""
+if (Test-Path -LiteralPath $stateHelper) {
+    try {
+        . $stateHelper
+        $stateFile = Get-ForgeStatePath -Root (Get-Location).Path -Mode Read
+    } catch { $stateFile = "" }
+}
 
 if (-not (Test-Path $stateFile)) {
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Breadcrumb wording byte-equivalent to bash variant for AC-4 parity.
-    [Console]::Error.WriteLine("ℹ check-workflow-gates: $stateFile not found.")
-    [Console]::Error.WriteLine("  If you have a legacy CONTINUITY.md and just upgraded, run setup --migrate")
+    [Console]::Error.WriteLine("ℹ check-workflow-gates: Forge state.md not found.")
+    [Console]::Error.WriteLine("  If you have a legacy CONTINUITY.md, run setup --migrate before setup -R")
     exit 0
 }
 

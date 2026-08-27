@@ -20,6 +20,8 @@ HOOK_SH="$REPO_ROOT/hooks/session-start.sh"
 HOOK_PS="$REPO_ROOT/hooks/session-start.ps1"
 LIB_SH="$REPO_ROOT/hooks/lib/default-branch.sh"
 LIB_PS="$REPO_ROOT/hooks/lib/default-branch.ps1"
+STATE_LIB_SH="$REPO_ROOT/hooks/lib/state-path.sh"
+STATE_LIB_PS="$REPO_ROOT/hooks/lib/state-path.ps1"
 
 # ---------------------------------------------------------------------------
 # Fixture builder: minimal git repo with `main` checked out + bare remote
@@ -72,6 +74,7 @@ prepare_hook_repo() {
     mkdir -p "$repo/.hooks/lib"
     cp "$HOOK_SH" "$repo/.hooks/session-start.sh"
     cp "$LIB_SH" "$repo/.hooks/lib/default-branch.sh"
+    cp "$STATE_LIB_SH" "$repo/.hooks/lib/state-path.sh"
     chmod +x "$repo/.hooks/session-start.sh" "$repo/.hooks/lib/default-branch.sh"
 }
 
@@ -80,6 +83,7 @@ prepare_hook_repo_ps() {
     mkdir -p "$repo/.hooks/lib"
     cp "$HOOK_PS" "$repo/.hooks/session-start.ps1"
     cp "$LIB_PS" "$repo/.hooks/lib/default-branch.ps1"
+    cp "$STATE_LIB_PS" "$repo/.hooks/lib/state-path.ps1"
 }
 
 # Run the bash hook with a synthetic stdin payload, write stdout to a file
@@ -104,6 +108,32 @@ run_session_start_ps() {
         "$source_val" "$repo" | pwsh -NoProfile -File ./.hooks/session-start.ps1) > "$out" 2>"$repo/.session-err"
     echo "$out"
 }
+
+# Canonical state is included in resume context without reading a conflicting
+# legacy receipt surface.
+start_test "source=resume reads canonical v6 workflow when legacy state also exists"
+S_RESUME=$(scratch_dir)
+make_behind_repo "$S_RESUME" 0
+prepare_hook_repo "$S_RESUME/repo"
+mkdir -p "$S_RESUME/repo/.forge/local" "$S_RESUME/repo/.claude/local"
+printf '6\n' > "$S_RESUME/repo/.forge/version"
+cat > "$S_RESUME/repo/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field | Value |
+| Command | /new-feature canonical-resume |
+| Phase | 4 — Implementation |
+| Next step | continue |
+EOF
+cat > "$S_RESUME/repo/.claude/local/state.md" <<'EOF'
+## Workflow
+| Field | Value |
+| Command | /fix-bug stale-legacy |
+| Phase | stale |
+EOF
+OUTFILE=$(run_session_start_sh "$S_RESUME/repo" "resume")
+assert_contains "$OUTFILE" "/new-feature canonical-resume" "resume context reads canonical v6 workflow"
+assert_not_contains "$OUTFILE" "stale-legacy" "resume context never resurrects conflicting v5 state"
 
 # ===========================================================================
 # Test 1: source=clear → no fetch, branch-only context

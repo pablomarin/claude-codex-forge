@@ -59,6 +59,21 @@ if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
     }
 }
 
+$hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$stateHelper = Join-Path $hookDir "lib\state-path.ps1"
+if (-not (Test-Path -LiteralPath $stateHelper)) {
+    $stateHelper = Join-Path (Get-Location) "hooks\lib\state-path.ps1"
+}
+$stateMd = ""
+if (Test-Path -LiteralPath $stateHelper) {
+    try {
+        . $stateHelper
+        $stateMd = Get-ForgeStatePath -Root (Get-Location).Path -Mode Read
+    } catch { $stateMd = "" }
+}
+$stateLocalDir = ".forge/local"
+if (($stateMd -replace '\\', '/') -match '/\.claude/local/state\.md$') { $stateLocalDir = ".claude/local" }
+
 # Note: build-evidence is no longer invoked inline. It runs as its own Stop
 # hook entry (registered in settings.template.json) BEFORE this one — so its
 # STDERR output is rendered as informational hook output rather than being
@@ -79,9 +94,8 @@ if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
 # PS 5.1 compatible: no ??, [Console]::Error.WriteLine for STDERR.
 # ---------------------------------------------------------------------------
 function Invoke-ForgeGoalStuckCheck {
-    $stateMd = ".claude/local/state.md"
-    $fpFile   = ".claude/local/forge-goal-last-fingerprint"
-    $ctrFile  = ".claude/local/forge-goal-stuck-count"
+    $fpFile   = Join-Path $stateLocalDir "forge-goal-last-fingerprint"
+    $ctrFile  = Join-Path $stateLocalDir "forge-goal-stuck-count"
 
     # Only proceed if /forge-goal is active: state.md must have a non-empty
     # nonce in the ## /goal session table.
@@ -136,7 +150,7 @@ function Invoke-ForgeGoalStuckCheck {
 
     # Persist updated counter (WriteAllText to avoid BOM that Set-Content adds).
     try {
-        $null = New-Item -ItemType Directory -Path ".claude/local" -Force -ErrorAction SilentlyContinue
+        $null = New-Item -ItemType Directory -Path $stateLocalDir -Force -ErrorAction SilentlyContinue
         [System.IO.File]::WriteAllText($ctrFile, "$newCount|$currentFp`n")
     } catch {
         # Non-blocking: ignore write failures
@@ -219,8 +233,8 @@ if ($branchChangedOutput) {
 # --- Workflow state tracking ---
 # State file is gitignored. Emit breadcrumb only when legacy CONTINUITY.md is also present
 # (signals user upgraded but hasn't migrated) — avoid spamming every Stop event.
-if (-not (Test-Path ".claude/local/state.md") -and (Test-Path "CONTINUITY.md")) {
-    [Console]::Error.WriteLine("ℹ check-state-updated: .claude/local/state.md not found, but CONTINUITY.md exists.")
+if ((-not $stateMd -or -not (Test-Path $stateMd)) -and (Test-Path "CONTINUITY.md")) {
+    [Console]::Error.WriteLine("ℹ check-state-updated: Forge state.md not found, but CONTINUITY.md exists.")
     [Console]::Error.WriteLine("  Run setup --migrate to move your content to the new structure.")
     # Continue to CHANGELOG check — gates are independent.
 }
@@ -234,8 +248,8 @@ if (-not (Test-Path ".claude/local/state.md") -and (Test-Path "CONTINUITY.md")) 
 # of them; even with `Select-Object -First 1` the FIRST hit can be the stray if
 # it appears before the canonical scaffold. Scope first, then match.
 $workflowReminder = ""
-if (Test-Path ".claude/local/state.md") {
-    $stateContent = Get-Content ".claude/local/state.md" -Raw -ErrorAction SilentlyContinue
+if ($stateMd -and (Test-Path $stateMd)) {
+    $stateContent = Get-Content $stateMd -Raw -ErrorAction SilentlyContinue
     if (-not [string]::IsNullOrEmpty($stateContent)) {
         # Extract just the `## Workflow` block (between `## Workflow` and the next `## ` heading).
         $workflowBlockLines = @()

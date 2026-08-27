@@ -27,6 +27,7 @@ usage() {
     echo "  -p, --project NAME  Project name (default: directory name)"
     echo "  -t, --tech STACK    Tech stack: python, typescript, fullstack (default: fullstack)"
     echo "  -f, --force         Overwrite existing files (destructive)"
+    echo "  -F, --full-refresh  Authoritative transactional v5 -> v6 harness refresh"
     echo "  -u, --upgrade       Smart upgrade: merge new hooks/permissions into existing settings"
     echo "      --migrate       Migrate legacy CONTINUITY.md content to the new structure"
     echo "  -g, --global        Set up global memory system (~/.claude/)"
@@ -39,6 +40,7 @@ usage() {
     echo "  $0 -p \"My Project\"          # Custom project name"
     echo "  $0 -t python                # Python-only project"
     echo "  $0 -f                       # Force overwrite existing files"
+    echo "  $0 -F                       # Ownership-aware full harness refresh"
     echo "  $0 --upgrade                # Upgrade: add new hooks/rules, merge settings"
     echo "  $0 --migrate                # Migrate CONTINUITY.md to .claude/local/state.md + ADRs"
     echo "  $0 --global                 # Set up global memory (run once per machine)"
@@ -50,6 +52,7 @@ usage() {
 PROJECT_NAME=""
 TECH_STACK="fullstack"
 FORCE=false
+FULL_REFRESH=false
 UPGRADE=false
 MIGRATE=false
 GLOBAL=false
@@ -71,6 +74,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -f|--force)
             FORCE=true
+            shift
+            ;;
+        -F|--full-refresh)
+            FULL_REFRESH=true
             shift
             ;;
         -u|--upgrade)
@@ -101,6 +108,24 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [ "$FULL_REFRESH" = true ] && { [ "$FORCE" = true ] || [ "$UPGRADE" = true ] || [ "$MIGRATE" = true ] || [ "$WITH_PLAYWRIGHT" = true ]; }; then
+    echo -e "${RED}ERROR: --full-refresh cannot be combined with --force, --upgrade, --migrate, or --with-playwright.${NC}" >&2
+    exit 1
+fi
+
+# Full refresh is a separate transaction. It exits before ordinary setup can
+# stamp, merge, or create any host surface.
+if [ "$FULL_REFRESH" = true ]; then
+    refresh_helper="$SCRIPT_DIR/scripts/full-refresh.sh"
+    [ -f "$refresh_helper" ] || { echo "BLOCKED: full-refresh helper not found: $refresh_helper" >&2; exit 1; }
+    if [ "$GLOBAL" = true ]; then
+        bash "$refresh_helper" --target "${HOME:?HOME is required for global full refresh}" --scope global
+    else
+        bash "$refresh_helper" --target "$(pwd -P)" --scope project
+    fi
+    exit $?
+fi
 
 # --- Migration dispatch (PR #2 / continuity-split) -------------------------
 # Migration runs as a SEPARATE script for review hygiene. The logic lives at
@@ -156,7 +181,19 @@ v6_preflight_no_legacy() {
                 ;;
             *) continue ;;
         esac
-        echo "BLOCKED: full refresh is not available in this checkpoint" >&2
+        if [ "$UPGRADE" = true ]; then
+            if [ "$scope" = global ]; then
+                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Run: '$SCRIPT_DIR/setup.sh' --global -F" >&2
+            else
+                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Run: '$SCRIPT_DIR/setup.sh' -F" >&2
+            fi
+        else
+            if [ "$scope" = global ]; then
+                echo "BLOCKED: legacy Forge harness detected. Run the explicit authoritative refresh: '$SCRIPT_DIR/setup.sh' --global -F" >&2
+            else
+                echo "BLOCKED: legacy Forge harness detected. Run the explicit authoritative refresh: '$SCRIPT_DIR/setup.sh' -F" >&2
+            fi
+        fi
         return 1
     done < "$manifest"
 }
