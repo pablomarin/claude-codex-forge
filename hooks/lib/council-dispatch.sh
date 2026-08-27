@@ -58,8 +58,18 @@ fi
 
 qhash=$(hash_stream < "$question_file")
 workroot=$(git rev-parse --show-toplevel 2>/dev/null) || die 'Git worktree required'
+workroot=$(cd "$workroot" && pwd -P) || die 'cannot resolve Git worktree'
 review_root="$workroot/.forge/local/reviews/council-$qhash"
-mkdir -p "$review_root" || die 'cannot create council receipt storage'
+cursor="$workroot"
+for part in .forge local reviews "council-$qhash"; do
+  cursor="$cursor/$part"
+  if [ -e "$cursor" ] || [ -L "$cursor" ]; then
+    [ -d "$cursor" ] && [ ! -L "$cursor" ] || die 'council receipt storage ancestors must be no-follow directories'
+  else
+    mkdir "$cursor" || die 'cannot create council receipt storage'
+  fi
+done
+[ "$(cd "$review_root" && pwd -P)" = "$review_root" ] || die 'council receipt storage ancestor is linked'
 
 preflight_other() {
   # A known absent other engine must avoid launching any partial mixed council.

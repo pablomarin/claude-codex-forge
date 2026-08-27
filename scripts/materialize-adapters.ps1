@@ -263,10 +263,15 @@ function Merge-CodexHookEntries {
         foreach ($entry in $event.Value) {
             $hook = [string]$entry.command[1]
             if ($hook.EndsWith(".sh")) { $hook = $hook.Substring(0, $hook.Length - 3) + ".ps1" }
-            $entry.command = @(
-                "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                ".forge/hooks/lib/codex-worktree-dispatch.ps1", $hook
-            )
+            if ([string]$entry.forgeManagedId -eq 'host-context') {
+                $entry.command = @("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".forge/hooks/lib/host-context.ps1", "-Mode", "hook", "-Host", "codex")
+            }
+            else {
+                $entry.command = @(
+                    "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                    ".forge/hooks/lib/codex-worktree-dispatch.ps1", $hook
+                )
+            }
         }
     }
     $temporary = Join-Path ([IO.Path]::GetTempPath()) ("forge-codex-hooks-" + [Guid]::NewGuid().ToString("N") + ".json")

@@ -20,16 +20,17 @@ jobs:
       - name: Run deterministic PowerShell 5.1 suites
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          $artifacts = Join-Path $env:RUNNER_TEMP 'forge-windows-powershell51'
+          New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\template\run-all.ps1 2>&1 |
-            Tee-Object -FilePath artifacts\windows-powershell-51.log
+            Tee-Object -FilePath (Join-Path $artifacts 'windows-powershell-51.log')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\scripts\qualify-runtime-final.ps1 -WriteWindowsAttestation -ProjectRoot . `
-            -Output artifacts\windows-powershell-51.receipt
+            -Output (Join-Path $artifacts 'windows-powershell-51.receipt')
       - name: Upload deterministic PowerShell result
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-powershell-51
-          path: artifacts/
+          path: ${{ runner.temp }}/forge-windows-powershell51/
           if-no-files-found: error

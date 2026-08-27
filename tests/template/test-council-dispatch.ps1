@@ -31,7 +31,7 @@ exit 0
 function Invoke-Fixture([hashtable]$Fixture,[string]$Failure='',[string[]]$Extra=@()) {
   $gitDir=Split-Path -Parent (Get-Command git.exe).Source;$env:PATH="$($Fixture.Bin);$gitDir;$env:SystemRoot\System32";$env:FAKE_MAIN='claude';$env:FAKE_LOG=$Fixture.Log;$env:FAKE_FAIL_MATCH=$Failure;$env:FAKE_FAIL_MARKER=Join-Path $Fixture.Dir 'failure-used'
   $args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$Fixture.Council,'--question-file',(Join-Path $Fixture.Repo 'question.txt'),'--artifact',(Join-Path $Fixture.Repo 'artifact.txt'),'--workflow-base-sha','deadbeef','--workflow-base-ref','refs/heads/main')+$Extra
-  $output=& powershell.exe @args 2>&1;$rc=$LASTEXITCODE;return @{Rc=$rc;Output=@($output);Receipt=(@($output|Where-Object{$_ -like 'Council receipt:*'})[-1] -replace '^Council receipt: ','')}
+  $output=& powershell.exe @args 2>&1;$rc=$LASTEXITCODE;$receiptLine=@($output|Where-Object{$_ -like 'Council receipt:*'}|Select-Object -Last 1);$receipt=if($receiptLine.Count){$receiptLine[0] -replace '^Council receipt: ',''}else{''};return @{Rc=$rc;Output=@($output);Receipt=$receipt}
 }
 $originalPath=$env:PATH;$fixtures=@()
 try {
@@ -45,6 +45,12 @@ try {
   Assert-True ((Get-Content -Raw $result.Receipt) -match 'trigger_reason=runtime-other-failure') 'PowerShell fallback reason is visible'
   Assert-True (@((Get-ChildItem (Split-Path (Split-Path $result.Receipt)) -Directory)).Count -eq 1) 'PowerShell discards failed mixed artifacts'
   Assert-True (@(Get-Content $fallback.Log|Select-Object -Last 11|Where-Object{$_ -notlike 'claude|*'}).Count -eq 0) 'PowerShell fallback reruns all seats on main'
+  $linked=New-Fixture linked;$fixtures+=$linked.Dir;$outside=Join-Path $linked.Dir 'outside-council';New-Item -ItemType Directory -Path $outside|Out-Null
+  $qhash=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $linked.Repo 'question.txt')).Hash.ToLowerInvariant();$reviews=Join-Path $linked.Repo '.forge\local\reviews';New-Item -ItemType Directory -Path $reviews -Force|Out-Null
+  & cmd.exe /d /c mklink /J "$(Join-Path $reviews "council-$qhash")" "$outside"|Out-Null
+  $result=Invoke-Fixture $linked
+  Assert-True ($result.Rc -ne 0) 'PowerShell linked council receipt root blocks before dispatch'
+  Assert-True (@(Get-ChildItem -LiteralPath $outside -Force).Count -eq 0) 'PowerShell linked council target remains untouched'
 }
 finally{$env:PATH=$originalPath;foreach($dir in $fixtures){Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue}}
 Write-Host "PASS: $passes council dispatcher PowerShell assertions"

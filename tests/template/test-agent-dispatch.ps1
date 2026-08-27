@@ -13,6 +13,7 @@ function Fail([string]$Message) { $script:Failed++; [Console]::Error.WriteLine("
 function Assert-Equal($Actual, $Expected, [string]$Message) { if ([string]$Actual -ceq [string]$Expected) { Pass $Message } else { Fail "$Message expected=$Expected actual=$Actual" } }
 function Assert-Contains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -like "*$Needle*") { Pass $Message } else { Fail "$Message missing=$Needle" } }
 function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; return $line.Substring($Key.Length + 1) }
+function Get-LatestReceipt([string]$Repository) { return (Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1).FullName }
 function New-Repository([string]$Name) {
     $path = Join-Path $temporary $Name
     New-Item -ItemType Directory -Path (Join-Path $path '.forge/local'), (Join-Path $path '.forge') -Force | Out-Null
@@ -25,7 +26,7 @@ function New-Repository([string]$Name) {
 }
 function Set-State([string]$Repository, [string]$Base, [string]$BaseRef) {
     $rootPath = (Resolve-Path $Repository).Path; $commonRelative = (& git -C $Repository rev-parse --git-common-dir); $common = (Resolve-Path (Join-Path $Repository $commonRelative)).Path
-    $body = "<!-- forge:state-schema v6 -->`n# Project State`n`n## Identity`n`n| Field | Value |`n| --- | --- |`n| Worktree root | $rootPath |`n| Git common directory | $common |`n| Last active host | claude |`n| Workflow base ref | $BaseRef |`n| Workflow base SHA | $Base |`n`n## Workflow`n"
+    $body = "<!-- forge:state-schema v6 -->`n# Project State`n`n## Identity`n`n| Field | Value |`n| --- | --- |`n| Worktree root | $rootPath |`n| Git common directory | $common |`n| Last active host | claude |`n| Workflow base ref | $BaseRef |`n| Workflow base SHA | $Base |`n`n## Workflow`n`n## Receipts`n| Field | Value |`n| Review iteration | 1 |`n"
     [IO.File]::WriteAllText((Join-Path $Repository '.forge/local/state.md'), $body)
 }
 function Set-Context([string]$Repository, [string]$Host, [string]$Session) {
@@ -80,6 +81,7 @@ public static class ForgeFakeEngine {
     string behavior=E("FAKE_"+engine.ToUpperInvariant()+"_BEHAVIOR","clean"); string joined=String.Join(" ",args); string output="";
     for(int i=0;i+1<args.Length;i++) if(args[i]=="--output-last-message") output=args[i+1];
     string log=E("FAKE_"+engine.ToUpperInvariant()+"_LOG"); if(log!="") File.AppendAllText(log,joined+Environment.NewLine);
+    string argv=E("FAKE_"+engine.ToUpperInvariant()+"_ARGV_LOG"); if(argv!="") File.WriteAllLines(argv,args.Select(x=>x==""?"<EMPTY>":x));
     if(engine=="codex" && joined.Contains("--json") && !joined.Contains("exec resume")) Console.WriteLine("{\"type\":\"thread.started\",\"thread_id\":\""+E("FORGE_DISPATCH_SESSION_ID")+"\"}");
     if(behavior=="timeout") { var p=Process.Start(new ProcessStartInfo("cmd.exe","/d /c ping -n 30 127.0.0.1 >nul"){UseShellExecute=false,CreateNoWindow=true}); var pid=E("FAKE_CHILD_PID_FILE"); if(pid!="") File.WriteAllText(pid,p.Id.ToString()); Thread.Sleep(30000); return 0; }
     if(behavior=="delayed-clean") Thread.Sleep(1000);
@@ -113,6 +115,29 @@ public static class ForgeFakeEngine {
     Assert-Equal (Get-ReceiptValue $repo 'fallback') 'true' 'fallback is recorded'
     Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'claude' 'fallback engine is fresh main engine'
 
+    Write-Host 'PowerShell exact empty Claude argv preservation'
+    $repo = New-Repository 'empty argv'; $argvLog = Join-Path $repo '.forge/local/reviews/claude-argv.log'; $env:FAKE_CLAUDE_ARGV_LOG = $argvLog; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'claude') 0 'Claude invocation with explicit empty setting sources succeeds'
+    $argv = @([IO.File]::ReadAllLines($argvLog)); $settingIndex = [Array]::IndexOf($argv, '--setting-sources'); $toolsIndex = [Array]::IndexOf($argv, '--tools')
+    Assert-True ($settingIndex -ge 0 -and $argv[$settingIndex + 1] -ceq '<EMPTY>') 'empty --setting-sources value occupies its exact argv position'
+    Assert-True ($toolsIndex -eq $settingIndex + 2 -and $argv[$toolsIndex + 1] -ceq 'Read,Grep,Glob') '--tools and its value follow the empty setting source'
+    Remove-Item Env:FAKE_CLAUDE_ARGV_LOG -ErrorAction SilentlyContinue
+
+    Write-Host 'PowerShell review-pair current candidate and output binding'
+    $repo = New-Repository 'verify pair'; $env:FAKE_CODEX_BEHAVIOR = 'clean'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'code-spec') 0 'code-spec receipt is created'; $spec = Get-LatestReceipt $repo
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'code-quality') 0 'code-quality receipt is created'; $quality = Get-LatestReceipt $repo
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Mode verify-pair -CodeSpecReceipt $spec -CodeQualityReceipt $quality *> $null
+    Assert-Equal $LASTEXITCODE 0 'current distinct pair certifies'
+    Add-Content -LiteralPath (Join-Path $repo 'app.txt') -Value 'mutated candidate'
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Mode verify-pair -CodeSpecReceipt $spec -CodeQualityReceipt $quality *> $null
+    Assert-Equal $LASTEXITCODE 2 'candidate mutation invalidates the pair'
+    [IO.File]::WriteAllText((Join-Path $repo 'app.txt'), "base`n")
+    $qualityOutput = (Get-Content -LiteralPath $quality | Where-Object { $_ -like 'output_path=*' } | Select-Object -First 1).Substring(12)
+    Add-Content -LiteralPath $qualityOutput -Value 'mutated output'
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Mode verify-pair -CodeSpecReceipt $spec -CodeQualityReceipt $quality *> $null
+    Assert-Equal $LASTEXITCODE 2 'review output mutation invalidates the pair'
+
     Write-Host 'PowerShell timeout tree cleanup and semantic non-fallback'
     $repo = New-Repository 'timeout cleanup'; $env:FAKE_CODEX_BEHAVIOR = 'timeout'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'; $pidFile = Join-Path $repo '.forge/local/child.pid'; $env:FAKE_CHILD_PID_FILE = $pidFile
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'auto') 0 'timeout falls back once'
@@ -141,6 +166,21 @@ public static class ForgeFakeEngine {
     Assert-Contains $log "--session-id $exact" 'new turn binds exact Claude session'
     Assert-Contains $log "--resume $exact" 'second turn resumes exact Claude session'
     Remove-Item Env:FAKE_CLAUDE_LOG -ErrorAction SilentlyContinue
+
+    Write-Host 'PowerShell session metadata leaf is no-follow'
+    $repo = New-Repository 'metadata leaf'; $sessionOutput = Join-Path $repo '.forge/local/reviews/session.id'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'claude' 'council-advisor' 'none' 'new' '' $sessionOutput) 0 'metadata-leaf fixture starts a session'
+    $exact = (Get-Content -LiteralPath $sessionOutput -Raw).Trim(); $meta = Join-Path $repo ".forge/local/reviews/sessions/$exact.meta"; $outsideMeta = Join-Path $temporary 'outside-session.meta'
+    Copy-Item -LiteralPath $meta -Destination $outsideMeta; $outsideHash = Get-ShaFileForTest $outsideMeta; Remove-Item -LiteralPath $meta -Force; $linked = $false
+    try { New-Item -ItemType SymbolicLink -Path $meta -Target $outsideMeta -ErrorAction Stop | Out-Null; $linked = $true } catch { Copy-Item -LiteralPath $outsideMeta -Destination $meta }
+    if ($linked) {
+        Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'claude' 'council-advisor' 'none' 'resume' $exact) 2 'session metadata reparse leaf is rejected'
+        Assert-Equal (Get-ShaFileForTest $outsideMeta) $outsideHash 'reparse target remains byte-identical'
+    } else {
+        $source = Get-Content -LiteralPath $dispatcher -Raw
+        Assert-True (([regex]::Matches($source, 'Assert-NoFollowSessionMetadata \$SessionMeta')).Count -ge 3) 'session metadata is checked before read and update when symlink creation is unavailable'
+    }
+
     $repo = New-Repository 'investigation replay'; $env:FAKE_CODEX_BEHAVIOR = 'investigate'
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'investigation') 0 'investigation candidate writes replay safely'
     Assert-Contains (Join-Path $repo 'tests/reproductions/claimed.txt') 'bounded reproduction' 'declared reproduction reaches real worktree'
@@ -170,6 +210,23 @@ public static class ForgeFakeEngine {
     try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $fingerprint -Mode capture -Artifact 'git:working-tree' -WorkflowBaseSha $base -WorkflowBaseRef x -Output (Join-Path $repo '.forge/local/fp') | Out-Null; $junctionRc = $LASTEXITCODE }
     finally { Pop-Location }
     if ($junctionRc -ne 0) { Pass 'untracked junction or reparse point is rejected' } else { Fail 'untracked junction was accepted' }
+    foreach ($reserved in @('sessions','session-stores')) {
+        $repo = New-Repository "reserved $reserved"; $outside = Join-Path $repo "outside-$reserved"; New-Item -ItemType Directory -Path $outside | Out-Null
+        & cmd.exe /d /c mklink /J "$(Join-Path $repo ".forge\local\reviews\$reserved")" "$outside" | Out-Null
+        $sessionOutput = Join-Path $repo '.forge/local/reviews/session.id'
+        Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'claude' 'council-advisor' 'none' 'new' '' $sessionOutput) 2 "$reserved junction ancestor is rejected"
+        Assert-Equal (@(Get-ChildItem -LiteralPath $outside -Force).Count) 0 "$reserved junction target remains untouched"
+    }
+
+    Write-Host 'PowerShell materialized Codex host-context invocation'
+    $installed = Join-Path $temporary 'materialized adapters'; New-Item -ItemType Directory -Path $installed | Out-Null
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts/materialize-adapters.ps1') -RepoRoot $root -Target $installed -Scope project -Platform windows *> $null
+    Assert-Equal $LASTEXITCODE 0 'PowerShell adapters materialize'
+    $hooks = Get-Content -LiteralPath (Join-Path $installed '.codex/hooks.json') -Raw | ConvertFrom-Json
+    $hostEntry = @($hooks.hooks.session_start | Where-Object { $_.forgeManagedId -eq 'host-context' })[0]
+    Assert-Equal (($hostEntry.command -join '|')) 'powershell.exe|-NoProfile|-ExecutionPolicy|Bypass|-File|.forge/hooks/lib/host-context.ps1|-Mode|hook|-Host|codex' 'Codex host-context invokes the Windows hook directly'
+    $sessionEntry = @($hooks.hooks.session_start | Where-Object { $_.forgeManagedId -eq 'session-start' })[0]
+    Assert-Equal $sessionEntry.command[5] '.forge/hooks/lib/codex-worktree-dispatch.ps1' 'other Codex hooks retain worktree routing'
 }
 finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue

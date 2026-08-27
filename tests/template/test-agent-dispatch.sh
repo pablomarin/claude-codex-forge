@@ -385,6 +385,24 @@ assert_equals "$session_path_rc" "2" "session id output cannot target canonical 
 assert_contains "$S/session-path.err" "session id output" "session output rejection is the path boundary, not an unrelated council check"
 assert_hash_equals "$S/.forge/local/state.md" "$state_before" "rejected session output leaves canonical state byte-identical"
 
+start_test "council session metadata and stores reject linked reserved ancestors"
+for reserved in sessions session-stores; do
+    S=$(scratch_dir "dispatch-linked-$reserved"); make_repo "$S"; capture_context "$S" claude sid
+    outside="$S/outside-$reserved"; mkdir "$outside"
+    ln -s "$outside" "$S/.forge/local/reviews/$reserved"
+    printf 'question_hash=%s\nlinked reserved path\n' "$(printf question | shasum -a 256 | awk '{print $1}')" > "$S/prompt.txt"
+    base=$(git -C "$S" rev-parse HEAD)
+    set +e
+    launch_dispatch "$S" claude run --engine claude --fallback-policy none --role council-advisor --profile review \
+      --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base \
+      --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/council-output" --conversation new \
+      --session-id-output "$S/.forge/local/reviews/session.id" --seat-id advisor-1 --timeout-seconds 2 >/dev/null 2>&1
+    linked_reserved_rc=$?
+    set -e
+    assert_equals "$linked_reserved_rc" "2" "$reserved symlink ancestor is rejected"
+    assert_equals "$(find "$outside" -mindepth 1 | wc -l | tr -d ' ')" "0" "$reserved symlink target remains untouched"
+done
+
 start_test "reserved output publication atomically replaces a swapped leaf without following it"
 S=$(scratch_dir dispatch-output-race); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid; base=$(git -C "$S" rev-parse HEAD)
 protected="$S/.forge/local/protected-output"; printf 'protected\n' > "$protected"; protected_before=$(hash_file "$protected")
@@ -534,9 +552,28 @@ assert_equals "$(awk -F= '$1=="review_iteration"{print $2}' "$quality")" "1" "qu
 if bash "$DISPATCH" verify-pair --code-spec-receipt "$spec" --code-quality-receipt "$quality" >/dev/null 2>&1; then pass "two distinct lenses certify one candidate"; else fail "valid review pair rejected"; fi
 set +e; bash "$DISPATCH" verify-pair --code-spec-receipt "$spec" --code-quality-receipt "$spec" >/dev/null 2>&1; rc=$?; set -e
 assert_equals "$rc" "2" "duplicate invocation cannot certify"
+printf 'mutated candidate\n' >> "$S/app.txt"
+set +e; bash "$DISPATCH" verify-pair --code-spec-receipt "$spec" --code-quality-receipt "$quality" >/dev/null 2>&1; rc=$?; set -e
+assert_equals "$rc" "2" "candidate mutation invalidates the review pair"
+printf 'base\n' > "$S/app.txt"
+quality_output=$(awk -F= '$1=="output_path"{sub(/^[^=]*=/,"");print;exit}' "$quality")
+cp "$quality_output" "$S/.forge/local/quality-output.backup"; printf 'mutated output\n' >> "$quality_output"
+set +e; bash "$DISPATCH" verify-pair --code-spec-receipt "$spec" --code-quality-receipt "$quality" >/dev/null 2>&1; rc=$?; set -e
+assert_equals "$rc" "2" "review output mutation invalidates the review pair"
+mv "$S/.forge/local/quality-output.backup" "$quality_output"
 sed -i.bak 's/| Review iteration | 1 |/| Review iteration | 2 |/' "$S/.forge/local/state.md"
 set +e; bash "$DISPATCH" verify-pair --code-spec-receipt "$spec" --code-quality-receipt "$quality" >/dev/null 2>&1; rc=$?; set -e
 assert_equals "$rc" "2" "state iteration relabel cannot certify stale review receipts"
+
+start_test "PowerShell process serialization preserves explicit empty Claude arguments"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'if ($Value.Length -eq 0)' \
+  "PowerShell argument serializer treats an empty argv value explicitly"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "'FAKE_CLAUDE_ARGV_LOG'" \
+  "PowerShell test-mode whitelist propagates the exact argv log"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Assert-NoFollowSessionMetadata $SessionMeta' \
+  "PowerShell resume rechecks the session metadata leaf"
+assert_contains "$REPO_ROOT/scripts/materialize-adapters.ps1" '".forge/hooks/lib/host-context.ps1", "-Mode", "hook", "-Host", "codex"' \
+  "PowerShell materializer renders Codex host context as a direct invocation"
 
 start_test "child review cannot mutate canonical state or authorization records"
 S=$(scratch_dir dispatch-state); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; printf 'auth\n' > "$S/.forge/local/authorization-record"; capture_context "$S" claude sid

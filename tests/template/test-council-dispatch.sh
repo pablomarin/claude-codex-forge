@@ -100,4 +100,14 @@ make_fixture main-chair yes; FAKE_FAIL_MATCH=claude:chair:ephemeral; run_fixture
 if [ "$RUN_RC" -ne 0 ]; then pass "custom main chairman failure blocks"; else fail "custom main chairman failure must block"; fi
 assert_equals "$(wc -l < "$FIXTURE_LOG" | tr -d ' ')" 11 "custom main chairman failure does not rerun"
 
+start_test "council receipt root rejects a linked council ancestor"
+make_fixture linked-root yes
+qhash=$(shasum -a 256 "$FIXTURE_REPO/question.txt" | awk '{print $1}')
+mkdir -p "$FIXTURE_REPO/.forge/local/reviews" "$FIXTURE_ROOT/outside-council"
+ln -s "$FIXTURE_ROOT/outside-council" "$FIXTURE_REPO/.forge/local/reviews/council-$qhash"
+FAKE_FAIL_MATCH= run_fixture
+if [ "$RUN_RC" -ne 0 ]; then pass "linked council receipt root blocks before dispatch"; else fail "linked council receipt root was followed"; fi
+assert_equals "$(find "$FIXTURE_ROOT/outside-council" -mindepth 1 | wc -l | tr -d ' ')" 0 \
+  "linked council target remains untouched"
+
 report "test-council-dispatch.sh"

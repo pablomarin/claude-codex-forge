@@ -8,7 +8,7 @@ DISPATCH="$ROOT/scripts/qualify-dispatch-isolation.sh"
 GOAL="$ROOT/scripts/qualify-goal-feasibility.sh"
 
 usage() {
-    echo "Usage: qualify-runtime-final.sh (--fixture-mode|--inventory|--live) --project-root DIR --output FILE [--engine-dir DIR] [--claude-goal-authorization FILE] [--codex-goal-capture FILE] [--windows-attestation FILE]" >&2
+    echo "Usage: qualify-runtime-final.sh (--fixture-mode|--inventory|--live) --project-root DIR --output FILE [--engine-dir DIR] [--claude-goal-authorization FILE] [--codex-goal-capture FILE] [--windows-attestation FILE] [--qualification-timeout-seconds N]" >&2
     echo "       qualify-runtime-final.sh --validate --input FILE" >&2
     exit 2
 }
@@ -47,6 +47,31 @@ candidate_hash() {
     } | hash_stream
 }
 binary_path() { local path; if [ -n "$2" ]; then path="$(cd "$2" && pwd -P)/$1"; else path=$(command -v "$1" 2>/dev/null || true); fi; [ -z "$path" ] || resolve_file "$path"; }
+candidate_clean() { [ -z "$(git -C "$1" status --porcelain --untracked-files=all)" ]; }
+write_blocked_child() {
+    printf '{"schema":"%s","status":"BLOCKED","reason":"%s","evidence_mode":"authenticated","source_class":"forge-runtime-qualifier"}\n' "$2" "$3" > "$1"
+}
+signal_qualification_tree() {
+    local signal="$1" group="$2"
+    kill "-$signal" -- "-$group" 2>/dev/null || true
+}
+run_qualification_child() {
+    local seconds="$1" receipt="$2" schema="$3" child elapsed rc; shift 3
+    python3 -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1],sys.argv[1:])' "$@" >/dev/null 2>&1 & child=$!
+    elapsed=0
+    while kill -0 "$child" 2>/dev/null; do
+        if [ "$elapsed" -ge "$((seconds * 10))" ]; then
+            signal_qualification_tree TERM "$child"; sleep 0.2
+            signal_qualification_tree KILL "$child"; wait "$child" 2>/dev/null || true
+            write_blocked_child "$receipt" "$schema" 'qualification child timeout'
+            return 124
+        fi
+        sleep 0.1; elapsed=$((elapsed + 1))
+    done
+    wait "$child"; rc=$?
+    [ -f "$receipt" ] && [ ! -L "$receipt" ] || write_blocked_child "$receipt" "$schema" 'qualification child exited without receipt'
+    return "$rc"
+}
 
 validate_child() {
     local path="$1" schema="$2" status hash
@@ -80,8 +105,21 @@ validate_receipt() {
             fi
         done
     done
+    status=$(field "$input" windows_status); case "$status" in PASS|PENDING) ;; *) return 1 ;; esac
+    if [ "$status" = PASS ]; then
+        path=$(field "$input" windows_attestation_path); sha=$(field "$input" windows_attestation_sha256)
+        [ -f "$path" ] && [ ! -L "$path" ] && [ "$(hash_file "$path")" = "$sha" ] || return 1
+        [ "$(field "$path" format)" = forge-windows-deterministic-v1 ] \
+          && [ "$(field "$path" powershell_major)" = 5 ] \
+          && [ "$(field "$path" powershell_minor)" = 1 ] \
+          && [ "$(field "$path" status)" = PASS ] \
+          && [ "$(field "$path" candidate_clean)" = true ] \
+          && [ "$(field "$path" git_head)" = "$head" ] \
+          && [ "$(field "$path" tree_sha)" = "$tree" ] \
+          && candidate_clean "$project" || return 1
+    fi
     if [ "$overall" = PASS ]; then
-        [ "$mode" = authenticated ] && [ "$(field "$input" windows_status)" = PASS ] || return 1
+        [ "$mode" = authenticated ] && [ "$status" = PASS ] || return 1
         for engine in claude codex; do
             for kind in dispatch goal; do
                 path=$(field "$input" "${engine}_${kind}_path")
@@ -98,19 +136,11 @@ validate_receipt() {
         done
         path=$(field "$input" codex_goal_capture_path); sha=$(field "$input" codex_goal_capture_sha256)
         [ -f "$path" ] && [ ! -L "$path" ] && [ "$(hash_file "$path")" = "$sha" ] || return 1
-        path=$(field "$input" windows_attestation_path); sha=$(field "$input" windows_attestation_sha256)
-        [ -f "$path" ] && [ ! -L "$path" ] && [ "$(hash_file "$path")" = "$sha" ] || return 1
-        [ "$(field "$path" format)" = forge-windows-deterministic-v1 ] \
-          && [ "$(field "$path" powershell_major)" = 5 ] \
-          && [ "$(field "$path" powershell_minor)" = 1 ] \
-          && [ "$(field "$path" status)" = PASS ] \
-          && [ "$(field "$path" git_head)" = "$head" ] \
-          && [ "$(field "$path" tree_sha)" = "$tree" ] || return 1
     fi
     return 0
 }
 
-mode=""; project=""; output=""; input=""; engine_dir=""; claude_auth=""; codex_capture=""; windows=""
+mode=""; project=""; output=""; input=""; engine_dir=""; claude_auth=""; codex_capture=""; windows=""; qualification_timeout=1200
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --fixture-mode) [ -z "$mode" ] || usage; mode=fixture; shift ;;
@@ -122,11 +152,13 @@ while [ "$#" -gt 0 ]; do
         --claude-goal-authorization) claude_auth="$2"; shift 2 ;;
         --codex-goal-capture) codex_capture="$2"; shift 2 ;;
         --windows-attestation) windows="$2"; shift 2 ;;
+        --qualification-timeout-seconds) qualification_timeout="$2"; shift 2 ;;
         *) usage ;;
     esac
 done
 if [ "$mode" = validate ]; then [ -n "$input" ] || usage; validate_receipt "$input"; exit $?; fi
 case "$mode" in fixture|inventory|authenticated) ;; *) usage ;; esac
+case "$qualification_timeout" in ''|*[!0-9]*|0) usage ;; esac
 [ -d "$project/.forge" ] && [ -n "$output" ] || usage
 project=$(cd "$project" && pwd -P); output_dir=$(dirname "$output"); mkdir -p "$output_dir"
 output=$(cd "$output_dir" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$output")")
@@ -142,13 +174,23 @@ for engine in claude codex; do
         FORGE_FAKE_ENGINE_NAME="$engine" "$DISPATCH" --engine "$engine" --project-root "$project" --output "$dispatch_out" --fixture-mode --engine-path "$bin" >/dev/null 2>&1 || true
         FORGE_FAKE_ENGINE_NAME="$engine" "$GOAL" --engine "$engine" --project-root "$project" --output "$goal_out" --fixture-mode --engine-path "$bin" >/dev/null 2>&1 || true
     else
-        if [ "$mode" = authenticated ]; then export FORGE_LIVE_QUALIFICATION=1; else unset FORGE_LIVE_QUALIFICATION 2>/dev/null || true; fi
-        "$DISPATCH" --engine "$engine" --project-root "$project" --output "$dispatch_out" >/dev/null 2>&1 || true
-        if [ "$engine" = claude ] && [ -n "$claude_auth" ]; then
-            "$GOAL" --engine claude --project-root "$project" --output "$goal_out" --authorization "$claude_auth" >/dev/null 2>&1 || true
-        elif [ "$engine" = codex ] && [ -n "$codex_capture" ]; then
-            "$GOAL" --engine codex --project-root "$project" --output "$goal_out" --trusted-capture "$codex_capture" >/dev/null 2>&1 || true
+        if [ "$mode" = authenticated ]; then
+            export FORGE_LIVE_QUALIFICATION=1
+            run_qualification_child "$qualification_timeout" "$dispatch_out" forge.dispatch-isolation.v1 \
+                "$DISPATCH" --engine "$engine" --project-root "$project" --output "$dispatch_out" || true
+            if [ "$engine" = claude ] && [ -n "$claude_auth" ]; then
+                run_qualification_child "$qualification_timeout" "$goal_out" forge.goal-feasibility.v1 \
+                    "$GOAL" --engine claude --project-root "$project" --output "$goal_out" --authorization "$claude_auth" || true
+            elif [ "$engine" = codex ] && [ -n "$codex_capture" ]; then
+                run_qualification_child "$qualification_timeout" "$goal_out" forge.goal-feasibility.v1 \
+                    "$GOAL" --engine codex --project-root "$project" --output "$goal_out" --trusted-capture "$codex_capture" || true
+            else
+                run_qualification_child "$qualification_timeout" "$goal_out" forge.goal-feasibility.v1 \
+                    "$GOAL" --engine "$engine" --project-root "$project" --output "$goal_out" || true
+            fi
         else
+            unset FORGE_LIVE_QUALIFICATION 2>/dev/null || true
+            "$DISPATCH" --engine "$engine" --project-root "$project" --output "$dispatch_out" >/dev/null 2>&1 || true
             "$GOAL" --engine "$engine" --project-root "$project" --output "$goal_out" >/dev/null 2>&1 || true
         fi
     fi
@@ -163,8 +205,10 @@ if [ -n "$windows" ] && [ -f "$windows" ] && [ ! -L "$windows" ] \
    && [ "$(field "$windows" powershell_major)" = 5 ] \
    && [ "$(field "$windows" powershell_minor)" = 1 ] \
    && [ "$(field "$windows" status)" = PASS ] \
+   && [ "$(field "$windows" candidate_clean)" = true ] \
    && [ "$(field "$windows" git_head)" = "$git_head" ] \
-   && [ "$(field "$windows" tree_sha)" = "$tree_sha" ]; then
+   && [ "$(field "$windows" tree_sha)" = "$tree_sha" ] \
+   && candidate_clean "$project"; then
     windows_status=PASS; windows_path=$(physical_file "$windows"); windows_sha=$(hash_file "$windows")
 fi
 overall=BLOCKED

@@ -10,7 +10,8 @@ param(
     [string]$EngineDir,
     [string]$ClaudeGoalAuthorization,
     [string]$CodexGoalCapture,
-    [string]$WindowsAttestation
+    [string]$WindowsAttestation,
+    [ValidateRange(1,86400)][int]$QualificationTimeoutSeconds = 1200
 )
 $ErrorActionPreference = 'Stop'
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
@@ -41,6 +42,36 @@ function Get-CandidateHash([string]$Path) {
     foreach($file in Get-ChildItem -LiteralPath $physical -Recurse -File -Force|Where-Object{$_.FullName -notmatch '[\\/]\.git[\\/]' -and $_.FullName -notmatch '[\\/]\.forge[\\/]local[\\/]'}|Sort-Object FullName){$relative=$file.FullName.Substring($physical.Length).TrimStart([char[]]@('\','/')).Replace('\','/');$lines.Add("$relative`t$(Get-Hash $file.FullName)")}
     return Get-TextHash (($lines -join "`n")+"`n")
 }
+function Test-CandidateClean([string]$Path) {
+    $status=@(& git -C $Path status --porcelain --untracked-files=all)
+    return $LASTEXITCODE -eq 0 -and $status.Count -eq 0
+}
+function ConvertTo-QualificationArgument([string]$Value) {
+    if($Value.Length -eq 0){return '""'}
+    if($Value -notmatch '[\s"]'){return $Value}
+    return '"'+(($Value -replace '(\\*)"','$1$1\"') -replace '(\\+)$','$1$1')+'"'
+}
+function Write-BlockedChild([string]$Path,[string]$Schema,[string]$Reason) {
+    $body=@{schema=$Schema;status='BLOCKED';reason=$Reason;evidence_mode='authenticated';source_class='forge-runtime-qualifier'}|ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($Path,$body+"`n",$Utf8NoBom)
+}
+function Invoke-QualificationChild([string[]]$Arguments,[string]$Receipt,[string]$Schema,[int]$TimeoutSeconds) {
+    $start=New-Object Diagnostics.ProcessStartInfo
+    $start.FileName='powershell.exe';$start.Arguments=(@($Arguments|ForEach-Object{ConvertTo-QualificationArgument $_}) -join ' ')
+    $start.UseShellExecute=$false;$start.CreateNoWindow=$true
+    $process=New-Object Diagnostics.Process;$process.StartInfo=$start
+    try {
+        if(-not $process.Start()){Write-BlockedChild $Receipt $Schema 'qualification child failed to start';return 127}
+        if(-not $process.WaitForExit($TimeoutSeconds*1000)){
+            & taskkill.exe /PID $process.Id /T /F 2>$null|Out-Null
+            try{$process.Kill()}catch{};$process.WaitForExit()
+            Write-BlockedChild $Receipt $Schema 'qualification child timeout';return 124
+        }
+        $rc=$process.ExitCode
+        if(-not (Test-Path -LiteralPath $Receipt -PathType Leaf)){Write-BlockedChild $Receipt $Schema 'qualification child exited without receipt'}
+        return $rc
+    } finally {$process.Dispose()}
+}
 function Test-Regular([string]$Path){return ((Test-Path -LiteralPath $Path -PathType Leaf)-and -not ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint))}
 function Test-Child([string]$Path,[string]$Hash,[string]$Schema){
     if(-not (Test-Regular $Path) -or (Get-Hash $Path) -cne $Hash){return $false}
@@ -58,6 +89,11 @@ function Test-Final([string]$Path){
         if(-not (Test-Child $f["${engine}_dispatch_path"] $f["${engine}_dispatch_sha256"] 'forge.dispatch-isolation.v1')){return $false}
         if(-not (Test-Child $f["${engine}_goal_path"] $f["${engine}_goal_sha256"] 'forge.goal-feasibility.v1')){return $false}
     }
+    if($f.windows_status -notin @('PASS','PENDING')){return $false}
+    if($f.windows_status -eq 'PASS'){
+        if(-not (Test-Regular $f.windows_attestation_path) -or (Get-Hash $f.windows_attestation_path) -cne $f.windows_attestation_sha256){return $false};$wf=Get-Fields $f.windows_attestation_path
+        if($wf.format -ne 'forge-windows-deterministic-v1' -or $wf.status -ne 'PASS' -or $wf.powershell_major -ne '5' -or $wf.powershell_minor -ne '1' -or $wf.candidate_clean -ne 'true' -or $wf.git_head -ne $head -or $wf.tree_sha -ne $tree -or -not (Test-CandidateClean $f.project_root)){return $false}
+    }
     if($f.overall_status -eq 'PASS'){
         if($f.evidence_mode -ne 'authenticated' -or $f.windows_status -ne 'PASS'){return $false}
         $expected=@{
@@ -66,16 +102,14 @@ function Test-Final([string]$Path){
         }
         foreach($name in $expected.Keys){$child=Get-Content -LiteralPath $f["${name}_path"] -Raw|ConvertFrom-Json;if($child.status -ne 'PASS' -or $child.reason -cne $expected[$name]){return $false}}
         if(-not (Test-Regular $f.codex_goal_capture_path) -or (Get-Hash $f.codex_goal_capture_path) -cne $f.codex_goal_capture_sha256){return $false}
-        if(-not (Test-Regular $f.windows_attestation_path) -or (Get-Hash $f.windows_attestation_path) -cne $f.windows_attestation_sha256){return $false};$wf=Get-Fields $f.windows_attestation_path
-        if($wf.format -ne 'forge-windows-deterministic-v1' -or $wf.status -ne 'PASS' -or $wf.powershell_major -ne '5' -or $wf.powershell_minor -ne '1' -or $wf.git_head -ne $head -or $wf.tree_sha -ne $tree){return $false}
     }
     return $true
 }
 
 if($WriteWindowsAttestation){
     if($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1){throw 'Windows deterministic attestation requires Windows PowerShell 5.1'}
-    $ProjectRoot=(Resolve-Path $ProjectRoot).Path;$head=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$tree=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1)
-    [IO.File]::WriteAllLines($Output,@('format=forge-windows-deterministic-v1','status=PASS','powershell_major=5','powershell_minor=1',"git_head=$head","tree_sha=$tree"),$Utf8NoBom);exit 0
+    $ProjectRoot=(Resolve-Path $ProjectRoot).Path;if(-not (Test-CandidateClean $ProjectRoot)){throw 'Windows deterministic attestation requires a clean candidate'};$head=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$tree=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1)
+    [IO.File]::WriteAllLines($Output,@('format=forge-windows-deterministic-v1','status=PASS','powershell_major=5','powershell_minor=1','candidate_clean=true',"git_head=$head","tree_sha=$tree"),$Utf8NoBom);exit 0
 }
 if($Validate){if(Test-Final $Input){exit 0}else{exit 1}}
 $selected=0;foreach($flag in @($FixtureMode,$Inventory,$Live)){if($flag){$selected++}};if($selected -ne 1 -or -not $ProjectRoot -or -not $Output){throw 'select exactly one of FixtureMode, Inventory, or Live and provide ProjectRoot/Output'}
@@ -91,14 +125,21 @@ foreach($engine in @('claude','codex')){
     }else{
         $previous=$env:FORGE_LIVE_QUALIFICATION;if($Live){$env:FORGE_LIVE_QUALIFICATION='1'}else{Remove-Item Env:FORGE_LIVE_QUALIFICATION -ErrorAction SilentlyContinue}
         try{
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatch -Engine $engine -ProjectRoot $ProjectRoot -Output $dispatchOut *> $null
             $extra=@();if($engine -eq 'claude' -and $ClaudeGoalAuthorization){$extra=@('-Authorization',$ClaudeGoalAuthorization)}elseif($engine -eq 'codex' -and $CodexGoalCapture){$extra=@('-TrustedCapture',$CodexGoalCapture)}
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $goal -Engine $engine -ProjectRoot $ProjectRoot -Output $goalOut @extra *> $null
-        }finally{$env:FORGE_LIVE_QUALIFICATION=$previous}
+            if($Live){
+                $dispatchArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatch,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$dispatchOut)
+                $goalArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$goal,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$goalOut)+$extra
+                $null=Invoke-QualificationChild -Arguments $dispatchArguments -Receipt $dispatchOut -Schema 'forge.dispatch-isolation.v1' -TimeoutSeconds $QualificationTimeoutSeconds
+                $null=Invoke-QualificationChild -Arguments $goalArguments -Receipt $goalOut -Schema 'forge.goal-feasibility.v1' -TimeoutSeconds $QualificationTimeoutSeconds
+            }else{
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatch -Engine $engine -ProjectRoot $ProjectRoot -Output $dispatchOut *> $null
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $goal -Engine $engine -ProjectRoot $ProjectRoot -Output $goalOut @extra *> $null
+            }
+        }finally{if($null -eq $previous){Remove-Item Env:FORGE_LIVE_QUALIFICATION -ErrorAction SilentlyContinue}else{$env:FORGE_LIVE_QUALIFICATION=$previous}}
     }
 }
 $windowsStatus='PENDING';$windowsPath='none';$windowsHash='none'
-if($WindowsAttestation -and (Test-Regular $WindowsAttestation)){$wf=Get-Fields $WindowsAttestation;$head=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$tree=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1);if($wf.format -eq 'forge-windows-deterministic-v1' -and $wf.status -eq 'PASS' -and $wf.powershell_major -eq '5' -and $wf.powershell_minor -eq '1' -and $wf.git_head -eq $head -and $wf.tree_sha -eq $tree){$windowsStatus='PASS';$windowsPath=(Resolve-Path $WindowsAttestation).Path;$windowsHash=Get-Hash $windowsPath}}
+if($WindowsAttestation -and (Test-Regular $WindowsAttestation)){$wf=Get-Fields $WindowsAttestation;$head=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$tree=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1);if($wf.format -eq 'forge-windows-deterministic-v1' -and $wf.status -eq 'PASS' -and $wf.powershell_major -eq '5' -and $wf.powershell_minor -eq '1' -and $wf.candidate_clean -eq 'true' -and $wf.git_head -eq $head -and $wf.tree_sha -eq $tree -and (Test-CandidateClean $ProjectRoot)){$windowsStatus='PASS';$windowsPath=(Resolve-Path $WindowsAttestation).Path;$windowsHash=Get-Hash $windowsPath}}
 $overall='BLOCKED';if($mode -eq 'authenticated' -and $windowsStatus -eq 'PASS'){$allPass=$true;foreach($child in $children.Values){try{if((Get-Content -Raw $child|ConvertFrom-Json).status -ne 'PASS'){$allPass=$false}}catch{$allPass=$false}};if($allPass){$overall='PASS'}}
 $lines=New-Object Collections.Generic.List[string];foreach($line in @('format=forge-runtime-final-v1','source_class=forge-runtime-qualifier',"evidence_mode=$mode","project_root=$ProjectRoot","candidate_sha256=$candidate","git_head=$gitHead","tree_sha=$treeSha")){$lines.Add($line)}
 foreach($engine in @('claude','codex')){$binary=$binaries[$engine];if($binary -and (Test-Regular $binary)){$binary=(Resolve-Path $binary).Path;$binaryHash=Get-Hash $binary}else{$binary='none';$binaryHash='none'};$lines.Add("${engine}_binary_path=$binary");$lines.Add("${engine}_binary_sha256=$binaryHash");foreach($kind in @('dispatch','goal')){$child=$children["${engine}_${kind}"];$lines.Add("${engine}_${kind}_path=$child");$lines.Add("${engine}_${kind}_sha256=$(Get-Hash $child)")}}

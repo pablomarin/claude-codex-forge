@@ -56,6 +56,25 @@ function Get-StateTableValue([string]$Path, [string]$Field) {
     return [string]$values[0]
 }
 function Test-SafeSessionId([string]$Value) { return $Value -match '^[A-Za-z0-9._-]+$' }
+function Assert-NoFollowSessionMetadata([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'BLOCKED[invariant]: exact council session metadata is unavailable' }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'BLOCKED[invariant]: council session metadata must be a no-follow regular file' }
+}
+function Ensure-ReservedReviewDirectory([string]$Reviews, [string]$Relative, [bool]$Create) {
+    if (-not $Relative -or [IO.Path]::IsPathRooted($Relative) -or $Relative -match '(^|[\\/])\.\.([\\/]|$)') { throw 'BLOCKED[invariant]: unsafe dispatcher-reserved path' }
+    $cursor = $Reviews
+    foreach ($part in @($Relative -split '[\\/]' | Where-Object { $_ -and $_ -ne '.' })) {
+        $cursor = Join-Path $cursor $part
+        if (Test-Path -LiteralPath $cursor) {
+            $item = Get-Item -LiteralPath $cursor -Force
+            if (-not $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'BLOCKED[invariant]: dispatcher-reserved ancestors must be no-follow directories' }
+        }
+        elseif ($Create) { New-Item -ItemType Directory -Path $cursor | Out-Null }
+        else { throw 'BLOCKED[invariant]: dispatcher-reserved directory is unavailable' }
+    }
+    return [IO.Path]::GetFullPath($cursor)
+}
 function Reserve-OwnedReviewPath([string]$Path, [string]$Label, [string]$Root, [string]$Reviews) {
     if (-not $Path) { throw "BLOCKED[invariant]: $Label is required" }
     if ($Path.Contains("`n") -or $Path.Contains("`r")) { throw "BLOCKED[invariant]: $Label contains a newline" }
@@ -113,6 +132,7 @@ function Publish-OwnedReviewFile([string]$Source, [string]$Destination, [string]
     finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
 }
 function Escape-ProcessArgument([string]$Value) {
+    if ($Value.Length -eq 0) { return '""' }
     if ($Value -notmatch '[\s"]') { return $Value }
     return '"' + (($Value -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
 }
@@ -347,7 +367,7 @@ function Invoke-Engine([string]$Selected) {
     if ($script:ReproMode) { $prompt = "This is the dispatcher-owned $($script:ReproCheckKind) reproduction check. Under the already-qualified no-network workspace boundary, execute powershell.exe -NoProfile -ExecutionPolicy Bypass -File $($script:ReproRunner) exactly once. Do not edit it or synthesize its stdout/exit files.`n" + $prompt }
     $bound = Join-Path $scratch 'bound.out'
     $environment = @{ FORGE_DISPATCH_MODE = $(if ($Profile -eq 'investigate') { 'investigate' } else { 'review' }); FORGE_CANDIDATE_ROOT = $snapshot; FORGE_REPRO_RUNNER = $(if ($script:ReproMode) { $script:ReproRunner } else { '' }); FORGE_DISPATCH_SESSION_ID = $(if ($Conversation -eq 'new') { $SessionProvisionalId } else { $SessionId }); FORGE_DISPATCH_SEAT_HASH = $seatHash; FORGE_DISPATCH_CONFIG_HASH = $configHash; FORGE_DISPATCH_CANARY_HASH = $canaryHash; FORGE_DISPATCH_QUALIFICATION_REVISION = $QualificationRevision }
-    foreach ($name in @('FORGE_DISPATCH_TEST_MODE', 'FORGE_TEST_DISABLE_ENGINE', 'FAKE_CLAUDE_BEHAVIOR', 'FAKE_CODEX_BEHAVIOR', 'FAKE_CLAUDE_LOG', 'FAKE_CODEX_LOG', 'FAKE_CHILD_PID_FILE')) {
+    foreach ($name in @('FORGE_DISPATCH_TEST_MODE', 'FORGE_TEST_DISABLE_ENGINE', 'FAKE_CLAUDE_BEHAVIOR', 'FAKE_CODEX_BEHAVIOR', 'FAKE_CLAUDE_LOG', 'FAKE_CLAUDE_ARGV_LOG', 'FAKE_CODEX_LOG', 'FAKE_CHILD_PID_FILE')) {
         $value = [Environment]::GetEnvironmentVariable($name)
         if ($value) { $environment[$name] = $value }
     }
@@ -429,7 +449,9 @@ function Invoke-Engine([string]$Selected) {
 
 try {
     if ($Mode -eq 'verify-pair') {
-        foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) { if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'BLOCKED[artifact]: two regular receipts are required' } }
+        foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'BLOCKED[artifact]: two no-follow regular receipts are required' }
+        }
         if ((Get-Value $CodeSpecReceipt 'role') -ne 'code-spec' -or (Get-Value $CodeQualityReceipt 'role') -ne 'code-quality' -or (Get-Value $CodeSpecReceipt 'invocation_id') -eq (Get-Value $CodeQualityReceipt 'invocation_id')) { throw 'BLOCKED[invariant]: distinct code lenses are required' }
         foreach ($key in @('artifact_hash', 'worktree_identity', 'workflow_base_sha', 'git_head')) { if ((Get-Value $CodeSpecReceipt $key) -cne (Get-Value $CodeQualityReceipt $key)) { throw "BLOCKED[artifact]: mixed candidate pair: $key" } }
         $specOutput = Get-Value $CodeSpecReceipt 'output_path' $true
@@ -437,10 +459,35 @@ try {
         $markerIndex = $specOutput.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase)
         if ($markerIndex -lt 1) { throw 'BLOCKED[invariant]: review receipt output path cannot resolve canonical state' }
         $pairState = Join-Path $specOutput.Substring(0, $markerIndex) '.forge\local\state.md'
+        $pairRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $pairState))
+        $reviews = Join-Path $pairRoot '.forge\local\reviews'
+        $cursor = $pairRoot
+        foreach ($part in @('.forge','local','reviews')) {
+            $cursor = Join-Path $cursor $part; $item = Get-Item -LiteralPath $cursor -Force
+            if (-not $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'BLOCKED[invariant]: review storage ancestors must be no-follow directories' }
+        }
         $currentIteration = Get-StateTableValue $pairState 'Review iteration'
         if ($currentIteration -notmatch '^[0-9]+$') { throw 'BLOCKED[invariant]: current review iteration is invalid' }
         foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) { if ((Get-Value $path 'review_iteration' $true) -cne $currentIteration) { throw 'BLOCKED[artifact]: review receipt iteration is stale or mixed' } }
-        foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) { if ((Get-Value $path 'semantic_verdict') -ne 'CLEAN' -or (Get-Value $path 'max_severity') -notin @('NONE', 'P3')) { throw 'BLOCKED[artifact]: both lenses must be certifying clean' } }
+        foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) {
+            if ((Get-Value $path 'schema_version' $true) -cne '1' -or (Get-Value $path 'fresh_process' $true) -cne 'true' -or (Get-Value $path 'process_exit_status' $true) -cne '0' -or (Get-Value $path 'blocked_class' $true) -cne 'none' -or (Get-Value $path 'result_schema_version' $true) -cne '1') { throw 'BLOCKED[artifact]: review receipt execution schema is not certifying' }
+            if ((Get-Value $path 'semantic_verdict' $true) -cne 'CLEAN' -or (Get-Value $path 'max_severity' $true) -notin @('NONE', 'P3')) { throw 'BLOCKED[artifact]: both lenses must be certifying clean' }
+            $reviewOutput = Get-Value $path 'output_path' $true
+            $prefix = $reviews.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+            if (-not $reviewOutput.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $reviewOutput -PathType Leaf) -or ((Get-Item -LiteralPath $reviewOutput -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'BLOCKED[artifact]: review output must be a bound no-follow regular file' }
+            $relativeParent = (Split-Path -Parent $reviewOutput).Substring($reviews.Length).TrimStart('\','/')
+            if ($relativeParent) { $null = Ensure-ReservedReviewDirectory $reviews $relativeParent $false }
+            if ((Get-ShaFile $reviewOutput) -cne (Get-Value $path 'output_hash' $true)) { throw 'BLOCKED[artifact]: review output hash changed' }
+        }
+        $current = Join-Path $reviews ('.verify-pair-' + [Guid]::NewGuid().ToString('N') + '.candidate')
+        try {
+            Push-Location $pairRoot
+            try { & $Fingerprint -Mode identity -Artifact 'git:working-tree' -WorkflowBaseSha (Get-Value $CodeSpecReceipt 'workflow_base_sha' $true) -WorkflowBaseRef (Get-Value $CodeSpecReceipt 'workflow_base_ref' $true) -Output $current *> $null }
+            finally { Pop-Location }
+            if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: current candidate capture failed' }
+            foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) { foreach ($key in @('artifact_hash','worktree_identity','workflow_base_sha','git_head')) { if ((Get-Value $path $key $true) -cne (Get-Value $current $key $true)) { throw "BLOCKED[artifact]: review pair is stale: $key" } } }
+        }
+        finally { Remove-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue }
         Write-Output 'CLEAN: distinct code-spec and code-quality receipts certify one candidate'
         exit 0
     }
@@ -485,16 +532,18 @@ try {
     $SessionMeta = ''; $SessionStore = ''; $SessionSnapshot = ''; $SessionSnapshotHash = ''; $SessionCanaryHash = ''; $SessionSeatHash = ''; $SessionProvisionalId = ''
     if ($Conversation -eq 'new') {
         $SessionProvisionalId = [Guid]::NewGuid().ToString()
-        $SessionStore = Join-Path $reviews "session-stores/$invocationId"
-        New-Item -ItemType Directory -Path (Join-Path $SessionStore 'home'), (Join-Path $SessionStore 'codex-home') -Force | Out-Null
+        $SessionStore = Ensure-ReservedReviewDirectory $reviews "session-stores/$invocationId" $true
+        $null = Ensure-ReservedReviewDirectory $reviews "session-stores/$invocationId/home" $true
+        $null = Ensure-ReservedReviewDirectory $reviews "session-stores/$invocationId/codex-home" $true
     }
     elseif ($Conversation -eq 'resume') {
+        $null = Ensure-ReservedReviewDirectory $reviews 'sessions' $false
         $SessionMeta = Join-Path $reviews "sessions/$SessionId.meta"
-        if (-not (Test-Path -LiteralPath $SessionMeta -PathType Leaf)) { throw 'BLOCKED[invariant]: exact council session metadata is unavailable' }
+        Assert-NoFollowSessionMetadata $SessionMeta
         if ((Get-Value $SessionMeta 'completed' $true) -ne 'false' -or (Get-Value $SessionMeta 'session_id' $true) -cne $SessionId -or (Get-Value $SessionMeta 'engine' $true) -cne $first -or (Get-Value $SessionMeta 'role' $true) -cne $Role -or (Get-Value $SessionMeta 'seat_id' $true) -cne $SeatId -or (Get-Value $SessionMeta 'question_hash' $true) -cne $QuestionHash -or (Get-Value $SessionMeta 'active_host' $true) -cne $activeHost -or (Get-Value $SessionMeta 'context_hash' $true) -cne $contextHash -or (Get-Value $SessionMeta 'artifact_hash' $true) -cne $ArtifactHash -or (Get-Value $SessionMeta 'worktree_identity' $true) -cne $worktreeIdentity -or (Get-Value $SessionMeta 'qualification_revision' $true) -cne $QualificationRevision) { throw 'BLOCKED[invariant]: stale, cross-seat, or cross-candidate council resume' }
         $storeId = Get-Value $SessionMeta 'store_id' $true
         if (-not (Test-SafeSessionId $storeId)) { throw 'BLOCKED[invariant]: unsafe council session store id' }
-        $SessionStore = Join-Path $reviews "session-stores/$storeId"
+        $SessionStore = Ensure-ReservedReviewDirectory $reviews "session-stores/$storeId" $false
         $SessionSnapshot = Get-Value $SessionMeta 'snapshot_path' $true
         $SessionSnapshotHash = Get-Value $SessionMeta 'snapshot_manifest_hash' $true
         $SessionCanaryHash = Get-Value $SessionMeta 'canary_hash' $true
@@ -541,7 +590,7 @@ try {
     }
     if ($result.Rc -eq 0 -and $Conversation -eq 'new') {
         if (-not (Test-SafeSessionId $result.Session)) { throw 'BLOCKED[invariant]: engine emitted unsafe session id' }
-        $sessionDirectory = Join-Path $reviews 'sessions'; New-Item -ItemType Directory -Path $sessionDirectory -Force | Out-Null
+        $sessionDirectory = Ensure-ReservedReviewDirectory $reviews 'sessions' $true
         $SessionMeta = Join-Path $sessionDirectory "$($result.Session).meta"
         if (Test-Path -LiteralPath $SessionMeta) { throw 'BLOCKED[invariant]: session metadata already exists' }
         $meta = "schema_version=1`ncompleted=false`nsession_id=$($result.Session)`nengine=$($result.Engine)`nrole=$Role`nseat_id=$SeatId`nquestion_hash=$QuestionHash`nactive_host=$activeHost`ncontext_hash=$contextHash`nartifact_hash=$ArtifactHash`nworktree_identity=$worktreeIdentity`nturn_prompt_hash=$PromptHash`nconfig_hash=$($result.ConfigHash)`ncanary_hash=$($result.CanaryHash)`nseat_hash=$($result.SeatHash)`nqualification_revision=$QualificationRevision`nstore_id=$invocationId`nsnapshot_path=$($result.Snapshot)`nsnapshot_manifest_hash=$(Get-SnapshotStateHash $result.SnapshotBefore)`n"
@@ -553,8 +602,11 @@ try {
     }
     if ($result.Output -and (Test-Path -LiteralPath $result.Output -PathType Leaf)) { Publish-OwnedReviewFile $result.Output $Output 'review output' $reviews }
     if ($result.Rc -eq 0 -and $Conversation -eq 'resume') {
+        Assert-NoFollowSessionMetadata $SessionMeta
         $updated = (Get-Content -LiteralPath $SessionMeta | ForEach-Object { if ($_ -eq 'completed=false') { 'completed=true' } else { $_ } }) -join "`n"
+        Assert-NoFollowSessionMetadata $SessionMeta
         [IO.File]::WriteAllText($SessionMeta, $updated + "`n", $Utf8)
+        $null = Ensure-ReservedReviewDirectory $reviews "session-stores/$(Split-Path -Leaf $SessionStore)" $false
         Remove-Item -LiteralPath $SessionStore -Recurse -Force
     }
     $receipt = Join-Path $reviews "$invocationId.receipt"

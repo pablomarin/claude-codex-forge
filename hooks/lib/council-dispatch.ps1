@@ -4,6 +4,17 @@ param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
 $ErrorActionPreference = 'Stop'
 function Stop-Council([string]$Message) { [Console]::Error.WriteLine("BLOCKED[council]: $Message"); exit 2 }
 function Sha([string]$Path) { (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant() }
+function New-CouncilDirectory([string]$Worktree, [string]$QuestionHash) {
+  $cursor=$Worktree
+  foreach($part in @('.forge','local','reviews',"council-$QuestionHash")){
+    $cursor=Join-Path $cursor $part
+    if(Test-Path -LiteralPath $cursor){
+      $item=Get-Item -LiteralPath $cursor -Force
+      if(-not $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)){Stop-Council 'council receipt storage ancestors must be no-follow directories'}
+    }else{New-Item -ItemType Directory -Path $cursor | Out-Null}
+  }
+  return [IO.Path]::GetFullPath($cursor)
+}
 function Usage { @'
 usage: council-dispatch.ps1 --question-file FILE --artifact ARTIFACT --workflow-base-sha SHA --workflow-base-ref REF [--seat-engine SEAT=claude|codex|main|other]
 Six fresh sessions and eleven turns; runtime other failure reruns the complete topology on main (same-engine-fallback).
@@ -26,7 +37,7 @@ $main = (& $hostContext verify 2>$null); if ($LASTEXITCODE -ne 0 -or $main -noti
 $other = if ($main -eq 'claude') { 'codex' } else { 'claude' }
 $seats=@('simplifier','scalability_hawk','pragmatist','contrarian','maintainer'); $labels=@{simplifier='A';scalability_hawk='B';pragmatist='C';contrarian='D';maintainer='E'}; $personas=@{simplifier='The Simplifier';scalability_hawk='The Scalability Hawk';pragmatist='The Pragmatist';contrarian='The Contrarian';maintainer='The Maintainer'}; $engine=@{simplifier=$main;scalability_hawk=$main;pragmatist=$main;contrarian=$other;maintainer=$other;chair=$other}; $custom=$false
 foreach ($entry in $overrides) { $parts=$entry -split '=',2; if ($parts.Count -ne 2 -or $parts[0] -notin @($seats + 'chair')) { Stop-Council 'invalid seat override' }; $value=$parts[1]; if ($value -eq 'main') {$value=$main}; if ($value -eq 'other') {$value=$other}; if ($value -notin @('claude','codex')) { Stop-Council 'invalid seat engine' }; $engine[$parts[0]]=$value; $custom=$true }
-$qhash=Sha $question; $workroot=(& git rev-parse --show-toplevel); if ($LASTEXITCODE -ne 0) { Stop-Council 'Git worktree required' }; $reviewRoot=Join-Path $workroot ".forge\local\reviews\council-$qhash"; New-Item -ItemType Directory -Force -Path $reviewRoot | Out-Null
+$qhash=Sha $question; $workroot=(& git rev-parse --show-toplevel); if ($LASTEXITCODE -ne 0) { Stop-Council 'Git worktree required' }; $workroot=(Resolve-Path $workroot).Path; $reviewRoot=New-CouncilDirectory $workroot $qhash
 $script:FailedEngine=''; $script:AttemptDir=''
 function Test-EnginePreflight([string]$Selected) {
   if (-not (Get-Command $Selected -ErrorAction SilentlyContinue)) { return $false }

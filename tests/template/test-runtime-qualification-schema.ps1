@@ -47,5 +47,43 @@ public static class ForgeRuntimeFake {
     $child=((Get-Content $output|Where-Object{$_ -like 'claude_dispatch_path=*'}) -replace '^claude_dispatch_path=','');Add-Content $child ''
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -Validate -Input $output *> $null
     Assert-True ($LASTEXITCODE -ne 0) 'child hash mismatch is rejected'
+
+    $windows=Join-Path $temporary 'windows-clean.receipt'
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output $windows *> $null
+    Assert-True ($LASTEXITCODE -eq 0 -and (Get-Content -Raw $windows) -match '(?m)^candidate_clean=true$') 'clean Windows writer records candidate cleanliness'
+    Add-Content -LiteralPath (Join-Path $project 'app.txt') -Value 'dirty tracked'
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output (Join-Path $temporary 'windows-dirty.receipt') *> $null
+    Assert-True ($LASTEXITCODE -ne 0) 'Windows writer rejects tracked dirtiness'
+    [IO.File]::WriteAllText((Join-Path $project 'app.txt'),"candidate`n");[IO.File]::WriteAllText((Join-Path $project 'untracked.txt'),"untracked`n")
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output (Join-Path $temporary 'windows-untracked.receipt') *> $null
+    Assert-True ($LASTEXITCODE -ne 0) 'Windows writer rejects untracked dirtiness'
+    Remove-Item -LiteralPath (Join-Path $project 'untracked.txt')
+
+    $noClean=Join-Path $temporary 'windows-no-clean.receipt';$head=(& git -C $project rev-parse HEAD);$tree=(& git -C $project rev-parse 'HEAD^{tree}')
+    [IO.File]::WriteAllLines($noClean,@('format=forge-windows-deterministic-v1','status=PASS','powershell_major=5','powershell_minor=1',"git_head=$head","tree_sha=$tree"))
+    $noCleanFinal=Join-Path $temporary 'no-clean-final.receipt'
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -FixtureMode -ProjectRoot $project -Output $noCleanFinal -EngineDir $bin -WindowsAttestation $noClean *> $null
+    Assert-True ((Get-Content -Raw $noCleanFinal) -match '(?m)^windows_status=PENDING$') 'final validator rejects Windows PASS without candidate_clean'
+
+    $hangBin=Join-Path $temporary 'hanging-bin';New-Item -ItemType Directory -Path $hangBin|Out-Null;$hangMarker=Join-Path $temporary 'hang-used'
+    $hangSource=@'
+using System;
+using System.IO;
+using System.Threading;
+public static class ForgeRuntimeHang {
+ public static int Main(string[] args){
+  if(args.Length>0 && args[0]=="--version"){Console.WriteLine("runtime hang 1");return 0;}
+  if(args.Length>0 && (args[0]=="--help" || (args[0]=="exec" && args.Length>1 && args[1]=="--help"))){Console.WriteLine("--safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable");return 0;}
+  if(Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).Equals("claude",StringComparison.OrdinalIgnoreCase) && !File.Exists(Environment.GetEnvironmentVariable("FORGE_RUNTIME_HANG_MARKER"))){File.WriteAllText(Environment.GetEnvironmentVariable("FORGE_RUNTIME_HANG_MARKER"),"used");Thread.Sleep(10000);}
+  return 23;
+ }
+}
+'@
+    Add-Type -TypeDefinition $hangSource -Language CSharp -OutputAssembly (Join-Path $hangBin 'runtime-hang.exe') -OutputType ConsoleApplication
+    Copy-Item (Join-Path $hangBin 'runtime-hang.exe') (Join-Path $hangBin 'claude.exe');Copy-Item (Join-Path $hangBin 'runtime-hang.exe') (Join-Path $hangBin 'codex.exe')
+    $savedPath=$env:PATH;$env:PATH="$hangBin;$savedPath";$env:FORGE_RUNTIME_HANG_MARKER=$hangMarker;$timeoutOutput=Join-Path $temporary 'timeout-final.receipt';$clock=[Diagnostics.Stopwatch]::StartNew()
+    try{& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -Live -ProjectRoot $project -Output $timeoutOutput -EngineDir $hangBin -QualificationTimeoutSeconds 1 *> $null;$timeoutRc=$LASTEXITCODE}finally{$clock.Stop();$env:PATH=$savedPath;Remove-Item Env:FORGE_RUNTIME_HANG_MARKER -ErrorAction SilentlyContinue}
+    Assert-True ($timeoutRc -ne 0 -and $clock.Elapsed.TotalSeconds -lt 8) 'authenticated PowerShell child qualification timeout is bounded and BLOCKED'
+    Assert-True ((Get-Content -Raw "$timeoutOutput.d\claude-dispatch.json") -match 'qualification child timeout') 'PowerShell timeout emits a truthful child receipt'
 } finally {Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue}
 Write-Host 'PASS: PowerShell runtime qualification schema'

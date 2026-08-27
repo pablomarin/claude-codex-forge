@@ -33,6 +33,24 @@ strict_kv_dispatch() {
     kv_dispatch "$file" "$key"
 }
 safe_session_id_dispatch() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1 ;; *) return 0 ;; esac; }
+ensure_reserved_review_dir_dispatch() {
+    local relative="$1" create="${2:-false}" cursor="$reviews_dir" part old_ifs
+    case "$relative" in ''|/*|../*|*/../*|*/..) return 1 ;; esac
+    old_ifs=$IFS; IFS=/
+    for part in $relative; do
+        IFS=$old_ifs
+        [ -n "$part" ] && [ "$part" != . ] && [ "$part" != .. ] || return 1
+        cursor="$cursor/$part"
+        if [ -e "$cursor" ] || [ -L "$cursor" ]; then
+            [ -d "$cursor" ] && [ ! -L "$cursor" ] || return 1
+        else
+            [ "$create" = true ] && mkdir "$cursor" || return 1
+        fi
+        IFS=/
+    done
+    IFS=$old_ifs
+    printf '%s\n' "$cursor"
+}
 
 prepare_session_dispatch() {
     SESSION_FINAL_ID=""; SESSION_META=""; SESSION_STORE=""; SESSION_SNAPSHOT=""; SESSION_SNAPSHOT_HASH=""; SESSION_CANARY_HASH=""; SESSION_SEAT_HASH=""
@@ -44,11 +62,16 @@ prepare_session_dispatch() {
         session_output_dir=$(dirname "$session_id_output"); mkdir -p "$session_output_dir"
         session_output_dir=$(cd "$session_output_dir" && pwd -P) || die_dispatch invariant 'cannot canonicalize session id output'
         case "$session_output_dir/$(basename "$session_id_output")" in "$root"/.forge/local/*) ;; *) die_dispatch invariant 'session id output must be under .forge/local' ;; esac
-        SESSION_PROVISIONAL_ID=$(new_uuid_dispatch); SESSION_STORE="$reviews_dir/session-stores/$invocation_id"
-        umask 077; mkdir -p "$SESSION_STORE/home" "$SESSION_STORE/codex-home"; chmod 700 "$SESSION_STORE" 2>/dev/null || true
+        SESSION_PROVISIONAL_ID=$(new_uuid_dispatch)
+        SESSION_STORE=$(ensure_reserved_review_dir_dispatch "session-stores/$invocation_id" true) || die_dispatch invariant 'private council session store path is unsafe'
+        umask 077
+        ensure_reserved_review_dir_dispatch "session-stores/$invocation_id/home" true >/dev/null || die_dispatch invariant 'cannot create private council session home'
+        ensure_reserved_review_dir_dispatch "session-stores/$invocation_id/codex-home" true >/dev/null || die_dispatch invariant 'cannot create private Codex session home'
+        chmod 700 "$SESSION_STORE" 2>/dev/null || true
         return 0
     fi
     safe_session_id_dispatch "$session_id" || die_dispatch invariant 'unsafe exact session id'
+    ensure_reserved_review_dir_dispatch sessions false >/dev/null || die_dispatch invariant 'private council session metadata path is unsafe'
     SESSION_META="$reviews_dir/sessions/$session_id.meta"
     [ -f "$SESSION_META" ] && [ ! -L "$SESSION_META" ] || die_dispatch invariant 'exact council session metadata is unavailable'
     [ "$(strict_kv_dispatch "$SESSION_META" schema_version)" = 1 ] || die_dispatch invariant 'unsupported council session metadata'
@@ -64,7 +87,7 @@ prepare_session_dispatch() {
     [ "$(strict_kv_dispatch "$SESSION_META" worktree_identity)" = "$worktree_identity" ] || die_dispatch invariant 'council resume worktree mismatch'
     [ "$(strict_kv_dispatch "$SESSION_META" qualification_revision)" = "$qualification_revision" ] || die_dispatch capability 'council resume qualification changed'
     store_id=$(strict_kv_dispatch "$SESSION_META" store_id); safe_session_id_dispatch "$store_id" || die_dispatch invariant 'unsafe council session store id'
-    SESSION_STORE="$reviews_dir/session-stores/$store_id"; [ -d "$SESSION_STORE" ] && [ ! -L "$SESSION_STORE" ] || die_dispatch invariant 'private council session store is unavailable'
+    SESSION_STORE=$(ensure_reserved_review_dir_dispatch "session-stores/$store_id" false) || die_dispatch invariant 'private council session store is unavailable'
     SESSION_SNAPSHOT=$(strict_kv_dispatch "$SESSION_META" snapshot_path); [ -d "$SESSION_SNAPSHOT" ] && [ ! -L "$SESSION_SNAPSHOT" ] || die_dispatch artifact 'bound council snapshot is unavailable'
     SESSION_SNAPSHOT_HASH=$(strict_kv_dispatch "$SESSION_META" snapshot_manifest_hash)
     SESSION_CANARY_HASH=$(strict_kv_dispatch "$SESSION_META" canary_hash); SESSION_SEAT_HASH=$(strict_kv_dispatch "$SESSION_META" seat_hash)
@@ -75,7 +98,7 @@ write_session_metadata_dispatch() {
     local snapshot_hash meta_dir tmp
     SESSION_FINAL_ID="$ATTEMPT_SESSION_ID"; safe_session_id_dispatch "$SESSION_FINAL_ID" || return 2
     snapshot_hash=$(hash_file_dispatch "$ATTEMPT_SNAPSHOT_BEFORE")
-    meta_dir="$reviews_dir/sessions"; mkdir -p "$meta_dir"; chmod 700 "$meta_dir" 2>/dev/null || true
+    meta_dir=$(ensure_reserved_review_dir_dispatch sessions true) || return 2; chmod 700 "$meta_dir" 2>/dev/null || true
     SESSION_META="$meta_dir/$SESSION_FINAL_ID.meta"; [ ! -e "$SESSION_META" ] && [ ! -L "$SESSION_META" ] || return 2
     tmp="$SESSION_META.tmp.$$"; umask 077
     {
@@ -93,7 +116,7 @@ complete_session_dispatch() {
     tmp="$SESSION_META.tmp.$$"; awk -F= '$1=="completed" {print "completed=true"; next} {print}' "$SESSION_META" > "$tmp" || return 2
     chmod 600 "$tmp" 2>/dev/null || true; mv "$tmp" "$SESSION_META" || return 2
     case "$SESSION_STORE" in "$reviews_dir"/session-stores/*) ;; *) return 2 ;; esac
-    [ -d "$SESSION_STORE" ] && [ ! -L "$SESSION_STORE" ] || return 2
+    ensure_reserved_review_dir_dispatch "session-stores/$(basename "$SESSION_STORE")" false >/dev/null || return 2
     find -P "$SESSION_STORE" -depth -mindepth 1 -delete 2>/dev/null || return 2
     rmdir "$SESSION_STORE" 2>/dev/null || return 2
 }
@@ -478,7 +501,8 @@ EOF
 }
 
 verify_pair_dispatch() {
-    spec=""; quality=""; while [ "$#" -gt 0 ]; do case "$1" in --code-spec-receipt) spec="$2"; shift 2 ;; --code-quality-receipt) quality="$2"; shift 2 ;; *) die_dispatch invariant "unknown pair argument $1" ;; esac; done
+    local spec="" quality="" pair_output pair_root pair_state pair_iteration current f key role output_path output_parent output_hash base_sha base_ref
+    while [ "$#" -gt 0 ]; do case "$1" in --code-spec-receipt) spec="$2"; shift 2 ;; --code-quality-receipt) quality="$2"; shift 2 ;; *) die_dispatch invariant "unknown pair argument $1" ;; esac; done
     [ -f "$spec" ] && [ -f "$quality" ] && [ ! -L "$spec" ] && [ ! -L "$quality" ] || die_dispatch artifact 'two regular receipts are required'
     [ "$(kv_dispatch "$spec" role)" = code-spec ] && [ "$(kv_dispatch "$quality" role)" = code-quality ] || die_dispatch invariant 'required code lenses are missing or duplicated'
     [ "$(kv_dispatch "$spec" invocation_id)" != "$(kv_dispatch "$quality" invocation_id)" ] || die_dispatch invariant 'review invocation ids must differ'
@@ -488,7 +512,29 @@ verify_pair_dispatch() {
     pair_iteration=$(awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Review iteration"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}' "$pair_state")
     case "$pair_iteration" in ''|*[!0-9]*) die_dispatch invariant 'current review iteration is invalid' ;; esac
     [ "$(kv_dispatch "$spec" review_iteration)" = "$pair_iteration" ] && [ "$(kv_dispatch "$quality" review_iteration)" = "$pair_iteration" ] || die_dispatch artifact 'review receipt iteration is stale or mixed'
-    for f in "$spec" "$quality"; do [ "$(kv_dispatch "$f" semantic_verdict)" = CLEAN ] && case "$(kv_dispatch "$f" max_severity)" in NONE|P3) ;; *) die_dispatch artifact 'both review lenses must be certifying clean' ;; esac; done
+    for f in "$spec" "$quality"; do
+        [ "$(kv_dispatch "$f" schema_version)" = 1 ] && [ "$(kv_dispatch "$f" fresh_process)" = true ] \
+          && [ "$(kv_dispatch "$f" process_exit_status)" = 0 ] && [ "$(kv_dispatch "$f" blocked_class)" = none ] \
+          && [ "$(kv_dispatch "$f" result_schema_version)" = 1 ] || die_dispatch artifact 'review receipt execution schema is not certifying'
+        [ "$(kv_dispatch "$f" semantic_verdict)" = CLEAN ] && case "$(kv_dispatch "$f" max_severity)" in NONE|P3) ;; *) die_dispatch artifact 'both review lenses must be certifying clean' ;; esac
+        output_path=$(kv_dispatch "$f" output_path)
+        case "$output_path" in "$pair_root"/.forge/local/reviews/*) ;; *) die_dispatch invariant 'review output escaped the bound worktree' ;; esac
+        [ -f "$output_path" ] && [ ! -L "$output_path" ] || die_dispatch artifact 'review output must be a no-follow regular file'
+        output_parent=$(cd "$(dirname "$output_path")" 2>/dev/null && pwd -P) || die_dispatch artifact 'review output parent is unavailable'
+        [ "$output_parent" = "$(dirname "$output_path")" ] || die_dispatch artifact 'review output ancestor is linked'
+        output_hash=$(kv_dispatch "$f" output_hash)
+        [ "$(hash_file_dispatch "$output_path")" = "$output_hash" ] || die_dispatch artifact 'review output hash changed'
+    done
+    current="$pair_root/.forge/local/reviews/.verify-pair-$$-$RANDOM.candidate"
+    base_sha=$(kv_dispatch "$spec" workflow_base_sha); base_ref=$(kv_dispatch "$spec" workflow_base_ref)
+    (cd "$pair_root" && bash "$FINGERPRINT" identity --artifact git:working-tree --workflow-base-sha "$base_sha" --workflow-base-ref "$base_ref" --output "$current") >/dev/null 2>&1 \
+      || { rm -f "$current"; die_dispatch artifact 'current candidate capture failed'; }
+    for f in "$spec" "$quality"; do
+        for key in artifact_hash worktree_identity workflow_base_sha git_head; do
+            [ "$(kv_dispatch "$f" "$key")" = "$(kv_dispatch "$current" "$key")" ] || { rm -f "$current"; die_dispatch artifact "review pair is stale: $key"; }
+        done
+    done
+    rm -f "$current"
     printf 'CLEAN: distinct code-spec and code-quality receipts certify candidate %s\n' "$(kv_dispatch "$spec" artifact_hash)"
 }
 

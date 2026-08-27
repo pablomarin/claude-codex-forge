@@ -79,4 +79,64 @@ cp "$B/claude" "$S/claude.before"; printf '\n' >> "$B/claude"
 if bash "$RUNNER" --validate --input "$OUT" >/dev/null 2>&1; then fail "stale engine binary was accepted"; else pass "stale engine binary hash is rejected"; fi
 mv "$S/claude.before" "$B/claude"; chmod +x "$B/claude"
 
+start_test "Windows PASS requires an explicitly clean current candidate"
+head=$(git -C "$P" rev-parse HEAD); tree=$(git -C "$P" rev-parse 'HEAD^{tree}')
+WIN_NO_CLEAN="$S/windows-no-clean.receipt"
+printf 'format=forge-windows-deterministic-v1\nstatus=PASS\npowershell_major=5\npowershell_minor=1\ngit_head=%s\ntree_sha=%s\n' "$head" "$tree" > "$WIN_NO_CLEAN"
+OUT_NO_CLEAN="$S/no-clean-final.receipt"
+set +e; bash "$RUNNER" --fixture-mode --project-root "$P" --output "$OUT_NO_CLEAN" --engine-dir "$B" --windows-attestation "$WIN_NO_CLEAN" >/dev/null 2>&1; set -e
+assert_contains "$OUT_NO_CLEAN" 'windows_status=PENDING' "Windows attestation without candidate_clean cannot pass"
+
+WIN="$S/windows-clean.receipt"
+printf 'format=forge-windows-deterministic-v1\nstatus=PASS\npowershell_major=5\npowershell_minor=1\ncandidate_clean=true\ngit_head=%s\ntree_sha=%s\n' "$head" "$tree" > "$WIN"
+OUT_CLEAN="$S/clean-final.receipt"
+set +e; bash "$RUNNER" --fixture-mode --project-root "$P" --output "$OUT_CLEAN" --engine-dir "$B" --windows-attestation "$WIN" >/dev/null 2>&1; set -e
+assert_contains "$OUT_CLEAN" 'windows_status=PASS' "clean candidate accepts a bound Windows attestation"
+
+printf 'dirty tracked\n' >> "$P/app.txt"
+OUT_DIRTY="$S/dirty-final.receipt"
+set +e; bash "$RUNNER" --fixture-mode --project-root "$P" --output "$OUT_DIRTY" --engine-dir "$B" --windows-attestation "$WIN" >/dev/null 2>&1; set -e
+assert_contains "$OUT_DIRTY" 'windows_status=PENDING' "tracked dirtiness rejects Windows PASS"
+win_hash=$(if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$WIN" | awk '{print $1}'; else sha256sum "$WIN" | awk '{print $1}'; fi)
+awk -v p="$WIN" -v h="$win_hash" 'BEGIN{FS=OFS="="} $1=="windows_status"{$2="PASS"} $1=="windows_attestation_path"{$2=p} $1=="windows_attestation_sha256"{$2=h} {print}' "$OUT_DIRTY" > "$S/forged-dirty-windows.receipt"
+if bash "$RUNNER" --validate --input "$S/forged-dirty-windows.receipt" >/dev/null 2>&1; then fail "validator accepted Windows PASS on a dirty candidate"; else pass "validator rejects Windows PASS on a dirty candidate"; fi
+printf 'candidate\n' > "$P/app.txt"
+printf 'untracked\n' > "$P/untracked.txt"
+OUT_UNTRACKED="$S/untracked-final.receipt"
+set +e; bash "$RUNNER" --fixture-mode --project-root "$P" --output "$OUT_UNTRACKED" --engine-dir "$B" --windows-attestation "$WIN" >/dev/null 2>&1; set -e
+assert_contains "$OUT_UNTRACKED" 'windows_status=PENDING' "untracked dirtiness rejects Windows PASS"
+rm "$P/untracked.txt"
+
+start_test "authenticated child qualification has a bounded timeout"
+H="$S/hanging-bin"; mkdir "$H"
+cat > "$H/runtime-hang" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --version) echo 'runtime hang 1'; exit 0 ;;
+  --help) echo '--safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable'; exit 0 ;;
+  exec) [ "${2:-}" != --help ] || { echo '--add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable'; exit 0; } ;;
+esac
+if [ "$(basename "$0")" = claude ] && [ ! -e "$FORGE_RUNTIME_HANG_MARKER" ]; then
+  : > "$FORGE_RUNTIME_HANG_MARKER"
+  sleep 10 & nested=$!
+  printf '%s\n' "$nested" > "$FORGE_RUNTIME_SLEEP_PID_FILE"
+  wait "$nested"
+fi
+exit 23
+EOF
+chmod +x "$H/runtime-hang"; cp "$H/runtime-hang" "$H/claude"; cp "$H/runtime-hang" "$H/codex"
+TIMEOUT_OUT="$S/timeout-final.receipt"; started=$(date +%s)
+set +e
+PATH="$H:$PATH" FORGE_RUNTIME_HANG_MARKER="$S/hang-used" FORGE_RUNTIME_SLEEP_PID_FILE="$S/nested-sleep.pid" bash "$RUNNER" --live --project-root "$P" --output "$TIMEOUT_OUT" --engine-dir "$H" --qualification-timeout-seconds 1 >/dev/null 2>&1
+timeout_rc=$?
+set -e
+elapsed=$(($(date +%s) - started))
+if [ "$timeout_rc" -ne 0 ]; then pass "timed-out authenticated qualification remains BLOCKED"; else fail "timed-out authenticated qualification returned PASS"; fi
+[ "$elapsed" -lt 8 ] && pass "authenticated child timeout is bounded" || fail "authenticated child timeout exceeded its bound ($elapsed seconds)"
+assert_contains "$TIMEOUT_OUT.d/claude-dispatch.json" 'qualification child timeout' "timed-out child emits a truthful BLOCKED receipt"
+nested_pid=$(cat "$S/nested-sleep.pid")
+for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$nested_pid" 2>/dev/null || break; sleep 0.1; done
+if kill -0 "$nested_pid" 2>/dev/null; then fail "timed-out qualification left nested child $nested_pid alive"; kill -KILL "$nested_pid" 2>/dev/null || true; else pass "timed-out qualification terminates the complete descendant tree"; fi
+assert_contains "$REPO_ROOT/scripts/qualify-runtime-final.ps1" 'QualificationTimeoutSeconds' "PowerShell final qualifier exposes the same bounded timeout"
+
 report "test-runtime-qualification-schema.sh"
