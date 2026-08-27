@@ -2373,6 +2373,12 @@ assert_contains "$REPO_ROOT/hooks/lib/council-dispatch.sh" 'same-engine-fallback
     "council dispatcher records whole-topology fallback"
 assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-authorized-action.sh' \
     "human-action boundary suite is registered"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-skill-pressure-schema.sh' \
+    "deterministic skill-pressure schema suite is registered without a model invocation"
+assert_contains "$REPO_ROOT/scripts/qualify-skill-pressure.sh" '--validate-fixture' \
+    "Bash skill-pressure runner separates deterministic fixture checks from live qualification"
+assert_contains "$REPO_ROOT/scripts/qualify-skill-pressure.ps1" 'ValidateFixture' \
+    "PowerShell skill-pressure runner mirrors deterministic fixture qualification"
 assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Invoke-IndependentReproduction' \
     "PowerShell dispatcher owns independent primary/control reproduction"
 assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Reserve-OwnedReviewPath' \

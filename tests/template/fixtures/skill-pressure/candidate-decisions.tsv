@@ -1,0 +1,10 @@
+candidate	decision	live_callsite	canonical_owner	rationale
+brainstorming	REJECTED_DUPLICATE	.forge/workflows/new-feature.md	canonical workflow phase	The discovery and option-selection behavior is already required by the shared new-feature workflow for both hosts.
+writing-plans	REJECTED_DUPLICATE	.forge/workflows/new-feature.md	canonical workflow phase	The durable plan and review checkpoint are already owned by the shared new-feature workflow for both hosts.
+systematic-debugging	REJECTED_DUPLICATE	.forge/workflows/fix-bug.md	canonical workflow phase	The reproduce-isolate-fix loop is already required by the shared fix-bug workflow for both hosts.
+subagent-driven-development	REJECTED_DUPLICATE	.forge/workflows/new-feature.md	canonical workflow phase	Native subagents and their evidence gates are already selected by the host-neutral feature workflow and reviewer dispatcher.
+executing-plans	REJECTED_DUPLICATE	.forge/workflows/new-feature.md	canonical workflow phase	Plan execution and its review checkpoints are already owned by the shared feature workflow.
+requesting-review	REJECTED_DUPLICATE	.forge/workflows/review.md	independent reviewer dispatcher	The reviewer dispatcher owns fresh independent review selection, fallback, receipt binding, and closure.
+receiving-review	REJECTED_DUPLICATE	.forge/workflows/review-pr-comments.md	canonical workflow phase	Review-comment triage and repair are already required by the shared review-comments workflow.
+simplifying-work	REJECTED_DUPLICATE	.forge/workflows/new-feature.md	canonical workflow phase	Simplification is a bounded review phase in the shared feature workflow and has no independent portable callsite.
+verifying-work	REJECTED_DUPLICATE	.forge/workflows/new-feature.md	verify agents and workflow gates	Verification is already owned by verify-app verify-e2e and the shared evidence gates.

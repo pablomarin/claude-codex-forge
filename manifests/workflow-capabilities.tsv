@@ -5,7 +5,9 @@ superpowers	writing-plans	/superpowers:writing-plans	forge	.forge/workflows/new-
 superpowers	subagent-driven-development	/superpowers:subagent-driven-development	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 superpowers	executing-plans	/superpowers:executing-plans	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 superpowers	systematic-debugging	/superpowers:systematic-debugging	forge	.forge/workflows/fix-bug.md	workflow-phase	claude,codex
+superpowers	requesting-code-review	/superpowers:requesting-code-review	forge	.forge/workflows/review.md	reviewer-dispatch	claude,codex
 superpowers	receiving-code-review	/superpowers:receiving-code-review	forge	.forge/workflows/review-pr-comments.md	workflow-phase	claude,codex
+superpowers	verification-before-completion	/superpowers:verification-before-completion	forge	.forge/workflows/new-feature.md	workflow-gates	claude,codex
 pr-review-toolkit	code-simplifier	code-simplifier-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 pr-review-toolkit	code-reviewer	code-reviewer-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 pr-review-toolkit	silent-failure-hunter	silent-failure-hunter-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
@@ -13,5 +15,6 @@ pr-review-toolkit	pr-test-analyzer	pr-test-analyzer-agent	forge	.forge/workflows
 pr-review-toolkit	comment-analyzer	comment-analyzer-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 pr-review-toolkit	type-design-analyzer	type-design-analyzer-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 pr-review-toolkit	review-pr	/pr-review-toolkit:review-pr	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+claude-core	simplify	/simplify	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
 frontend-design	frontend-design	frontend-design-skill	forge	.forge/skills/ui-design/SKILL.template.md	canonical-skill	claude,codex
 forge	subagent-review-receipt	forge-v6-producer	forge	.forge/local/reviews/<task-id>/{spec,quality}.receipt	forge-subagent-review-v1	claude,codex

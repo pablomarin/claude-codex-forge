@@ -14,7 +14,7 @@ When an MCP server for stock photos is available, use it proactively:
 
 ## AI Image Generation (Gemini API)
 
-Use the `/generate-image` skill to create custom images via Google's Gemini API directly. It checks the latest official docs for current model IDs, generates a script, runs it, and saves the image to your project. No community MCP servers needed.
+Activate the Forge generate-image skill when it is available to create custom images through an approved provider. It verifies the provider contract for the run and saves the resulting asset in the project.
 
 When generating images:
 

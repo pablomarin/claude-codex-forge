@@ -109,6 +109,8 @@ canonical	scripts/qualify-dispatch-isolation.sh	.forge/bin/qualify-dispatch-isol
 canonical	scripts/qualify-dispatch-isolation.ps1	.forge/bin/qualify-dispatch-isolation.ps1	all	shared	project	forge-canonical	.forge/bin/qualify-dispatch-isolation.ps1	v6
 canonical	scripts/qualify-goal-feasibility.sh	.forge/bin/qualify-goal-feasibility	all	shared	project	forge-canonical	.forge/bin/qualify-goal-feasibility	v6
 canonical	scripts/qualify-goal-feasibility.ps1	.forge/bin/qualify-goal-feasibility.ps1	all	shared	project	forge-canonical	.forge/bin/qualify-goal-feasibility.ps1	v6
+canonical	scripts/qualify-skill-pressure.sh	.forge/bin/qualify-skill-pressure	all	shared	project	forge-canonical	.forge/bin/qualify-skill-pressure	v6
+canonical	scripts/qualify-skill-pressure.ps1	.forge/bin/qualify-skill-pressure.ps1	all	shared	project	forge-canonical	.forge/bin/qualify-skill-pressure.ps1	v6
 canonical	scripts/forge-goal-authorize.sh	.forge/bin/forge-goal-authorize	all	shared	global	forge-canonical	.forge/bin/forge-goal-authorize	v6
 canonical	scripts/forge-goal-authorize.ps1	.forge/bin/forge-goal-authorize.ps1	all	shared	global	forge-canonical	.forge/bin/forge-goal-authorize.ps1	v6
 canonical	scripts/forge-goal-capture.sh	.forge/bin/forge-goal-capture	all	shared	global	forge-canonical	.forge/bin/forge-goal-capture	v6
