@@ -103,8 +103,8 @@ write_early_receipt() {
     mkdir -p "$reviews_dir"
     receipt="$reviews_dir/$invocation_id.receipt"
     {
-      printf 'schema_version=1\ninvocation_id=%s\ntimestamp=%s\nmain_host=%s\nrequested_engine=%s\nfirst_attempted_engine=none\nactual_engine=none\nfallback=false\nfallback_reason=%s\nattempted_engines=none\nrole=%s\nprofile=%s\nfresh_process=false\nsemantic_verdict=BLOCKED\nmax_severity=NONE\nblocked_class=%s\nresult_schema_version=none\n' \
-        "$invocation_id" "$(now_dispatch)" "${active_host:-UNBOUND}" "${engine:-UNBOUND}" "$(escape_dispatch "$reason")" "${role:-UNBOUND}" "${profile:-UNBOUND}" "$class"
+      printf 'schema_version=1\ninvocation_id=%s\ntimestamp=%s\nmain_host=%s\nrequested_engine=%s\nfirst_attempted_engine=none\nactual_engine=none\nfallback=false\nfallback_reason=%s\nattempted_engines=none\nrole=%s\nprofile=%s\nreview_iteration=%s\nfresh_process=false\nsemantic_verdict=BLOCKED\nmax_severity=NONE\nblocked_class=%s\nresult_schema_version=none\n' \
+        "$invocation_id" "$(now_dispatch)" "${active_host:-UNBOUND}" "${engine:-UNBOUND}" "$(escape_dispatch "$reason")" "${role:-UNBOUND}" "${profile:-UNBOUND}" "${review_iteration:-none}" "$class"
     } > "$receipt"
 }
 
@@ -483,6 +483,11 @@ verify_pair_dispatch() {
     [ "$(kv_dispatch "$spec" role)" = code-spec ] && [ "$(kv_dispatch "$quality" role)" = code-quality ] || die_dispatch invariant 'required code lenses are missing or duplicated'
     [ "$(kv_dispatch "$spec" invocation_id)" != "$(kv_dispatch "$quality" invocation_id)" ] || die_dispatch invariant 'review invocation ids must differ'
     for key in artifact_hash worktree_identity workflow_base_sha git_head; do [ "$(kv_dispatch "$spec" "$key")" = "$(kv_dispatch "$quality" "$key")" ] || die_dispatch artifact "mixed or stale candidate pair: $key"; done
+    pair_output=$(kv_dispatch "$spec" output_path); case "$pair_output" in */.forge/local/reviews/*) pair_root=${pair_output%/.forge/local/reviews/*} ;; *) die_dispatch invariant 'review receipt output path cannot resolve canonical state' ;; esac
+    pair_state="$pair_root/.forge/local/state.md"; [ -f "$pair_state" ] && [ ! -L "$pair_state" ] || die_dispatch invariant 'canonical review state is unavailable'
+    pair_iteration=$(awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Review iteration"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}' "$pair_state")
+    case "$pair_iteration" in ''|*[!0-9]*) die_dispatch invariant 'current review iteration is invalid' ;; esac
+    [ "$(kv_dispatch "$spec" review_iteration)" = "$pair_iteration" ] && [ "$(kv_dispatch "$quality" review_iteration)" = "$pair_iteration" ] || die_dispatch artifact 'review receipt iteration is stale or mixed'
     for f in "$spec" "$quality"; do [ "$(kv_dispatch "$f" semantic_verdict)" = CLEAN ] && case "$(kv_dispatch "$f" max_severity)" in NONE|P3) ;; *) die_dispatch artifact 'both review lenses must be certifying clean' ;; esac; done
     printf 'CLEAN: distinct code-spec and code-quality receipts certify candidate %s\n' "$(kv_dispatch "$spec" artifact_hash)"
 }
@@ -517,6 +522,12 @@ scalar_dispatch engine "$engine"; scalar_dispatch role "$role"; scalar_dispatch 
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die_dispatch invariant 'Git worktree required'; root=$(cd "$root" && pwd -P)
 reviews_dir="$root/.forge/local/reviews"
+review_iteration=none
+case "$role" in code-spec|code-quality)
+  review_iteration=$(awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Review iteration"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}' "$root/.forge/local/state.md" 2>/dev/null)
+  case "$review_iteration" in ''|*[!0-9]*) die_dispatch invariant 'code review requires a numeric current Review iteration' ;; esac
+  ;;
+esac
 for owned_dir in "$root/.forge" "$root/.forge/local" "$reviews_dir"; do
   if [ -e "$owned_dir" ] || [ -L "$owned_dir" ]; then [ -d "$owned_dir" ] && [ ! -L "$owned_dir" ] || die_dispatch invariant 'review storage ancestors must be no-follow directories'
   else mkdir "$owned_dir" || die_dispatch invariant 'cannot create review storage'; fi
@@ -598,8 +609,8 @@ fi
 output_hash=$(hash_file_dispatch "$output"); invocation_config_hash=$(printf '%s\n' "$attempted" "${ATTEMPT_CONFIG_HASH:-MISSING}" "$qualification_revision" "$artifact_hash" "$prompt_hash" "$role" "$profile" | hash_stream_dispatch)
 receipt="$reviews_dir/$invocation_id.receipt"
 {
- printf 'schema_version=1\ninvocation_id=%s\ntimestamp=%s\nmain_host=%s\nrequested_engine=%s\nfirst_attempted_engine=%s\nactual_engine=%s\nfallback=%s\nfallback_reason=%s\nattempted_engines=%s\nrole=%s\nprofile=%s\nfresh_process=true\nconversation=%s\nsession_id=%s\nartifact_kind=%s\nartifact_identity=%s\nartifact_hash=%s\nworktree_identity=%s\ngit_head=%s\nprompt_hash=%s\nworkflow_base_ref=%s\nworkflow_base_sha=%s\noutput_path=%s\noutput_hash=%s\nprocess_exit_status=%s\nsemantic_verdict=%s\nmax_severity=%s\nfindings_digest=%s\nresult_schema_version=%s\nrequested_provider=%s\nrequested_model=%s\nrequested_reasoning_effort=%s\nbound_provider=%s\nbound_model=%s\nbound_reasoning_effort=%s\nactual_provider=%s\nactual_model=%s\nactual_reasoning_effort=%s\ninvocation_config_hash=%s\nmodel_qualification_revision=%s\nblocked_class=%s\ninvestigation_replay=%s\nreproduction_status=%s\nhypothesis_hash=%s\nprimary_check_hash=%s\ncontrol_hash=%s\n' \
-  "$invocation_id" "$(now_dispatch)" "$active_host" "$engine" "$first_attempted" "$actual" "$fallback" "$(escape_dispatch "$fallback_reason")" "$attempted" "$role" "$profile" "$conversation" "${ATTEMPT_SESSION_ID:-none}" "$artifact_kind" "$artifact_hash" "$artifact_hash" "$worktree_identity" "$git_head" "$prompt_hash" "$(escape_dispatch "$workflow_base_ref")" "$base_resolved" "$(escape_dispatch "$output")" "$output_hash" "${ATTEMPT_EXIT:-127}" "${ATTEMPT_VERDICT:-BLOCKED}" "${ATTEMPT_SEVERITY:-NONE}" "${ATTEMPT_FINDINGS_DIGEST:-MISSING}" "${ATTEMPT_SCHEMA:-none}" "${ATTEMPT_REQUESTED_PROVIDER:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_MODEL:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_EFFORT:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_PROVIDER:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_MODEL:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_EFFORT:-UNQUALIFIED}" "${ATTEMPT_ACTUAL_PROVIDER:-UNOBSERVABLE}" "${ATTEMPT_ACTUAL_MODEL:-UNOBSERVABLE}" "${ATTEMPT_ACTUAL_EFFORT:-UNOBSERVABLE}" "$invocation_config_hash" "$qualification_revision" "${ATTEMPT_CLASS:-engine}" "$INVESTIGATION_REPLAY" "$REPRODUCTION_STATUS" "${REPRO_HYPOTHESIS_HASH:-MISSING}" "${REPRO_PRIMARY_HASH:-MISSING}" "${REPRO_CONTROL_HASH:-MISSING}"
+ printf 'schema_version=1\ninvocation_id=%s\ntimestamp=%s\nmain_host=%s\nrequested_engine=%s\nfirst_attempted_engine=%s\nactual_engine=%s\nfallback=%s\nfallback_reason=%s\nattempted_engines=%s\nrole=%s\nprofile=%s\nreview_iteration=%s\nfresh_process=true\nconversation=%s\nsession_id=%s\nartifact_kind=%s\nartifact_identity=%s\nartifact_hash=%s\nworktree_identity=%s\ngit_head=%s\nprompt_hash=%s\nworkflow_base_ref=%s\nworkflow_base_sha=%s\noutput_path=%s\noutput_hash=%s\nprocess_exit_status=%s\nsemantic_verdict=%s\nmax_severity=%s\nfindings_digest=%s\nresult_schema_version=%s\nrequested_provider=%s\nrequested_model=%s\nrequested_reasoning_effort=%s\nbound_provider=%s\nbound_model=%s\nbound_reasoning_effort=%s\nactual_provider=%s\nactual_model=%s\nactual_reasoning_effort=%s\ninvocation_config_hash=%s\nmodel_qualification_revision=%s\nblocked_class=%s\ninvestigation_replay=%s\nreproduction_status=%s\nhypothesis_hash=%s\nprimary_check_hash=%s\ncontrol_hash=%s\n' \
+  "$invocation_id" "$(now_dispatch)" "$active_host" "$engine" "$first_attempted" "$actual" "$fallback" "$(escape_dispatch "$fallback_reason")" "$attempted" "$role" "$profile" "$review_iteration" "$conversation" "${ATTEMPT_SESSION_ID:-none}" "$artifact_kind" "$artifact_hash" "$artifact_hash" "$worktree_identity" "$git_head" "$prompt_hash" "$(escape_dispatch "$workflow_base_ref")" "$base_resolved" "$(escape_dispatch "$output")" "$output_hash" "${ATTEMPT_EXIT:-127}" "${ATTEMPT_VERDICT:-BLOCKED}" "${ATTEMPT_SEVERITY:-NONE}" "${ATTEMPT_FINDINGS_DIGEST:-MISSING}" "${ATTEMPT_SCHEMA:-none}" "${ATTEMPT_REQUESTED_PROVIDER:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_MODEL:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_EFFORT:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_PROVIDER:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_MODEL:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_EFFORT:-UNQUALIFIED}" "${ATTEMPT_ACTUAL_PROVIDER:-UNOBSERVABLE}" "${ATTEMPT_ACTUAL_MODEL:-UNOBSERVABLE}" "${ATTEMPT_ACTUAL_EFFORT:-UNOBSERVABLE}" "$invocation_config_hash" "$qualification_revision" "${ATTEMPT_CLASS:-engine}" "$INVESTIGATION_REPLAY" "$REPRODUCTION_STATUS" "${REPRO_HYPOTHESIS_HASH:-MISSING}" "${REPRO_PRIMARY_HASH:-MISSING}" "${REPRO_CONTROL_HASH:-MISSING}"
 } > "$receipt"
 printf 'Reviewer selection: main=%s requested=%s actual=%s fallback=%s role=%s receipt=%s\n' "$active_host" "$engine" "$actual" "$fallback" "$role" "$receipt"
 [ "$final_rc" -eq 0 ] || exit 2

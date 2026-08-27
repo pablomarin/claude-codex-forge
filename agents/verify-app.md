@@ -114,7 +114,8 @@ Then use this format:
 
 The invoking agent writes the report, then creates the candidate-bound receipt
 with `verification-receipt write --kind verify-app` (or its PowerShell mirror),
-recording the exact command/profile, exit status, report hash, and PASS/FAIL result.
+recording the exact command/profile, exit status, report hash, and PASS/FAIL result. The
+persisted report retains the leading `VERDICT:` header so the helper binds that verdict.
 You do not certify a mutable report path or an unfrozen candidate.
 
 ## When to Approve

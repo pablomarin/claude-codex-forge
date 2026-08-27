@@ -768,6 +768,7 @@ fallback_reason=$reason
 attempted_engines=$actual
 role=$role
 profile=review
+review_iteration=1
 fresh_process=true
 artifact_kind=git-working-tree
 artifact_identity=$candidate_id
@@ -793,8 +794,8 @@ refresh_v2_final_receipts() {
         --output .forge/local/evidence/candidate.receipt) || return 1
     write_v2_review code-spec invoke-spec-$$ claude false none "$V2/.forge/local/reviews/spec.receipt"
     write_v2_review code-quality invoke-quality-$$ codex false none "$V2/.forge/local/reviews/quality.receipt"
-    printf 'verify app report\n' > "$V2/.forge/local/evidence/verify-app.report"
-    printf 'e2e report\n' > "$V2/.forge/local/evidence/e2e.report"
+    printf 'VERDICT: PASS\nverify app report\n' > "$V2/.forge/local/evidence/verify-app.report"
+    printf 'VERDICT: PASS\ne2e report\n' > "$V2/.forge/local/evidence/e2e.report"
     (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind verify-app \
         --candidate .forge/local/evidence/candidate.receipt --command 'focused verify-app' --profile focused \
         --report .forge/local/evidence/verify-app.report --result PASS --exit-status 0 \
@@ -813,8 +814,20 @@ make_v2_candidate_repo
 assert_equals "$?" "0" "staged-clean candidate freezes"
 write_v2_review code-spec invoke-spec claude false none "$V2/.forge/local/reviews/spec.receipt"
 write_v2_review code-quality invoke-quality codex true preferred-engine-unavailable "$V2/.forge/local/reviews/quality.receipt"
-printf 'verify app report\n' > "$V2/.forge/local/evidence/verify-app.report"
-printf 'e2e report\n' > "$V2/.forge/local/evidence/e2e.report"
+printf 'VERDICT: FAIL\nverify app report\n' > "$V2/.forge/local/evidence/verify-app-mismatch.report"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind verify-app \
+    --candidate .forge/local/evidence/candidate.receipt --command 'focused verify-app' --profile focused \
+    --report .forge/local/evidence/verify-app-mismatch.report --result PASS --exit-status 0 \
+    --output .forge/local/evidence/verify-app-mismatch.receipt) >/dev/null 2>&1
+assert_equals "$?" "2" "verify-app PASS cannot bind a FAIL report"
+printf 'VERDICT: PARTIAL\ne2e report\n' > "$V2/.forge/local/evidence/e2e-mismatch.report"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+    --candidate .forge/local/evidence/candidate.receipt --command 'focused e2e' --profile regression \
+    --report .forge/local/evidence/e2e-mismatch.report --result PASS --exit-status 0 \
+    --output .forge/local/evidence/e2e-mismatch.receipt) >/dev/null 2>&1
+assert_equals "$?" "2" "E2E PASS cannot bind a PARTIAL report"
+printf 'VERDICT: PASS\nverify app report\n' > "$V2/.forge/local/evidence/verify-app.report"
+printf 'VERDICT: PASS\ne2e report\n' > "$V2/.forge/local/evidence/e2e.report"
 (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind verify-app \
     --candidate .forge/local/evidence/candidate.receipt --command 'focused verify-app' --profile focused \
     --report .forge/local/evidence/verify-app.report --result PASS --exit-status 0 \
@@ -825,6 +838,10 @@ assert_equals "$?" "0" "verify-app result is bound to the frozen candidate"
     --report .forge/local/evidence/e2e.report --result PASS --exit-status 0 \
     --output .forge/local/evidence/e2e.receipt)
 assert_equals "$?" "0" "E2E result is bound to the frozen candidate"
+assert_contains "$V2/.forge/local/evidence/verify-app.receipt" 'report_verdict=PASS' \
+    "verify-app receipt persists the report verdict"
+assert_contains "$V2/.forge/local/evidence/e2e.receipt" 'report_verdict=PASS' \
+    "E2E receipt persists the report verdict"
 (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check \
     --state .forge/local/state.md) > "$V2/.forge/local/evidence/check.out" 2>&1
 assert_equals "$?" "0" "complete receipt set validates"
@@ -844,8 +861,8 @@ printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"
     | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$V2/.forge/local/evidence/gate-valid.out" 2>&1
 assert_equals "$?" "0" "ship hook accepts the complete current receipt set"
 
-start_test "receipt-v2: semantic/process/identity mutations fail closed in one compact matrix"
-for mutation in duplicate-invocation wrong-role findings stale-output copied-worktree; do
+start_test "receipt-v2: semantic/process/identity/iteration mutations fail closed in one compact matrix"
+for mutation in duplicate-invocation wrong-role findings stale-output copied-worktree stale-iteration; do
     cp "$V2/.forge/local/reviews/spec.receipt" "$V2/.forge/local/reviews/spec.saved"
     cp "$V2/.forge/local/reviews/quality.receipt" "$V2/.forge/local/reviews/quality.saved"
     case "$mutation" in
@@ -854,6 +871,7 @@ for mutation in duplicate-invocation wrong-role findings stale-output copied-wor
         findings) sed -i.bak 's/semantic_verdict=CLEAN/semantic_verdict=FINDINGS/;s/max_severity=NONE/max_severity=P1/' "$V2/.forge/local/reviews/quality.receipt" ;;
         stale-output) printf 'mutated\n' >> "$V2/.forge/local/reviews/code-quality.result" ;;
         copied-worktree) sed -i.bak 's/worktree_identity=.*/worktree_identity=0000000000000000000000000000000000000000000000000000000000000000/' "$V2/.forge/local/reviews/quality.receipt" ;;
+        stale-iteration) sed -i.bak 's/review_iteration=1/review_iteration=0/' "$V2/.forge/local/reviews/quality.receipt" ;;
     esac
     (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) > "$V2/.forge/local/evidence/$mutation.out" 2>&1
     assert_equals "$?" "2" "$mutation cannot certify"

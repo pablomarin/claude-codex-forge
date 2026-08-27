@@ -46,6 +46,11 @@ vr_fresh() {
     now=$(date +%s); age=$((now - epoch))
     [ "$age" -ge -300 ] && [ "$age" -le "${FORGE_RECEIPT_MAX_AGE_SECONDS:-86400}" ]
 }
+vr_report_verdict() {
+    local report="$1" kind="$2" verdict
+    verdict=$(sed -n '1{s/\r$//;s/^VERDICT: //p;}' "$report")
+    case "$kind:$verdict" in verify-app:PASS|verify-app:FAIL|verify-app:BLOCKED|e2e:PASS|e2e:FAIL|e2e:PARTIAL) printf '%s\n' "$verdict" ;; *) return 1 ;; esac
+}
 vr_candidate_current() {
     local receipt="$1" tmp key expected actual base base_ref helper
     [ -f "$receipt" ] && [ ! -L "$receipt" ] || return 1
@@ -68,14 +73,15 @@ vr_candidate_current() {
     return 0
 }
 vr_validate_review() {
-    local receipt="$1" role="$2" candidate="$3" key candidate_id worktree head base output fallback reason requested actual digest
+    local receipt="$1" role="$2" candidate="$3" iteration="$4" key candidate_id worktree head base output fallback reason requested actual digest
     [ -f "$receipt" ] && [ ! -L "$receipt" ] || return 1
-    for key in schema_version invocation_id timestamp main_host requested_engine actual_engine fallback fallback_reason role profile fresh_process artifact_kind artifact_hash worktree_identity git_head workflow_base_sha output_path output_hash process_exit_status semantic_verdict max_severity findings_digest result_schema_version blocked_class; do
+    for key in schema_version invocation_id timestamp main_host requested_engine actual_engine fallback fallback_reason role profile review_iteration fresh_process artifact_kind artifact_hash worktree_identity git_head workflow_base_sha output_path output_hash process_exit_status semantic_verdict max_severity findings_digest result_schema_version blocked_class; do
         vr_kv "$receipt" "$key" >/dev/null 2>&1 || return 1
     done
     [ "$(vr_kv "$receipt" schema_version)" = 1 ] || return 1
     [ "$(vr_kv "$receipt" role)" = "$role" ] || return 1
     [ "$(vr_kv "$receipt" profile)" = review ] || return 1
+    [ "$(vr_kv "$receipt" review_iteration)" = "$iteration" ] || return 1
     [ "$(vr_kv "$receipt" fresh_process)" = true ] || return 1
     vr_fresh "$(vr_kv "$receipt" timestamp)" || return 1
     [ "$(vr_kv "$receipt" artifact_kind)" = git-working-tree ] || return 1
@@ -108,9 +114,9 @@ vr_validate_review() {
     return 0
 }
 vr_validate_verifier() {
-    local receipt="$1" kind="$2" candidate="$3" key report candidate_id
+    local receipt="$1" kind="$2" candidate="$3" key report candidate_id report_verdict
     [ -f "$receipt" ] && [ ! -L "$receipt" ] || return 1
-    for key in schema_version receipt_kind invocation_id started_at ended_at candidate_id worktree_identity git_head workflow_base_sha index_tree command_hash profile exit_status report_path report_hash result; do
+    for key in schema_version receipt_kind invocation_id started_at ended_at candidate_id worktree_identity git_head workflow_base_sha index_tree command_hash profile exit_status report_path report_hash report_verdict result; do
         vr_kv "$receipt" "$key" >/dev/null 2>&1 || return 1
     done
     [ "$(vr_kv "$receipt" schema_version)" = 2 ] || return 1
@@ -118,12 +124,15 @@ vr_validate_verifier() {
     vr_fresh "$(vr_kv "$receipt" ended_at)" || return 1
     [ "$(vr_kv "$receipt" exit_status)" = 0 ] || return 1
     [ "$(vr_kv "$receipt" result)" = PASS ] || return 1
+    [ "$(vr_kv "$receipt" report_verdict)" = PASS ] || return 1
     candidate_id=$(vr_kv "$candidate" candidate_id) || return 1
     for key in candidate_id worktree_identity git_head workflow_base_sha index_tree; do
         [ "$(vr_kv "$receipt" "$key")" = "$(vr_kv "$candidate" "$key")" ] || return 1
     done
     report=$(vr_owned_path "$(vr_kv "$receipt" report_path)" true) || return 1
     [ "$(vr_hash_file "$report")" = "$(vr_kv "$receipt" report_hash)" ] || return 1
+    report_verdict=$(vr_report_verdict "$report" "$kind") || return 1
+    [ "$report_verdict" = "$(vr_kv "$receipt" report_verdict)" ] || return 1
     return 0
 }
 
@@ -142,12 +151,14 @@ if [ "$mode" = write ]; then
         --started-at) started="${2:-}"; shift 2 ;; --ended-at) ended="${2:-}"; shift 2 ;;
         *) vr_die "unknown write argument $1" ;; esac; done
     case "$kind" in verify-app|e2e) ;; *) vr_die 'kind must be verify-app or e2e' ;; esac
-    case "$result" in PASS|FAIL|BLOCKED) ;; *) vr_die 'invalid verifier result' ;; esac
+    case "$result" in PASS|FAIL|BLOCKED|PARTIAL) ;; *) vr_die 'invalid verifier result' ;; esac
     case "$status" in ''|*[!0-9]*) vr_die 'numeric exit status is required' ;; esac
     vr_scalar command "$command_text"; vr_scalar profile "$profile"
     candidate=$(vr_owned_path "$candidate" true) || vr_die 'candidate receipt must be Forge-local'
     vr_candidate_current "$candidate" || vr_die 'candidate is not the current staged-clean identity'
     report=$(vr_owned_path "$report" true) || vr_die 'report must be a Forge-local regular file'
+    report_verdict=$(vr_report_verdict "$report" "$kind") || vr_die 'report must begin with a canonical VERDICT header for its verifier kind'
+    [ "$report_verdict" = "$result" ] || vr_die 'report verdict and requested receipt result differ'
     output=$(vr_owned_path "$output" false) || vr_die 'receipt output must be Forge-local'
     [ -n "$started" ] || started=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     [ -n "$ended" ] || ended=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -157,8 +168,8 @@ if [ "$mode" = write ]; then
     {
         printf 'schema_version=2\nreceipt_kind=%s\ninvocation_id=%s\nstarted_at=%s\nended_at=%s\n' "$kind" "$invocation" "$started" "$ended"
         for key in candidate_id worktree_identity git_head workflow_base_sha index_tree; do printf '%s=%s\n' "$key" "$(vr_kv "$candidate" "$key")"; done
-        printf 'command_hash=%s\nprofile=%s\nexit_status=%s\nreport_path=%s\nreport_hash=%s\nresult=%s\n' \
-            "$(printf '%s' "$command_text" | vr_hash_stream)" "$profile" "$status" "$report" "$(vr_hash_file "$report")" "$result"
+        printf 'command_hash=%s\nprofile=%s\nexit_status=%s\nreport_path=%s\nreport_hash=%s\nreport_verdict=%s\nresult=%s\n' \
+            "$(printf '%s' "$command_text" | vr_hash_stream)" "$profile" "$status" "$report" "$(vr_hash_file "$report")" "$report_verdict" "$result"
     } > "$tmp" || vr_die 'cannot write verifier receipt'
     mv "$tmp" "$output" || vr_die 'cannot publish verifier receipt'
     printf 'RECEIPT:%s\n' "$output"
@@ -186,7 +197,7 @@ verify_app=$(vr_owned_path "$verify_app" true) || vr_die 'verify-app receipt pat
 e2e=$(vr_owned_path "$e2e" true) || vr_die 'E2E receipt path is invalid'
 candidate_ok=false; reviews_ok=false; app_ok=false; e2e_ok=false
 vr_candidate_current "$candidate" && candidate_ok=true
-if [ "$candidate_ok" = true ] && vr_validate_review "$spec" code-spec "$candidate" && vr_validate_review "$quality" code-quality "$candidate"; then
+if [ "$candidate_ok" = true ] && vr_validate_review "$spec" code-spec "$candidate" "$iteration" && vr_validate_review "$quality" code-quality "$candidate" "$iteration"; then
     spec_id=$(vr_kv "$spec" invocation_id); quality_id=$(vr_kv "$quality" invocation_id)
     [ "$spec_id" != "$quality_id" ] && reviews_ok=true
 fi

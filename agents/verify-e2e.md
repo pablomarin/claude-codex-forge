@@ -296,7 +296,7 @@ When the verdict is `FAIL` due to `FAIL_INVALID_USE_CASE` (and no `FAIL_BUG`), i
 After your response returns, the invoking agent:
 
 1. Parses the `VERDICT:` and `SUGGESTED_PATH:` header lines
-2. Writes everything after the `---` separator to the path you suggested
+2. Writes the `VERDICT:` header and everything after the `---` separator to the path you suggested
 3. Creates the candidate-bound receipt with `verification-receipt write --kind e2e`
    (or its PowerShell mirror), recording the exact command/profile, exit status,
    report hash, and PASS/FAIL result

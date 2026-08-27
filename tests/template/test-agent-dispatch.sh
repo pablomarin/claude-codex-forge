@@ -33,7 +33,7 @@ write_state() {
       printf '<!-- forge:state-schema v6 -->\n# Project State\n\n## Identity\n\n'
       printf '| Field | Value |\n| --- | --- |\n'
       printf '| Worktree root | %s |\n| Git common directory | %s |\n' "$(cd "$dir" && pwd -P)" "$common"
-      printf '| Last active host | claude |\n| Workflow base ref | %s |\n| Workflow base SHA | %s |\n\n## Workflow\n' "$ref" "$base"
+      printf '| Last active host | claude |\n| Workflow base ref | %s |\n| Workflow base SHA | %s |\n\n## Workflow\n\n## Receipts\n| Field | Value |\n| Review iteration | 1 |\n' "$ref" "$base"
     } > "$dir/.forge/local/state.md"
 }
 
@@ -529,9 +529,14 @@ start_test "code certification needs distinct same-candidate spec and quality re
 S=$(scratch_dir dispatch-pair); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
 run_dispatch "$S" claude sid codex code-spec >/dev/null 2>&1; spec=$(find "$S/.forge/local/reviews" -name '*.receipt' | sort | tail -1)
 run_dispatch "$S" claude sid codex code-quality >/dev/null 2>&1; quality=$(find "$S/.forge/local/reviews" -name '*.receipt' | sort | tail -1)
+assert_equals "$(awk -F= '$1=="review_iteration"{print $2}' "$spec")" "1" "spec receipt records the current review iteration"
+assert_equals "$(awk -F= '$1=="review_iteration"{print $2}' "$quality")" "1" "quality receipt records the current review iteration"
 if bash "$DISPATCH" verify-pair --code-spec-receipt "$spec" --code-quality-receipt "$quality" >/dev/null 2>&1; then pass "two distinct lenses certify one candidate"; else fail "valid review pair rejected"; fi
 set +e; bash "$DISPATCH" verify-pair --code-spec-receipt "$spec" --code-quality-receipt "$spec" >/dev/null 2>&1; rc=$?; set -e
 assert_equals "$rc" "2" "duplicate invocation cannot certify"
+sed -i.bak 's/| Review iteration | 1 |/| Review iteration | 2 |/' "$S/.forge/local/state.md"
+set +e; bash "$DISPATCH" verify-pair --code-spec-receipt "$spec" --code-quality-receipt "$quality" >/dev/null 2>&1; rc=$?; set -e
+assert_equals "$rc" "2" "state iteration relabel cannot certify stale review receipts"
 
 start_test "child review cannot mutate canonical state or authorization records"
 S=$(scratch_dir dispatch-state); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; printf 'auth\n' > "$S/.forge/local/authorization-record"; capture_context "$S" claude sid

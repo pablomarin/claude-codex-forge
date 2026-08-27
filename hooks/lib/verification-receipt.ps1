@@ -5,7 +5,7 @@ param(
     [string]$Command,
     [string]$Profile,
     [string]$Report,
-    [ValidateSet('PASS', 'FAIL', 'BLOCKED')][string]$Result,
+    [ValidateSet('PASS', 'FAIL', 'BLOCKED', 'PARTIAL')][string]$Result,
     [int]$ExitStatus = -1,
     [string]$Output,
     [string]$StartedAt,
@@ -67,6 +67,14 @@ function Test-Fresh([string]$Timestamp) {
     if ($env:FORGE_RECEIPT_MAX_AGE_SECONDS -match '^[0-9]+$') { $maximum = [int]$env:FORGE_RECEIPT_MAX_AGE_SECONDS }
     return $age -ge -300 -and $age -le $maximum
 }
+function Get-ReportVerdict([string]$Path, [string]$ReceiptKind) {
+    $first = ([IO.File]::ReadLines($Path) | Select-Object -First 1).TrimEnd("`r")
+    if ($first -notmatch '^VERDICT: ([A-Z]+)$') { throw 'report must begin with a canonical VERDICT header' }
+    $verdict = $matches[1]
+    if ($ReceiptKind -eq 'verify-app' -and $verdict -notin @('PASS','FAIL','BLOCKED')) { throw 'invalid verify-app report verdict' }
+    if ($ReceiptKind -eq 'e2e' -and $verdict -notin @('PASS','FAIL','PARTIAL')) { throw 'invalid E2E report verdict' }
+    return $verdict
+}
 function Test-CurrentCandidate([string]$Root, [string]$Receipt) {
     if ((Get-Kv $Receipt 'schema_version') -cne '2' -or (Get-Kv $Receipt 'candidate_state') -cne 'staged-clean') { return $false }
     $fingerprint = Join-Path $PSScriptRoot 'candidate-fingerprint.ps1'
@@ -84,10 +92,10 @@ function Test-CurrentCandidate([string]$Root, [string]$Receipt) {
     catch { return $false }
     finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
 }
-function Test-Review([string]$Root, [string]$Receipt, [string]$Role, [string]$CandidateReceipt) {
+function Test-Review([string]$Root, [string]$Receipt, [string]$Role, [string]$CandidateReceipt, [string]$Iteration) {
     try {
-        foreach ($key in @('schema_version','invocation_id','timestamp','main_host','requested_engine','actual_engine','fallback','fallback_reason','role','profile','fresh_process','artifact_kind','artifact_hash','worktree_identity','git_head','workflow_base_sha','output_path','output_hash','process_exit_status','semantic_verdict','max_severity','findings_digest','result_schema_version','blocked_class')) { $null = Get-Kv $Receipt $key }
-        if ((Get-Kv $Receipt 'schema_version') -cne '1' -or (Get-Kv $Receipt 'role') -cne $Role -or (Get-Kv $Receipt 'profile') -cne 'review' -or (Get-Kv $Receipt 'fresh_process') -cne 'true') { return $false }
+        foreach ($key in @('schema_version','invocation_id','timestamp','main_host','requested_engine','actual_engine','fallback','fallback_reason','role','profile','review_iteration','fresh_process','artifact_kind','artifact_hash','worktree_identity','git_head','workflow_base_sha','output_path','output_hash','process_exit_status','semantic_verdict','max_severity','findings_digest','result_schema_version','blocked_class')) { $null = Get-Kv $Receipt $key }
+        if ((Get-Kv $Receipt 'schema_version') -cne '1' -or (Get-Kv $Receipt 'role') -cne $Role -or (Get-Kv $Receipt 'profile') -cne 'review' -or (Get-Kv $Receipt 'review_iteration') -cne $Iteration -or (Get-Kv $Receipt 'fresh_process') -cne 'true') { return $false }
         if (-not (Test-Fresh (Get-Kv $Receipt 'timestamp'))) { return $false }
         if ((Get-Kv $Receipt 'artifact_kind') -cne 'git-working-tree' -or (Get-Kv $Receipt 'artifact_hash') -cne (Get-Kv $CandidateReceipt 'candidate_id')) { return $false }
         foreach ($key in @('worktree_identity','git_head','workflow_base_sha')) { if ((Get-Kv $Receipt $key) -cne (Get-Kv $CandidateReceipt $key)) { return $false } }
@@ -107,12 +115,12 @@ function Test-Review([string]$Root, [string]$Receipt, [string]$Role, [string]$Ca
 }
 function Test-Verifier([string]$Root, [string]$Receipt, [string]$ReceiptKind, [string]$CandidateReceipt) {
     try {
-        foreach ($key in @('schema_version','receipt_kind','invocation_id','started_at','ended_at','candidate_id','worktree_identity','git_head','workflow_base_sha','index_tree','command_hash','profile','exit_status','report_path','report_hash','result')) { $null = Get-Kv $Receipt $key }
+        foreach ($key in @('schema_version','receipt_kind','invocation_id','started_at','ended_at','candidate_id','worktree_identity','git_head','workflow_base_sha','index_tree','command_hash','profile','exit_status','report_path','report_hash','report_verdict','result')) { $null = Get-Kv $Receipt $key }
         if ((Get-Kv $Receipt 'schema_version') -cne '2' -or (Get-Kv $Receipt 'receipt_kind') -cne $ReceiptKind -or -not (Test-Fresh (Get-Kv $Receipt 'ended_at'))) { return $false }
-        if ((Get-Kv $Receipt 'exit_status') -cne '0' -or (Get-Kv $Receipt 'result') -cne 'PASS') { return $false }
+        if ((Get-Kv $Receipt 'exit_status') -cne '0' -or (Get-Kv $Receipt 'result') -cne 'PASS' -or (Get-Kv $Receipt 'report_verdict') -cne 'PASS') { return $false }
         foreach ($key in @('candidate_id','worktree_identity','git_head','workflow_base_sha','index_tree')) { if ((Get-Kv $Receipt $key) -cne (Get-Kv $CandidateReceipt $key)) { return $false } }
         $report = Get-OwnedPath $Root (Get-Kv $Receipt 'report_path') $true
-        return (Get-ShaFile $report) -ceq (Get-Kv $Receipt 'report_hash')
+        return (Get-ShaFile $report) -ceq (Get-Kv $Receipt 'report_hash') -and (Get-ReportVerdict $report $ReceiptKind) -ceq (Get-Kv $Receipt 'report_verdict')
     }
     catch { return $false }
 }
@@ -131,20 +139,22 @@ function Invoke-VerificationReceipt {
     $root = (Resolve-Path $root).Path
 
     if ($ReceiptMode -eq 'write') {
-        if (@('verify-app','e2e') -cnotcontains $ReceiptKind -or @('PASS','FAIL','BLOCKED') -cnotcontains $ReceiptResult -or $ReceiptExitStatus -lt 0) {
+        if (@('verify-app','e2e') -cnotcontains $ReceiptKind -or @('PASS','FAIL','BLOCKED','PARTIAL') -cnotcontains $ReceiptResult -or $ReceiptExitStatus -lt 0) {
             $response.Error = 'BLOCKED[evidence]: invalid verifier receipt arguments'; return [pscustomobject]$response
         }
         try {
             $candidateFile = Get-OwnedPath $root $CandidatePath $true
             if (-not (Test-CurrentCandidate $root $candidateFile)) { throw 'candidate is not current staged-clean identity' }
             $reportFile = Get-OwnedPath $root $ReportPath $true; $outputFile = Get-OwnedPath $root $OutputPath $false
+            $reportVerdict = Get-ReportVerdict $reportFile $ReceiptKind
+            if ($reportVerdict -cne $ReceiptResult) { throw 'report verdict and requested receipt result differ' }
             if (-not $ReceiptStartedAt) { $ReceiptStartedAt = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ') }
             if (-not $ReceiptEndedAt) { $ReceiptEndedAt = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ') }
             if (-not (Test-Fresh $ReceiptStartedAt) -or -not (Test-Fresh $ReceiptEndedAt)) { throw 'verifier timestamps are stale or invalid' }
             $invocation = Get-ShaText "$ReceiptKind|$ReceiptStartedAt|$PID|$CommandText|$(Get-Kv $candidateFile 'candidate_id')`n"
             $body = "schema_version=2`nreceipt_kind=$ReceiptKind`ninvocation_id=$invocation`nstarted_at=$ReceiptStartedAt`nended_at=$ReceiptEndedAt`n"
             foreach ($key in @('candidate_id','worktree_identity','git_head','workflow_base_sha','index_tree')) { $body += "$key=$(Get-Kv $candidateFile $key)`n" }
-            $body += "command_hash=$(Get-ShaText $CommandText)`nprofile=$ProfileName`nexit_status=$ReceiptExitStatus`nreport_path=$reportFile`nreport_hash=$(Get-ShaFile $reportFile)`nresult=$ReceiptResult`n"
+            $body += "command_hash=$(Get-ShaText $CommandText)`nprofile=$ProfileName`nexit_status=$ReceiptExitStatus`nreport_path=$reportFile`nreport_hash=$(Get-ShaFile $reportFile)`nreport_verdict=$reportVerdict`nresult=$ReceiptResult`n"
             [IO.File]::WriteAllText("$outputFile.tmp.$PID", $body, $Utf8)
             Move-Item -LiteralPath "$outputFile.tmp.$PID" -Destination $outputFile -Force
             $response.Status = 0; $response.Lines = @("RECEIPT:$outputFile")
@@ -165,7 +175,7 @@ function Invoke-VerificationReceipt {
         $iteration = Get-StateValue $stateFile 'Review iteration'; if ($iteration -notmatch '^[0-9]+$') { throw 'Review iteration must be numeric' }
         $candidateOk = Test-CurrentCandidate $root $candidateFile
         $reviewsOk = $false; $appOk = $false; $e2eOk = $false
-        if ($candidateOk -and (Test-Review $root $specFile 'code-spec' $candidateFile) -and (Test-Review $root $qualityFile 'code-quality' $candidateFile)) {
+        if ($candidateOk -and (Test-Review $root $specFile 'code-spec' $candidateFile $iteration) -and (Test-Review $root $qualityFile 'code-quality' $candidateFile $iteration)) {
             $reviewsOk = (Get-Kv $specFile 'invocation_id') -cne (Get-Kv $qualityFile 'invocation_id')
         }
         if ($candidateOk) { $appOk = Test-Verifier $root $appFile 'verify-app' $candidateFile; $e2eOk = Test-Verifier $root $e2eFile 'e2e' $candidateFile }

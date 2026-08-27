@@ -46,6 +46,15 @@ function Get-Value([string]$Path, [string]$Key, [bool]$Strict = $false) {
     if ($rows.Count -eq 0) { return '' }
     return $rows[0].Substring($Key.Length + 1)
 }
+function Get-StateTableValue([string]$Path, [string]$Field) {
+    $values = @()
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        $parts = $line.Split('|')
+        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq $Field) { $values += $parts[2].Trim() }
+    }
+    if ($values.Count -ne 1) { throw "BLOCKED[invariant]: state field $Field must occur exactly once" }
+    return [string]$values[0]
+}
 function Test-SafeSessionId([string]$Value) { return $Value -match '^[A-Za-z0-9._-]+$' }
 function Reserve-OwnedReviewPath([string]$Path, [string]$Label, [string]$Root, [string]$Reviews) {
     if (-not $Path) { throw "BLOCKED[invariant]: $Label is required" }
@@ -423,6 +432,14 @@ try {
         foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) { if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'BLOCKED[artifact]: two regular receipts are required' } }
         if ((Get-Value $CodeSpecReceipt 'role') -ne 'code-spec' -or (Get-Value $CodeQualityReceipt 'role') -ne 'code-quality' -or (Get-Value $CodeSpecReceipt 'invocation_id') -eq (Get-Value $CodeQualityReceipt 'invocation_id')) { throw 'BLOCKED[invariant]: distinct code lenses are required' }
         foreach ($key in @('artifact_hash', 'worktree_identity', 'workflow_base_sha', 'git_head')) { if ((Get-Value $CodeSpecReceipt $key) -cne (Get-Value $CodeQualityReceipt $key)) { throw "BLOCKED[artifact]: mixed candidate pair: $key" } }
+        $specOutput = Get-Value $CodeSpecReceipt 'output_path' $true
+        $marker = [IO.Path]::DirectorySeparatorChar + '.forge' + [IO.Path]::DirectorySeparatorChar + 'local' + [IO.Path]::DirectorySeparatorChar + 'reviews' + [IO.Path]::DirectorySeparatorChar
+        $markerIndex = $specOutput.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase)
+        if ($markerIndex -lt 1) { throw 'BLOCKED[invariant]: review receipt output path cannot resolve canonical state' }
+        $pairState = Join-Path $specOutput.Substring(0, $markerIndex) '.forge\local\state.md'
+        $currentIteration = Get-StateTableValue $pairState 'Review iteration'
+        if ($currentIteration -notmatch '^[0-9]+$') { throw 'BLOCKED[invariant]: current review iteration is invalid' }
+        foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) { if ((Get-Value $path 'review_iteration' $true) -cne $currentIteration) { throw 'BLOCKED[artifact]: review receipt iteration is stale or mixed' } }
         foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) { if ((Get-Value $path 'semantic_verdict') -ne 'CLEAN' -or (Get-Value $path 'max_severity') -notin @('NONE', 'P3')) { throw 'BLOCKED[artifact]: both lenses must be certifying clean' } }
         Write-Output 'CLEAN: distinct code-spec and code-quality receipts certify one candidate'
         exit 0
@@ -438,6 +455,11 @@ try {
     if ($Conversation -eq 'resume' -and -not (Test-SafeSessionId $SessionId)) { throw 'BLOCKED[invariant]: exact safe session id is required' }
     $root = (Resolve-Path (& git rev-parse --show-toplevel)).Path
     $reviews = Join-Path $root '.forge/local/reviews'
+    $reviewIteration = 'none'
+    if ($Role -in @('code-spec','code-quality')) {
+        $reviewIteration = Get-StateTableValue (Join-Path $root '.forge\local\state.md') 'Review iteration'
+        if ($reviewIteration -notmatch '^[0-9]+$') { throw 'BLOCKED[invariant]: code review requires a numeric current Review iteration' }
+    }
     $Output = Reserve-OwnedReviewPath $Output 'review output' $root $reviews
     if ($Conversation -eq 'new') { $SessionIdOutput = Reserve-OwnedReviewPath $SessionIdOutput 'session id output' $root $reviews }
     if ($Role -in @('council-advisor','council-chair')) {
@@ -538,7 +560,7 @@ try {
     $receipt = Join-Path $reviews "$invocationId.receipt"
     $outputHash = Get-ShaFile $Output
     $configHash = if ($result.ConfigHash) { $result.ConfigHash } else { 'MISSING' }
-    $body = "schema_version=1`ninvocation_id=$invocationId`ntimestamp=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`nmain_host=$activeHost`nrequested_engine=$Engine`nfirst_attempted_engine=$first`nactual_engine=$($result.Engine)`nfallback=$($fallback.ToString().ToLowerInvariant())`nfallback_reason=$fallbackReason`nattempted_engines=$($attempted -join ',')`nrole=$Role`nprofile=$Profile`nfresh_process=true`nconversation=$Conversation`nsession_id=$($result.Session)`nartifact_kind=$(Get-Value $FingerprintReceipt 'artifact_kind')`nartifact_identity=$ArtifactHash`nartifact_hash=$ArtifactHash`nworktree_identity=$worktreeIdentity`ngit_head=$(Get-Value $FingerprintReceipt 'git_head')`nprompt_hash=$PromptHash`nworkflow_base_ref=$WorkflowBaseRef`nworkflow_base_sha=$(Get-Value $FingerprintReceipt 'workflow_base_sha')`noutput_path=$Output`noutput_hash=$outputHash`nprocess_exit_status=$($result.Exit)`nsemantic_verdict=$($result.Verdict)`nmax_severity=$($result.Severity)`nfindings_digest=$($result.Digest)`nresult_schema_version=$($result.Schema)`nrequested_provider=$($result.Provider)`nrequested_model=$($result.Model)`nrequested_reasoning_effort=$($result.Effort)`nbound_provider=$($result.Provider)`nbound_model=$($result.Model)`nbound_reasoning_effort=$($result.Effort)`nactual_provider=$(if($result.ActualProvider){$result.ActualProvider}else{'UNOBSERVABLE'})`nactual_model=$(if($result.ActualModel){$result.ActualModel}else{'UNOBSERVABLE'})`nactual_reasoning_effort=UNOBSERVABLE`ninvocation_config_hash=$(Get-ShaText (($attempted -join ',') + '|' + $configHash + '|' + $ArtifactHash + '|' + $PromptHash))`nmodel_qualification_revision=$QualificationRevision`nblocked_class=$($result.Class)`ninvestigation_replay=$investigationReplay`nreproduction_status=$reproductionStatus`nhypothesis_hash=$hypothesisHash`nprimary_check_hash=$primaryHash`ncontrol_hash=$controlHash`n"
+    $body = "schema_version=1`ninvocation_id=$invocationId`ntimestamp=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`nmain_host=$activeHost`nrequested_engine=$Engine`nfirst_attempted_engine=$first`nactual_engine=$($result.Engine)`nfallback=$($fallback.ToString().ToLowerInvariant())`nfallback_reason=$fallbackReason`nattempted_engines=$($attempted -join ',')`nrole=$Role`nprofile=$Profile`nreview_iteration=$reviewIteration`nfresh_process=true`nconversation=$Conversation`nsession_id=$($result.Session)`nartifact_kind=$(Get-Value $FingerprintReceipt 'artifact_kind')`nartifact_identity=$ArtifactHash`nartifact_hash=$ArtifactHash`nworktree_identity=$worktreeIdentity`ngit_head=$(Get-Value $FingerprintReceipt 'git_head')`nprompt_hash=$PromptHash`nworkflow_base_ref=$WorkflowBaseRef`nworkflow_base_sha=$(Get-Value $FingerprintReceipt 'workflow_base_sha')`noutput_path=$Output`noutput_hash=$outputHash`nprocess_exit_status=$($result.Exit)`nsemantic_verdict=$($result.Verdict)`nmax_severity=$($result.Severity)`nfindings_digest=$($result.Digest)`nresult_schema_version=$($result.Schema)`nrequested_provider=$($result.Provider)`nrequested_model=$($result.Model)`nrequested_reasoning_effort=$($result.Effort)`nbound_provider=$($result.Provider)`nbound_model=$($result.Model)`nbound_reasoning_effort=$($result.Effort)`nactual_provider=$(if($result.ActualProvider){$result.ActualProvider}else{'UNOBSERVABLE'})`nactual_model=$(if($result.ActualModel){$result.ActualModel}else{'UNOBSERVABLE'})`nactual_reasoning_effort=UNOBSERVABLE`ninvocation_config_hash=$(Get-ShaText (($attempted -join ',') + '|' + $configHash + '|' + $ArtifactHash + '|' + $PromptHash))`nmodel_qualification_revision=$QualificationRevision`nblocked_class=$($result.Class)`ninvestigation_replay=$investigationReplay`nreproduction_status=$reproductionStatus`nhypothesis_hash=$hypothesisHash`nprimary_check_hash=$primaryHash`ncontrol_hash=$controlHash`n"
     [IO.File]::WriteAllText($receipt, $body, $Utf8)
     Write-Output "Reviewer selection: main=$activeHost requested=$Engine actual=$($result.Engine) fallback=$fallback role=$Role receipt=$receipt"
     if ($result.Rc -ne 0) { exit 2 }
