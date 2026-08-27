@@ -40,6 +40,16 @@ assert_contains "$REPO_ROOT/state.template.md" '| Spec review receipt' \
     "state names the per-task spec-review receipt"
 assert_contains "$REPO_ROOT/state.template.md" '| Quality review receipt' \
     "state names the per-task quality-review receipt"
+assert_contains "$REPO_ROOT/state.template.md" '| Review iteration' \
+    "state binds the receipt pair to one iteration"
+assert_contains "$REPO_ROOT/state.template.md" '| Candidate receipt' \
+    "state links the immutable staged-clean candidate"
+assert_contains "$REPO_ROOT/state.template.md" '| Verify app receipt' \
+    "state links candidate-bound application verification"
+assert_contains "$REPO_ROOT/state.template.md" '| E2E receipt' \
+    "state links candidate-bound E2E verification"
+assert_contains "$REPO_ROOT/state.template.md" '| Promotion receipt' \
+    "state links exact-tree promotion evidence"
 assert_contains "$REPO_ROOT/state.template.md" '| Council receipt' \
     "state names the council receipt"
 

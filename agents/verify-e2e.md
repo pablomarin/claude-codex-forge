@@ -208,7 +208,7 @@ You do NOT write files. Return the report as your response using the exact forma
 
 ```
 VERDICT: PASS | FAIL | PARTIAL
-SUGGESTED_PATH: tests/e2e/reports/YYYY-MM-DD-HH-MM-<feature-or-mode>.md
+SUGGESTED_PATH: .forge/local/evidence/<task-id>/e2e-report.md
 ---
 # E2E Verification Report
 
@@ -297,7 +297,10 @@ After your response returns, the invoking agent:
 
 1. Parses the `VERDICT:` and `SUGGESTED_PATH:` header lines
 2. Writes everything after the `---` separator to the path you suggested
-3. Acts on the verdict (proceed to next phase on PASS, iterate on FAIL)
+3. Creates the candidate-bound receipt with `verification-receipt write --kind e2e`
+   (or its PowerShell mirror), recording the exact command/profile, exit status,
+   report hash, and PASS/FAIL result
+4. Acts on the verdict (proceed to next phase on PASS, iterate on FAIL)
 
 You do NOT write the file. You do NOT confirm it was written. Your response IS the artifact; persistence is the caller's job.
 

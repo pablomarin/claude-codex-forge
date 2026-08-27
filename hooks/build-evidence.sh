@@ -84,6 +84,9 @@ case "$STATE_MD" in */.claude/local/state.md) STATE_LOCAL_DIR=".claude/local" ;;
 RS=".forge/hooks/lib/review-breaker.sh"
 [ -f "$RS" ] || RS=".claude/hooks/lib/review-breaker.sh"
 [ -f "$RS" ] || RS="hooks/lib/review-breaker.sh"
+VR="$HOOK_DIR/lib/verification-receipt.sh"
+[ -f "$VR" ] || VR=".forge/hooks/lib/verification-receipt.sh"
+[ -f "$VR" ] || VR="hooks/lib/verification-receipt.sh"
 
 # ---------------------------------------------------------------------------
 # Git state queries (read-only, best-effort — failures produce empty strings)
@@ -453,6 +456,35 @@ RG_REST="${RG_RESULT#*|}"
 RG_ITER="${RG_REST%%|*}"
 RG_HEAD="${RG_REST##*|}"
 
+# Receipt-v2 is activated by an explicit Candidate receipt state linkage. Until
+# Task 9 converts a workflow producer, the existing checklist reader remains the
+# compatibility path. Migrated v5 evidence cannot enter it because translation
+# removes legacy clean rows and receipt state.
+CANDIDATE_CLEAN=false
+VERIFY_APP_CLEAN=false
+E2E_RECEIPT_CLEAN=false
+SHIP_RECEIPTS_CLEAN=false
+RECEIPT_GATE_OK=true
+CANDIDATE_ID=""
+RECEIPT_CANDIDATE=$(tr -d '\r' < "$STATE_MD" 2>/dev/null | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
+case "$RECEIPT_CANDIDATE" in ''|*'<'*) ;; *)
+    RECEIPT_GATE_OK=false
+    if [ "$STATE_IS_V6" = true ] && [ -f "$VR" ]; then
+        VR_OUT=$(bash "$VR" check --state "$STATE_MD" 2>/dev/null || true)
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^CANDIDATE_VALID://p' | tail -1)" = true ] && CANDIDATE_CLEAN=true
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^REVIEWS_VALID://p' | tail -1)" = true ] && RG_CLEAN=true || RG_CLEAN=false
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^VERIFY_APP_VALID://p' | tail -1)" = true ] && VERIFY_APP_CLEAN=true
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^E2E_VALID://p' | tail -1)" = true ] && E2E_RECEIPT_CLEAN=true
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^SHIP_READY://p' | tail -1)" = true ] && SHIP_RECEIPTS_CLEAN=true
+        [ "$SHIP_RECEIPTS_CLEAN" = true ] && RECEIPT_GATE_OK=true
+        RG_ITER=$(printf '%s\n' "$VR_OUT" | sed -n 's/^REVIEW_ITERATION://p' | tail -1)
+        CANDIDATE_ID=$(printf '%s\n' "$VR_OUT" | sed -n 's/^CANDIDATE_ID://p' | tail -1)
+        [ "$CANDIDATE_CLEAN" = true ] && RG_HEAD="$HEAD_SHA" || RG_HEAD=""
+        E2E_FRESH="$E2E_RECEIPT_CLEAN"
+    fi
+    ;;
+esac
+
 # Convergence breaker fields (full-state helper run). Sets POST_CERT_ROUNDS,
 # BREAKER, BREAKER_OK (false only when tripped AND unadjudicated).
 compute_breaker_fields
@@ -499,7 +531,8 @@ PR_HEAD_MATCH="false"
 PR_READY="false"
 if [ "$PR_OPEN" = "true" ] && [ "$PR_HEAD_MATCH" = "true" ] && \
    [ "$RG_CLEAN" = "true" ] && [ "$E2E_FRESH" = "true" ] && \
-   [ "$PA_AUTH" = "true" ] && [ "$BREAKER_OK" = "true" ]; then
+   [ "$PA_AUTH" = "true" ] && [ "$BREAKER_OK" = "true" ] && \
+   [ "$RECEIPT_GATE_OK" = "true" ]; then
     PR_READY="true"
 fi
 
@@ -575,6 +608,7 @@ PR_HEAD_OID_JSON=$(json_str_field "head_oid" "$PR_HEAD_OID")
 PR_BASE_REF_JSON=$(json_str_field "base_ref" "$PR_BASE_REF")
 PR_HEAD_REF_JSON=$(json_str_field "head_ref" "$PR_HEAD_REF")
 E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
+CANDIDATE_ID_JSON=$(json_str_field "candidate_id" "$CANDIDATE_ID")
 
 # Emit evidence JSON.
 {
@@ -589,6 +623,9 @@ E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
         "$PHASE_JSON" "$NEXT_STEP_JSON" "$TOTAL_COUNT" "$DONE_COUNT"
     printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s,"post_cert_rounds":%d,"breaker":"%s"},' \
         "$RG_CLEAN" "$RG_ITER_JSON" "$RG_HEAD_JSON" "$POST_CERT_ROUNDS" "$BREAKER"
+    printf '"candidate_gate":{"staged_clean":%s,%s,"all_receipts_same_candidate":%s},' \
+        "$CANDIDATE_CLEAN" "$CANDIDATE_ID_JSON" "$SHIP_RECEIPTS_CLEAN"
+    printf '"verification_gate":{"verify_app":%s,"e2e":%s},' "$VERIFY_APP_CLEAN" "$E2E_RECEIPT_CLEAN"
     printf '"plan_review_gate":{"clean_same_iteration":%s,%s,%s},' \
         "$PRG_CLEAN" "$PRG_ITER_JSON" "$PRG_SHA_JSON"
     printf '%s,' "$BRANCH_JSON"

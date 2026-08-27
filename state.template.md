@@ -88,8 +88,13 @@ surface to user.
 
 | Field                  | Value |
 | ---------------------- | ----- |
+| Review iteration       | <integer> |
+| Candidate receipt      | .forge/local/evidence/<task-id>/candidate.receipt |
 | Spec review receipt    | .forge/local/reviews/<task-id>/spec.receipt |
 | Quality review receipt | .forge/local/reviews/<task-id>/quality.receipt |
+| Verify app receipt     | .forge/local/evidence/<task-id>/verify-app.receipt |
+| E2E receipt            | .forge/local/evidence/<task-id>/e2e.receipt |
+| Promotion receipt      | .forge/local/evidence/<task-id>/promotion.receipt |
 | Council receipt        | .forge/local/council/<council-id>/receipt.json |
 
 Each action receipt records `host=<claude|codex>`. Receipt paths are worktree-local;
@@ -143,12 +148,13 @@ Claude or Codex of the active workflow; the ship hook gates commit/push/PR on th
 
 **On code-review iteration completion (during a `/forge-goal`-driven run):**
 
-1. Append a checklist line to `### Checklist` capturing the iteration number, tool, and HEAD SHA:
-   - `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``
-   - `- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``
-2. Both `codex clean` AND `pr-toolkit clean` must be present for the SAME iteration AND at the SAME current HEAD for the `reviewer_gate.clean_same_iteration` evidence to be true.
-3. If a fix changes HEAD, re-run reviewers and append a NEW iteration row; do NOT mutate existing rows.
-4. **Convergence breaker (v5.54):** after the first both-engines-clean iteration (certification), more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
+1. Freeze one staged-clean `git:working-tree` candidate and set `Candidate receipt`.
+2. Record distinct `code-spec` and `code-quality` review receipts for the same review iteration and candidate. Engine choice is neutral: same-engine reviews and a visible fallback are valid when each receipt records requested engine, actual engine, and fallback reason.
+3. Persist candidate-bound `verify-app` and `e2e` receipts only after their reports are written under `.forge/local/evidence/` and hashed by `verification-receipt`.
+4. Any staged, unstaged, or in-scope untracked mutation invalidates the complete final receipt set. Freeze the new candidate and rerun both review lenses plus both verifiers; never relabel an old receipt.
+5. Genuine unmigrated v5 fixtures retain the legacy checklist reader during dual-read. Once receipt-v2 linkage is present, legacy clean rows cannot certify the workflow.
+6. Exact-tree promotion revalidates the receipt set before hook execution and compare-and-swap, then records `Promotion receipt`; the real branch is not advanced early.
+7. **Convergence breaker (v5.54):** after the first receipt-certified iteration, more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
    - `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\``
    The line is head-bound; the agent never writes it on its own initiative. If the loop line carries an iteration count, an N/A escape must KEEP it (`- [x] Code review loop (<N> iterations) — N/A: <reason>`) — a count-less `Code review loop — N/A:` after certification reads as counter erasure and trips the breaker.
 

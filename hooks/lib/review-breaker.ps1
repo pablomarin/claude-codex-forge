@@ -128,16 +128,37 @@ function Invoke-ReviewBreaker {
         }
     }
 
-    # --- certification: lowest N with BOTH engines clean at the SAME head ---
-    $sortedNs = $rows | ForEach-Object { $_.N } | Sort-Object -Unique
+    # --- certification: receipt-v2 first, legacy rows only when unconverted ---
     $CERT_N = $null
     $CERT_HEAD = ''
-    foreach ($n in $sortedNs) {
-        $cl = $rows | Where-Object { $_.N -eq $n -and $_.Tool -eq 'codex' } | Select-Object -Last 1
-        $tl = $rows | Where-Object { $_.N -eq $n -and $_.Tool -eq 'pr-toolkit' } | Select-Object -Last 1
-        if (-not $cl -or -not $tl) { continue }
-        if ($cl.Head -ne $tl.Head) { continue }
-        $CERT_N = $n; $CERT_HEAD = $cl.Head; break
+    $v2Active = $false
+    $candidateRows = @()
+    foreach ($ln in $lines) {
+        $parts = $ln -split '\|'
+        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') { $candidateRows += $parts[2].Trim() }
+    }
+    $candidateReceipt = if ($candidateRows.Count -eq 1) { [string]$candidateRows[0] } else { '' }
+    if ($candidateReceipt -and -not $candidateReceipt.Contains('<')) {
+        $v2Active = $true
+        $verificationReceipt = Join-Path $PSScriptRoot 'verification-receipt.ps1'
+        if (Test-Path -LiteralPath $verificationReceipt) {
+            . $verificationReceipt
+            $receiptResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateFile
+            if ($receiptResponse.Lines -contains 'REVIEWS_VALID:true') {
+                $iterationLine = $receiptResponse.Lines | Where-Object { $_ -match '^REVIEW_ITERATION:' } | Select-Object -Last 1
+                if ($iterationLine -match '^REVIEW_ITERATION:([0-9]+)$') { $CERT_N = [int]$matches[1]; $CERT_HEAD = $HEAD_SHA }
+            }
+        }
+    }
+    if (-not $v2Active) {
+        $sortedNs = $rows | ForEach-Object { $_.N } | Sort-Object -Unique
+        foreach ($n in $sortedNs) {
+            $cl = $rows | Where-Object { $_.N -eq $n -and $_.Tool -eq 'codex' } | Select-Object -Last 1
+            $tl = $rows | Where-Object { $_.N -eq $n -and $_.Tool -eq 'pr-toolkit' } | Select-Object -Last 1
+            if (-not $cl -or -not $tl) { continue }
+            if ($cl.Head -ne $tl.Head) { continue }
+            $CERT_N = $n; $CERT_HEAD = $cl.Head; break
+        }
     }
 
     if ($null -eq $CERT_N) {

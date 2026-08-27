@@ -90,6 +90,8 @@ canonical	hooks/lib/authorized-action.ps1	.forge/hooks/lib/authorized-action.ps1
 canonical	hooks/lib/authorized-action.sh	.forge/hooks/lib/authorized-action.sh	all	shared	project	forge-canonical	.forge/hooks/lib/authorized-action.sh	v6
 canonical	hooks/lib/candidate-fingerprint.ps1	.forge/hooks/lib/candidate-fingerprint.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/candidate-fingerprint.ps1	v6
 canonical	hooks/lib/candidate-fingerprint.sh	.forge/hooks/lib/candidate-fingerprint.sh	all	shared	project	forge-canonical	.forge/hooks/lib/candidate-fingerprint.sh	v6
+canonical	hooks/lib/verification-receipt.ps1	.forge/hooks/lib/verification-receipt.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/verification-receipt.ps1	v6
+canonical	hooks/lib/verification-receipt.sh	.forge/hooks/lib/verification-receipt.sh	all	shared	project	forge-canonical	.forge/hooks/lib/verification-receipt.sh	v6
 canonical	hooks/lib/host-context.ps1	.forge/hooks/lib/host-context.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/host-context.ps1	v6
 canonical	hooks/lib/host-context.sh	.forge/hooks/lib/host-context.sh	all	shared	project	forge-canonical	.forge/hooks/lib/host-context.sh	v6
 canonical	hooks/post-tool-format.ps1	.forge/hooks/post-tool-format.ps1	all	shared	project	forge-canonical	.forge/hooks/post-tool-format.ps1	v6

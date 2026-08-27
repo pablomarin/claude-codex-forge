@@ -114,6 +114,21 @@ if [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ]; then
     fi
 fi
 
+# Receipt-v2 Stop advisory: surface invalidation immediately after any tracked,
+# index, or in-scope untracked mutation. Shipping remains enforced by the
+# PreToolUse gate; Stop does not turn this reminder into a second policy engine.
+if [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ]; then
+    _candidate_receipt=$(tr -d '\r' < "$STATE_MD" | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
+    case "$_candidate_receipt" in ''|*'<'*) ;; *)
+        _vr="$HOOK_DIR/lib/verification-receipt.sh"
+        [ -f "$_vr" ] || _vr="hooks/lib/verification-receipt.sh"
+        if [ ! -f "$_vr" ] || ! bash "$_vr" check --state "$STATE_MD" >/dev/null 2>&1; then
+            echo "FORGE_FINAL_EVIDENCE_STALE: candidate-bound review, verify-app, and E2E receipts no longer certify the current staged-clean candidate." >&2
+        fi
+        ;;
+    esac
+fi
+
 _forge_goal_authorization_tampered() {
     echo "FORGE_GOAL_AUTHORIZATION_TAMPERED: $1" >&2
     exit 2

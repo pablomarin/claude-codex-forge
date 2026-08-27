@@ -95,6 +95,27 @@ if ($stateLocalDir -eq ".forge/local" -and (Test-Path -LiteralPath $stateMd -Pat
     if (-not $needsEvidence) { $needsEvidence = (Get-Item -LiteralPath $stateMd).LastWriteTimeUtc -gt (Get-Item -LiteralPath $fp).LastWriteTimeUtc }
     $builder = Join-Path $hookDir "build-evidence.ps1"
     if ($needsEvidence -and (Test-Path -LiteralPath $builder -PathType Leaf)) { $jsonInput | & $builder 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) } }
+
+    $candidateRows = @()
+    $receiptStateRaw = (Get-Content -LiteralPath $stateMd -Raw) -replace "`r", ""
+    foreach ($line in @($receiptStateRaw -split "`n")) {
+        $parts = $line -split '\|'
+        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') { $candidateRows += $parts[2].Trim() }
+    }
+    $candidateReceipt = if ($candidateRows.Count -eq 1) { [string]$candidateRows[0] } else { "" }
+    if ($candidateReceipt -and -not $candidateReceipt.Contains('<')) {
+        $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
+        if (-not (Test-Path -LiteralPath $verificationReceipt)) { $verificationReceipt = Join-Path (Get-Location) 'hooks\lib\verification-receipt.ps1' }
+        $receiptStatus = 2
+        if (Test-Path -LiteralPath $verificationReceipt) {
+            . $verificationReceipt
+            $receiptResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateMd
+            $receiptStatus = $receiptResponse.Status
+        }
+        if ($receiptStatus -ne 0) {
+            [Console]::Error.WriteLine('FORGE_FINAL_EVIDENCE_STALE: candidate-bound review, verify-app, and E2E receipts no longer certify the current staged-clean candidate.')
+        }
+    }
 }
 
 function Write-ForgeGoalTamper([string]$Reason) { [Console]::Error.WriteLine("FORGE_GOAL_AUTHORIZATION_TAMPERED: $Reason"); exit 2 }

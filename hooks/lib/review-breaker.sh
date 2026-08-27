@@ -63,16 +63,34 @@ NA_COUNTLESS=0
 echo "$CHECKLIST" | grep -E 'Code review loop' | grep -E 'N/A:' \
     | grep -qvE '\([0-9]+ iterations\)' && NA_COUNTLESS=1
 
-# Certification: lowest N with BOTH engines clean at the SAME head.
-CERT_N=""; CERT_HEAD=""
-for n in $(echo "$ROWS" | cut -d'|' -f1 | sort -n | uniq); do
-    [ -n "$n" ] || continue
-    ch="$(echo "$ROWS" | awk -F'|' -v n="$n" '$1==n && $2=="codex"{print $3}' | tail -1)"
-    th="$(echo "$ROWS" | awk -F'|' -v n="$n" '$1==n && $2=="pr-toolkit"{print $3}' | tail -1)"
-    [ -n "$ch" ] && [ -n "$th" ] || continue
-    [ "$ch" = "$th" ] || continue
-    CERT_N="$n"; CERT_HEAD="$ch"; break
-done
+# Certification: receipt-v2 uses the first iteration whose distinct code-spec
+# and code-quality receipts validate for one immutable candidate. Workflows not
+# yet converted retain the v5 Codex/PR-toolkit row reader through v6.0.
+CERT_N=""; CERT_HEAD=""; V2_ACTIVE=false
+V2_CANDIDATE=$(tr -d '\r' < "$STATE" | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
+case "$V2_CANDIDATE" in ''|*'<'*) ;; *)
+    V2_ACTIVE=true
+    VR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/verification-receipt.sh"
+    [ -f "$VR" ] || VR="hooks/lib/verification-receipt.sh"
+    if [ -f "$VR" ]; then
+        V2_OUT=$(bash "$VR" check --state "$STATE" 2>/dev/null || true)
+        if [ "$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEWS_VALID://p' | tail -1)" = true ]; then
+            CERT_N=$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEW_ITERATION://p' | tail -1)
+            CERT_HEAD="$HEAD_SHA"
+        fi
+    fi
+    ;;
+esac
+if [ "$V2_ACTIVE" != true ]; then
+    for n in $(echo "$ROWS" | cut -d'|' -f1 | sort -n | uniq); do
+        [ -n "$n" ] || continue
+        ch="$(echo "$ROWS" | awk -F'|' -v n="$n" '$1==n && $2=="codex"{print $3}' | tail -1)"
+        th="$(echo "$ROWS" | awk -F'|' -v n="$n" '$1==n && $2=="pr-toolkit"{print $3}' | tail -1)"
+        [ -n "$ch" ] && [ -n "$th" ] || continue
+        [ "$ch" = "$th" ] || continue
+        CERT_N="$n"; CERT_HEAD="$ch"; break
+    done
+fi
 
 # Human adjudication line bound to the CURRENT head (unblocks a tripped breaker).
 ADJ=no

@@ -325,6 +325,25 @@ if [ -n "$BRK_HEAD" ] && [ -f "$RS" ] && [ -f "$STATE_FILE" ]; then
     fi
 fi
 
+# Receipt-v2 compatibility switch. An explicit Candidate receipt linkage means
+# this workflow has migrated its final gates: all review/verify/E2E receipts
+# must validate against the same current staged-clean candidate. Workflows not
+# yet converted by Task 9 continue through the legacy checklist evidence below.
+RECEIPT_V2_ACTIVE=false
+RECEIPT_CANDIDATE=$(tr -d '\r' < "$STATE_FILE" | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
+case "$RECEIPT_CANDIDATE" in ''|*'<'*) ;; *)
+    RECEIPT_V2_ACTIVE=true
+    VR="$HOOK_DIR/lib/verification-receipt.sh"
+    [ -f "$VR" ] || VR="$_TOPLEVEL/hooks/lib/verification-receipt.sh"
+    if [ ! -f "$VR" ] || ! VR_OUT=$(bash "$VR" check --state "$STATE_FILE" 2>&1); then
+        echo "WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean." >&2
+        printf '%s\n' "${VR_OUT:-verification-receipt helper unavailable}" >&2
+        echo "Freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E." >&2
+        exit 2
+    fi
+    ;;
+esac
+
 # ---------------------------------------------------------------------------
 # No-code carve-out (git commit only) — closes the integrity hole
 #
@@ -475,7 +494,7 @@ fi
 # ---------------------------------------------------------------------------
 E2E_CHECKED_LINE=$(echo "$CHECKLIST" | grep -E '^\s*- \[x\]\s+E2E verified' | head -1)
 
-if [ -n "$E2E_CHECKED_LINE" ] && ! echo "$E2E_CHECKED_LINE" | grep -qE 'N/A:'; then
+if [ "$RECEIPT_V2_ACTIVE" != true ] && [ -n "$E2E_CHECKED_LINE" ] && ! echo "$E2E_CHECKED_LINE" | grep -qE 'N/A:'; then
     # [x] E2E verified checked without N/A → require a fresh report file.
 
     # Find the branch-off commit (try main, fall back to master, else skip).
@@ -740,7 +759,7 @@ elif [ -n "$CODE_CHECKED_ANY" ]; then
     exit 2
 fi
 
-if [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
+if [ "$RECEIPT_V2_ACTIVE" != true ] && [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
     CODE_N=$(echo "$CODE_PASS_LINE" | sed -E 's/.*Code review loop \(([0-9]+) iterations\).*/\1/')
 
     # Validate codex side (last-line semantics — defensive against stale duplicates)

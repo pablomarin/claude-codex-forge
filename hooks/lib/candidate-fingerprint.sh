@@ -14,8 +14,151 @@ state_value_fp() {
     [ "$count" -eq 1 ] || die_fp "canonical state field $field must occur exactly once"
     awk -F'|' -v f="$field" '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if (k==f) {v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}' "$state"
 }
+kv_fp() {
+    local file="$1" key="$2" count
+    count=$(awk -F= -v k="$key" '$1==k{n++} END{print n+0}' "$file")
+    [ "$count" -eq 1 ] || die_fp "$key must occur exactly once in $(basename "$file")"
+    awk -F= -v k="$key" '$1==k{sub(/^[^=]*=/,""); print; exit}' "$file"
+}
+canonical_fp() {
+    local raw="$1" must="${2:-true}" candidate parent
+    case "$raw" in /*) candidate="$raw" ;; *) candidate="$PROMOTE_ROOT/$raw" ;; esac
+    if [ "$must" = true ]; then regular_nofollow_fp "$candidate" || die_fp "regular file required: $raw"
+    else mkdir -p "$(dirname "$candidate")" || die_fp "cannot create parent for $raw"; [ ! -L "$candidate" ] || die_fp "linked output rejected: $raw"; fi
+    parent=$(cd "$(dirname "$candidate")" 2>/dev/null && pwd -P) || die_fp "cannot resolve $raw"
+    printf '%s/%s\n' "$parent" "$(basename "$candidate")"
+}
+resolve_hook_fp() {
+    local name="$1" raw parent
+    raw=$(git -C "$PROMOTE_ROOT" rev-parse --git-path "hooks/$name" 2>/dev/null) || die_fp "cannot resolve $name hook"
+    case "$raw" in /*) ;; *) raw="$PROMOTE_ROOT/$raw" ;; esac
+    [ -e "$raw" ] || { printf '\n'; return 0; }
+    regular_nofollow_fp "$raw" && [ -x "$raw" ] || die_fp "$name hook must be an executable no-follow regular file"
+    parent=$(cd "$(dirname "$raw")" 2>/dev/null && pwd -P) || die_fp "cannot resolve $name hook"
+    printf '%s/%s\n' "$parent" "$(basename "$raw")"
+}
+run_hook_fp() {
+    local name="$1" hook="$2" expected="$3" runner="$4" message="$5" index="$6" rc
+    [ -n "$hook" ] || return 0
+    [ "$(hash_file_fp "$hook")" = "$expected" ] || die_fp "$name hook changed after capture"
+    case "$name" in
+        pre-commit) (cd "$runner" && GIT_INDEX_FILE="$index" "$hook") ;;
+        prepare-commit-msg) (cd "$runner" && GIT_INDEX_FILE="$index" "$hook" "$message" "") ;;
+        commit-msg) (cd "$runner" && GIT_INDEX_FILE="$index" "$hook" "$message") ;;
+        post-commit) (cd "$runner" && GIT_INDEX_FILE="$index" "$hook") ;;
+    esac
+    rc=$?; [ "$rc" -eq 0 ] || return "$rc"
+}
+promote_fp() {
+    local candidate="" state="" message="" receipt="" dependencies="" replay=0
+    while [ "$#" -gt 0 ]; do case "$1" in
+        --candidate) candidate="${2:-}"; shift 2 ;; --state) state="${2:-}"; shift 2 ;;
+        --message-file) message="${2:-}"; shift 2 ;; --promotion-receipt) receipt="${2:-}"; shift 2 ;;
+        --hook-dependencies) dependencies="${2:-}"; shift 2 ;; --replay-attempt) replay="${2:-}"; shift 2 ;;
+        *) die_fp "unknown promote argument $1" ;; esac; done
+    case "$replay" in 0|1) ;; *) die_fp 'replay-attempt must be 0 or 1' ;; esac
+    PROMOTE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || die_fp 'Git worktree required'
+    PROMOTE_ROOT=$(cd "$PROMOTE_ROOT" && pwd -P)
+    candidate=$(canonical_fp "$candidate" true); state=$(canonical_fp "$state" true)
+    message=$(canonical_fp "$message" true); receipt=$(canonical_fp "$receipt" false)
+    case "$candidate:$state:$message:$receipt" in
+        "$PROMOTE_ROOT/.forge/local"/*:"$PROMOTE_ROOT/.forge/local"/*:"$PROMOTE_ROOT/.forge/local"/*:"$PROMOTE_ROOT/.forge/local"/*) ;;
+        *) die_fp 'promotion inputs and receipt must be under .forge/local' ;;
+    esac
+    vr="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/verification-receipt.sh"
+    [ -f "$vr" ] || vr="$PROMOTE_ROOT/hooks/lib/verification-receipt.sh"
+    [ -f "$vr" ] || die_fp 'verification-receipt helper unavailable'
+    bash "$vr" check --state "$state" >/dev/null 2>&1 || die_fp 'final receipt set does not certify the current candidate'
+    [ "$(kv_fp "$candidate" schema_version)" = 2 ] && [ "$(kv_fp "$candidate" candidate_state)" = staged-clean ] || die_fp 'staged-clean schema-v2 candidate required'
+    old_id=$(kv_fp "$candidate" candidate_id); head=$(kv_fp "$candidate" git_head); tree=$(kv_fp "$candidate" index_tree)
+    [ "$(git -C "$PROMOTE_ROOT" rev-parse HEAD)" = "$head" ] || die_fp 'candidate parent is stale'
+    git -C "$PROMOTE_ROOT" cat-file -e "$tree^{tree}" 2>/dev/null || die_fp 'frozen index tree is missing'
+    branch=$(git -C "$PROMOTE_ROOT" symbolic-ref -q HEAD 2>/dev/null) || die_fp 'promotion requires a checked-out branch'
+
+    pre=$(resolve_hook_fp pre-commit); prepare=$(resolve_hook_fp prepare-commit-msg); commitmsg=$(resolve_hook_fp commit-msg); post=$(resolve_hook_fp post-commit)
+    pre_hash=none; prepare_hash=none; commitmsg_hash=none; post_hash=none
+    [ -z "$pre" ] || pre_hash=$(hash_file_fp "$pre"); [ -z "$prepare" ] || prepare_hash=$(hash_file_fp "$prepare")
+    [ -z "$commitmsg" ] || commitmsg_hash=$(hash_file_fp "$commitmsg"); [ -z "$post" ] || post_hash=$(hash_file_fp "$post")
+
+    runner=$(mktemp -d "${TMPDIR:-/tmp}/forge-promote.XXXXXX") || die_fp 'cannot create promotion runner'
+    rmdir "$runner" || die_fp 'cannot reserve promotion runner path'
+    patch=$(mktemp "${TMPDIR:-/tmp}/forge-hook-replay.XXXXXX") || { rmdir "$runner"; die_fp 'cannot create replay artifact'; }
+    cleanup_promote_fp() { git -C "$PROMOTE_ROOT" worktree remove --force "$runner" >/dev/null 2>&1 || true; rm -f "$patch"; }
+    trap cleanup_promote_fp EXIT HUP INT TERM
+    git -C "$PROMOTE_ROOT" worktree add -q --detach "$runner" "$head" || die_fp 'cannot create disposable promotion worktree'
+    git -C "$runner" read-tree --reset -u "$tree" || die_fp 'cannot materialize frozen index tree'
+    runner_index=$(git -C "$runner" rev-parse --git-path index)
+    case "$runner_index" in /*) ;; *) runner_index="$runner/$runner_index" ;; esac
+    runner_message=$(git -C "$runner" rev-parse --git-path COMMIT_EDITMSG)
+    case "$runner_message" in /*) ;; *) runner_message="$runner/$runner_message" ;; esac
+    cp "$message" "$runner_message" || die_fp 'cannot prepare commit message'
+
+    dep_hash=none
+    if [ -n "$dependencies" ]; then
+        dependencies=$(canonical_fp "$dependencies" true)
+        dep_hash=$(hash_file_fp "$dependencies")
+        while IFS=$'\t' read -r rel expected; do
+            [ -n "$rel" ] || continue; scalar_fp dependency "$rel"
+            case "$rel" in /*|../*|*/../*|.git|.git/*|.forge/local|.forge/local/*) die_fp "hook dependency escapes policy: $rel" ;; esac
+            source="$PROMOTE_ROOT/$rel"; regular_nofollow_fp "$source" || die_fp "hook dependency missing: $rel"
+            git -C "$PROMOTE_ROOT" check-ignore -q -- "$rel" || die_fp "hook dependency must be ignored: $rel"
+            [ "$(hash_file_fp "$source")" = "$expected" ] || die_fp "hook dependency hash changed: $rel"
+            mkdir -p "$runner/$(dirname "$rel")"; cp -p "$source" "$runner/$rel" || die_fp "cannot project hook dependency: $rel"
+            chmod a-w "$runner/$rel" 2>/dev/null || die_fp "hook dependency is not read-only: $rel"
+        done < "$dependencies"
+    fi
+
+    run_hook_fp pre-commit "$pre" "$pre_hash" "$runner" "$runner_message" "$runner_index" || die_fp 'pre-commit hook failed'
+    run_hook_fp prepare-commit-msg "$prepare" "$prepare_hash" "$runner" "$runner_message" "$runner_index" || die_fp 'prepare-commit-msg hook failed'
+    run_hook_fp commit-msg "$commitmsg" "$commitmsg_hash" "$runner" "$runner_message" "$runner_index" || die_fp 'commit-msg hook failed'
+
+    after_tree=$(git -C "$runner" write-tree 2>/dev/null) || die_fp 'hook runner index is invalid'
+    runner_untracked=$(git -C "$runner" ls-files --others --exclude-standard -- . | head -1)
+    if [ "$after_tree" != "$tree" ] || ! git -C "$runner" diff --quiet || [ -n "$runner_untracked" ]; then
+        [ "$replay" = 0 ] || die_fp 'hook mutated again after one bounded replay'
+        while IFS= read -r special; do die_fp "hook produced linked or special path: ${special#"$runner"/}"; done \
+            < <(find -P "$runner" -path "$runner/.git" -prune -o \( -type l -o ! -type f ! -type d \) -print 2>/dev/null)
+        git -C "$runner" add -A || die_fp 'cannot capture hook changes'
+        changed=$(git -C "$runner" diff --cached --name-only "$tree" | wc -l | tr -d ' ')
+        [ "$changed" -le "${FORGE_HOOK_REPLAY_MAX_FILES:-32}" ] || die_fp 'hook replay exceeds file limit'
+        git -C "$runner" diff --cached --numstat "$tree" | grep -q '^-' && die_fp 'binary hook replay is outside policy'
+        git -C "$runner" diff --cached --binary "$tree" > "$patch" || die_fp 'cannot capture hook replay artifact'
+        [ "$(size_fp "$patch")" -le "${FORGE_HOOK_REPLAY_MAX_BYTES:-1048576}" ] || die_fp 'hook replay exceeds byte limit'
+        bash "$vr" check --state "$state" >/dev/null 2>&1 || die_fp 'candidate changed before hook replay'
+        git -C "$PROMOTE_ROOT" apply --index --binary "$patch" || die_fp 'validated hook replay could not be applied'
+        cleanup_promote_fp; trap - EXIT HUP INT TERM
+        printf 'HOOK_REPLAY_REQUIRED: changes were staged; freeze and rerun all final gates once\n' >&2
+        exit 3
+    fi
+
+    signing=$(git -C "$PROMOTE_ROOT" config --bool commit.gpgsign 2>/dev/null || printf false)
+    if [ "$signing" = true ]; then new_commit=$(git -C "$PROMOTE_ROOT" commit-tree -S "$tree" -p "$head" < "$runner_message") || die_fp 'signed commit-tree failed'
+    else new_commit=$(git -C "$PROMOTE_ROOT" commit-tree "$tree" -p "$head" < "$runner_message") || die_fp 'commit-tree failed'; fi
+    [ "$(git -C "$PROMOTE_ROOT" rev-parse "$new_commit^{tree}")" = "$tree" ] || die_fp 'temporary commit tree mismatch'
+    [ "$(git -C "$PROMOTE_ROOT" rev-parse "$new_commit^")" = "$head" ] || die_fp 'temporary commit parent mismatch'
+    bash "$vr" check --state "$state" >/dev/null 2>&1 || die_fp 'candidate changed before compare-and-swap'
+    git -C "$PROMOTE_ROOT" update-ref "$branch" "$new_commit" "$head" || die_fp 'compare-and-swap rejected concurrent branch movement'
+
+    post_status=not-run
+    if [ -n "$post" ]; then
+        [ "$(hash_file_fp "$post")" = "$post_hash" ] || die_fp 'post-commit hook changed after capture'
+        if (cd "$PROMOTE_ROOT" && GIT_INDEX_FILE="$(git -C "$PROMOTE_ROOT" rev-parse --git-path index)" "$post"); then post_status=pass
+        else post_status=failed; fi
+    fi
+    dirty=false; [ -n "$(git -C "$PROMOTE_ROOT" status --porcelain --untracked-files=all)" ] && dirty=true
+    tmp_receipt="$receipt.tmp.$$"
+    printf 'schema_version=2\nold_candidate_id=%s\nold_head=%s\nhook_pre_commit_hash=%s\nhook_prepare_commit_msg_hash=%s\nhook_commit_msg_hash=%s\nhook_post_commit_hash=%s\nhook_dependency_manifest_hash=%s\ntemporary_commit=%s\nnew_branch_commit=%s\nnew_branch_tree=%s\nworktree_identity=%s\npost_commit_status=%s\npost_commit_dirty=%s\n' \
+        "$old_id" "$head" "$pre_hash" "$prepare_hash" "$commitmsg_hash" "$post_hash" "$dep_hash" "$new_commit" "$new_commit" "$tree" "$(kv_fp "$candidate" worktree_identity)" "$post_status" "$dirty" > "$tmp_receipt"
+    mv "$tmp_receipt" "$receipt" || die_fp 'cannot publish promotion receipt'
+    cleanup_promote_fp; trap - EXIT HUP INT TERM
+    [ "$post_status" != failed ] || { printf 'POST_COMMIT_HOOK_FAILED\n' >&2; exit 2; }
+    [ "$dirty" = false ] || { printf 'POST_COMMIT_DIRTY\n' >&2; exit 2; }
+    printf 'PROMOTED:%s\n' "$new_commit"
+    exit 0
+}
 
 mode="${1:-}"; [ "$#" -gt 0 ] && shift
+if [ "$mode" = promote ]; then promote_fp "$@"; fi
 artifact=""; base=""; base_ref=""; output=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -24,7 +167,8 @@ while [ "$#" -gt 0 ]; do
         *) die_fp "unknown argument $1" ;;
     esac
 done
-[ "$mode" = capture ] || [ "$mode" = identity ] || die_fp 'usage: candidate-fingerprint.sh capture|identity ...'
+[ "$mode" = capture ] || [ "$mode" = identity ] || [ "$mode" = freeze ] \
+    || die_fp 'usage: candidate-fingerprint.sh capture|identity|freeze ...'
 [ -n "$artifact" ] && [ -n "$base" ] && [ -n "$base_ref" ] || die_fp 'artifact and immutable workflow base are required'
 scalar_fp artifact "$artifact"; scalar_fp workflow-base-ref "$base_ref"
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die_fp 'Git worktree required'
@@ -67,11 +211,16 @@ while IFS= read -r -d '' rel; do
 done < "$paths"
 LC_ALL=C sort "$manifest" -o "$manifest"
 untracked_hash=$(hash_file_fp "$manifest")
+candidate_id=$(printf '%s\n' "$base" "$head" "$index_tree" "$worktree_identity" | hash_stream_fp)
+candidate_state=dirty
+if git -C "$root" diff --quiet && [ "$untracked_count" -eq 0 ]; then candidate_state=staged-clean; fi
 artifact_kind=""; artifact_identity=""; snapshot=""
 case "$artifact" in
 git:working-tree)
     artifact_kind=git-working-tree
-    artifact_identity=$(printf '%s\n' "$base" "$head" "$index_tree" "$staged_hash" "$unstaged_hash" "$untracked_hash" "$worktree_identity" | hash_stream_fp)
+    if [ "$candidate_state" = staged-clean ]; then artifact_identity="$candidate_id"
+    else artifact_identity=$(printf '%s\n' "$base" "$head" "$index_tree" "$staged_hash" "$unstaged_hash" "$untracked_hash" "$worktree_identity" | hash_stream_fp)
+    fi
     ;;
 git:head)
     artifact_kind=git-head; artifact_identity=$(printf '%s|%s\n' "$head" "$worktree_identity" | hash_stream_fp)
@@ -87,7 +236,11 @@ file:*)
 *) die_fp 'artifact must be file:PATH, git:head, or git:working-tree' ;;
 esac
 
-if [ "$mode" = capture ]; then
+if [ "$mode" = freeze ]; then
+    [ "$artifact_kind" = git-working-tree ] || die_fp 'only git:working-tree can be frozen'
+    [ "$candidate_state" = staged-clean ] || die_fp 'freeze requires no unstaged or in-scope untracked changes'
+    [ -n "$output" ] || die_fp 'freeze output is required'
+elif [ "$mode" = capture ]; then
     [ -n "$output" ] || die_fp 'capture output is required'
     snapshot=$(mktemp -d "${TMPDIR:-/tmp}/forge-candidate.XXXXXX") || die_fp 'cannot create sibling candidate'
     if [ "$artifact_kind" = file ]; then mkdir -p "$snapshot/data"; cp -p "$file" "$snapshot/data/$(basename "$file")" || die_fp 'file snapshot failed'
@@ -144,7 +297,8 @@ done < <(find -P "$root" \( -path "$root/.git" -o -path "$root/.forge/local" \) 
 
 emit="${output:-/dev/stdout}"; mkdir -p "$(dirname "$emit")"
 {
-  printf 'schema_version=1\nartifact_kind=%s\nartifact_identity=%s\nartifact_hash=%s\nworktree_identity=%s\ngit_head=%s\nworkflow_base_ref=%s\nworkflow_base_sha=%s\nindex_tree=%s\nstaged_hash=%s\nunstaged_hash=%s\nuntracked_hash=%s\nuntracked_count=%s\n' \
-    "$artifact_kind" "$artifact_identity" "$artifact_identity" "$worktree_identity" "$head" "$base_ref" "$base" "$index_tree" "$staged_hash" "$unstaged_hash" "$untracked_hash" "$untracked_count"
+  schema=1; [ "$mode" = freeze ] && schema=2
+  printf 'schema_version=%s\nartifact_kind=%s\nartifact_identity=%s\nartifact_hash=%s\ncandidate_id=%s\ncandidate_state=%s\nworktree_identity=%s\ngit_head=%s\nworkflow_base_ref=%s\nworkflow_base_sha=%s\nindex_tree=%s\nstaged_hash=%s\nunstaged_hash=%s\nuntracked_hash=%s\nuntracked_count=%s\n' \
+    "$schema" "$artifact_kind" "$artifact_identity" "$artifact_identity" "$candidate_id" "$candidate_state" "$worktree_identity" "$head" "$base_ref" "$base" "$index_tree" "$staged_hash" "$unstaged_hash" "$untracked_hash" "$untracked_count"
   [ -z "$snapshot" ] || printf 'snapshot_path=%s\n' "$snapshot"
 } > "$emit"

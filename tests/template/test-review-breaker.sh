@@ -481,5 +481,15 @@ else
     assert_contains_str "ADJUDICATED:no" "$out" "ps: after head moves → no"
 fi
 
+start_test "receipt-v2 certification is engine-neutral and disables legacy fallback once linked"
+assert_contains "$HELPER" 'REVIEWS_VALID:' \
+    "Bash breaker certifies the validated code-spec/code-quality pair"
+assert_contains "$HELPER" 'V2_ACTIVE=true' \
+    "Bash breaker disables legacy rows after receipt-v2 activation"
+assert_contains "$HELPER_PS" 'REVIEWS_VALID:true' \
+    "PowerShell breaker mirrors receipt-v2 pair certification"
+assert_contains "$HELPER_PS" '$v2Active = $true' \
+    "PowerShell breaker disables legacy rows after receipt-v2 activation"
+
 # lib.sh's EXIT trap prints scratch info; emit the summary explicitly.
 report "test-review-breaker.sh"

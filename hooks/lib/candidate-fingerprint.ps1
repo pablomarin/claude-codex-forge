@@ -1,9 +1,15 @@
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('capture', 'identity')][string]$Mode,
-    [Parameter(Mandatory = $true)][string]$Artifact,
-    [Parameter(Mandatory = $true)][string]$WorkflowBaseSha,
-    [Parameter(Mandatory = $true)][string]$WorkflowBaseRef,
-    [Parameter(Mandatory = $true)][string]$Output
+    [Parameter(Mandatory = $true)][ValidateSet('capture', 'identity', 'freeze', 'promote')][string]$Mode,
+    [string]$Artifact,
+    [string]$WorkflowBaseSha,
+    [string]$WorkflowBaseRef,
+    [string]$Output,
+    [string]$Candidate,
+    [string]$State,
+    [string]$MessageFile,
+    [string]$PromotionReceipt,
+    [string]$HookDependencies,
+    [ValidateSet(0, 1)][int]$ReplayAttempt = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -91,6 +97,180 @@ function Assert-NoUntrackedReparse([string]$Root) {
     }
 }
 
+function Get-ReceiptKv([string]$Path, [string]$Key) {
+    $values = @()
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        $position = $line.IndexOf('=')
+        if ($position -gt 0 -and $line.Substring(0, $position) -ceq $Key) { $values += $line.Substring($position + 1) }
+    }
+    if ($values.Count -ne 1) { throw "BLOCKED[artifact]: $Key must occur exactly once in $Path" }
+    return [string]$values[0]
+}
+function Get-LocalPromotionPath([string]$Root, [string]$Raw, [bool]$MustExist) {
+    if (-not $Raw -or $Raw.Contains("`r") -or $Raw.Contains("`n")) { throw 'BLOCKED[artifact]: invalid promotion path' }
+    $path = if ([IO.Path]::IsPathRooted($Raw)) { [IO.Path]::GetFullPath($Raw) } else { [IO.Path]::GetFullPath((Join-Path $Root $Raw)) }
+    $prefix = [IO.Path]::GetFullPath((Join-Path $Root '.forge\local')).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'BLOCKED[artifact]: promotion inputs and receipt must be under .forge/local' }
+    if ($MustExist) {
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw "BLOCKED[artifact]: no-follow regular file required: $Raw" }
+    } else {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        if ($item -and (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw "BLOCKED[artifact]: linked output rejected: $Raw" }
+    }
+    return $path
+}
+function Get-PromotionHook([string]$Root, [string]$Name) {
+    $raw = Invoke-GitText @('-C', $Root, 'rev-parse', '--git-path', "hooks/$Name")
+    $path = if ([IO.Path]::IsPathRooted($raw)) { [IO.Path]::GetFullPath($raw) } else { [IO.Path]::GetFullPath((Join-Path $Root $raw)) }
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    $item = Get-Item -LiteralPath $path -Force
+    if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw "BLOCKED[artifact]: $Name hook must be a no-follow regular file" }
+    return [pscustomobject]@{ Path = $path; Hash = (Get-ShaFile $path) }
+}
+function Invoke-PromotionHook([string]$Name, $Hook, [string]$Runner, [string]$Message, [string]$Index) {
+    if (-not $Hook) { return }
+    if ((Get-ShaFile $Hook.Path) -cne $Hook.Hash) { throw "BLOCKED[artifact]: $Name hook changed after capture" }
+    $savedIndex = $env:GIT_INDEX_FILE
+    $savedLocation = (Get-Location).Path
+    try {
+        Set-Location -LiteralPath $Runner
+        $env:GIT_INDEX_FILE = $Index
+        if ($Name -eq 'pre-commit' -or $Name -eq 'post-commit') { & $Hook.Path }
+        elseif ($Name -eq 'prepare-commit-msg') { & $Hook.Path $Message '' }
+        else { & $Hook.Path $Message }
+        if ($LASTEXITCODE -ne 0) { throw "BLOCKED[artifact]: $Name hook failed" }
+    }
+    finally {
+        Set-Location -LiteralPath $savedLocation
+        if ($null -eq $savedIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue } else { $env:GIT_INDEX_FILE = $savedIndex }
+    }
+}
+function Invoke-CandidatePromotion {
+    $root = (Resolve-Path (Invoke-GitText @('rev-parse', '--show-toplevel'))).Path
+    $candidateFile = Get-LocalPromotionPath $root $Candidate $true
+    $stateFile = Get-LocalPromotionPath $root $State $true
+    $message = Get-LocalPromotionPath $root $MessageFile $true
+    $receipt = Get-LocalPromotionPath $root $PromotionReceipt $false
+    $verification = Join-Path $PSScriptRoot 'verification-receipt.ps1'
+    if (-not (Test-Path -LiteralPath $verification)) { $verification = Join-Path $root 'hooks\lib\verification-receipt.ps1' }
+    if (-not (Test-Path -LiteralPath $verification)) { throw 'BLOCKED[artifact]: verification-receipt helper unavailable' }
+    . $verification
+    $verificationResult = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateFile
+    if ($verificationResult.Status -ne 0) { throw 'BLOCKED[artifact]: final receipt set does not certify the current candidate' }
+    if ((Get-ReceiptKv $candidateFile 'schema_version') -cne '2' -or (Get-ReceiptKv $candidateFile 'candidate_state') -cne 'staged-clean') { throw 'BLOCKED[artifact]: staged-clean schema-v2 candidate required' }
+    $oldId = Get-ReceiptKv $candidateFile 'candidate_id'
+    $head = Get-ReceiptKv $candidateFile 'git_head'
+    $tree = Get-ReceiptKv $candidateFile 'index_tree'
+    if ((Invoke-GitText @('-C', $root, 'rev-parse', 'HEAD')) -cne $head) { throw 'BLOCKED[artifact]: candidate parent is stale' }
+    $null = Invoke-GitText @('-C', $root, 'cat-file', '-e', "$tree^{tree}")
+    $branch = Invoke-GitText @('-C', $root, 'symbolic-ref', '-q', 'HEAD')
+
+    $hooks = @{}
+    foreach ($name in @('pre-commit','prepare-commit-msg','commit-msg','post-commit')) { $hooks[$name] = Get-PromotionHook $root $name }
+    $runner = Join-Path ([IO.Path]::GetTempPath()) ('forge-promote-' + [Guid]::NewGuid().ToString('N'))
+    $patch = Join-Path ([IO.Path]::GetTempPath()) ('forge-hook-replay-' + [Guid]::NewGuid().ToString('N'))
+    $runnerAdded = $false
+    try {
+        & git -C $root worktree add -q --detach $runner $head
+        if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: cannot create disposable promotion worktree' }
+        $runnerAdded = $true
+        & git -C $runner read-tree --reset -u $tree
+        if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: cannot materialize frozen index tree' }
+        $runnerIndex = Invoke-GitText @('-C', $runner, 'rev-parse', '--git-path', 'index')
+        if (-not [IO.Path]::IsPathRooted($runnerIndex)) { $runnerIndex = Join-Path $runner $runnerIndex }
+        $runnerMessage = Invoke-GitText @('-C', $runner, 'rev-parse', '--git-path', 'COMMIT_EDITMSG')
+        if (-not [IO.Path]::IsPathRooted($runnerMessage)) { $runnerMessage = Join-Path $runner $runnerMessage }
+        Copy-Item -LiteralPath $message -Destination $runnerMessage -Force
+
+        $dependencyHash = 'none'
+        if ($HookDependencies) {
+            $dependencies = Get-LocalPromotionPath $root $HookDependencies $true
+            $dependencyHash = Get-ShaFile $dependencies
+            foreach ($line in [IO.File]::ReadAllLines($dependencies)) {
+                if (-not $line) { continue }
+                $parts = $line.Split("`t"); if ($parts.Count -ne 2) { throw 'BLOCKED[artifact]: malformed hook dependency manifest' }
+                $relative = $parts[0]; Assert-SafeRelative $relative
+                if ($relative -eq '.git' -or $relative.StartsWith('.git\') -or $relative -eq '.forge\local' -or $relative.StartsWith('.forge\local\')) { throw "BLOCKED[artifact]: hook dependency escapes policy: $relative" }
+                $source = Join-Path $root $relative; $item = Get-Item -LiteralPath $source -Force
+                if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw "BLOCKED[artifact]: hook dependency missing: $relative" }
+                & git -C $root check-ignore -q -- $relative
+                if ($LASTEXITCODE -ne 0) { throw "BLOCKED[artifact]: hook dependency must be ignored: $relative" }
+                if ((Get-ShaFile $source) -cne $parts[1]) { throw "BLOCKED[artifact]: hook dependency hash changed: $relative" }
+                $destination = Join-Path $runner $relative
+                New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+                Copy-Item -LiteralPath $source -Destination $destination -Force
+                (Get-Item -LiteralPath $destination).IsReadOnly = $true
+            }
+        }
+
+        Invoke-PromotionHook 'pre-commit' $hooks['pre-commit'] $runner $runnerMessage $runnerIndex
+        Invoke-PromotionHook 'prepare-commit-msg' $hooks['prepare-commit-msg'] $runner $runnerMessage $runnerIndex
+        Invoke-PromotionHook 'commit-msg' $hooks['commit-msg'] $runner $runnerMessage $runnerIndex
+        $afterTree = Invoke-GitText @('-C', $runner, 'write-tree')
+        & git -C $runner diff --quiet
+        $unstagedClean = $LASTEXITCODE -eq 0
+        $untracked = @(& git -C $runner ls-files --others --exclude-standard -- .)
+        if ($afterTree -cne $tree -or -not $unstagedClean -or $untracked.Count -gt 0) {
+            if ($ReplayAttempt -ne 0) { throw 'BLOCKED[artifact]: hook mutated again after one bounded replay' }
+            foreach ($item in Get-NoFollowTreeItems $runner) {
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "BLOCKED[artifact]: hook produced linked or special path: $($item.FullName)" }
+            }
+            & git -C $runner add -A
+            if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: cannot capture hook changes' }
+            $changed = @(& git -C $runner diff --cached --name-only $tree).Count
+            $maxFiles = 32; if ($env:FORGE_HOOK_REPLAY_MAX_FILES -match '^[0-9]+$') { $maxFiles = [int]$env:FORGE_HOOK_REPLAY_MAX_FILES }
+            if ($changed -gt $maxFiles) { throw 'BLOCKED[artifact]: hook replay exceeds file limit' }
+            foreach ($line in @(& git -C $runner diff --cached --numstat $tree)) { if ($line -match '^-') { throw 'BLOCKED[artifact]: binary hook replay is outside policy' } }
+            & git -C $runner diff --cached --binary $tree "--output=$patch"
+            if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: cannot capture hook replay artifact' }
+            $maxBytes = 1048576; if ($env:FORGE_HOOK_REPLAY_MAX_BYTES -match '^[0-9]+$') { $maxBytes = [int64]$env:FORGE_HOOK_REPLAY_MAX_BYTES }
+            if ((Get-Item -LiteralPath $patch).Length -gt $maxBytes) { throw 'BLOCKED[artifact]: hook replay exceeds byte limit' }
+            $verificationResult = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateFile
+            if ($verificationResult.Status -ne 0) { throw 'BLOCKED[artifact]: candidate changed before hook replay' }
+            & git -C $root apply --index --binary $patch
+            if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: validated hook replay could not be applied' }
+            $script:PromotionExitStatus = 3
+            throw 'HOOK_REPLAY_REQUIRED: changes were staged; freeze and rerun all final gates once'
+        }
+
+        $commitArgs = @('-C', $root, 'commit-tree', $tree, '-p', $head)
+        $signing = (& git -C $root config --bool commit.gpgsign 2>$null | Select-Object -First 1)
+        if ($signing -eq 'true') { $commitArgs = @('-C', $root, 'commit-tree', '-S', $tree, '-p', $head) }
+        $newCommit = ((Get-Content -LiteralPath $runnerMessage -Raw) | & git @commitArgs) -join ''
+        if ($LASTEXITCODE -ne 0 -or -not $newCommit) { throw 'BLOCKED[artifact]: commit-tree failed' }
+        if ((Invoke-GitText @('-C', $root, 'rev-parse', "$newCommit^{tree}")) -cne $tree -or (Invoke-GitText @('-C', $root, 'rev-parse', "$newCommit^")) -cne $head) { throw 'BLOCKED[artifact]: temporary commit identity mismatch' }
+        $verificationResult = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateFile
+        if ($verificationResult.Status -ne 0) { throw 'BLOCKED[artifact]: candidate changed before compare-and-swap' }
+        & git -C $root update-ref $branch $newCommit $head
+        if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: compare-and-swap rejected concurrent branch movement' }
+
+        $postStatus = 'not-run'
+        if ($hooks['post-commit']) {
+            try { Invoke-PromotionHook 'post-commit' $hooks['post-commit'] $root $message (Invoke-GitText @('-C', $root, 'rev-parse', '--git-path', 'index')); $postStatus = 'pass' }
+            catch { $postStatus = 'failed' }
+        }
+        $dirty = @(& git -C $root status --porcelain --untracked-files=all).Count -gt 0
+        function Get-HookHash($Hook) { if ($Hook) { return $Hook.Hash } return 'none' }
+        $body = "schema_version=2`nold_candidate_id=$oldId`nold_head=$head`nhook_pre_commit_hash=$(Get-HookHash ($hooks['pre-commit']))`nhook_prepare_commit_msg_hash=$(Get-HookHash ($hooks['prepare-commit-msg']))`nhook_commit_msg_hash=$(Get-HookHash ($hooks['commit-msg']))`nhook_post_commit_hash=$(Get-HookHash ($hooks['post-commit']))`nhook_dependency_manifest_hash=$dependencyHash`ntemporary_commit=$newCommit`nnew_branch_commit=$newCommit`nnew_branch_tree=$tree`nworktree_identity=$(Get-ReceiptKv $candidateFile 'worktree_identity')`npost_commit_status=$postStatus`npost_commit_dirty=$($dirty.ToString().ToLowerInvariant())`n"
+        [IO.File]::WriteAllText("$receipt.tmp.$PID", $body, $Utf8); Move-Item -LiteralPath "$receipt.tmp.$PID" -Destination $receipt -Force
+        if ($postStatus -eq 'failed') { throw 'POST_COMMIT_HOOK_FAILED' }
+        if ($dirty) { throw 'POST_COMMIT_DIRTY' }
+        Write-Output "PROMOTED:$newCommit"
+    }
+    finally {
+        if ($runnerAdded) { & git -C $root worktree remove --force $runner 2>$null | Out-Null }
+        Remove-Item -LiteralPath $patch -Force -ErrorAction SilentlyContinue
+    }
+}
+
+if ($Mode -eq 'promote') {
+    $script:PromotionExitStatus = 2
+    try { Invoke-CandidatePromotion; exit 0 }
+    catch { [Console]::Error.WriteLine([string]$_.Exception.Message); exit $script:PromotionExitStatus }
+}
+
 try {
     $root = (Resolve-Path (Invoke-GitText @('rev-parse', '--show-toplevel'))).Path
     $head = Invoke-GitText @('-C', $root, 'rev-parse', 'HEAD')
@@ -119,12 +299,19 @@ try {
     $manifestText = (@($manifest) -join "`n") + "`n"
     $untrackedHash = Get-ShaText $manifestText
 
+    $candidateId = Get-ShaText "$base`n$head`n$indexTree`n$worktreeIdentity`n"
+    $candidateState = 'dirty'
+    if ((Get-Item -LiteralPath $unstagedPatch).Length -eq 0 -and @($untrackedPaths).Count -eq 0) { $candidateState = 'staged-clean' }
     $kind = ''
     $identity = ''
     $snapshot = ''
     $fileArtifact = ''
     switch ($Artifact) {
-        'git:working-tree' { $kind = 'git-working-tree'; $identity = Get-ShaText "$base`n$head`n$indexTree`n$stagedHash`n$unstagedHash`n$untrackedHash`n$worktreeIdentity`n" }
+        'git:working-tree' {
+            $kind = 'git-working-tree'
+            if ($candidateState -eq 'staged-clean') { $identity = $candidateId }
+            else { $identity = Get-ShaText "$base`n$head`n$indexTree`n$stagedHash`n$unstagedHash`n$untrackedHash`n$worktreeIdentity`n" }
+        }
         'git:head' { $kind = 'git-head'; $identity = Get-ShaText "$head|$worktreeIdentity`n" }
         default {
             if (-not $Artifact.StartsWith('file:')) { throw 'BLOCKED[artifact]: invalid artifact' }
@@ -141,7 +328,11 @@ try {
         }
     }
 
-    if ($Mode -eq 'capture') {
+    if ($Mode -eq 'freeze') {
+        if ($kind -ne 'git-working-tree' -or $candidateState -ne 'staged-clean') { throw 'BLOCKED[artifact]: freeze requires a staged-clean git:working-tree candidate' }
+        if (-not $Output) { throw 'BLOCKED[artifact]: freeze output is required' }
+    }
+    elseif ($Mode -eq 'capture') {
         $parent = Join-Path ([IO.Path]::GetTempPath()) ('forge-candidate-' + [Guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $parent | Out-Null
         if ($kind -eq 'file') {
@@ -199,7 +390,9 @@ try {
     $manifestAfter = Get-UntrackedManifest $root $pathsAfter
     if ((@($manifestAfter) -join "`n") -cne (@($manifest) -join "`n")) { throw 'BLOCKED[artifact]: untracked content changed during capture' }
 
-    $body = "schema_version=1`nartifact_kind=$kind`nartifact_identity=$identity`nartifact_hash=$identity`nworktree_identity=$worktreeIdentity`ngit_head=$head`nworkflow_base_ref=$WorkflowBaseRef`nworkflow_base_sha=$base`nindex_tree=$indexTree`nstaged_hash=$stagedHash`nunstaged_hash=$unstagedHash`nuntracked_hash=$untrackedHash`nuntracked_count=$($manifest.Count)`n"
+    $schema = 1
+    if ($Mode -eq 'freeze') { $schema = 2 }
+    $body = "schema_version=$schema`nartifact_kind=$kind`nartifact_identity=$identity`nartifact_hash=$identity`ncandidate_id=$candidateId`ncandidate_state=$candidateState`nworktree_identity=$worktreeIdentity`ngit_head=$head`nworkflow_base_ref=$WorkflowBaseRef`nworkflow_base_sha=$base`nindex_tree=$indexTree`nstaged_hash=$stagedHash`nunstaged_hash=$unstagedHash`nuntracked_hash=$untrackedHash`nuntracked_count=$($manifest.Count)`n"
     if ($snapshot) { $body += "snapshot_path=$snapshot`n" }
     New-Item -ItemType Directory -Path (Split-Path -Parent $Output) -Force | Out-Null
     [IO.File]::WriteAllText($Output, $body, $Utf8)

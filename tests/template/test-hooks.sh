@@ -2851,4 +2851,16 @@ for config in "$REPO_ROOT/settings/settings.template.json" "$REPO_ROOT/settings/
         "$(basename "$config") prevents agents from writing protected host receipts"
 done
 
+start_test "Task 8 receipt-v2 helpers and final evidence boundaries are shipped symmetrically"
+for helper in verification-receipt.sh verification-receipt.ps1; do
+    assert_contains "$REPO_ROOT/manifests/managed-v6.tsv" ".forge/hooks/lib/$helper" \
+        "managed v6 installs $helper before verifier callsites"
+done
+for hook in check-workflow-gates check-state-updated build-evidence; do
+    assert_contains "$REPO_ROOT/hooks/$hook.sh" 'verification-receipt.sh' \
+        "$hook Bash boundary consumes receipt-v2 evidence"
+    assert_contains "$REPO_ROOT/hooks/$hook.ps1" 'verification-receipt.ps1' \
+        "$hook PowerShell boundary consumes receipt-v2 evidence"
+done
+
 report "test-hooks.sh"

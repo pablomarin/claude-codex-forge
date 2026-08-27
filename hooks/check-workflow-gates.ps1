@@ -325,6 +325,43 @@ if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $st
     }
 }
 
+# Receipt-v2 compatibility switch. An explicit Candidate receipt linkage means
+# all final evidence must bind to one current staged-clean candidate. Genuine
+# unconverted workflows continue through the legacy checklist evidence below.
+$ReceiptV2Active = $false
+$receiptCandidate = ""
+$receiptCandidateRows = @()
+foreach ($line in (($content -replace "`r", "") -split "`n")) {
+    $parts = $line -split '\|'
+    if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') {
+        $receiptCandidateRows += $parts[2].Trim()
+    }
+}
+if ($receiptCandidateRows.Count -eq 1) { $receiptCandidate = [string]$receiptCandidateRows[0] }
+if ($receiptCandidate -and -not $receiptCandidate.Contains('<')) {
+    $ReceiptV2Active = $true
+    $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
+    if (-not (Test-Path -LiteralPath $verificationReceipt)) {
+        $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1'
+    }
+    $vrOut = @()
+    $vrStatus = 2
+    if (Test-Path -LiteralPath $verificationReceipt) {
+        . $verificationReceipt
+        $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateFile
+        $vrOut = @($vrResponse.Lines)
+        if ($vrResponse.Error) { $vrOut += $vrResponse.Error }
+        $vrStatus = $vrResponse.Status
+    }
+    if ($vrStatus -ne 0) {
+        [Console]::Error.WriteLine('WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean.')
+        foreach ($line in $vrOut) { [Console]::Error.WriteLine([string]$line) }
+        if (-not $vrOut) { [Console]::Error.WriteLine('verification-receipt helper unavailable') }
+        [Console]::Error.WriteLine('Freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E.')
+        exit 2
+    }
+}
+
 # ---------------------------------------------------------------------------
 # No-code carve-out (git commit only) — closes the integrity hole (mirrors .sh)
 # See check-workflow-gates.sh for the full rationale + scope decision. When a
@@ -449,7 +486,7 @@ foreach ($line in $checklistLines) {
     }
 }
 
-if ($e2eCheckedLine -and ($e2eCheckedLine -notmatch 'N/A:')) {
+if (-not $ReceiptV2Active -and $e2eCheckedLine -and ($e2eCheckedLine -notmatch 'N/A:')) {
     # Find branch-off commit (try main, fall back to master, else skip)
     $branchOff = git merge-base HEAD main 2>$null
     if (-not $branchOff) { $branchOff = git merge-base HEAD master 2>$null }
@@ -640,7 +677,7 @@ if ($codePassLine) {
     exit 2
 }
 
-if ($codePassLine -and $headShaCode) {
+if (-not $ReceiptV2Active -and $codePassLine -and $headShaCode) {
     if ($codePassLine -match 'Code review loop \((\d+) iterations\)') {
         $codeN = $matches[1]
     } else {

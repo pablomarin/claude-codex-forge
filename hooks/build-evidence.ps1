@@ -104,6 +104,14 @@ if (Test-Path -LiteralPath $ReviewBreakerPs1) {
     $ReviewBreakerAvailable = $true
 }
 
+$VerificationReceiptPs1 = Join-Path (Get-Location) ".forge\hooks\lib\verification-receipt.ps1"
+if (-not (Test-Path -LiteralPath $VerificationReceiptPs1)) {
+    $VerificationReceiptPs1 = Join-Path (Get-Location) ".claude\hooks\lib\verification-receipt.ps1"
+}
+if (-not (Test-Path -LiteralPath $VerificationReceiptPs1)) {
+    $VerificationReceiptPs1 = Join-Path (Get-Location) "hooks\lib\verification-receipt.ps1"
+}
+
 # ---------------------------------------------------------------------------
 # Helper: Unix epoch time (PS 5.1 compatible)
 # ---------------------------------------------------------------------------
@@ -134,6 +142,19 @@ function Read-StateMdLines {
     if ([string]::IsNullOrEmpty($raw)) { return @() }
     # CRLF normalize: strip \r, then split on \n
     return ($raw -replace "`r", "") -split "`n"
+}
+
+function Get-ReceiptStateValue {
+    param([string]$Field)
+    $values = @()
+    foreach ($line in Read-StateMdLines) {
+        $parts = $line -split '\|'
+        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq $Field) {
+            $values += $parts[2].Trim()
+        }
+    }
+    if ($values.Count -eq 1) { return [string]$values[0] }
+    return ""
 }
 
 # ---------------------------------------------------------------------------
@@ -530,6 +551,37 @@ $RgClean = if ($rg.clean) { "true" } else { "false" }
 $RgIter = $rg.matched_iteration
 $RgHead = $rg.matched_head
 
+# An explicit Candidate receipt activates receipt-v2. Genuine unconverted
+# workflows retain the legacy checklist reader; migrated evidence cannot use it
+# because migration removes those rows and receipt linkages.
+$CandidateClean = "false"
+$VerifyAppClean = "false"
+$E2eReceiptClean = "false"
+$ShipReceiptsClean = "false"
+$ReceiptGateOk = $true
+$CandidateId = ""
+$receiptCandidate = Get-ReceiptStateValue "Candidate receipt"
+if (-not [string]::IsNullOrEmpty($receiptCandidate) -and -not $receiptCandidate.Contains('<')) {
+    $ReceiptGateOk = $false
+    if ($StateIsV6 -and (Test-Path -LiteralPath $VerificationReceiptPs1)) {
+        . $VerificationReceiptPs1
+        $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateMd
+        $vrOut = @($vrResponse.Lines)
+        foreach ($line in $vrOut) {
+            if ($line -eq 'CANDIDATE_VALID:true') { $CandidateClean = "true" }
+            elseif ($line -eq 'REVIEWS_VALID:true') { $RgClean = "true" }
+            elseif ($line -match '^REVIEWS_VALID:') { $RgClean = "false" }
+            elseif ($line -eq 'VERIFY_APP_VALID:true') { $VerifyAppClean = "true" }
+            elseif ($line -eq 'E2E_VALID:true') { $E2eReceiptClean = "true" }
+            elseif ($line -eq 'SHIP_READY:true') { $ShipReceiptsClean = "true"; $ReceiptGateOk = $true }
+            elseif ($line -match '^REVIEW_ITERATION:(.*)$') { $RgIter = $matches[1] }
+            elseif ($line -match '^CANDIDATE_ID:(.*)$') { $CandidateId = $matches[1] }
+        }
+        if ($CandidateClean -eq "true") { $RgHead = $HeadSha } else { $RgHead = "" }
+        $E2eFresh = $E2eReceiptClean
+    }
+}
+
 # Convergence breaker fields (full-state helper run).
 $brkFields = Compute-BreakerFields
 $PostCertRounds = $brkFields.rounds
@@ -560,7 +612,7 @@ if ((-not [string]::IsNullOrEmpty($HeadSha)) -and ($PrHeadOid -eq $HeadSha)) {
 }
 
 $PrReady = "false"
-if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $RgClean -eq "true" -and $E2eFresh -eq "true" -and $PaAuth -eq "true" -and $BreakerOk) {
+if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $RgClean -eq "true" -and $E2eFresh -eq "true" -and $PaAuth -eq "true" -and $BreakerOk -and $ReceiptGateOk) {
     $PrReady = "true"
 }
 
@@ -661,6 +713,7 @@ $PrHeadOidJson    = Build-JsonStringField "head_oid" $PrHeadOid
 $PrBaseRefJson    = Build-JsonStringField "base_ref" $PrBaseRef
 $PrHeadRefJson    = Build-JsonStringField "head_ref" $PrHeadRef
 $E2ePathJson      = Build-JsonStringField "path" $E2ePath
+$CandidateIdJson  = Build-JsonStringField "candidate_id" $CandidateId
 
 # pr_state block
 if ($PrExists -eq "true") {
@@ -688,6 +741,8 @@ $json = '{' +
     $WorkflowCmdJson + ',' +
     '"state":{' + $PhaseJson + ',' + $NextStepJson + ',"checklist_total":' + $TotalCount + ',"checklist_done":' + $DoneCount + '},' +
     '"reviewer_gate":{"clean_same_iteration":' + $RgClean + ',' + $RgIterJson + ',' + $RgHeadJson + ',"post_cert_rounds":' + $PostCertRounds + ',"breaker":"' + $Breaker + '"},' +
+    '"candidate_gate":{"staged_clean":' + $CandidateClean + ',' + $CandidateIdJson + ',"all_receipts_same_candidate":' + $ShipReceiptsClean + '},' +
+    '"verification_gate":{"verify_app":' + $VerifyAppClean + ',"e2e":' + $E2eReceiptClean + '},' +
     '"plan_review_gate":{"clean_same_iteration":' + $PrgClean + ',' + $PrgIterJson + ',' + $PrgShaJson + '},' +
     $BranchJson + ',' +
     $HeadShaJson + ',' +

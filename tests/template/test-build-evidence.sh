@@ -684,5 +684,364 @@ assert_matches "$CS/.forge/local/forge-goal-last-fingerprint" '^[0-9a-f]{64}$' \
 assert_contains "$CS/one.out" 'FORGE_GOAL_EVIDENCE_END' "first Stop emits complete evidence"
 assert_contains "$CS/two.out" 'FORGE_GOAL_EVIDENCE_END' "second Stop emits the same complete schema"
 
+# ===========================================================================
+# Task 8: receipt-v2 final-candidate binding. These tests use Task 5 review
+# receipt fields verbatim and add only the verifier/candidate layer owned here.
+# ===========================================================================
+
+make_v2_candidate_repo() {
+    V2=$(scratch_dir receipt-v2)
+    V2=$(cd "$V2" && pwd -P)
+    case "$V2" in
+        ''|"$REPO_ROOT"|"$REPO_ROOT"/*)
+            fail "receipt-v2 fixture escaped its registered scratch root"
+            return 1
+            ;;
+    esac
+    mkdir -p "$V2/.forge/local/reviews" "$V2/.forge/local/evidence"
+    (
+        cd "$V2" || exit 1
+        git init -q --initial-branch=main
+        git config user.email t@t
+        git config user.name t
+        printf '.forge/local/\n' > .gitignore
+        printf 'base\n' > app.txt
+        git add .gitignore app.txt
+        git commit -qm base
+    )
+    V2_HEAD=$(git -C "$V2" rev-parse HEAD)
+    V2_COMMON=$(cd "$V2" && cd "$(git rev-parse --git-common-dir)" && pwd -P)
+    cat > "$V2/.forge/local/state.md" <<EOF
+<!-- forge:state-schema v6 -->
+## Identity
+| Field | Value |
+| Worktree root | $V2 |
+| Git common directory | $V2_COMMON |
+| Last active host | claude |
+| Workflow base ref | main |
+| Workflow base SHA | $V2_HEAD |
+## Workflow
+| Field | Value |
+| Command | /new-feature receipt-v2 |
+| Phase | 5 — Quality |
+| Next step | promote |
+### Checklist
+- [x] Code review loop (1 iterations) — PASS
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified via verify-e2e agent (Phase 5.4)
+## Receipts
+| Field | Value |
+| Review iteration | 1 |
+| Candidate receipt | .forge/local/evidence/candidate.receipt |
+| Spec review receipt | .forge/local/reviews/spec.receipt |
+| Quality review receipt | .forge/local/reviews/quality.receipt |
+| Verify app receipt | .forge/local/evidence/verify-app.receipt |
+| E2E receipt | .forge/local/evidence/e2e.receipt |
+EOF
+    printf 'changed\n' > "$V2/app.txt"
+    git -C "$V2" add -A
+}
+
+write_v2_review() {
+    local role="$1" invocation="$2" actual="$3" fallback="$4" reason="$5" receipt="$6"
+    local candidate_id worktree head base output output_hash now empty_digest
+    candidate_id=$(awk -F= '$1=="candidate_id"{print $2}' "$V2/.forge/local/evidence/candidate.receipt")
+    worktree=$(awk -F= '$1=="worktree_identity"{print $2}' "$V2/.forge/local/evidence/candidate.receipt")
+    head=$(awk -F= '$1=="git_head"{print $2}' "$V2/.forge/local/evidence/candidate.receipt")
+    base=$(awk -F= '$1=="workflow_base_sha"{print $2}' "$V2/.forge/local/evidence/candidate.receipt")
+    output="$V2/.forge/local/reviews/$role.result"
+    printf 'schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n' > "$output"
+    output_hash=$(shasum -a 256 "$output" | awk '{print $1}')
+    empty_digest=$(printf '' | shasum -a 256 | awk '{print $1}')
+    now=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    cat > "$receipt" <<EOF
+schema_version=1
+invocation_id=$invocation
+timestamp=$now
+main_host=claude
+requested_engine=$actual
+first_attempted_engine=$actual
+actual_engine=$actual
+fallback=$fallback
+fallback_reason=$reason
+attempted_engines=$actual
+role=$role
+profile=review
+fresh_process=true
+artifact_kind=git-working-tree
+artifact_identity=$candidate_id
+artifact_hash=$candidate_id
+worktree_identity=$worktree
+git_head=$head
+workflow_base_ref=main
+workflow_base_sha=$base
+output_path=$output
+output_hash=$output_hash
+process_exit_status=0
+semantic_verdict=CLEAN
+max_severity=NONE
+findings_digest=$empty_digest
+result_schema_version=1
+blocked_class=none
+EOF
+}
+
+refresh_v2_final_receipts() {
+    (cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" freeze \
+        --artifact git:working-tree --workflow-base-sha "$V2_HEAD" --workflow-base-ref main \
+        --output .forge/local/evidence/candidate.receipt) || return 1
+    write_v2_review code-spec invoke-spec-$$ claude false none "$V2/.forge/local/reviews/spec.receipt"
+    write_v2_review code-quality invoke-quality-$$ codex false none "$V2/.forge/local/reviews/quality.receipt"
+    printf 'verify app report\n' > "$V2/.forge/local/evidence/verify-app.report"
+    printf 'e2e report\n' > "$V2/.forge/local/evidence/e2e.report"
+    (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind verify-app \
+        --candidate .forge/local/evidence/candidate.receipt --command 'focused verify-app' --profile focused \
+        --report .forge/local/evidence/verify-app.report --result PASS --exit-status 0 \
+        --output .forge/local/evidence/verify-app.receipt >/dev/null) || return 1
+    (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+        --candidate .forge/local/evidence/candidate.receipt --command 'focused e2e' --profile regression \
+        --report .forge/local/evidence/e2e.report --result PASS --exit-status 0 \
+        --output .forge/local/evidence/e2e.receipt >/dev/null) || return 1
+}
+
+start_test "receipt-v2: distinct clean same-engine/fallback lenses and verifiers certify one staged-clean candidate"
+make_v2_candidate_repo
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" freeze \
+    --artifact git:working-tree --workflow-base-sha "$V2_HEAD" --workflow-base-ref main \
+    --output .forge/local/evidence/candidate.receipt)
+assert_equals "$?" "0" "staged-clean candidate freezes"
+write_v2_review code-spec invoke-spec claude false none "$V2/.forge/local/reviews/spec.receipt"
+write_v2_review code-quality invoke-quality codex true preferred-engine-unavailable "$V2/.forge/local/reviews/quality.receipt"
+printf 'verify app report\n' > "$V2/.forge/local/evidence/verify-app.report"
+printf 'e2e report\n' > "$V2/.forge/local/evidence/e2e.report"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind verify-app \
+    --candidate .forge/local/evidence/candidate.receipt --command 'focused verify-app' --profile focused \
+    --report .forge/local/evidence/verify-app.report --result PASS --exit-status 0 \
+    --output .forge/local/evidence/verify-app.receipt)
+assert_equals "$?" "0" "verify-app result is bound to the frozen candidate"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+    --candidate .forge/local/evidence/candidate.receipt --command 'focused e2e' --profile regression \
+    --report .forge/local/evidence/e2e.report --result PASS --exit-status 0 \
+    --output .forge/local/evidence/e2e.receipt)
+assert_equals "$?" "0" "E2E result is bound to the frozen candidate"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check \
+    --state .forge/local/state.md) > "$V2/.forge/local/evidence/check.out" 2>&1
+assert_equals "$?" "0" "complete receipt set validates"
+assert_contains "$V2/.forge/local/evidence/check.out" 'SHIP_READY:true' "all four final gates share one candidate"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/review-breaker.sh" .forge/local/state.md) \
+    > "$V2/.forge/local/evidence/breaker-v2.out" 2>&1
+assert_contains "$V2/.forge/local/evidence/breaker-v2.out" 'CERTIFIED:yes' \
+    "convergence breaker certifies the first clean code-spec/code-quality receipt pair"
+(cd "$V2" && run_evidence) > "$V2/.forge/local/evidence/evidence.out" 2>&1
+assert_contains "$V2/.forge/local/evidence/evidence.out" '"candidate_gate":{"staged_clean":true' \
+    "build evidence exposes the immutable staged-clean candidate"
+assert_contains "$V2/.forge/local/evidence/evidence.out" '"reviewer_gate":{"clean_same_iteration":true' \
+    "build evidence accepts engine-neutral code-spec/code-quality receipts"
+assert_contains "$V2/.forge/local/evidence/evidence.out" '"verification_gate":{"verify_app":true,"e2e":true' \
+    "build evidence binds verifier receipts"
+printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$V2/.forge/local/evidence/gate-valid.out" 2>&1
+assert_equals "$?" "0" "ship hook accepts the complete current receipt set"
+
+start_test "receipt-v2: semantic/process/identity mutations fail closed in one compact matrix"
+for mutation in duplicate-invocation wrong-role findings stale-output copied-worktree; do
+    cp "$V2/.forge/local/reviews/spec.receipt" "$V2/.forge/local/reviews/spec.saved"
+    cp "$V2/.forge/local/reviews/quality.receipt" "$V2/.forge/local/reviews/quality.saved"
+    case "$mutation" in
+        duplicate-invocation) sed -i.bak 's/invocation_id=invoke-quality/invocation_id=invoke-spec/' "$V2/.forge/local/reviews/quality.receipt" ;;
+        wrong-role) sed -i.bak 's/role=code-quality/role=general/' "$V2/.forge/local/reviews/quality.receipt" ;;
+        findings) sed -i.bak 's/semantic_verdict=CLEAN/semantic_verdict=FINDINGS/;s/max_severity=NONE/max_severity=P1/' "$V2/.forge/local/reviews/quality.receipt" ;;
+        stale-output) printf 'mutated\n' >> "$V2/.forge/local/reviews/code-quality.result" ;;
+        copied-worktree) sed -i.bak 's/worktree_identity=.*/worktree_identity=0000000000000000000000000000000000000000000000000000000000000000/' "$V2/.forge/local/reviews/quality.receipt" ;;
+    esac
+    (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) > "$V2/.forge/local/evidence/$mutation.out" 2>&1
+    assert_equals "$?" "2" "$mutation cannot certify"
+    mv "$V2/.forge/local/reviews/spec.saved" "$V2/.forge/local/reviews/spec.receipt"
+    mv "$V2/.forge/local/reviews/quality.saved" "$V2/.forge/local/reviews/quality.receipt"
+    rm -f "$V2/.forge/local/reviews/"*.bak
+    [ "$mutation" != stale-output ] || printf 'schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n' > "$V2/.forge/local/reviews/code-quality.result"
+done
+
+start_test "receipt-v2: any post-freeze tracked/index/untracked mutation invalidates review, verify-app, and E2E"
+printf 'unstaged mutation\n' >> "$V2/app.txt"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) > "$V2/.forge/local/evidence/unstaged.out" 2>&1
+assert_equals "$?" "2" "unstaged mutation invalidates all final receipts"
+printf '{"cwd":"%s","host":"codex","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$V2/.forge/local/evidence/gate-mutated.out" 2>&1
+assert_equals "$?" "2" "ship hook blocks after candidate mutation"
+printf '{"cwd":"%s","host":"codex","stop_hook_active":false}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-state-updated.sh") > "$V2/.forge/local/evidence/stop-mutated.out" 2>&1
+assert_contains "$V2/.forge/local/evidence/stop-mutated.out" 'FORGE_FINAL_EVIDENCE_STALE' \
+    "Stop advisory exposes candidate-bound evidence invalidation immediately"
+git -C "$V2" checkout -- app.txt
+printf 'new untracked\n' > "$V2/new.txt"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) > "$V2/.forge/local/evidence/untracked.out" 2>&1
+assert_equals "$?" "2" "in-scope untracked addition invalidates all final receipts"
+rm "$V2/new.txt"
+printf 'different staged bytes\n' > "$V2/app.txt"
+git -C "$V2" add -A
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) > "$V2/.forge/local/evidence/staged.out" 2>&1
+assert_equals "$?" "2" "index mutation invalidates all final receipts"
+
+start_test "exact-tree promotion validates standard hooks, CASes once, and runs post-commit on the real branch"
+make_v2_candidate_repo
+refresh_v2_final_receipts
+OLD_HEAD=$(git -C "$V2" rev-parse HEAD)
+FROZEN_TREE=$(awk -F= '$1=="index_tree"{print $2}' "$V2/.forge/local/evidence/candidate.receipt")
+printf 'Task 8 promotion\n' > "$V2/.forge/local/evidence/message.txt"
+mkdir -p "$V2/.git/hooks"
+cat > "$V2/.git/hooks/pre-commit" <<EOF
+#!/bin/sh
+printf 'pre:%s\n' "\$(pwd -P)" >> "$V2/.forge/local/evidence/hook.log"
+EOF
+cat > "$V2/.git/hooks/post-commit" <<EOF
+#!/bin/sh
+printf 'post:%s:%s\n' "\$(pwd -P)" "\$(git branch --show-current)" >> "$V2/.forge/local/evidence/hook.log"
+EOF
+chmod +x "$V2/.git/hooks/pre-commit" "$V2/.git/hooks/post-commit"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" promote \
+    --candidate .forge/local/evidence/candidate.receipt --state .forge/local/state.md \
+    --message-file .forge/local/evidence/message.txt \
+    --promotion-receipt .forge/local/evidence/promotion.receipt --replay-attempt 0) \
+    > "$V2/.forge/local/evidence/promote.out" 2>&1
+assert_equals "$?" "0" "promotion succeeds only after exact candidate validation"
+PROMOTED_HEAD=$(git -C "$V2" rev-parse HEAD)
+if [ "$PROMOTED_HEAD" != "$OLD_HEAD" ]; then pass "CAS advances the real branch exactly once"; else fail "CAS did not advance the real branch"; fi
+assert_equals "$(git -C "$V2" rev-parse HEAD^{tree})" "$FROZEN_TREE" "promoted commit tree is the frozen index tree"
+assert_contains "$V2/.forge/local/evidence/hook.log" "post:$V2:main" \
+    "post-commit sees the original worktree cwd and real branch"
+assert_contains "$V2/.forge/local/evidence/promotion.receipt" "old_candidate_id=" \
+    "promotion receipt binds the old candidate"
+assert_equals "$(git -C "$V2" status --porcelain | wc -l | tr -d ' ')" "0" \
+    "original worktree and index are clean after CAS"
+
+start_test "exact-tree promotion replays one bounded auto-fix and requires every final receipt to rerun"
+make_v2_candidate_repo
+refresh_v2_final_receipts
+OLD_HEAD=$(git -C "$V2" rev-parse HEAD)
+printf 'Task 8 replay\n' > "$V2/.forge/local/evidence/message.txt"
+mkdir -p "$V2/.git/hooks"
+cat > "$V2/.git/hooks/pre-commit" <<'EOF'
+#!/bin/sh
+if ! grep -q '^# hook-fixed$' app.txt; then
+    printf '# hook-fixed\n' >> app.txt
+    git add app.txt
+fi
+EOF
+chmod +x "$V2/.git/hooks/pre-commit"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" promote \
+    --candidate .forge/local/evidence/candidate.receipt --state .forge/local/state.md \
+    --message-file .forge/local/evidence/message.txt \
+    --promotion-receipt .forge/local/evidence/promotion.receipt --replay-attempt 0) \
+    > "$V2/.forge/local/evidence/replay.out" 2>&1
+assert_equals "$?" "3" "first auto-fix is replayed without advancing the branch"
+assert_equals "$(git -C "$V2" rev-parse HEAD)" "$OLD_HEAD" "repair cycle leaves the real branch at the expected parent"
+assert_contains "$V2/app.txt" '# hook-fixed' "validated hook artifact is replayed into the original worktree"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) \
+    > "$V2/.forge/local/evidence/replay-stale.out" 2>&1
+assert_equals "$?" "2" "pre-replay receipts cannot certify the repaired candidate"
+refresh_v2_final_receipts
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" promote \
+    --candidate .forge/local/evidence/candidate.receipt --state .forge/local/state.md \
+    --message-file .forge/local/evidence/message.txt \
+    --promotion-receipt .forge/local/evidence/promotion.receipt --replay-attempt 1) \
+    > "$V2/.forge/local/evidence/replay-promote.out" 2>&1
+assert_equals "$?" "0" "idempotent second hook run promotes after fresh final receipts"
+
+start_test "exact-tree promotion rejects a tree mismatch before advancing the branch"
+make_v2_candidate_repo
+refresh_v2_final_receipts
+OLD_HEAD=$(git -C "$V2" rev-parse HEAD)
+sed -i.bak 's/index_tree=.*/index_tree=0000000000000000000000000000000000000000/' "$V2/.forge/local/evidence/candidate.receipt"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" promote \
+    --candidate .forge/local/evidence/candidate.receipt --state .forge/local/state.md \
+    --message-file .forge/local/evidence/verify-app.report \
+    --promotion-receipt .forge/local/evidence/promotion.receipt --replay-attempt 0) \
+    > "$V2/.forge/local/evidence/tree-mismatch.out" 2>&1
+assert_equals "$?" "2" "tree mismatch blocks promotion"
+assert_equals "$(git -C "$V2" rev-parse HEAD)" "$OLD_HEAD" "tree mismatch never advances the real branch"
+
+start_test "exact-tree promotion CAS failure preserves the concurrently advanced branch and skips post-commit"
+make_v2_candidate_repo
+refresh_v2_final_receipts
+OLD_HEAD=$(git -C "$V2" rev-parse HEAD)
+CONCURRENT=$(printf 'concurrent\n' | git -C "$V2" commit-tree "${OLD_HEAD}^{tree}" -p "$OLD_HEAD")
+printf 'Task 8 CAS\n' > "$V2/.forge/local/evidence/message.txt"
+mkdir -p "$V2/.git/hooks"
+cat > "$V2/.git/hooks/pre-commit" <<EOF
+#!/bin/sh
+git update-ref refs/heads/main "$CONCURRENT" "$OLD_HEAD"
+EOF
+cat > "$V2/.git/hooks/post-commit" <<EOF
+#!/bin/sh
+printf 'ran\n' > "$V2/.forge/local/evidence/post-ran"
+EOF
+chmod +x "$V2/.git/hooks/pre-commit" "$V2/.git/hooks/post-commit"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" promote \
+    --candidate .forge/local/evidence/candidate.receipt --state .forge/local/state.md \
+    --message-file .forge/local/evidence/message.txt \
+    --promotion-receipt .forge/local/evidence/promotion.receipt --replay-attempt 0) \
+    > "$V2/.forge/local/evidence/cas-failure.out" 2>&1
+assert_equals "$?" "2" "compare-and-swap rejects concurrent branch movement"
+assert_equals "$(git -C "$V2" rev-parse HEAD)" "$CONCURRENT" "promotion does not overwrite the concurrent winner"
+assert_file_missing "$V2/.forge/local/evidence/post-ran" "post-commit never runs after failed CAS"
+
+start_test "exact-tree promotion hook/dependency failure policy is bounded and fail-closed"
+for promotion_case in pre-failure repeated-mutation dependency-present dependency-missing dependency-changed post-failure post-mutation; do
+    make_v2_candidate_repo
+    refresh_v2_final_receipts
+    OLD_HEAD=$(git -C "$V2" rev-parse HEAD)
+    printf 'Task 8 policy %s\n' "$promotion_case" > "$V2/.forge/local/evidence/message.txt"
+    mkdir -p "$V2/.git/hooks"
+    DEP_ARG=""
+    case "$promotion_case" in
+        pre-failure)
+            printf '#!/bin/sh\nexit 1\n' > "$V2/.git/hooks/pre-commit"
+            chmod +x "$V2/.git/hooks/pre-commit"
+            EXPECTED_RC=2; EXPECTED_ADVANCE=no ;;
+        repeated-mutation)
+            printf '#!/bin/sh\nprintf "again\\n" >> app.txt\ngit add app.txt\n' > "$V2/.git/hooks/pre-commit"
+            chmod +x "$V2/.git/hooks/pre-commit"
+            EXPECTED_RC=2; EXPECTED_ADVANCE=no ;;
+        dependency-present|dependency-changed)
+            printf 'hook runtime\n' > "$V2/hook.dep"
+            printf 'hook.dep\n' >> "$V2/.gitignore"
+            git -C "$V2" add .gitignore
+            refresh_v2_final_receipts
+            DEP_SHA=$(shasum -a 256 "$V2/hook.dep" | awk '{print $1}')
+            printf 'hook.dep\t%s\n' "$DEP_SHA" > "$V2/.forge/local/evidence/dependencies.tsv"
+            printf '#!/bin/sh\ntest -f hook.dep\n' > "$V2/.git/hooks/pre-commit"
+            chmod +x "$V2/.git/hooks/pre-commit"
+            DEP_ARG="--hook-dependencies .forge/local/evidence/dependencies.tsv"
+            if [ "$promotion_case" = dependency-changed ]; then printf 'changed\n' >> "$V2/hook.dep"; EXPECTED_RC=2; EXPECTED_ADVANCE=no
+            else EXPECTED_RC=0; EXPECTED_ADVANCE=yes; fi ;;
+        dependency-missing)
+            printf 'missing.dep\t0000000000000000000000000000000000000000000000000000000000000000\n' > "$V2/.forge/local/evidence/dependencies.tsv"
+            DEP_ARG="--hook-dependencies .forge/local/evidence/dependencies.tsv"
+            EXPECTED_RC=2; EXPECTED_ADVANCE=no ;;
+        post-failure)
+            printf '#!/bin/sh\nexit 1\n' > "$V2/.git/hooks/post-commit"
+            chmod +x "$V2/.git/hooks/post-commit"
+            EXPECTED_RC=2; EXPECTED_ADVANCE=yes ;;
+        post-mutation)
+            printf '#!/bin/sh\nprintf "post dirty\\n" >> app.txt\n' > "$V2/.git/hooks/post-commit"
+            chmod +x "$V2/.git/hooks/post-commit"
+            EXPECTED_RC=2; EXPECTED_ADVANCE=yes ;;
+    esac
+    # shellcheck disable=SC2086 -- DEP_ARG intentionally expands to one option pair.
+    (cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" promote \
+        --candidate .forge/local/evidence/candidate.receipt --state .forge/local/state.md \
+        --message-file .forge/local/evidence/message.txt \
+        --promotion-receipt .forge/local/evidence/promotion.receipt \
+        --replay-attempt "$([ "$promotion_case" = repeated-mutation ] && echo 1 || echo 0)" $DEP_ARG) \
+        > "$V2/.forge/local/evidence/$promotion_case.out" 2>&1
+    assert_equals "$?" "$EXPECTED_RC" "$promotion_case returns the bounded policy status"
+    NEW_HEAD=$(git -C "$V2" rev-parse HEAD)
+    if [ "$EXPECTED_ADVANCE" = yes ] && [ "$NEW_HEAD" != "$OLD_HEAD" ]; then pass "$promotion_case advances only at the authorized CAS boundary"
+    elif [ "$EXPECTED_ADVANCE" = no ] && [ "$NEW_HEAD" = "$OLD_HEAD" ]; then pass "$promotion_case leaves the real branch untouched"
+    else fail "$promotion_case branch-advance policy mismatch"; fi
+done
+
 # lib.sh's EXIT trap prints the summary; no explicit call needed.
 report "build-evidence.sh" >&2
