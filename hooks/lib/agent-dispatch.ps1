@@ -137,7 +137,7 @@ function Escape-ProcessArgument([string]$Value) {
     return '"' + (($Value -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
 }
 function ConvertTo-PowerShellLiteral([string]$Value) { return "'" + $Value.Replace("'", "''") + "'" }
-function Invoke-BoundProcess([string]$Executable, [string[]]$Arguments, [string]$WorkingDirectory, [hashtable]$Environment, [int]$Timeout) {
+function Invoke-BoundProcess([string]$Executable, [string[]]$Arguments, [string]$WorkingDirectory, [hashtable]$Environment, [int]$Timeout, [bool]$InheritEnvironment = $false) {
     $stdout = Join-Path ([IO.Path]::GetTempPath()) ('forge-stdout-' + [Guid]::NewGuid().ToString('N'))
     $stderr = Join-Path ([IO.Path]::GetTempPath()) ('forge-stderr-' + [Guid]::NewGuid().ToString('N'))
     $start = New-Object Diagnostics.ProcessStartInfo
@@ -148,10 +148,12 @@ function Invoke-BoundProcess([string]$Executable, [string[]]$Arguments, [string]
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    $start.EnvironmentVariables.Clear()
-    foreach ($key in @('PATH', 'SystemRoot', 'ComSpec', 'TEMP', 'TMP')) {
-        $value = [Environment]::GetEnvironmentVariable($key)
-        if ($value) { $start.EnvironmentVariables[$key] = $value }
+    if (-not $InheritEnvironment) {
+        $start.EnvironmentVariables.Clear()
+        foreach ($key in @('PATH', 'SystemRoot', 'ComSpec', 'TEMP', 'TMP')) {
+            $value = [Environment]::GetEnvironmentVariable($key)
+            if ($value) { $start.EnvironmentVariables[$key] = $value }
+        }
     }
     foreach ($key in $Environment.Keys) { $start.EnvironmentVariables[$key] = [string]$Environment[$key] }
     $process = New-Object Diagnostics.Process
@@ -204,47 +206,6 @@ function Get-SnapshotStateHash([hashtable]$State) {
     $lines = @($State.Keys | Sort-Object | ForEach-Object { "$_`t$($State[$_])" })
     return Get-ShaText (($lines -join "`n") + "`n")
 }
-function Copy-DeclaredInvestigation([string]$Envelope, [string]$Snapshot, [hashtable]$Before, [string]$RealRoot) {
-    $declared = @(Get-Content -LiteralPath $Envelope | Where-Object { $_ -like 'replay_path=*' } | ForEach-Object { $_.Substring(12) })
-    if ($declared.Count -eq 0) { return 'NONE' }
-    $allowed = @{}
-    [long]$total = 0
-    foreach ($declaredPath in $declared) {
-        if ($declaredPath -notmatch '^(tests[\\/]reproductions|\.forge[\\/]local[\\/]investigation-artifacts)[\\/]' -or [IO.Path]::IsPathRooted($declaredPath) -or $declaredPath -match '(^|[\\/])\.\.([\\/]|$)') { throw 'BLOCKED[authorization]: undeclared investigation replay scope' }
-        $relative = $declaredPath -replace '[\\/]', [string][IO.Path]::DirectorySeparatorChar
-        $source = Join-Path $Snapshot $relative
-        $item = Get-Item -LiteralPath $source -Force
-        if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'BLOCKED[artifact]: replay source must be a regular file' }
-        $total += $item.Length
-        if ($item.Length -gt 1048576 -or $total -gt 5242880) { throw 'BLOCKED[artifact]: replay size limit exceeded' }
-        $allowed[$relative] = $true
-    }
-    $after = Get-SnapshotState $Snapshot
-    foreach ($path in @((@($Before.Keys) + @($after.Keys)) | Sort-Object -Unique)) {
-        $beforeValue = if ($Before.ContainsKey($path)) { $Before[$path] } else { 'MISSING' }
-        $afterValue = if ($after.ContainsKey($path)) { $after[$path] } else { 'MISSING' }
-        if ($beforeValue -cne $afterValue -and -not $allowed.ContainsKey($path)) { throw 'BLOCKED[artifact]: undeclared investigation write' }
-    }
-    foreach ($declaredPath in $declared) {
-        $relative = $declaredPath -replace '[\\/]', [string][IO.Path]::DirectorySeparatorChar
-        $destination = Join-Path $RealRoot $relative
-        $cursor = $RealRoot
-        foreach ($part in @($relative -split '[\\/]' | Select-Object -SkipLast 1)) {
-            $cursor = Join-Path $cursor $part
-            if (Test-Path -LiteralPath $cursor) {
-                $ancestor = Get-Item -LiteralPath $cursor -Force
-                if (($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'BLOCKED[authorization]: replay ancestor is a reparse point' }
-            }
-        }
-        if (Test-Path -LiteralPath $destination) {
-            $existing = Get-Item -LiteralPath $destination -Force
-            if (($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'BLOCKED[authorization]: replay destination is a reparse point' }
-        }
-        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $Snapshot $relative) -Destination $destination -Force
-    }
-    return 'REPLAYED'
-}
 function Test-ReproductionProtectedBytes {
     if ((Get-ShaFile (Join-Path $root '.forge/local/state.md')) -cne $script:ReproProtectedStateHash) { return 'reproduction-protected-state-mutated' }
     if ($script:ReproProtectedAuthFile) {
@@ -291,9 +252,60 @@ function Invoke-IndependentReproduction([string]$Selected) {
     $script:ReproControlArguments = @(Get-Content -LiteralPath $PromptFile | Where-Object { $_ -like 'control_arg=*' } | ForEach-Object { $_.Substring(12) })
     return Invoke-ReproductionPair $Selected
 }
+function Get-ClaudeObservedIdentity($Wrapper, [string]$RequestedModel) {
+    $matches = @($Wrapper.modelUsage.PSObject.Properties | Where-Object {
+        $canonical = if ($_.Value.canonicalModel) { [string]$_.Value.canonicalModel } else { [string]$_.Name }
+        if ($RequestedModel -eq 'opus') { $canonical -match '(^|-)opus($|-)' }
+        else { $canonical -ceq $RequestedModel -or $_.Name -ceq $RequestedModel }
+    })
+    if ($matches.Count -ne 1) { return $null }
+    $value = $matches[0].Value
+    $canonical = if ($value.canonicalModel) { [string]$value.canonicalModel } else { [string]$matches[0].Name }
+    if (-not $value.provider -or -not $canonical) { return $null }
+    return @{ Provider = [string]$value.provider; Model = $canonical }
+}
+function Test-ClaudeObservedIdentity([string]$ExpectedProvider, [string]$ExpectedModel, [string]$ActualProvider, [string]$ActualModel) {
+    $providerMatches = $ActualProvider -ceq $ExpectedProvider -or ($ExpectedProvider -ceq 'anthropic' -and $ActualProvider -ceq 'firstParty')
+    $modelMatches = $ActualModel -ceq $ExpectedModel -or ($ExpectedModel -ceq 'opus' -and $ActualModel -like 'claude-opus-*')
+    return $providerMatches -and $modelMatches
+}
 function Get-CapabilityRow([string]$Selected, [string]$RequestedRole) {
     $capability = if ($RequestedRole -eq 'council-advisor') { 'model-council-advisor' } elseif ($RequestedRole -eq 'council-chair') { 'model-council-chair' } else { 'model-certifying' }
     return Get-Content -LiteralPath $Capabilities | Where-Object { $_ -like "$capability`t$Selected`t*" } | Select-Object -First 1
+}
+
+function Invoke-FullInvestigation([string]$Selected, [string]$Executable, [string]$Provider, [string]$Model, [string]$Effort, [string]$Scratch) {
+    New-Item -ItemType Directory -Path $Scratch -Force | Out-Null
+    $configHash = Get-ShaText "$Selected|$root|$QualificationRevision|host-managed-full-agent-v1"
+    $seatHash = Get-ShaText "$Selected|$Role|$SeatId|$QuestionHash"
+    $prompt = "You are a fresh full-capability $Selected investigation agent in the real project worktree $root. Use the normal user and project configuration, shared Forge state and memory, installed tools, MCP servers, network, databases, and APIs available to this host. Forge adds no tool, sandbox, configuration, or write restriction for this investigation. You may inspect and edit the worktree as needed. Return ONLY the Forge line envelope below.`n" + [IO.File]::ReadAllText($PromptFile) + "`nRequired envelope:`nschema_version=1`nverdict=CLEAN|FINDINGS|BLOCKED`nmax_severity=NONE|P0|P1|P2|P3`nblocked_class=none|engine|capability|artifact|authorization|invariant`n"
+    $bound = Join-Path $Scratch 'bound.out'
+    if ($Selected -eq 'claude') {
+        $arguments = @('-p', '--permission-mode', 'auto', '--model', $Model, '--effort', $Effort, '--output-format', 'json', '--no-session-persistence', $prompt)
+        $process = Invoke-BoundProcess $Executable $arguments $root @{} $TimeoutSeconds $true
+        Copy-Item -LiteralPath $process.Stdout -Destination $bound -Force
+    }
+    else {
+        $arguments = @('-a', 'on-request', '--search', 'exec', '-C', $root, '--sandbox', 'danger-full-access', '-m', $Model, '-c', "model_reasoning_effort=$Effort", '--output-last-message', $bound, '--ephemeral', $prompt)
+        $process = Invoke-BoundProcess $Executable $arguments $root @{} $TimeoutSeconds $true
+    }
+    if ($process.Exit -eq 124) { return @{ Rc = 1; Class = 'engine'; Reason = 'timeout'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 124; InvestigationMode = 'full-agent-worktree' } }
+    if ($process.Exit -ne 0) { return @{ Rc = 1; Class = 'engine'; Reason = "process-exit-$($process.Exit)"; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = $process.Exit; InvestigationMode = 'full-agent-worktree' } }
+    $actualProvider = 'UNOBSERVABLE'; $actualModel = 'UNOBSERVABLE'
+    if ($Selected -eq 'claude' -and (Get-Item -LiteralPath $bound).Length -gt 0 -and [IO.File]::ReadAllText($bound).TrimStart().StartsWith('{')) {
+        try {
+            $wrapper = [IO.File]::ReadAllText($bound) | ConvertFrom-Json
+            if ($wrapper.result) { [IO.File]::WriteAllText($bound, [string]$wrapper.result + "`n", $Utf8) }
+            $identity = Get-ClaudeObservedIdentity $wrapper $Model
+            if ($identity) { $actualProvider = $identity.Provider; $actualModel = $identity.Model }
+        } catch {}
+        if ($actualProvider -eq 'UNOBSERVABLE' -or $actualModel -eq 'UNOBSERVABLE') { return @{ Rc = 1; Class = 'capability'; Reason = 'observable-identity-missing'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0; InvestigationMode = 'full-agent-worktree' } }
+        if (-not (Test-ClaudeObservedIdentity $Provider $Model $actualProvider $actualModel)) { return @{ Rc = 1; Class = 'capability'; Reason = 'observable-identity-mismatch'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0; InvestigationMode = 'full-agent-worktree' } }
+    }
+    $envelope = Read-Envelope $bound
+    if (-not $envelope.Valid) { return @{ Rc = 1; Class = 'engine'; Reason = $envelope.Reason; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0; InvestigationMode = 'full-agent-worktree' } }
+    $rc = if ($envelope.Class -in @('engine', 'capability')) { 1 } elseif ($envelope.Class -in @('artifact', 'authorization', 'invariant')) { 2 } else { 0 }
+    return @{ Rc = $rc; Class = $envelope.Class; Reason = $envelope.Reason; Engine = $Selected; Verdict = $envelope.Verdict; Severity = $envelope.Severity; Exit = 0; Output = $bound; Provider = $Provider; Model = $Model; Effort = $Effort; ActualProvider = $actualProvider; ActualModel = $actualModel; Digest = $envelope.Digest; Schema = $envelope.Schema; ConfigHash = $configHash; CanaryHash = 'NOT_APPLICABLE'; SeatHash = $seatHash; Snapshot = $root; SnapshotBefore = @(); Session = 'none'; InvestigationMode = 'full-agent-worktree' }
 }
 
 function Invoke-Engine([string]$Selected) {
@@ -304,7 +316,7 @@ function Invoke-Engine([string]$Selected) {
     if (-not $env:FORGE_DISPATCH_TEST_MODE) {
         $help = (& $command.Source --help 2>&1) -join "`n"
         if ($Selected -eq 'codex') { $help += "`n" + ((& $command.Source exec --help 2>&1) -join "`n") }
-        $required = if ($Selected -eq 'claude') { @('-p', '--safe-mode', '--strict-mcp-config', '--mcp-config', '--settings', '--setting-sources', '--tools', '--permission-mode', '--add-dir', '--model', '--effort', '--output-format') } else { @('-a', 'exec', '--sandbox', '--add-dir', '--ignore-user-config', '--ignore-rules', '--disable', '--output-last-message', '-C', '-m', '-c') }
+        $required = if ($Role -eq 'investigation' -and $Selected -eq 'claude') { @('-p', '--permission-mode', '--model', '--effort', '--output-format', '--no-session-persistence') } elseif ($Role -eq 'investigation') { @('-a', '--search', 'exec', '--sandbox', '--output-last-message', '--ephemeral', '-C', '-m', '-c') } elseif ($Selected -eq 'claude') { @('-p', '--safe-mode', '--strict-mcp-config', '--mcp-config', '--settings', '--setting-sources', '--tools', '--permission-mode', '--add-dir', '--model', '--effort', '--output-format') } else { @('-a', 'exec', '--sandbox', '--add-dir', '--ignore-user-config', '--ignore-rules', '--disable', '--output-last-message', '-C', '-m', '-c') }
         if ($Conversation -eq 'ephemeral') { $required += $(if ($Selected -eq 'claude') { '--no-session-persistence' } else { '--ephemeral' }) }
         elseif ($Conversation -eq 'new') { $required += $(if ($Selected -eq 'claude') { '--session-id' } else { '--json' }) }
         else { $required += $(if ($Selected -eq 'claude') { '--resume' } else { @('resume', '--json') }) }
@@ -316,6 +328,7 @@ function Invoke-Engine([string]$Selected) {
     $columns = $row -split "`t"
     $provider = $columns[5]; $model = $columns[6]; $effort = $columns[7]
     $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-dispatch-$Selected-" + [Guid]::NewGuid().ToString('N'))
+    if ($Role -eq 'investigation') { return Invoke-FullInvestigation $Selected $command.Source $provider $model $effort $scratch }
     $renderArguments = @{ Engine = $Selected; Profile = $Profile; OutputDir = $scratch }
     if ($ReadOnlyServer) { $renderArguments.ReadOnlyServer = $ReadOnlyServer }
     $configReceipt = Join-Path $scratch 'config.receipt'
@@ -403,7 +416,7 @@ function Invoke-Engine([string]$Selected) {
         }
         $disabled = @('--disable', 'hooks', '--disable', 'plugins', '--disable', 'plugin_sharing', '--disable', 'apps', '--disable', 'remote_plugin', '--disable', 'in_app_browser', '--disable', 'browser_use', '--disable', 'computer_use')
         if ($Conversation -eq 'resume') {
-            $arguments = @('-a', 'never', 'exec', 'resume') + $disabled + @('--ignore-user-config', '--ignore-rules', '--sandbox', $sandbox, '--json', '-m', $model, '-c', "model_reasoning_effort=$effort", '--output-last-message', $bound, $SessionId, $prompt)
+            $arguments = @('-a', 'never', '--sandbox', $sandbox, 'exec', 'resume') + $disabled + @('--ignore-user-config', '--ignore-rules', '--json', '-m', $model, '-c', "model_reasoning_effort=$effort", '--output-last-message', $bound, $SessionId, $prompt)
         }
         else {
             $arguments = @('-a', 'never', 'exec') + $disabled + @('-C', $primary, '--add-dir', $snapshot, '--ignore-user-config', '--ignore-rules', '--sandbox', $sandbox, '-m', $model, '-c', "model_reasoning_effort=$effort", '--output-last-message', $bound)
@@ -435,18 +448,20 @@ function Invoke-Engine([string]$Selected) {
         try {
             $wrapper = [IO.File]::ReadAllText($bound) | ConvertFrom-Json
             if ($wrapper.result) { [IO.File]::WriteAllText($bound, [string]$wrapper.result + "`n", $Utf8) }
-            $modelProperty = @($wrapper.modelUsage.PSObject.Properties)
-            if ($modelProperty.Count -eq 1) { $actualProvider = [string]$wrapper.provider; $actualModel = $modelProperty[0].Name }
+            $identity = Get-ClaudeObservedIdentity $wrapper $model
+            if ($identity) { $actualProvider = $identity.Provider; $actualModel = $identity.Model }
         } catch {}
         if ($actualProvider -eq 'UNOBSERVABLE' -or $actualModel -eq 'UNOBSERVABLE') { return @{ Rc = 1; Class = 'capability'; Reason = 'observable-identity-missing'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0 } }
-        if (-not ($actualProvider -eq $provider -and (($actualModel -eq $model) -or ($model -eq 'opus' -and $actualModel -eq 'claude-opus-4-1')))) {
+        if (-not (Test-ClaudeObservedIdentity $provider $model $actualProvider $actualModel)) {
             return @{ Rc = 1; Class = 'capability'; Reason = 'observable-identity-mismatch'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0 }
         }
     }
     $envelope = Read-Envelope $bound
     if (-not $envelope.Valid) { return @{ Rc = 1; Class = 'engine'; Reason = $envelope.Reason; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0 } }
+    $boundLines = [IO.File]::ReadAllLines($bound)
     foreach ($observation in @(@('forge_canary_hash', $canaryHash), @('forge_config_hash', $configHash), @('forge_qualification_revision', $QualificationRevision))) {
-        if ((Get-Value $bound $observation[0] $true) -cne $observation[1]) { return @{ Rc = 1; Class = 'capability'; Reason = 'isolation-canary-missing-or-mismatch'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0 } }
+        $prefix = "$($observation[0])="; $values = @($boundLines | Where-Object { $_.StartsWith($prefix, [StringComparison]::Ordinal) } | ForEach-Object { $_.Substring($prefix.Length) })
+        if ($values.Count -eq 0 -or @($values | Where-Object { $_ -cne $observation[1] }).Count -gt 0) { return @{ Rc = 1; Class = 'capability'; Reason = 'isolation-canary-missing-or-mismatch'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0 } }
     }
     $rc = if ($envelope.Class -in @('engine', 'capability')) { 1 } elseif ($envelope.Class -in @('artifact', 'authorization', 'invariant')) { 2 } else { 0 }
     return @{ Rc = $rc; Class = $envelope.Class; Reason = $envelope.Reason; Engine = $Selected; Verdict = $envelope.Verdict; Severity = $envelope.Severity; Exit = 0; Output = $bound; Provider = $provider; Model = $model; Effort = $effort; ActualProvider = $actualProvider; ActualModel = $actualModel; Digest = $envelope.Digest; Schema = $envelope.Schema; ConfigHash = $configHash; CanaryHash = $canaryHash; SeatHash = $seatHash; Snapshot = $snapshot; SnapshotBefore = $snapshotBefore; Session = $capturedSession; ReproStdout = $reproStdout; ReproStderr = $reproStderr; ReproExit = $(if ($script:ReproMode) { [int]$reproExitValue } else { 0 }) }
@@ -520,7 +535,7 @@ try {
         $QuestionHash = $questionRows[0].Substring(14); if ($QuestionHash -notmatch '^[0-9a-fA-F]{64}$') { throw 'BLOCKED[invariant]: council question_hash must be sha256' }
     }
     else { if ($SeatId) { throw 'BLOCKED[invariant]: SeatId is reserved for council roles' }; $QuestionHash = Get-ShaFile $PromptFile; $SeatId = $Role }
-    if ((Get-Content -LiteralPath $PromptFile) -contains 'requires_read_only_channel=true' -and -not $ReadOnlyServer) { throw 'BLOCKED[authorization]: required read-only investigation channel was not selected' }
+    if ($Role -ne 'investigation' -and (Get-Content -LiteralPath $PromptFile) -contains 'requires_read_only_channel=true' -and -not $ReadOnlyServer) { throw 'BLOCKED[authorization]: required read-only investigation channel was not selected' }
     $invocationId = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + "-$PID-" + [Guid]::NewGuid().ToString('N').Substring(0, 8)
     $activeHost = (& $HostContext -Mode verify)
     if ($LASTEXITCODE -ne 0 -or -not $activeHost) { throw 'BLOCKED[invariant]: host context mismatch' }
@@ -581,14 +596,13 @@ try {
             $result = Invoke-Engine $second
         }
     }
-    $recheck = Join-Path $reviews "$invocationId.recheck"
-    & $Fingerprint -Mode identity -Artifact $Artifact -WorkflowBaseSha $WorkflowBaseSha -WorkflowBaseRef $WorkflowBaseRef -Output $recheck
-    if ($LASTEXITCODE -ne 0 -or (Get-Value $recheck 'artifact_hash') -cne $ArtifactHash) { $result = @{ Rc = 2; Class = 'artifact'; Reason = 'artifact-mutated'; Engine = $result.Engine; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = $result.Exit; Session = 'none' } }
-    $investigationReplay = 'NONE'; $reproductionStatus = 'UNVERIFIED'; $hypothesisHash = 'MISSING'; $primaryHash = 'MISSING'; $controlHash = 'MISSING'
-    if ($result.Rc -eq 0 -and $Role -eq 'investigation') {
-        try { $investigationReplay = Copy-DeclaredInvestigation $result.Output $result.Snapshot $result.SnapshotBefore $root }
-        catch { $result.Rc = 2; $result.Class = if ($_.Exception.Message -like '*authorization*') { 'authorization' } else { 'artifact' }; $result.Reason = 'investigation-replay-rejected'; $result.Verdict = 'BLOCKED'; $result.Severity = 'NONE' }
+    if ($Role -ne 'investigation') {
+        $recheck = Join-Path $reviews "$invocationId.recheck"
+        & $Fingerprint -Mode identity -Artifact $Artifact -WorkflowBaseSha $WorkflowBaseSha -WorkflowBaseRef $WorkflowBaseRef -Output $recheck
+        if ($LASTEXITCODE -ne 0 -or (Get-Value $recheck 'artifact_hash') -cne $ArtifactHash) { $result = @{ Rc = 2; Class = 'artifact'; Reason = 'artifact-mutated'; Engine = $result.Engine; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = $result.Exit; Session = 'none' } }
     }
+    $investigationMode = if ($Role -eq 'investigation') { 'full-agent-worktree' } else { 'not-applicable' }
+    $investigationReplay = 'NONE'; $reproductionStatus = 'UNVERIFIED'; $hypothesisHash = 'MISSING'; $primaryHash = 'MISSING'; $controlHash = 'MISSING'
     if ($Role -eq 'investigation-repro') {
         $hypothesisHash = if ($result.HypothesisHash) { $result.HypothesisHash } else { 'MISSING' }; $primaryHash = if ($result.PrimaryHash) { $result.PrimaryHash } else { 'MISSING' }; $controlHash = if ($result.ControlHash) { $result.ControlHash } else { 'MISSING' }
         if ($result.ReproductionStatus -in @('REPRODUCED', 'FAILED', 'PARTIAL', 'UNVERIFIED')) { $reproductionStatus = $result.ReproductionStatus }
@@ -617,7 +631,7 @@ try {
     $receipt = Join-Path $reviews "$invocationId.receipt"
     $outputHash = Get-ShaFile $Output
     $configHash = if ($result.ConfigHash) { $result.ConfigHash } else { 'MISSING' }
-    $body = "schema_version=1`ninvocation_id=$invocationId`ntimestamp=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`nmain_host=$activeHost`nrequested_engine=$Engine`nfirst_attempted_engine=$first`nactual_engine=$($result.Engine)`nfallback=$($fallback.ToString().ToLowerInvariant())`nfallback_reason=$fallbackReason`nattempted_engines=$($attempted -join ',')`nrole=$Role`nprofile=$Profile`nreview_iteration=$reviewIteration`nfresh_process=true`nconversation=$Conversation`nsession_id=$($result.Session)`nartifact_kind=$(Get-Value $FingerprintReceipt 'artifact_kind')`nartifact_identity=$ArtifactHash`nartifact_hash=$ArtifactHash`nworktree_identity=$worktreeIdentity`ngit_head=$(Get-Value $FingerprintReceipt 'git_head')`nprompt_hash=$PromptHash`nworkflow_base_ref=$WorkflowBaseRef`nworkflow_base_sha=$(Get-Value $FingerprintReceipt 'workflow_base_sha')`noutput_path=$Output`noutput_hash=$outputHash`nprocess_exit_status=$($result.Exit)`nsemantic_verdict=$($result.Verdict)`nmax_severity=$($result.Severity)`nfindings_digest=$($result.Digest)`nresult_schema_version=$($result.Schema)`nrequested_provider=$($result.Provider)`nrequested_model=$($result.Model)`nrequested_reasoning_effort=$($result.Effort)`nbound_provider=$($result.Provider)`nbound_model=$($result.Model)`nbound_reasoning_effort=$($result.Effort)`nactual_provider=$(if($result.ActualProvider){$result.ActualProvider}else{'UNOBSERVABLE'})`nactual_model=$(if($result.ActualModel){$result.ActualModel}else{'UNOBSERVABLE'})`nactual_reasoning_effort=UNOBSERVABLE`ninvocation_config_hash=$(Get-ShaText (($attempted -join ',') + '|' + $configHash + '|' + $ArtifactHash + '|' + $PromptHash))`nmodel_qualification_revision=$QualificationRevision`nblocked_class=$($result.Class)`ninvestigation_replay=$investigationReplay`nreproduction_status=$reproductionStatus`nhypothesis_hash=$hypothesisHash`nprimary_check_hash=$primaryHash`ncontrol_hash=$controlHash`n"
+    $body = "schema_version=1`ninvocation_id=$invocationId`ntimestamp=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`nmain_host=$activeHost`nrequested_engine=$Engine`nfirst_attempted_engine=$first`nactual_engine=$($result.Engine)`nfallback=$($fallback.ToString().ToLowerInvariant())`nfallback_reason=$fallbackReason`nattempted_engines=$($attempted -join ',')`nrole=$Role`nprofile=$Profile`nreview_iteration=$reviewIteration`nfresh_process=true`nconversation=$Conversation`nsession_id=$($result.Session)`nartifact_kind=$(Get-Value $FingerprintReceipt 'artifact_kind')`nartifact_identity=$ArtifactHash`nartifact_hash=$ArtifactHash`nworktree_identity=$worktreeIdentity`ngit_head=$(Get-Value $FingerprintReceipt 'git_head')`nprompt_hash=$PromptHash`nworkflow_base_ref=$WorkflowBaseRef`nworkflow_base_sha=$(Get-Value $FingerprintReceipt 'workflow_base_sha')`noutput_path=$Output`noutput_hash=$outputHash`nprocess_exit_status=$($result.Exit)`nsemantic_verdict=$($result.Verdict)`nmax_severity=$($result.Severity)`nfindings_digest=$($result.Digest)`nresult_schema_version=$($result.Schema)`nrequested_provider=$($result.Provider)`nrequested_model=$($result.Model)`nrequested_reasoning_effort=$($result.Effort)`nbound_provider=$($result.Provider)`nbound_model=$($result.Model)`nbound_reasoning_effort=$($result.Effort)`nactual_provider=$(if($result.ActualProvider){$result.ActualProvider}else{'UNOBSERVABLE'})`nactual_model=$(if($result.ActualModel){$result.ActualModel}else{'UNOBSERVABLE'})`nactual_reasoning_effort=UNOBSERVABLE`ninvocation_config_hash=$(Get-ShaText (($attempted -join ',') + '|' + $configHash + '|' + $ArtifactHash + '|' + $PromptHash))`nmodel_qualification_revision=$QualificationRevision`nblocked_class=$($result.Class)`ninvestigation_mode=$investigationMode`ninvestigation_replay=$investigationReplay`nreproduction_status=$reproductionStatus`nhypothesis_hash=$hypothesisHash`nprimary_check_hash=$primaryHash`ncontrol_hash=$controlHash`n"
     [IO.File]::WriteAllText($receipt, $body, $Utf8)
     Write-Output "Reviewer selection: main=$activeHost requested=$Engine actual=$($result.Engine) fallback=$fallback role=$Role receipt=$receipt"
     if ($result.Rc -ne 0) { exit 2 }

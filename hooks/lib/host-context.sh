@@ -37,15 +37,27 @@ launcher_context() {
     parent=$(cd "$(dirname "$requested")" 2>/dev/null && pwd -P) || die_context 'cannot resolve fixed dispatcher launcher'
     printf '%s/%s\n' "$parent" "$(basename "$requested")"
 }
+council_context() {
+    local root requested parent
+    root=$(physical_root_context); requested="$root/.forge/hooks/lib/council-dispatch.sh"
+    if [ "${FORGE_HOST_CONTEXT_TEST_MODE:-0}" = 1 ]; then
+        test_mode_allowed_context
+        if [ -n "${FORGE_HOST_CONTEXT_TEST_COUNCIL:-}" ]; then requested="$FORGE_HOST_CONTEXT_TEST_COUNCIL"; else requested=$(launcher_context); fi
+    fi
+    [ -f "$requested" ] && [ ! -L "$requested" ] || die_context 'fixed council dispatcher is unavailable'
+    parent=$(cd "$(dirname "$requested")" 2>/dev/null && pwd -P) || die_context 'cannot resolve fixed council dispatcher'
+    printf '%s/%s\n' "$parent" "$(basename "$requested")"
+}
 current_context() { local authority identity; authority=$(authority_root_context); identity=$(identity_context); printf '%s/%s/current.ctx\n' "$authority" "$identity"; }
 active_context() { local authority identity; authority=$(authority_root_context); identity=$(identity_context); printf '%s/%s/active-%s.ctx\n' "$authority" "$identity" "$1"; }
 validate_receipt_context() {
-    local file="$1" expected_host="$2" launcher="$3" schema host session revision identity launcher_path launcher_hash issued expires nonce stored body now expected_file
+    local file="$1" expected_host="$2" launcher="$3" council="$4" schema host session revision identity launcher_path launcher_hash council_path council_hash issued expires nonce stored body now expected_file
     [ -f "$file" ] && [ ! -L "$file" ] || die_context 'protected current host receipt is required'
     expected_file=$(active_context "$expected_host"); [ "$file" = "$expected_file" ] || die_context 'host receipt is not the protected active-host receipt'
     schema=$(value_context "$file" schema_version); host=$(value_context "$file" active_host); session=$(value_context "$file" session_id)
     revision=$(value_context "$file" context_revision); identity=$(value_context "$file" worktree_identity)
     launcher_path=$(value_context "$file" launcher_path); launcher_hash=$(value_context "$file" launcher_hash)
+    council_path=$(value_context "$file" council_path); council_hash=$(value_context "$file" council_hash)
     issued=$(value_context "$file" issued_epoch); expires=$(value_context "$file" expires_epoch); nonce=$(value_context "$file" nonce); stored=$(value_context "$file" receipt_hash)
     [ "$schema" = 2 ] || die_context 'unsupported host receipt schema'
     case "$host" in claude|codex) ;; *) die_context 'invalid host receipt engine' ;; esac
@@ -53,24 +65,25 @@ validate_receipt_context() {
     [ -n "$session" ] && [ -n "$nonce" ] || die_context 'host receipt lacks native session binding'
     [ "$revision" = "$(revision_context)" ] && [ "$identity" = "$(identity_context)" ] || die_context 'host receipt is stale or belongs to another worktree'
     [ "$launcher_path" = "$launcher" ] && [ "$launcher_hash" = "$(hash_file_context "$launcher")" ] || die_context 'host receipt launcher binding mismatch'
+    [ "$council_path" = "$council" ] && [ "$council_hash" = "$(hash_file_context "$council")" ] || die_context 'host receipt council binding mismatch'
     case "$issued:$expires" in *[!0-9:]*|:*) die_context 'host receipt time binding is invalid' ;; esac
     now=$(date +%s); [ "$issued" -le "$now" ] && [ "$expires" -ge "$now" ] || die_context 'host receipt is expired or not yet valid'
     body=$(awk -F= '$1!="receipt_hash" {print}' "$file" | hash_stream_context); [ "$stored" = "$body" ] || die_context 'host receipt hash mismatch'
     VALID_CONTEXT_SESSION="$session"; VALID_CONTEXT_HASH="$stored"; VALID_CONTEXT_LAUNCHER_HASH="$launcher_hash"
 }
 issue_context() {
-    local host="$1" session="$2" launcher authority current active parent tmp active_tmp now expires nonce
+    local host="$1" session="$2" launcher council authority current active parent tmp active_tmp now expires nonce
     case "$host" in claude|codex) ;; *) die_context 'hook host must be claude or codex' ;; esac
     case "$session" in ''|*$'\n'*|*$'\r'*) die_context 'native SessionStart event has no safe session/thread id' ;; esac
-    launcher=$(launcher_context); authority=$(authority_root_context); current=$(current_context); active=$(active_context "$host"); parent=$(dirname "$current")
+    launcher=$(launcher_context); council=$(council_context); authority=$(authority_root_context); current=$(current_context); active=$(active_context "$host"); parent=$(dirname "$current")
     mkdir -p "$parent" || die_context 'cannot create protected host receipt directory'
     [ ! -L "$authority" ] && [ ! -L "$parent" ] && [ ! -L "$current" ] && [ ! -L "$active" ] || die_context 'linked protected host receipt path rejected'
     chmod 700 "$authority" "$parent" 2>/dev/null || true
     now=$(date +%s); expires=$((now + ${FORGE_HOST_CONTEXT_TTL_SECONDS:-43200})); nonce="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"
     tmp="$current.tmp.$$"; umask 077
     {
-      printf 'schema_version=2\nactive_host=%s\nsession_id=%s\ncontext_revision=%s\nworktree_identity=%s\nlauncher_path=%s\nlauncher_hash=%s\nnonce=%s\nissued_epoch=%s\nexpires_epoch=%s\n' \
-        "$host" "$session" "$(revision_context)" "$(identity_context)" "$launcher" "$(hash_file_context "$launcher")" "$nonce" "$now" "$expires"
+      printf 'schema_version=2\nactive_host=%s\nsession_id=%s\ncontext_revision=%s\nworktree_identity=%s\nlauncher_path=%s\nlauncher_hash=%s\ncouncil_path=%s\ncouncil_hash=%s\nnonce=%s\nissued_epoch=%s\nexpires_epoch=%s\n' \
+        "$host" "$session" "$(revision_context)" "$(identity_context)" "$launcher" "$(hash_file_context "$launcher")" "$council" "$(hash_file_context "$council")" "$nonce" "$now" "$expires"
     } > "$tmp" || die_context 'cannot write protected host receipt'
     printf 'receipt_hash=%s\n' "$(hash_file_context "$tmp")" >> "$tmp"
     chmod 600 "$tmp" 2>/dev/null || true; mv "$tmp" "$current" || die_context 'cannot publish protected host receipt'
@@ -96,17 +109,17 @@ issue-test)
 launch)
     host=""; while [ "$#" -gt 0 ]; do case "$1" in --host) host="${2:-}"; shift 2 ;; --) shift; break ;; *) die_context "unknown launch argument $1" ;; esac; done
     case "$host" in claude|codex) ;; *) die_context 'fixed launcher host must be claude or codex' ;; esac
-    launcher=$(launcher_context); [ "$#" -gt 0 ] || set -- "$launcher"
+    launcher=$(launcher_context); council=$(council_context); [ "$#" -gt 0 ] || set -- "$launcher"
     requested="$1"; requested_parent=$(cd "$(dirname "$requested")" 2>/dev/null && pwd -P) || die_context 'cannot resolve requested launcher'; requested="$requested_parent/$(basename "$requested")"
-    [ "$requested" = "$launcher" ] || die_context 'requested command is not the bound fixed dispatcher launcher'
-    current=$(active_context "$host"); validate_receipt_context "$current" "$host" "$launcher"
+    [ "$requested" = "$launcher" ] || [ "$requested" = "$council" ] || die_context 'requested command is not a bound Forge dispatcher'
+    current=$(active_context "$host"); validate_receipt_context "$current" "$host" "$launcher" "$council"
     export FORGE_NATIVE_HOST="$host" FORGE_NATIVE_SESSION_ID="$VALID_CONTEXT_SESSION" FORGE_HOST_CONTEXT_FILE="$current" FORGE_HOST_CONTEXT_LAUNCHER_HASH="$VALID_CONTEXT_LAUNCHER_HASH"
     exec "$@"
     ;;
 verify)
-    file="${FORGE_HOST_CONTEXT_FILE:-}"; host="${FORGE_NATIVE_HOST:-}"; launcher=$(launcher_context)
+    file="${FORGE_HOST_CONTEXT_FILE:-}"; host="${FORGE_NATIVE_HOST:-}"; launcher=$(launcher_context); council=$(council_context)
     [ -n "$file" ] && [ -n "$host" ] && [ -n "${FORGE_HOST_CONTEXT_LAUNCHER_HASH:-}" ] || die_context 'protected launcher context is required'
-    validate_receipt_context "$file" "$host" "$launcher"
+    validate_receipt_context "$file" "$host" "$launcher" "$council"
     [ "$FORGE_HOST_CONTEXT_LAUNCHER_HASH" = "$VALID_CONTEXT_LAUNCHER_HASH" ] || die_context 'launcher environment binding mismatch'
     [ "${FORGE_NATIVE_SESSION_ID:-}" = "$VALID_CONTEXT_SESSION" ] || die_context 'native session environment mismatch'
     printf '%s\n' "$host"

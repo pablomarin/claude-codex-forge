@@ -40,16 +40,20 @@ Host availability is role- and capability-specific. A missing or unsuitable pref
 falls back visibly to a fresh same-engine process. A mixed-engine council uses three advisors on
 the current host, two on the other engine, and the other engine as chairman; if the other engine is
 absent or fails, Forge discards the partial attempt and reruns the whole council on the current
-host. Investigation is a separate explicitly authorized capability profile. Native `/goal` remains
+host. Investigation is a separate full-agent profile that inherits the active host's ordinary
+project capabilities and explicit authorization boundaries. Native `/goal` remains
 owned by each host and composes the same Forge objective, nonce, checkpoint, memory, and human-only
 PR authorization boundary.
 
 ### Fresh-Run Review Independence
 
-Reviewers run in fresh processes without inherited primary conversation, ambient plugins, hooks,
-skills, or write-capable MCP. Ordinary review is read-only. Investigation receives only declared
-network/query/workspace capabilities in a disposable copy, and a finding remains a hypothesis
-until a distinct primary/control reproduction succeeds. Receipts record requested and actual
+Ordinary reviewers run in fresh isolated processes without inherited primary conversation,
+ambient plugins, hooks, skills, or write-capable MCP. Ordinary review is read-only. Investigation
+instead runs a fresh full-capability engine in the real worktree with normal user/project config,
+state, memory, tools, MCP, and network. Claude uses safety-classified auto mode; Codex uses native
+on-request approval with full host access because non-interactive Codex otherwise defaults to
+read-only. A finding remains a hypothesis until a distinct
+primary/control reproduction succeeds. Receipts record requested and actual
 engine, fallback reason, invocation identity, role/profile, worktree, and immutable artifact
 identity.
 

@@ -23,12 +23,15 @@ next step survive a host switch; the native Claude Code or Codex session does no
 
 ## Decision Analysis
 
+- Claude Code: `/opinion investigate` followed by the request
+- Codex: `$opinion investigate` followed by the request
+
 | Host | Invocation | Purpose |
 | ---- | ---------- | ------- |
 | Claude Code | `/opinion <request>` | Fresh independent opinion |
 | Codex | `$opinion <request>` | Fresh independent opinion |
-| Claude Code | `/opinion investigate <request>` | Bounded investigation (Claude Code: `/opinion investigate`) |
-| Codex | `$opinion investigate <request>` | Bounded investigation (Codex: `$opinion investigate`) |
+| Claude Code | `/opinion investigate <request>` | Fresh full-agent investigation in the real worktree |
+| Codex | `$opinion investigate <request>` | Fresh full-agent investigation in the real worktree |
 
 ### Opinion profiles
 
@@ -41,7 +44,7 @@ to a fresh same-engine reviewer on launch or capability failure.
 | Profile           | Boundary | Use for |
 | ----------------- | -------- | ------- |
 | General/plan/code | Hermetic, read-only, no network | Independent analysis and candidate-bound review |
-| `investigate`     | Disposable workspace plus explicitly declared capabilities | Reproduction or live-state fact finding; replay is bounded and findings require an independent control |
+| `investigate`     | Fresh full agent, real worktree, normal host config/tools/MCP/network | Operational research and live-state fact finding; findings require an independent control |
 
 ## PRD Commands (Requirements)
 

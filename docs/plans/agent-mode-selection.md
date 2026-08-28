@@ -106,10 +106,11 @@ spike and no unresolved high-impact architectural ambiguity remains.
   peer critique is a second turn in that same fresh seat session, not five additional participant
   processes. `actual_engine != main_engine` and exit zero are never independence or cleanliness
   tests.
-- Investigation may use native web tools, explicitly read-only query/MCP credentials, project
-  execution, and isolated worktree writes. In v1 an external mutation is rendered as an exact
-  deterministic action for the developer to execute manually; an agent-writable authorization
-  receipt is audit-only, and no model receives general mutation credentials or a mutating MCP tool.
+- Investigation starts a fresh full-capability engine in the real worktree with normal host/project
+  config, state, memory, tools, MCP, network, databases, APIs, and worktree writes. Claude uses
+  safety-classified auto mode; Codex uses full host access with native on-request approval rather
+  than its read-only exec default. Existing
+  explicit human authorization still gates destructive or externally mutating actions.
 - A host switch does not require a lease or handoff and does not invalidate otherwise-fresh
   evidence. Documentation must warn against simultaneous editing.
 - Keep the current worktree and branch isolated through the entire implementation.
@@ -386,13 +387,11 @@ prompt names the sibling as the logical project root and Git-aware qualification
 `rev-parse`, diffs, deletions, renames, executable modes, and repository-relative scripts. Canary
 tests must prove the additional directory does not become an instruction/hook/skill/config source.
 
-For investigation, seed a disposable sibling candidate repository from the same frozen candidate
-and allow writes only there. Validate its resulting diff and replay only declared reproduction/artifact paths
-into the real worktree if the original candidate identity is unchanged; reject symlinks, path
-escapes, binary/oversized output outside policy, and Forge state/evidence/auth mutations. This
-gives the investigative agent ordinary file/query/execute capability without loading the trusted
-primary repository's ambient Codex configuration. The live qualification must prove the replay
-path before Task 5 starts.
+For investigation, prove a fresh selected-engine process can start directly in the real worktree
+with the ordinary user/project environment and can observe shared state/memory and perform a benign
+worktree write. Assert the dispatcher adds no safe mode, sandbox override, stripped config/home,
+tool allowlist, disposable candidate, or replay layer. Keep the separate independent reproduction
+role isolated and candidate-bound.
 
 Also run a minimal authenticated native-goal feasibility slice on each installed host. This is a
 disposable proving fixture with its own minimal adapter/oracle, not the production implementation
@@ -1021,7 +1020,7 @@ not expose. Tests replay captured live events, low-effort/local overrides, unsup
 missing observable metadata, and requested-versus-actual mismatches; none may emit certifying
 evidence outside its qualified row. No v1 model override or arbitrary tuple qualification exists.
 
-Ordinary review/investigation runs Claude headlessly with `claude -p --no-session-persistence` using the Task 2 qualified
+Ordinary review runs Claude headlessly with `claude -p --no-session-persistence` using the Task 2 qualified
 OAuth-compatible safe-mode recipe, or the separately qualified bare recipe only for explicit
 API-key/provider/helper authentication, plus a private settings/MCP file. Codex runs with
 `codex exec --ephemeral` in the Task 2 qualified clean scratch primary repository, using the existing PTY helper only when the
@@ -1038,6 +1037,11 @@ Pre-launch and in-process canaries must prove ambient project/user hooks, plugin
 rules, and instructions are absent; otherwise that engine is unusable for the role and follows
 normal fallback. The review profile exposes read tools only.
 
+Investigation is the deliberate exception: invoke the selected engine as a fresh ephemeral process
+with the real worktree cwd and normal inherited host/user/project environment. Do not render a
+private config, disable hooks/plugins/skills/MCP, override sandbox/tool permissions, or replay files.
+The host's ordinary permissions and explicit authorization boundaries remain authoritative.
+
 Only `council-advisor` may request the qualified Task 2 two-turn transport. Its `new` call records
 the exact Claude session UUID or Codex structured thread id; its `resume` call requires the same
 engine, seat, host context, candidate/question/config/canary hashes, and private session store. No
@@ -1046,16 +1050,9 @@ council orchestrator without per-seat engine substitution. Cleanup is bounded to
 session artifacts. If the selected engine lacks qualified exact-id resume, that seat is a
 capability failure and the council applies its whole-attempt policy.
 
-The investigation profile allows sandboxed writes and project execution inside its disposable
-candidate copy but disables arbitrary process network. After the child exits, the dispatcher
-validates and replays only declared reproduction/artifact paths into the real worktree while the
-source candidate identity is still exact; any concurrent mutation rejects replay. Internet
-research uses host-native WebSearch/WebFetch, and live
-queries use only declared read-only MCP tools/runners and read-only credentials copied by
-reference into the sanitized per-invocation configuration. If a project has no enforceable
-read-only channel, or selected host flags cannot exclude an ambient write-capable channel, the
-live query is `BLOCKED` rather than granting general write credentials. This is the authorization
-boundary; prompt text and mutation-pattern hooks are not.
+The investigation profile may use the normal installed tools, skills, MCP servers, network,
+databases, APIs, and worktree writes available to the engine. Its receipt records
+`investigation_mode=full-agent-worktree` and is not immutable-candidate review certification.
 
 Treat the investigator's result as a hypothesis until a separate `investigation-repro` invocation
 receives only the claimed hypothesis, exact primary check, and an independent control—not the
@@ -1073,9 +1070,9 @@ never reuse a partial output as a valid result.
 
 **Step 4: Keep external mutation human-executed in v1.**
 
-The investigator may propose an exact action but cannot perform it in its read-only external
-profile, and a conversational approval line or agent-writable receipt is never treated as proof of
-human authority. `authorized-action` only canonicalizes a predeclared executable/argv adapter,
+The investigator may propose an action, but destructive or externally mutating operations still
+require the normal workflow's explicit human authority; a conversational approval line or
+agent-writable receipt is never proof of that authority. `authorized-action` only canonicalizes a predeclared executable/argv adapter,
 renders the exact system/operation/target/action hash and expected effect into a local pending-action
 manifest, and verifies a result the user reports afterward. The audit receipt records nonce,
 worktree identity, exact action, timestamps, and outcome, but is audit-only and cannot unlock a
@@ -1808,10 +1805,9 @@ open a TUI; only separately invoked `scripts/qualify-runtime-final.*` may do liv
 9. **Council seat override:** Override at least one advisor and the chairman engine while retaining
    all six roles, anonymous peer review, and minority reports. Reject malformed or incomplete
    override maps and apply the complete fallback rule if a configured non-main engine fails.
-10. **Investigation authorization:** An investigative reviewer can research the web, use a
-   declared read-only query channel, execute inside the worktree, and write a reproduction without
-   general external-write credentials. A hostile ambient write MCP/plugin/hook is absent from the
-   child while the selected read-only query remains usable. Its finding stays a hypothesis until a
+10. **Investigation authorization:** An investigative reviewer starts as a fresh full agent in the
+   real worktree with normal project/user state, memory, tools, MCP, network, and credentials. Forge
+   adds no investigation-only isolation flags. Its finding stays a hypothesis until a
    distinct reproduction invocation reruns the primary check and a control. An external mutation
    remains unavailable to every model; Forge renders an allowlisted deterministic action for the
    developer to execute manually, treats an agent-written approval receipt as audit-only, and
@@ -1861,7 +1857,7 @@ time with focused regression tests.
 
 Against disposable repositories on the documented supported Claude and Codex versions, verify
 root/nested instruction and rule discovery, custom workflow/skill invocation, hook/config trust,
-fresh same-engine isolation, read-only review, read-only external investigation, worktree writes,
+fresh same-engine isolation, read-only review, full-agent real-worktree investigation, worktree writes,
 structured output, and every Must row in the goal behavior matrix, including budget exhaustion,
 stuck warning, user/process interruption, same-host resume, and exact checkpoint continuation.
 Record versions, commands, non-secret result hashes, and readiness in
@@ -1934,8 +1930,8 @@ be green before merge/release approval.
 - [planned] Explicit same-engine review will be a normal supported mode; independence will be
   evidenced by invocation/artifact/worktree receipts, and cleanliness by a structured semantic
   result rather than process exit status.
-- [planned] Investigation will allow isolated worktree writes, project execution, native web
-  research, and declared read-only query channels, followed by a separate primary/control
+- [planned] Investigation will launch a fresh full agent in the real worktree with normal host
+  config, memory, tools, MCP, network, and project execution, followed by a separate primary/control
   reproduction. In v1, external mutation remains human-executed from an exact rendered action;
   no model receives the mutating MCP tool or credential.
 - [planned] Healthy councils will retain the existing five-advisor-plus-chair preset with a

@@ -30,8 +30,8 @@ permissions	claude	all	native-policy	none	-	-	-	settings-json	config-hash	allow,
 permissions	codex	all	native-policy	none	-	-	-	config-toml	config-hash	sandbox,approval	codex>=0.144.1	block
 fresh-runs	claude	all	cli	none	-	-	-	-p,--no-session-persistence	session-id	structured-result	claude>=2.1.237	same-engine-fresh
 fresh-runs	codex	all	cli	none	-	-	-	exec,--ephemeral	thread-id	structured-result	codex>=0.144.1	same-engine-fresh
-investigation	claude	all	cli	none	-	-	-	fresh-process-workspace-write	session-id,receipt	structured-result	claude>=2.1.237	same-engine-fresh
-investigation	codex	all	cli	none	-	-	-	exec-ephemeral-workspace-write	thread-id,receipt	structured-result	codex>=0.144.1	same-engine-fresh
+investigation	claude	all	cli	none	-	-	-	fresh-process-full-agent-real-worktree-auto-mode	receipt,worktree	structured-result	claude>=2.1.237	same-engine-fresh
+investigation	codex	all	cli	none	-	-	-	exec-ephemeral-full-agent-real-worktree-on-request-search	receipt,worktree	structured-result	codex>=0.144.1	same-engine-fresh
 trust	claude	all	native-policy	none	-	-	-	project-trust	config-hash	trusted,blocked	claude>=2.1.237	block
 trust	codex	all	native-policy	none	-	-	-	project-trust	config-hash	trusted,blocked	codex>=0.144.1	block
 native-goals	claude	all	native-command	none	-	-	-	goal-command	goal-id,state-hash	status,receipt	claude>=2.1.237	block

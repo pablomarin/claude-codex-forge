@@ -35,8 +35,8 @@ switch ($env:FORGE_DISPATCH_FIXTURE_ACTION) {
     Write-Host "thread.resumed:$env:FORGE_DISPATCH_SESSION_ID"
   }
   "investigate" {
-    New-Item -ItemType Directory -Path (Join-Path $env:FORGE_DISPATCH_INVESTIGATION_ROOT "artifacts") -Force | Out-Null
-    [IO.File]::WriteAllText((Join-Path $env:FORGE_DISPATCH_INVESTIGATION_ROOT "artifacts\qualification.txt"), "bounded-reproduction`n")
+    New-Item -ItemType Directory -Path (Split-Path -Parent $env:FORGE_DISPATCH_INVESTIGATION_ARTIFACT) -Force | Out-Null
+    [IO.File]::WriteAllText($env:FORGE_DISPATCH_INVESTIGATION_ARTIFACT, "bounded-reproduction`n")
   }
   default { exit 76 }
 }
@@ -48,7 +48,7 @@ exit 0
         & $qualify -Engine $engine -ProjectRoot $project -Output $output -FixtureMode -EnginePath $fake | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "$engine deterministic dispatch fixture failed" }
         $receipt = Get-Content -Raw $output | ConvertFrom-Json
-        if ($receipt.status -ne "PASS" -or $receipt.ephemeral -ne "PASS" -or $receipt.council_resume -ne "PASS" -or $receipt.investigation_replay -ne "PASS") { throw "$engine incomplete PASS receipt" }
+        if ($receipt.status -ne "PASS" -or $receipt.ephemeral -ne "PASS" -or $receipt.council_resume -ne "PASS" -or $receipt.investigation_full_agent -ne "PASS") { throw "$engine incomplete PASS receipt" }
     }
     $previousLeak = $env:FORGE_FAKE_CANARY_LEAK
     try {
@@ -63,19 +63,13 @@ exit 0
     @'
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
 if ($Arguments[0] -eq "--version") { Write-Host "$env:FORGE_FAKE_ENGINE_NAME 9.9"; exit 0 }
-if ($Arguments[0] -eq "--help" -or ($Arguments -contains "--help")) { Write-Host "--safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable"; exit 0 }
+if ($Arguments[0] -eq "--help" -or ($Arguments -contains "--help")) { Write-Host "-a --search --permission-mode --safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable"; exit 0 }
 $joined = $Arguments -join " "
-[IO.File]::AppendAllText($env:FORGE_FAKE_ARGV_LOG, "engine=$env:FORGE_FAKE_ENGINE_NAME home=$env:HOME userprofile=$env:USERPROFILE username=$env:USERNAME argv=$joined`n")
+[IO.File]::AppendAllText($env:FORGE_FAKE_ARGV_LOG, "engine=$env:FORGE_FAKE_ENGINE_NAME cwd=$((Get-Location).Path) home=$env:HOME userprofile=$env:USERPROFILE username=$env:USERNAME argv=$joined`n")
 if ($joined -match 'FORGE_INVESTIGATION') {
-  if ($env:FORGE_FAKE_DISPATCH_FAILURE -eq "path-escape") { [IO.File]::WriteAllText((Join-Path $env:FORGE_FAKE_ESCAPE_TARGET "escaped.txt"), "escape-attempt`n") }
-  else {
-    New-Item -ItemType Directory -Path (Join-Path $env:FORGE_DISPATCH_INVESTIGATION_ROOT "artifacts") -Force | Out-Null
-    [IO.File]::WriteAllText((Join-Path $env:FORGE_DISPATCH_INVESTIGATION_ROOT "artifacts\qualification.txt"), "bounded-reproduction`n")
-    if ($env:FORGE_FAKE_DISPATCH_FAILURE -eq "undeclared") { [IO.File]::WriteAllText((Join-Path $env:FORGE_DISPATCH_INVESTIGATION_ROOT "undeclared.txt"), "bad`n") }
-    if ($env:FORGE_FAKE_DISPATCH_FAILURE -eq "no-clobber") { New-Item -ItemType Directory -Path (Join-Path $env:FORGE_DISPATCH_REPLAY_TARGET "artifacts") -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $env:FORGE_DISPATCH_REPLAY_TARGET "artifacts\qualification.txt"), "keep`n") }
-  }
-  $candidateId = $env:FORGE_DISPATCH_CANDIDATE_ID; if ($env:FORGE_FAKE_DISPATCH_FAILURE -eq "candidate") { $candidateId = "wrong-candidate" }
-  Write-Host "candidate_id=$candidateId`ncanary_observed=false"; exit 0
+  New-Item -ItemType Directory -Path (Split-Path -Parent $env:FORGE_DISPATCH_INVESTIGATION_ARTIFACT) -Force | Out-Null
+  [IO.File]::WriteAllText($env:FORGE_DISPATCH_INVESTIGATION_ARTIFACT, "bounded-reproduction`n")
+  Write-Host "worktree=$((Get-Location).Path)`nartifact_written=true"; exit 0
 }
 if ($env:FORGE_FAKE_ENGINE_NAME -eq "claude") {
   if ($joined -match '--no-session-persistence' -and $joined -notmatch 'FORGE_INVESTIGATION') { $canary = if ($env:FORGE_FAKE_CANARY_RESULT) { $env:FORGE_FAKE_CANARY_RESULT } else { "false" }; Write-Host "sentinel=$env:FORGE_DISPATCH_SENTINEL`ncanary_observed=$canary"; exit 0 }
@@ -101,8 +95,12 @@ Write-Host "{`"type`":`"turn.completed`",`"thread_id`":`"$env:FORGE_DISPATCH_SES
             if ($argv -notlike '*Return exactly these four key=value lines and nothing else*') { throw 'Claude council prompt does not require the machine-bound response shape' }
             if ($argv -notlike '*return exactly these two key=value lines and nothing else*') { throw 'Claude investigation prompt does not require the machine-bound response shape' }
         }
+        $investigationArgv = @($argv -split "`n" | Where-Object { $_ -match 'FORGE_INVESTIGATION' }) -join "`n"
+        if ($investigationArgv -notmatch [regex]::Escape("cwd=$project") -or $investigationArgv -match '--safe-mode|--setting-sources|--ignore-user-config|--ignore-rules|--add-dir') { throw "$engine investigation is not a normal full-agent worktree process" }
+        if ($engine -eq 'codex' -and ($investigationArgv -notmatch '-a on-request --search exec' -or $investigationArgv -notmatch '--sandbox danger-full-access')) { throw 'Codex investigation is missing full-capability on-request mode' }
+        if ($engine -eq 'claude' -and ($investigationArgv -notmatch '--permission-mode auto' -or $investigationArgv -match '--sandbox')) { throw 'Claude investigation is missing safety-classified full-agent mode' }
     }
-    foreach ($failure in @("cross-seat", "canary", "candidate", "undeclared", "path-escape", "no-clobber")) {
+    foreach ($failure in @("cross-seat", "canary")) {
         $env:FORGE_FAKE_ENGINE_NAME = "codex"; $env:FORGE_FAKE_DISPATCH_FAILURE = $failure; $env:FORGE_FAKE_CANARY_RESULT = if ($failure -eq "canary") { "true" } else { "" }
         $env:FORGE_FAKE_ESCAPE_TARGET = $project; $env:FORGE_FAKE_ARGV_LOG = Join-Path $scratch "$failure.argv"
         $blocked = Join-Path $scratch "$failure.json"

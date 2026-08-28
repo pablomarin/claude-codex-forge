@@ -8,8 +8,10 @@
 
 ### Dynamic six-seat topology (CRITICAL)
 
-Use `.forge/hooks/lib/council-dispatch.sh` (or `.ps1`) under the protected host
-context. It starts five fresh advisor sessions, resumes those exact sessions for
+Use the protected host launcher with its exact council target: `host-context.sh
+launch --host <host> -- .forge/hooks/lib/council-dispatch.sh ...` on Unix, or
+`host-context.ps1 -Mode launch -Host <host> -LaunchTarget council
+-LaunchArgumentsJson ...` on Windows. It starts five fresh advisor sessions, resumes those exact sessions for
 anonymous peer critique, then starts one fresh chairman session: six sessions
 and eleven turns. The healthy assignment is three advisor seats on the main
 engine, two advisor seats plus chairman on the other engine. Every seat uses

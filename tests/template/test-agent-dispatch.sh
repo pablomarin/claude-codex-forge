@@ -105,6 +105,13 @@ else
 fi
 assert_contains "$S/.forge/local/reviews/installed-result.txt" "verdict=CLEAN" \
     "installed dispatcher emits the machine envelope"
+if (cd "$S" && HOME="$S/home" \
+    bash .forge/hooks/lib/host-context.sh launch --host claude -- \
+      .forge/hooks/lib/council-dispatch.sh --help) >/dev/null 2>&1; then
+    pass "installed fixed launcher reaches the exact council dispatcher"
+else
+    fail "installed fixed launcher must reach the exact council dispatcher"
+fi
 
 start_test "launch/schema failures visibly fall back but semantic findings do not"
 S=$(scratch_dir dispatch-fallback); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
@@ -223,6 +230,7 @@ critique_rc=$?
 set -e
 assert_equals "$critique_rc" "0" "resume accepts a distinct critique prompt for the same seat and question"
 assert_contains "$codex_log" "exec resume" "Codex critique uses the exact-id resume transport"
+assert_contains "$codex_log" "-a never --sandbox read-only exec resume" "Codex resume places the sandbox option at the supported global boundary"
 assert_contains "$codex_log" "$codex_session" "Codex critique resumes the captured structured thread id"
 
 start_test "stale, copied, and caller-overridden host contexts block"
@@ -257,6 +265,12 @@ wrong_launcher_rc=$?
 set -e
 assert_equals "$stale_host_rc" "2" "expired Codex receipt cannot launch after a newer Claude session starts"
 assert_equals "$wrong_launcher_rc" "2" "host receipt rejects a launcher whose hash is not bound"
+assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" "council_path" \
+    "PowerShell protected receipt binds the council dispatcher path"
+assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" "council_hash" \
+    "PowerShell protected receipt binds the council dispatcher hash"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "@('-a', 'never', '--sandbox', \$sandbox, 'exec', 'resume')" \
+    "PowerShell Codex resume places sandbox before the exec subcommand"
 
 start_test "simultaneous native host sessions retain independent fixed launchers"
 S=$(scratch_dir dispatch-context-ambiguous); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
@@ -345,6 +359,14 @@ S=$(scratch_dir dispatch-canary-required); make_repo "$S"; printf 'review\n' > "
 FAKE_CLAUDE_BEHAVIOR=canary-missing FAKE_CODEX_BEHAVIOR=clean run_dispatch "$S" codex sid claude >/dev/null 2>&1
 assert_receipt_value "$S" actual_engine codex
 assert_receipt_value "$S" fallback_reason isolation-canary-missing
+S=$(scratch_dir dispatch-canary-duplicate); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" codex sid
+FAKE_CLAUDE_BEHAVIOR=duplicate-canary run_dispatch "$S" codex sid claude >/dev/null 2>&1
+assert_receipt_value "$S" actual_engine claude
+assert_receipt_value "$S" fallback false
+S=$(scratch_dir dispatch-canary-conflict); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" codex sid
+FAKE_CLAUDE_BEHAVIOR=conflicting-canary FAKE_CODEX_BEHAVIOR=clean run_dispatch "$S" codex sid claude >/dev/null 2>&1
+assert_receipt_value "$S" actual_engine codex
+assert_receipt_value "$S" fallback_reason isolation-canary-mismatch
 S=$(scratch_dir dispatch-codex-auth); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid; printf '{"token":"protected"}\n' > "$S/protected-auth.json"
 set +e
 FORGE_CODEX_AUTH_FILE="$S/protected-auth.json" FAKE_CODEX_BEHAVIOR=require-auth run_dispatch "$S" claude sid codex general none >/dev/null 2>&1
@@ -419,11 +441,43 @@ assert_equals "$output_race_rc" "0" "output publication completes after a leaf s
 assert_hash_equals "$protected" "$protected_before" "atomic publication never follows a swapped output symlink"
 if [ -f "$raced_output" ] && [ ! -L "$raced_output" ]; then pass "published output is a regular invocation-owned file"; else fail "published output remained linked or absent"; fi
 
-start_test "investigation replays only declared regular paths"
-S=$(scratch_dir dispatch-investigation); make_repo "$S"; printf 'hypothesis and exact check\n' > "$S/prompt.txt"; capture_context "$S" claude sid
-FAKE_CODEX_BEHAVIOR=investigate run_dispatch "$S" claude sid codex investigation automatic >/dev/null 2>&1
-assert_contains "$S/tests/reproductions/claimed.txt" "bounded reproduction" "declared candidate artifact replayed into real worktree"
-assert_receipt_value "$S" investigation_replay REPLAYED
+start_test "investigation launches a fresh full agent in the real worktree"
+for tuple in 'claude codex' 'codex claude'; do
+    set -- $tuple; selected="$1"; host="$2"
+    S=$(scratch_dir "dispatch-full-investigation-$selected"); make_repo "$S"; capture_context "$S" "$host" sid
+    mkdir -p "$S/.forge/memory" "$S/.forge/local/memory"
+    printf 'shared durable memory\n' > "$S/.forge/memory/shared.md"
+    printf 'shared local memory\n' > "$S/.forge/local/memory/session.md"
+    printf 'inspect with normal project tools and configuration\n' > "$S/prompt.txt"
+    log="$S/.forge/local/reviews/$selected-full-agent.log"
+    set +e
+    if [ "$selected" = claude ]; then
+      FAKE_REAL_ROOT="$S" FORGE_FULL_AGENT_PROBE=visible FAKE_CLAUDE_BEHAVIOR=full-investigation FAKE_CLAUDE_LOG="$log" \
+        run_dispatch "$S" "$host" sid "$selected" investigation none >/dev/null 2>&1
+    else
+      FAKE_REAL_ROOT="$S" FORGE_FULL_AGENT_PROBE=visible FAKE_CODEX_BEHAVIOR=full-investigation FAKE_CODEX_LOG="$log" \
+        run_dispatch "$S" "$host" sid "$selected" investigation none >/dev/null 2>&1
+    fi
+    investigation_rc=$?
+    set -e
+    assert_equals "$investigation_rc" "0" "$selected investigation completes in the real worktree"
+    assert_contains "$S/.forge/local/investigation-artifacts/$selected.txt" "$selected full agent" "$selected investigation can write shared local state"
+    assert_contains "$log" "cwd=$(cd "$S" && pwd -P)" "$selected investigation cwd is the real worktree"
+    assert_not_contains "$log" "--safe-mode" "$selected investigation is not placed in Forge safe mode"
+    assert_not_contains "$log" "--setting-sources" "$selected investigation keeps normal host configuration"
+    assert_not_contains "$log" "--ignore-user-config" "$selected investigation keeps normal user configuration"
+    assert_not_contains "$log" "--ignore-rules" "$selected investigation keeps normal project instructions"
+    assert_not_contains "$log" "--add-dir" "$selected investigation does not use a disposable candidate"
+    if [ "$selected" = codex ]; then
+      assert_contains "$log" "-a on-request --search exec" "Codex investigation preserves native on-request approval with web search"
+      assert_contains "$log" "--sandbox danger-full-access" "Codex investigation selects the full-capability sandbox mode"
+    else
+      assert_contains "$log" "--permission-mode auto" "Claude investigation uses non-interactive safety-classified full-agent mode"
+      assert_not_contains "$log" "--sandbox" "Claude investigation is not assigned a Forge sandbox override"
+    fi
+    assert_receipt_value "$S" investigation_mode full-agent-worktree
+    assert_receipt_value "$S" investigation_replay NONE
+done
 
 start_test "investigation role mapping, read-only channel, and dispatcher-owned reproduction are enforced"
 S=$(scratch_dir dispatch-role-profile); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid; base=$(git -C "$S" rev-parse HEAD)
@@ -433,13 +487,13 @@ role_profile_rc=$?
 set -e
 assert_equals "$role_profile_rc" "2" "general role cannot acquire investigation permissions"
 
-printf 'requires_read_only_channel=true\ninvestigate query\n' > "$S/prompt.txt"; readonly_log="$S/.forge/local/reviews/readonly.log"
+printf 'requires_read_only_channel=true\ninvestigate query with normal host capabilities\n' > "$S/prompt.txt"; readonly_log="$S/.forge/local/reviews/readonly.log"
 set +e
-FAKE_CODEX_LOG="$readonly_log" launch_dispatch "$S" claude run --engine codex --fallback-policy none --role investigation --profile investigate --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/readonly-investigation" --read-only-server context7 --timeout-seconds 2 >/dev/null 2>&1
+FAKE_CODEX_LOG="$readonly_log" launch_dispatch "$S" claude run --engine codex --fallback-policy none --role investigation --profile investigate --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/full-investigation" --timeout-seconds 2 >/dev/null 2>&1
 readonly_rc=$?
 set -e
-assert_equals "$readonly_rc" "0" "qualified read-only channel can be selected for investigation"
-assert_contains "$readonly_log" "mcp_servers.context7" "selected read-only channel is passed to Codex invocation"
+assert_equals "$readonly_rc" "0" "full investigation ignores the legacy declared-channel restriction"
+assert_not_contains "$readonly_log" "mcp_servers.context7" "Forge does not replace normal investigation MCP configuration"
 
 make_repro_fixture() {
   local dir="$1"
@@ -573,6 +627,10 @@ assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "'FAKE_CLAUDE_ARGV_LOG
   "PowerShell test-mode whitelist propagates the exact argv log"
 assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Assert-NoFollowSessionMetadata $SessionMeta' \
   "PowerShell resume rechecks the session metadata leaf"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "InvestigationMode = 'full-agent-worktree'" \
+  "PowerShell investigation records the full-agent worktree mode"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "if (\$Role -eq 'investigation')" \
+  "PowerShell dispatcher has a distinct unrestricted investigation branch"
 assert_contains "$REPO_ROOT/scripts/materialize-adapters.ps1" '".forge/hooks/lib/host-context.ps1", "-Mode", "hook", "-Host", "codex"' \
   "PowerShell materializer renders Codex host context as a direct invocation"
 

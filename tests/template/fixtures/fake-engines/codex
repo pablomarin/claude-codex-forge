@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 log="${FAKE_CODEX_LOG:-}"
-[ -z "$log" ] || printf '%s\n' "$*" >> "$log"
+[ -z "$log" ] || printf 'cwd=%s home=%s argv=%s\n' "$(pwd -P)" "${HOME:-}" "$*" >> "$log"
 out=""
 joined="$*"
 while [ "$#" -gt 0 ]; do
@@ -36,6 +36,15 @@ case "${FAKE_CODEX_BEHAVIOR:-clean}" in
     mkdir -p "$FORGE_CANDIDATE_ROOT/tests/reproductions"
     printf 'bounded reproduction\n' > "$FORGE_CANDIDATE_ROOT/tests/reproductions/claimed.txt"
     qualified_envelope 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'replay_path=tests/reproductions/claimed.txt' ;;
+  full-investigation)
+    real_root=$(cd "${FAKE_REAL_ROOT:?}" && pwd -P)
+    [ "$(pwd -P)" = "$real_root" ] || exit 71
+    [ "${FORGE_FULL_AGENT_PROBE:-}" = visible ] || exit 72
+    grep -q 'shared durable memory' "$real_root/.forge/memory/shared.md" || exit 73
+    grep -q 'shared local memory' "$real_root/.forge/local/memory/session.md" || exit 74
+    mkdir -p "$real_root/.forge/local/investigation-artifacts"
+    printf 'codex full agent\n' > "$real_root/.forge/local/investigation-artifacts/codex.txt"
+    clean_envelope ;;
   repro)
     [ -z "${FORGE_REPRO_RUNNER:-}" ] || "$FORGE_REPRO_RUNNER"
     qualified_envelope 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'hypothesis_hash=hypothesis-literal' 'primary_check_hash=primary-literal' 'control_hash=control-literal' 'primary_status=EXPECTED' 'control_status=EXPECTED' 'repro_status=REPRODUCED' ;;

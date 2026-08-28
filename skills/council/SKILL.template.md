@@ -49,19 +49,25 @@ Read any files referenced in the question. If an approach comparison table exist
 
 ### Live-state fact-finding (when a verdict hinges on real system/data state)
 
-If the question turns on actual system or data state — "is this migration safe given real row counts / distributions?", "does prod actually behave like X?" — gather **verified facts before advisors reason**, instead of having them speculate. Run the Forge opinion workflow's `investigate` profile (`/opinion investigate` in Claude Code; `$opinion investigate` in Codex) through `.forge/workflows/opinion.md`. The same hard constraints apply, unchanged:
+If the question turns on actual system or data state — "is this migration safe given real row counts / distributions?", "does prod actually behave like X?" — gather **verified facts before advisors reason**, instead of having them speculate. Run the Forge opinion workflow's `investigate` profile (`/opinion investigate` in Claude Code; `$opinion investigate` in Codex) through `.forge/workflows/opinion.md`.
 
-- Repo-confined Codex sandbox (`--sandbox workspace-write`, never `danger-full-access`), read-only / non-mutating, credentials from `.env` never in argv/logs.
-- **Never prompt the user** — provision Codex from what Claude already has. This holds inside a `/forge-goal` `/goal` run, where council fires autonomously and `AskUserQuestion` is reserved solely for PR creation.
-- Independently cross-verify the finding before it enters the council as fact.
+The investigation is a fresh full-capability selected-engine process in the real worktree. It uses
+the normal host/project state, memory, tools, MCP, network, databases, and APIs. Claude uses native
+safety-classified auto mode and Codex uses full host access with native on-request approval;
+council does not invent a second credential hand-off. Explicit human
+authorization for destructive or externally mutating actions still apply. Independently
+cross-verify the finding before it enters the council as fact.
 
-Advisors then reason over **verified facts**, and the chairman cites the evidence packet in the verdict. Council itself never grants write access — fact-finding is strictly read-only.
+Advisors then reason over **verified facts**, and the chairman cites the evidence packet in the verdict.
 
 ## Step 2: Load Advisor Profiles and Dispatch Topology
 
 Read `references/advisors.md` to get the five advisor personas. Engine assignment
-is runtime data: invoke `.forge/hooks/lib/council-dispatch.sh` (or `.ps1`) from
-the protected host context with the question, candidate, and workflow base. It
+is runtime data: invoke `.forge/hooks/lib/host-context.sh launch --host <host> --
+.forge/hooks/lib/council-dispatch.sh ...` on Unix, or use `host-context.ps1
+-Mode launch -Host <host> -LaunchTarget council -LaunchArgumentsJson ...` on
+Windows, with the question, candidate, and workflow base. The protected receipt
+binds both dispatchers by exact path and hash. It
 uses three main-engine advisors, two other-engine advisors, and an other-engine
 chairman when healthy. It creates five fresh advisor sessions, resumes each for
 one anonymous peer-review turn, and creates a fresh chairman session.

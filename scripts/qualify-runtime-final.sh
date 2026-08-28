@@ -126,8 +126,8 @@ validate_receipt() {
                 [ "$(json_field "$path" status)" = PASS ] || return 1
                 reason=$(json_field "$path" reason)
                 case "$engine:$kind:$reason" in
-                    'claude:dispatch:authenticated guarded isolation, exact-id resume, and frozen-candidate replay passed'|\
-                    'codex:dispatch:authenticated guarded isolation, exact-id resume, and frozen-candidate replay passed'|\
+                    'claude:dispatch:authenticated isolated review, exact-id resume, and full-agent worktree investigation passed'|\
+                    'codex:dispatch:authenticated isolated review, exact-id resume, and full-agent worktree investigation passed'|\
                     'claude:goal:authenticated Claude native /goal activation, exact resume, budget pause, and stuck oracle passed'|\
                     'codex:goal:validated sealed physical operator Codex TUI capture') ;;
                     *) return 1 ;;

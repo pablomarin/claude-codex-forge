@@ -97,7 +97,7 @@ function Test-Final([string]$Path){
     if($f.overall_status -eq 'PASS'){
         if($f.evidence_mode -ne 'authenticated' -or $f.windows_status -ne 'PASS'){return $false}
         $expected=@{
-          'claude_dispatch'='authenticated guarded isolation, exact-id resume, and frozen-candidate replay passed';'codex_dispatch'='authenticated guarded isolation, exact-id resume, and frozen-candidate replay passed';
+          'claude_dispatch'='authenticated isolated review, exact-id resume, and full-agent worktree investigation passed';'codex_dispatch'='authenticated isolated review, exact-id resume, and full-agent worktree investigation passed';
           'claude_goal'='authenticated Claude native /goal activation, exact resume, budget pause, and stuck oracle passed';'codex_goal'='validated sealed physical operator Codex TUI capture'
         }
         foreach($name in $expected.Keys){$child=Get-Content -LiteralPath $f["${name}_path"] -Raw|ConvertFrom-Json;if($child.status -ne 'PASS' -or $child.reason -cne $expected[$name]){return $false}}

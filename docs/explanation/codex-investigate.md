@@ -1,67 +1,56 @@
 # Opinion `investigate` Profile
 
-> **TL;DR** — Claude Code's `/opinion investigate` or Codex's `$opinion investigate` asks a fresh
-> reviewer to work inside a
-> disposable, repo-confined candidate with only explicitly declared capabilities. It can reproduce
-> a bug or query a live system without mutating the developer's real worktree; findings require an
-> independent primary/control reproduction before they become actionable.
+> **TL;DR** — Claude Code's `/opinion investigate` or Codex's `$opinion investigate` starts a fresh
+> selected-engine agent in the real worktree with the host's normal project configuration, state,
+> memory, tools, MCP servers, network, databases, and APIs.
 
 ## Why it matters
 
-Ordinary opinion review is hermetic: read-only and without network. That is the right posture for
-reviewing code, but source alone cannot answer every operational question. A hermetic reviewer cannot:
-
-- run a SQL query to see what the data actually says,
-- reach a cloud or API to check real state,
-- execute a script to reproduce a bug,
-- go outside the sandbox at all.
-
-For a whole class of real work — _why is this metric wrong?_, _is the data actually as of yesterday?_, _reverse-engineer this report's rule_ — reading code isn't enough. The answer lives in the live system. That's the gap Investigate mode closes.
+Ordinary opinion review is deliberately hermetic: read-only and without network. That is the right
+posture for independent code review, but source alone cannot answer every operational question. An
+investigator may need to run project tooling, inspect a database, call a cloud API, research current
+documentation, or create a reproduction in the worktree.
 
 ## What it does
 
-The current host prepares a bounded context and the Forge dispatcher selects the requested engine.
-The child receives only the declared query/runner surface inside a disposable candidate. The real
-worktree and protected authorization records are never exposed to child writes. If the requested
-engine is unavailable, selection falls back automatically and visibly to a fresh same-engine child.
+The current host selects the requested reviewer engine and starts a fresh ephemeral process. Unlike
+ordinary review, Forge does not replace HOME, strip user/project configuration, disable plugins or
+MCP, add a safe-mode/tool allowlist, create a disposable candidate, or replay selected files
+afterward. Claude uses native safety-classified `auto` mode. Codex uses native `on-request`
+approval with `danger-full-access` and search because `codex exec` otherwise defaults to a
+read-only sandbox. The
+investigator works directly in the same worktree and sees the same `.forge/local/state.md`,
+durable/local memory, instructions, and normal host integrations.
 
-It's deliberately **project-agnostic**: the Forge ships no Snowflake/Postgres/AWS code. It works for any backend because it borrows the connection surface your project already has.
+If the requested engine cannot launch, Forge visibly retries once with a fresh same-engine fallback
+according to the normal dispatcher policy. The receipt records `investigation_mode=full-agent-worktree`.
 
-## Why it's safe
+## Boundaries that still apply
 
-Giving an autonomous agent live access sounds risky — so the safety is structural, not hopeful:
+“Full agent” means the investigator has the host capabilities needed for the task; it does not erase
+the developer's explicit authorization boundaries. In particular:
 
-1. **Disposable candidate — never the real worktree.** The dispatcher launches either engine in a
-   fresh confined copy with only the declared capability surface. The child cannot write protected
-   Forge state, authorization, or the developer's real candidate.
-2. **Read-only / never mutate.** Investigation looks; it never changes. Use the narrowest role available (e.g. a SELECT-only DB role). Anything that needs to mutate is _implementation_, routed through the normal `/new-feature` or `/fix-bug` workflow — not investigation.
-3. **Credentials never leak into logs.** They're sourced from the project's `.env`/config at the runner boundary — never typed into a command line, the prompt, or anything that lands in a transcript.
-4. **Findings are independently reproduced before they're trusted.** The dispatcher owns a primary
-   check and independent control; `REPRODUCED` requires both to behave as predicted. A child claim
-   alone is never enough.
+1. Destructive or externally mutating operations still require the authority that the normal
+   workflow requires for that operation.
+2. Secrets stay in normal host/project credential stores rather than prompts, argv, receipts, or
+   tracked artifacts.
+3. The investigator may edit the worktree, so its receipt is not immutable-candidate review
+   certification.
+4. A finding remains a hypothesis until a separate `investigation-repro` run receives only the
+   claim, exact primary check, and an independent control. Only `REPRODUCED` is certifying.
 
-(Decision rationale and the full threat-model discussion live in [ADR 0007](../adr/0007-codex-investigate-mode-capability-gated.md).)
+This split is intentional: ordinary review remains a narrow independent evidence boundary;
+investigation behaves like a normal fresh engineering agent. See
+[ADR 0007](../adr/0007-codex-investigate-mode-capability-gated.md).
 
 ## It works inside `/goal`
 
-Investigation can run inside native `/goal` when all required capabilities are already authorized.
-It cannot authorize credentials, a new external mutation, PR creation, or destructive work; those
-boundaries checkpoint and return to the developer.
-Every non-hermetic capability therefore requires explicit authorization before dispatch.
+Investigation can run inside native `/goal` using the capabilities already available to that host.
+If a normal workflow boundary requires fresh human authority, the investigation checkpoints there
+instead of inventing authorization.
 
-## How it triggers — and who chooses
+## How it triggers
 
-**The command is explicit.** Claude Code uses `/opinion` and `/opinion investigate`; Codex uses
-`$opinion` and `$opinion investigate`. Both `/review` names remain reserved. The dispatcher prefers
-the other engine and visibly falls back to a fresh same-engine child on launch/capability failure;
-there is no permanent main-engine choice.
-
-Investigation is appropriate for project credentials, external systems (DB/cloud/API), live data,
-or non-hermetic execution. A plain opinion request never silently escalates to those capabilities.
-See the [opinion profiles](../reference/commands.md#opinion-profiles) for the exact mechanics.
-
-## Accepted residual
-
-The Forge's threat model is single-user, local-only (see `rules/security.md`). Read-only + network +
-credentials still carries exposure: credit burn, prompt injection through inspected data, and network
-exfiltration. A multi-tenant deployment requires additional isolation.
+Claude Code uses `/opinion investigate <request>`; Codex uses `$opinion investigate <request>`.
+The dispatcher prefers the other engine and visibly falls back to a fresh same-engine process on a
+launch/capability failure. There is no permanent main-engine choice.

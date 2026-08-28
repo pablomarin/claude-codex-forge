@@ -53,18 +53,24 @@ inferred Gate-1 briefing edges are exempt.
 
 ## Investigation
 
-Use `--profile investigate --role investigation`. The child may execute and write only inside its
-disposable candidate. It may use WebSearch/WebFetch and only a declared, enforceably read-only query
-channel. Ambient hooks, plugins, instructions, skills, and write-capable MCP servers are absent.
-Only `replay_path=` records under `tests/reproductions/` or
-`.forge/local/investigation-artifacts/` are eligible for no-follow, size-bounded replay while the
-source fingerprint is still exact. Any undeclared child write blocks replay.
+Use `--profile investigate --role investigation`. This launches a fresh full-capability process of
+the selected engine in the real worktree. It inherits the normal user/project configuration,
+Forge state and memory, installed tools and skills, MCP servers, network, databases, and APIs.
+Forge does not add a safe-mode, tool allowlist, stripped home/config, disposable candidate, or
+replay boundary to this role. Claude uses safety-classified `auto` permission mode so an
+unattended cross-engine call can use normal tools without bypassing safety checks. Because
+non-interactive Codex otherwise defaults to read-only, Forge selects `danger-full-access` with
+native `on-request` approval and search enabled for this explicit role. The developer's existing
+authorization boundaries still apply. Because the investigator may edit the live worktree, its
+receipt is evidence of the investigation run, not immutable-candidate review certification.
 
 An investigation is a hypothesis. Run a separate `investigation-repro` invocation with only the
 claim, exact primary check, and an independent control. Treat it as verified/actionable only when
 the reproduction receipt says `REPRODUCED` and both primary and control behave as predicted.
 
-External mutation remains human-executed. Use `authorized-action prepare` only for an allowlisted
+Destructive or externally mutating actions still require the existing explicit human authority;
+the authorized action remains human-executed.
+Use `authorized-action prepare` only for an allowlisted
 fixed executable/argv adapter, show the deterministic command, and ask the developer to execute it.
 An agent-written approval or audit receipt grants no tool, runner, or credential. Record the
 developer-reported outcome as `UNVERIFIED` until independent reproduction succeeds. MCP-only

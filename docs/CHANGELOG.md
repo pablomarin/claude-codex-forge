@@ -29,8 +29,8 @@ checkout hook registration, and project trust determine each host's `RUNTIME_REA
 
 Review and verification evidence is now bound to an immutable staged candidate, worktree identity,
 workflow base, iteration, and result payload. Ordinary review is fresh and read-only; investigative
-opinion uses an explicitly authorized disposable capability profile and requires independent
-primary/control reproduction. Both hosts compose their native `/goal` over the same persistent
+opinion launches a fresh full-capability engine in the real worktree with normal host/project state,
+memory, tools, MCP, and network, then requires independent primary/control reproduction. Both hosts compose their native `/goal` over the same persistent
 objective, nonce, resume, evidence, budget, and human-only PR authorization contract.
 
 Review loops now default to one broad review, one repair, and one closure. P3 or speculative notes do

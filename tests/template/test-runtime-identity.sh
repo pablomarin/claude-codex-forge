@@ -44,7 +44,7 @@ for cwd in "$S/project" "$S/project/nested/deeper"; do
     assert_contains "$S/discovery.$(basename "$cwd")" 'duplicate_rule_count=0' "$(basename "$cwd") sees no duplicate rule policy"
 done
 
-start_test "deterministic dispatch qualification proves isolation, exact resume, and bounded replay"
+start_test "deterministic dispatch qualification proves isolated review, exact resume, and full-agent investigation"
 Q="$S/qualification"
 mkdir -p "$Q/bin" "$Q/project/.forge"
 (cd "$Q/project" && git init -q && git config user.email forge@example.invalid && git config user.name Forge && printf 'caller\n' > caller.txt && git add caller.txt && git commit -qm caller)
@@ -52,7 +52,7 @@ cat > "$Q/bin/forge-dispatch-engine" <<'EOF'
 #!/bin/sh
 case "${1:-}" in
   --version) echo "${FORGE_FAKE_ENGINE_NAME:-fake} 1.0"; exit 0 ;;
-  --help) echo '--safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable'; exit 0 ;;
+  --help) echo '-a --search --permission-mode --safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable'; exit 0 ;;
 esac
 case "${FORGE_DISPATCH_FIXTURE_ACTION:-}" in
   ephemeral)
@@ -70,8 +70,8 @@ case "${FORGE_DISPATCH_FIXTURE_ACTION:-}" in
     printf 'thread.resumed:%s\n' "$FORGE_DISPATCH_SESSION_ID"
     ;;
   investigate)
-    mkdir -p "$FORGE_DISPATCH_INVESTIGATION_ROOT/artifacts"
-    printf 'bounded-reproduction\n' > "$FORGE_DISPATCH_INVESTIGATION_ROOT/artifacts/qualification.txt"
+    mkdir -p "$(dirname "$FORGE_DISPATCH_INVESTIGATION_ARTIFACT")"
+    printf 'bounded-reproduction\n' > "$FORGE_DISPATCH_INVESTIGATION_ARTIFACT"
     ;;
   *) exit 76 ;;
 esac
@@ -88,7 +88,7 @@ for engine in claude codex; do
     assert_contains "$Q/$engine.json" '"status":"PASS"' "$engine deterministic dispatch fixture attests PASS"
     assert_contains "$Q/$engine.json" '"ephemeral":"PASS"' "$engine canary isolation is proven"
     assert_contains "$Q/$engine.json" '"council_resume":"PASS"' "$engine exact-id council resume is proven"
-    assert_contains "$Q/$engine.json" '"investigation_replay":"PASS"' "$engine bounded investigation replay is proven"
+    assert_contains "$Q/$engine.json" '"investigation_full_agent":"PASS"' "$engine full-agent worktree investigation is proven"
 done
 
 FORGE_FAKE_ENGINE_NAME=codex FORGE_FAKE_CANARY_LEAK=1 PATH="$Q/bin:/usr/bin:/bin" \
@@ -98,27 +98,22 @@ rc=$?
 [ "$rc" -ne 0 ] && pass "canary leak makes deterministic dispatch qualification fail" || fail "canary leak was accepted"
 assert_contains "$Q/codex-leak.json" '"status":"BLOCKED"' "canary leak produces a truthful BLOCKED receipt"
 
-start_test "fake drivers exercise the guarded live command, exact resume id, and replay boundary"
+start_test "fake drivers exercise isolated review, exact resume, and real-worktree investigation"
 LIVE="$S/live-dispatch"
 mkdir -p "$LIVE/bin"
 cat > "$LIVE/bin/forge-live-engine" <<'EOF'
 #!/bin/sh
 case "${1:-}" in
   --version) echo "${FORGE_FAKE_ENGINE_NAME:-fake} 9.9"; exit 0 ;;
-  --help) echo '--safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable'; exit 0 ;;
+  --help) echo '-a --search --permission-mode --safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable'; exit 0 ;;
 esac
-printf 'engine=%s home=%s user=%s logname=%s argv=%s\n' \
-  "${FORGE_FAKE_ENGINE_NAME:-fake}" "${HOME:-}" "${USER:-}" "${LOGNAME:-}" "$*" >> "$FORGE_FAKE_ARGV_LOG"
+printf 'engine=%s cwd=%s home=%s user=%s logname=%s argv=%s\n' \
+  "${FORGE_FAKE_ENGINE_NAME:-fake}" "$(pwd -P)" "${HOME:-}" "${USER:-}" "${LOGNAME:-}" "$*" >> "$FORGE_FAKE_ARGV_LOG"
 case "$*" in
   *FORGE_INVESTIGATION*)
-    case "${FORGE_FAKE_DISPATCH_FAILURE:-}" in
-      path-escape) ln -s "$FORGE_FAKE_ESCAPE_TARGET" "$FORGE_DISPATCH_INVESTIGATION_ROOT/artifacts" ;;
-      undeclared) mkdir -p "$FORGE_DISPATCH_INVESTIGATION_ROOT/artifacts"; printf 'bad\n' > "$FORGE_DISPATCH_INVESTIGATION_ROOT/not-declared.txt" ;;
-      no-clobber) mkdir -p "$FORGE_DISPATCH_INVESTIGATION_ROOT/artifacts" "$FORGE_DISPATCH_REPLAY_TARGET/artifacts"; printf 'bounded-reproduction\n' > "$FORGE_DISPATCH_INVESTIGATION_ROOT/artifacts/qualification.txt"; printf 'keep\n' > "$FORGE_DISPATCH_REPLAY_TARGET/artifacts/qualification.txt" ;;
-      *) mkdir -p "$FORGE_DISPATCH_INVESTIGATION_ROOT/artifacts"; printf 'bounded-reproduction\n' > "$FORGE_DISPATCH_INVESTIGATION_ROOT/artifacts/qualification.txt" ;;
-    esac
-    candidate_id="$FORGE_DISPATCH_CANDIDATE_ID"; [ "${FORGE_FAKE_DISPATCH_FAILURE:-}" = candidate ] && candidate_id=wrong-candidate
-    printf 'candidate_id=%s\ncanary_observed=false\n' "$candidate_id"
+    mkdir -p "$(dirname "$FORGE_DISPATCH_INVESTIGATION_ARTIFACT")"
+    printf 'bounded-reproduction\n' > "$FORGE_DISPATCH_INVESTIGATION_ARTIFACT"
+    printf 'worktree=%s\nartifact_written=true\n' "$(pwd -P)"
     exit 0 ;;
 esac
 case "${FORGE_FAKE_ENGINE_NAME:-}" in
@@ -154,21 +149,32 @@ for engine in claude codex; do
     assert_equals "$?" "0" "$engine guarded live driver exits zero"
     assert_contains "$LIVE/$engine.json" '"status":"PASS"' "$engine guarded live driver can reach PASS"
     assert_contains "$LIVE/$engine.argv" 'FORGE_COUNCIL_START' "$engine constructs a persistent first council turn"
-    assert_contains "$LIVE/$engine.argv" 'FORGE_INVESTIGATION' "$engine invokes the writable disposable investigation"
+    assert_contains "$LIVE/$engine.argv" 'FORGE_INVESTIGATION' "$engine invokes the full-agent worktree investigation"
+    grep 'FORGE_INVESTIGATION' "$LIVE/$engine.argv" > "$LIVE/$engine.investigation.argv"
+    assert_contains "$LIVE/$engine.investigation.argv" "cwd=$(cd "$Q/project" && pwd -P)" "$engine investigation runs in the real qualification worktree"
+    assert_not_contains "$LIVE/$engine.investigation.argv" '--safe-mode' "$engine investigation has no Forge safe-mode override"
+    assert_not_contains "$LIVE/$engine.investigation.argv" '--setting-sources' "$engine investigation keeps normal host config"
+    assert_not_contains "$LIVE/$engine.investigation.argv" '--ignore-user-config' "$engine investigation keeps normal user config"
+    assert_not_contains "$LIVE/$engine.investigation.argv" '--ignore-rules' "$engine investigation keeps normal project instructions"
+    assert_not_contains "$LIVE/$engine.investigation.argv" '--add-dir' "$engine investigation has no disposable candidate"
     if [ "$engine" = claude ]; then
+        assert_contains "$LIVE/$engine.investigation.argv" '--permission-mode auto' "Claude investigation uses safety-classified full-agent mode"
+        assert_not_contains "$LIVE/$engine.investigation.argv" '--sandbox' "Claude investigation has no Forge sandbox override"
         assert_contains "$LIVE/$engine.argv" "home=$HOME user=${USER:-} logname=${LOGNAME:-${USER:-}}" "Claude live qualifier preserves the authenticated operator identity"
         assert_contains "$LIVE/$engine.argv" 'Return exactly these four key=value lines and nothing else' "Claude council prompt requires the machine-bound response shape"
-        assert_contains "$LIVE/$engine.argv" 'return exactly these two key=value lines and nothing else' "Claude investigation prompt requires the machine-bound response shape"
+        assert_contains "$LIVE/$engine.argv" 'Return exactly these two key=value lines and nothing else' "Claude investigation prompt requires the machine-bound response shape"
         assert_contains "$LIVE/$engine.argv" '--safe-mode --no-session-persistence --strict-mcp-config' "Claude ephemeral turn repeats isolated flags"
         assert_contains "$LIVE/$engine.argv" '--resume 11111111-1111-4111-8111-' "Claude resumes the exact declared session"
         assert_not_contains "$LIVE/$engine.argv" '--resume 11111111-1111-4111-8111-.*--no-session-persistence' "Claude resume remains persistent"
     else
-        assert_contains "$LIVE/$engine.argv" 'exec resume --disable hooks' "Codex resumes through exec resume with repeated disables"
+        assert_contains "$LIVE/$engine.investigation.argv" '-a on-request --search exec' "Codex full-agent investigation keeps native on-request approval and search"
+        assert_contains "$LIVE/$engine.investigation.argv" '--sandbox danger-full-access' "Codex full-agent investigation has unrestricted host access"
+        assert_contains "$LIVE/$engine.argv" '-a never --sandbox read-only exec resume --disable hooks' "Codex resumes with sandbox at the supported global boundary"
         assert_contains "$LIVE/$engine.argv" '--ignore-user-config --ignore-rules' "Codex repeats discovery isolation"
     fi
 done
 
-for failure in cross-seat canary candidate undeclared path-escape no-clobber; do
+for failure in cross-seat canary; do
     : > "$LIVE/fail-$failure.argv"
     extra=""
     [ "$failure" = canary ] && extra=FORGE_FAKE_CANARY_RESULT=true

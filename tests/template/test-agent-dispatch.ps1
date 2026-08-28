@@ -12,6 +12,7 @@ function Pass([string]$Message) { $script:Passed++; Write-Host "  PASS $Message"
 function Fail([string]$Message) { $script:Failed++; [Console]::Error.WriteLine("  FAIL $Message") }
 function Assert-Equal($Actual, $Expected, [string]$Message) { if ([string]$Actual -ceq [string]$Expected) { Pass $Message } else { Fail "$Message expected=$Expected actual=$Actual" } }
 function Assert-Contains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -like "*$Needle*") { Pass $Message } else { Fail "$Message missing=$Needle" } }
+function Assert-NotContains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -notlike "*$Needle*") { Pass $Message } else { Fail "$Message unexpected=$Needle" } }
 function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; return $line.Substring($Key.Length + 1) }
 function Get-LatestReceipt([string]$Repository) { return (Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1).FullName }
 function New-Repository([string]$Name) {
@@ -68,7 +69,7 @@ public static class ForgeFakeEngine {
   static void Emit(string path, string text) { if (String.IsNullOrEmpty(path)) Console.Write(text); else File.WriteAllText(path, text); }
   static string Qualified(string engine,string body) {
     body += "forge_canary_hash="+E("FORGE_DISPATCH_CANARY_HASH","MISSING")+"\nforge_config_hash="+E("FORGE_DISPATCH_CONFIG_HASH","MISSING")+"\nforge_qualification_revision="+E("FORGE_DISPATCH_QUALIFICATION_REVISION","MISSING")+"\n";
-    if(engine=="claude") return "{\"result\":\""+body.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r","").Replace("\n","\\n")+"\",\"modelUsage\":{\"opus\":{}},\"provider\":\"anthropic\"}\n";
+    if(engine=="claude") return "{\"result\":\""+body.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r","").Replace("\n","\\n")+"\",\"modelUsage\":{\"claude-haiku-4-5\":{\"canonicalModel\":\"claude-haiku-4-5\",\"provider\":\"firstParty\"},\"claude-opus-5\":{\"canonicalModel\":\"claude-opus-5\",\"provider\":\"firstParty\"}}}\n";
     return body;
   }
   static int RunReproduction() {
@@ -80,7 +81,7 @@ public static class ForgeFakeEngine {
     string engine=Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).ToLowerInvariant();
     string behavior=E("FAKE_"+engine.ToUpperInvariant()+"_BEHAVIOR","clean"); string joined=String.Join(" ",args); string output="";
     for(int i=0;i+1<args.Length;i++) if(args[i]=="--output-last-message") output=args[i+1];
-    string log=E("FAKE_"+engine.ToUpperInvariant()+"_LOG"); if(log!="") File.AppendAllText(log,"home="+E("HOME")+" userprofile="+E("USERPROFILE")+" username="+E("USERNAME")+" argv="+joined+Environment.NewLine);
+    string log=E("FAKE_"+engine.ToUpperInvariant()+"_LOG"); if(log!="") File.AppendAllText(log,"cwd="+Directory.GetCurrentDirectory()+" home="+E("HOME")+" userprofile="+E("USERPROFILE")+" username="+E("USERNAME")+" argv="+joined+Environment.NewLine);
     string argv=E("FAKE_"+engine.ToUpperInvariant()+"_ARGV_LOG"); if(argv!="") File.WriteAllLines(argv,args.Select(x=>x==""?"<EMPTY>":x));
     if(engine=="codex" && joined.Contains("--json") && !joined.Contains("exec resume")) Console.WriteLine("{\"type\":\"thread.started\",\"thread_id\":\""+E("FORGE_DISPATCH_SESSION_ID")+"\"}");
     if(behavior=="timeout") { var p=Process.Start(new ProcessStartInfo("cmd.exe","/d /c ping -n 30 127.0.0.1 >nul"){UseShellExecute=false,CreateNoWindow=true}); var pid=E("FAKE_CHILD_PID_FILE"); if(pid!="") File.WriteAllText(pid,p.Id.ToString()); Thread.Sleep(30000); return 0; }
@@ -88,12 +89,15 @@ public static class ForgeFakeEngine {
     if(behavior=="swap-output") { var paths=File.ReadAllLines(E("FAKE_CHILD_PID_FILE")); File.Delete(paths[0]); if(!CreateHardLink(paths[0],paths[1],IntPtr.Zero)) return 71; }
     if(behavior=="exit") return 23;
     if(behavior=="investigate") { var target=Path.Combine(E("FORGE_CANDIDATE_ROOT"),"tests","reproductions","claimed.txt"); Directory.CreateDirectory(Path.GetDirectoryName(target)); File.WriteAllText(target,"bounded reproduction\n"); Emit(output,Qualified(engine,"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nreplay_path=tests/reproductions/claimed.txt\n")); return 0; }
+    if(behavior=="full-investigation") { var root=Path.GetFullPath(E("FAKE_REAL_ROOT")); if(!String.Equals(Path.GetFullPath(Directory.GetCurrentDirectory()),root,StringComparison.OrdinalIgnoreCase)) return 71; if(E("FORGE_FULL_AGENT_PROBE")!="visible") return 72; if(!File.ReadAllText(Path.Combine(root,".forge","memory","shared.md")).Contains("shared durable memory")) return 73; if(!File.ReadAllText(Path.Combine(root,".forge","local","memory","session.md")).Contains("shared local memory")) return 74; var target=Path.Combine(root,".forge","local","investigation-artifacts",engine+".txt"); Directory.CreateDirectory(Path.GetDirectoryName(target)); File.WriteAllText(target,engine+" full agent\n"); Emit(output,Qualified(engine,"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n")); return 0; }
     if(behavior=="repro" || behavior=="repro-boundary") { if(behavior=="repro-boundary" && !(joined.Contains("--sandbox workspace-write") || joined.Contains("--safe-mode"))) return 69; var repro=RunReproduction(); if(repro!=0) return repro; Emit(output,Qualified(engine,"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n")); return 0; }
     string text="schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n";
     if(behavior=="findings") text="schema_version=1\nverdict=FINDINGS\nmax_severity=P1\nblocked_class=none\nfinding=F-1|P1|reachable\n";
     else if(behavior=="malformed") text="prose only\n";
     else if(behavior=="empty") text="";
     else if(behavior=="blocked-artifact") text="schema_version=1\nverdict=BLOCKED\nmax_severity=NONE\nblocked_class=artifact\n";
+    else if(behavior=="duplicate-canary") text="schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nforge_canary_hash="+E("FORGE_DISPATCH_CANARY_HASH")+"\nforge_config_hash="+E("FORGE_DISPATCH_CONFIG_HASH")+"\nforge_qualification_revision="+E("FORGE_DISPATCH_QUALIFICATION_REVISION")+"\n";
+    else if(behavior=="conflicting-canary") text="schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nforge_canary_hash=WRONG\n";
     if(behavior!="malformed" && behavior!="empty") text=Qualified(engine,text);
     Emit(output,text); return 0;
   }
@@ -183,10 +187,29 @@ public static class ForgeFakeEngine {
         Assert-True (([regex]::Matches($source, 'Assert-NoFollowSessionMetadata \$SessionMeta')).Count -ge 3) 'session metadata is checked before read and update when symlink creation is unavailable'
     }
 
-    $repo = New-Repository 'investigation replay'; $env:FAKE_CODEX_BEHAVIOR = 'investigate'
-    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'investigation') 0 'investigation candidate writes replay safely'
-    Assert-Contains (Join-Path $repo 'tests/reproductions/claimed.txt') 'bounded reproduction' 'declared reproduction reaches real worktree'
-    Assert-Equal (Get-ReceiptValue $repo 'investigation_replay') 'REPLAYED' 'replay receipt is explicit'
+    Write-Host 'PowerShell investigation uses a full agent in the real worktree'
+    foreach ($selected in @('claude','codex')) {
+        $repo = New-Repository "full investigation $selected"
+        New-Item -ItemType Directory -Path (Join-Path $repo '.forge/memory'), (Join-Path $repo '.forge/local/memory') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $repo '.forge/memory/shared.md'), "shared durable memory`n")
+        [IO.File]::WriteAllText((Join-Path $repo '.forge/local/memory/session.md'), "shared local memory`n")
+        $log = Join-Path $repo ".forge/local/reviews/$selected-full-agent.log"
+        $env:FAKE_REAL_ROOT = $repo; $env:FORGE_FULL_AGENT_PROBE = 'visible'; [Environment]::SetEnvironmentVariable("FAKE_$($selected.ToUpperInvariant())_BEHAVIOR", 'full-investigation'); [Environment]::SetEnvironmentVariable("FAKE_$($selected.ToUpperInvariant())_LOG", $log)
+        Assert-Equal (Invoke-Dispatch $repo $(if($selected -eq 'claude'){'codex'}else{'claude'}) 'sid' $selected 'investigation' 'none') 0 "$selected investigation runs in the real worktree"
+        Assert-Contains (Join-Path $repo ".forge/local/investigation-artifacts/$selected.txt") "$selected full agent" "$selected investigation writes shared local state"
+        Assert-Contains $log "cwd=$repo" "$selected investigation sees the real worktree"
+        foreach ($flag in @('--safe-mode','--setting-sources','--ignore-user-config','--ignore-rules','--add-dir')) { Assert-NotContains $log $flag "$selected investigation omits Forge restriction $flag" }
+        if ($selected -eq 'codex') {
+            Assert-Contains $log '-a on-request --search exec' 'Codex investigation preserves native on-request approval with web search'
+            Assert-Contains $log '--sandbox danger-full-access' 'Codex investigation selects the full-capability sandbox mode'
+        } else {
+            Assert-Contains $log '--permission-mode auto' 'Claude investigation uses safety-classified full-agent mode'
+            Assert-NotContains $log '--sandbox' 'Claude investigation has no Forge sandbox override'
+        }
+        Assert-Equal (Get-ReceiptValue $repo 'investigation_mode') 'full-agent-worktree' "$selected receipt records full-agent mode"
+        [Environment]::SetEnvironmentVariable("FAKE_$($selected.ToUpperInvariant())_BEHAVIOR", $null); [Environment]::SetEnvironmentVariable("FAKE_$($selected.ToUpperInvariant())_LOG", $null)
+    }
+    Remove-Item Env:FAKE_REAL_ROOT, Env:FORGE_FULL_AGENT_PROBE -ErrorAction SilentlyContinue
 
     Write-Host 'PowerShell qualified independent reproduction boundary'
     $repo = New-Repository 'reproduction boundary'; $auth = Join-Path $repo 'protected-auth.json'; [IO.File]::WriteAllText($auth, "protected-auth`n"); $outside = Join-Path $temporary 'reproduction-external'

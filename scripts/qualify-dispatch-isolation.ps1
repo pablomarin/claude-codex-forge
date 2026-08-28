@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
 if (-not (Test-Path (Join-Path $ProjectRoot ".forge"))) { throw "BLOCKED: materialized project is required" }
+$ProjectRoot = (Resolve-Path $ProjectRoot).Path
 
 function Get-ForgeSha256Bytes {
     param([byte[]]$Bytes)
@@ -54,11 +55,9 @@ function Invoke-ForgeDispatchFixture {
     $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-dispatch-fixture-" + [Guid]::NewGuid().ToString("N"))
     try {
         $candidate = Join-Path $scratch "candidate"
-        $investigation = Join-Path $scratch "investigation"
-        $replay = Join-Path $scratch "replay"
+        $investigation = Join-Path $scratch "investigation-worktree"
         New-Item -ItemType Directory -Path (Join-Path $candidate ".agents\skills\canary") -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $scratch "sessions") -Force | Out-Null
-        New-Item -ItemType Directory -Path $replay -Force | Out-Null
         & git -C $candidate init -q
         & git -C $candidate config user.email forge@example.invalid
         & git -C $candidate config user.name Forge
@@ -94,21 +93,16 @@ function Invoke-ForgeDispatchFixture {
         $script:councilResume = "PASS"
 
         Copy-Item -LiteralPath $candidate -Destination $investigation -Recurse
-        $run = Invoke-ForgeFixtureEngine $Binary "investigate" @{ FORGE_DISPATCH_INVESTIGATION_ROOT=$investigation } @("--fixture-investigate")
+        $artifact = Join-Path $investigation ".forge\local\investigation-artifacts\qualification.txt"
+        $run = Invoke-ForgeFixtureEngine $Binary "investigate" @{ FORGE_DISPATCH_INVESTIGATION_ROOT=$investigation; FORGE_DISPATCH_INVESTIGATION_ARTIFACT=$artifact } @("--fixture-investigate")
         if ($run.Code -ne 0) { throw "deterministic investigation fixture failed" }
         if ((Get-ForgeCandidateIdentity $candidate) -cne $before) { throw "frozen candidate identity changed during investigation" }
-        $artifact = Join-Path $investigation "artifacts\qualification.txt"
         if (-not (Test-Path $artifact -PathType Leaf)) { throw "investigation did not produce its declared artifact" }
         $item = Get-Item -LiteralPath $artifact -Force
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.Length -gt 65536) { throw "investigation artifact is linked or oversized" }
-        $artifactRoot = Join-Path $investigation "artifacts"
-        $unexpected = @(Get-ChildItem -LiteralPath $artifactRoot -Recurse -File -Force | Where-Object { $_.FullName -cne $artifact })
-        if ($unexpected.Count) { throw "investigation produced undeclared output" }
-        New-Item -ItemType Directory -Path (Join-Path $replay "artifacts") -Force | Out-Null
-        Copy-Item -LiteralPath $artifact -Destination (Join-Path $replay "artifacts\qualification.txt")
-        if (([IO.File]::ReadAllText((Join-Path $replay "artifacts\qualification.txt"))).Trim() -cne "bounded-reproduction") { throw "bounded replay content mismatch" }
-        $script:investigationReplay = "PASS"
-        return "deterministic fake-engine isolation, exact-id resume, and bounded replay passed"
+        if (([IO.File]::ReadAllText($artifact)).Trim() -cne "bounded-reproduction") { throw "full-agent artifact content mismatch" }
+        $script:investigationFullAgent = "PASS"
+        return "deterministic isolated review, exact-id resume, and full-agent worktree investigation passed"
     } finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
@@ -144,8 +138,8 @@ function Test-ForgeBoundResponse([string]$Text, [string]$Session, [string]$Seat,
 function Invoke-ForgeGuardedDispatch([string]$Binary) {
     $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-dispatch-live-" + [Guid]::NewGuid().ToString("N"))
     try {
-        $primary = Join-Path $scratch "primary"; $candidate = Join-Path $scratch "candidate"; $investigation = Join-Path $scratch "investigation"; $replay = Join-Path $scratch "replay"
-        foreach ($dir in @($primary,$candidate,$replay,(Join-Path $scratch "codex-home"))) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $primary = Join-Path $scratch "primary"; $candidate = Join-Path $scratch "candidate"; $investigation = $ProjectRoot
+        foreach ($dir in @($primary,$candidate,(Join-Path $scratch "codex-home"))) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
         & git -C $primary init -q; New-ForgeLiveCandidate $candidate
         [IO.File]::WriteAllText((Join-Path $primary "CLAUDE.md"), "FORGE_CANARY_USER_INSTRUCTION`n", $Utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $scratch "codex-home\AGENTS.md"), "FORGE_CANARY_USER_INSTRUCTION`n", $Utf8NoBom)
@@ -180,31 +174,28 @@ function Invoke-ForgeGuardedDispatch([string]$Binary) {
             if (-not $thread -or ($TestLiveDriver -and $thread -cne $session)) { throw "Codex council first turn emitted no exact thread.started id" }
             if (-not $TestLiveDriver) { $session = $thread; $vars["FORGE_DISPATCH_SESSION_ID"] = $session }
             if ($run.Code -ne 0 -or -not (Test-ForgeBoundResponse $run.Text $session $seat $config)) { throw "Codex council first turn identity mismatch" }
-            $resumeArgs = @("-a","never","exec","resume","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","--ignore-user-config","--ignore-rules","--sandbox","read-only","--json","--output-schema",$schema,$session,"FORGE_COUNCIL_RESUME session_id=$session seat_hash=$seat config_hash=$config canary_observed=false")
+            $resumeArgs = @("-a","never","--sandbox","read-only","exec","resume","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","--ignore-user-config","--ignore-rules","--json","--output-schema",$schema,$session,"FORGE_COUNCIL_RESUME session_id=$session seat_hash=$seat config_hash=$config canary_observed=false")
         }
         $run = Invoke-ForgeLiveEngine $Binary $resumeArgs $vars $primary
         if ($run.Code -ne 0 -or -not (Test-ForgeBoundResponse $run.Text $session $seat $config)) { throw "council resume rejected cross-seat, stale config, or canary evidence" }
         $script:councilResume = "PASS"
-        Copy-Item -LiteralPath $candidate -Destination $investigation -Recurse
-        $investigationVars = $vars.Clone(); $investigationVars["FORGE_DISPATCH_INVESTIGATION_ROOT"]=$investigation; $investigationVars["FORGE_DISPATCH_REPLAY_TARGET"]=$replay; $investigationVars["FORGE_DISPATCH_CANDIDATE_ID"]=$before
-        if ($Engine -eq "claude") { $investigationArgs = @("-p","--safe-mode","--no-session-persistence","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","Read,Write,Edit,Bash","--permission-mode","dontAsk","--output-format","json","--system-prompt","FORGE_INVESTIGATION candidate_id=$before. Write only artifacts/qualification.txt, text <=65536 bytes. Then return exactly these two key=value lines and nothing else: candidate_id=$before, canary_observed=false.","FORGE_INVESTIGATION") }
-        else { $investigationArgs = @("-a","never","exec","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","-C",$primary,"--add-dir",$investigation,"--ignore-user-config","--ignore-rules","--ephemeral","--sandbox","workspace-write","--json","FORGE_INVESTIGATION candidate_id=$before write only artifacts/qualification.txt and respond candidate_id=$before canary_observed=false") }
+        $artifact = Join-Path $investigation ".forge\local\investigation-artifacts\runtime-$Engine-$PID.txt"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $artifact) -Force | Out-Null
+        if (Test-Path -LiteralPath $artifact) { throw "investigation qualification artifact already exists" }
+        $investigationVars = @{ FORGE_DISPATCH_INVESTIGATION_ROOT=$investigation; FORGE_DISPATCH_INVESTIGATION_ARTIFACT=$artifact }
+        if ($Engine -eq "claude") { $investigationArgs = @("-p","--permission-mode","auto","--no-session-persistence","--model","opus","--effort","max","--output-format","json","FORGE_INVESTIGATION. Work as a normal full-capability project agent. Write exactly bounded-reproduction plus a newline to $artifact. Return exactly these two key=value lines and nothing else: worktree=$investigation and artifact_written=true.") }
+        else { $investigationArgs = @("-a","on-request","--search","exec","-C",$investigation,"--sandbox","danger-full-access","--ephemeral","-m","gpt-5.6-sol","-c","model_reasoning_effort=xhigh","FORGE_INVESTIGATION. Work as a normal full-capability project agent. Write exactly bounded-reproduction plus a newline to $artifact. Return exactly: worktree=$investigation artifact_written=true.") }
         $run = Invoke-ForgeLiveEngine $Binary $investigationArgs $investigationVars $investigation
-        if ($run.Code -ne 0 -or (Get-ForgeCandidateIdentity $candidate) -cne $before) { throw "frozen candidate identity changed during investigation" }
-        if ($run.Text -notmatch [regex]::Escape("candidate_id=$before") -or $run.Text -notmatch 'canary_observed["= :]+false' -or $run.Text -match 'FORGE_CANARY_') { throw "investigation response did not bind the frozen candidate or leaked a canary" }
-        $artifactRoot = Join-Path $investigation "artifacts"; $artifact = Join-Path $artifactRoot "qualification.txt"
-        if (-not (Test-Path $artifact -PathType Leaf) -or ((Get-Item $artifactRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or ((Get-Item $artifact -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or (Get-Item $artifact).Length -gt 65536) { throw "investigation path escaped, linked, oversized, or omitted its declared artifact" }
-        $moved = Join-Path $scratch "qualification.txt"; Move-Item $artifact $moved; Remove-Item $artifactRoot
-        if ((Get-ForgeCandidateIdentity $investigation) -cne $before) { throw "investigation modified undeclared candidate paths" }
-        $replayArtifacts = Join-Path $replay "artifacts"; if (Test-Path $replayArtifacts) { throw "replay refused to clobber an existing destination" }
-        New-Item -ItemType Directory -Path $replayArtifacts | Out-Null; Copy-Item $moved (Join-Path $replayArtifacts "qualification.txt")
-        if (([IO.File]::ReadAllText((Join-Path $replayArtifacts "qualification.txt"))).Trim() -cne "bounded-reproduction") { throw "declared replay content mismatch" }
-        $script:investigationReplay = "PASS"
-        return "authenticated guarded isolation, exact-id resume, and frozen-candidate replay passed"
+        if ($run.Code -ne 0 -or $run.Text -notmatch [regex]::Escape("worktree=$investigation") -or $run.Text -notmatch 'artifact_written["= :]+true') { throw "investigation response did not bind the real worktree" }
+        if (-not (Test-Path $artifact -PathType Leaf) -or ((Get-Item $artifact -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or (Get-Item $artifact).Length -gt 65536) { throw "full-agent investigation omitted its worktree artifact" }
+        if (([IO.File]::ReadAllText($artifact)).Trim() -cne "bounded-reproduction") { throw "full-agent investigation artifact content mismatch" }
+        Remove-Item -LiteralPath $artifact -Force
+        $script:investigationFullAgent = "PASS"
+        return "authenticated isolated review, exact-id resume, and full-agent worktree investigation passed"
     } finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-$version = ""; $status = "BLOCKED"; $ephemeral = "BLOCKED"; $councilResume = "BLOCKED"; $investigationReplay = "BLOCKED"; $reason = "binary unavailable"
+$version = ""; $status = "BLOCKED"; $ephemeral = "BLOCKED"; $councilResume = "BLOCKED"; $investigationFullAgent = "BLOCKED"; $reason = "binary unavailable"
 $commandPath = ""
 if ($EnginePath) { if (Test-Path $EnginePath -PathType Leaf) { $commandPath = (Resolve-Path $EnginePath).Path } }
 else { $command = Get-Command $Engine -ErrorAction SilentlyContinue; if ($command) { $commandPath = $command.Source } }
@@ -239,7 +230,7 @@ if ($FixtureMode) {
     }
 }
 
-$receipt = [ordered]@{ schema="forge.dispatch-isolation.v1"; engine=$Engine; version="$version"; status=$status; ephemeral=$ephemeral; council_resume=$councilResume; investigation_replay=$investigationReplay; reason=$reason }
+$receipt = [ordered]@{ schema="forge.dispatch-isolation.v1"; engine=$Engine; version="$version"; status=$status; ephemeral=$ephemeral; council_resume=$councilResume; investigation_full_agent=$investigationFullAgent; reason=$reason }
 $parent = Split-Path -Parent $Output
 if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
 $json = $receipt | ConvertTo-Json -Compress

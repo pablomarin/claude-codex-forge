@@ -267,7 +267,10 @@ And records the requested engine, actual engine, fallback reason, and reviewed a
 ```gherkin
 Given an investigation requires live data and a worktree evidence artifact
 When Forge dispatches an investigative reviewer
-Then the reviewer may use the authorized network, query, execution, and worktree-write capabilities
+Then Forge launches a fresh full-capability engine in the real worktree with normal host/project configuration
+And the reviewer may use the network, query, execution, MCP, and worktree-write capabilities normally available to that host
+And unattended Claude uses native safety-classified auto mode rather than bypassing permission checks
+And non-interactive Codex uses full host access with native on-request approval rather than its read-only default
 And any external mutation occurs only after the developer explicitly authorizes a bounded target and operation
 ```
 
@@ -275,6 +278,8 @@ And any external mutation occurs only after the developer explicitly authorizes 
 
 - [x] Investigative capability is independent of reviewer-engine selection.
 - [x] Either engine can serve as investigative reviewer or same-engine fallback.
+- [x] Investigation shares the real worktree, canonical state, durable/local memory, normal host
+  config, skills, MCP, and credentials without a Forge-specific sandbox or tool allowlist.
 - [x] Internet access, live read queries, project execution, and worktree evidence writes
   can be granted without misclassifying the reviewer as non-independent.
 - [x] External mutations require explicit user authorization naming a bounded target and

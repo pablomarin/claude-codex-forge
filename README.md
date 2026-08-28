@@ -41,8 +41,8 @@ required capability.
 ## What you get
 
 - **Dual-engine review** — Claude Code uses `/opinion`; Codex uses `$opinion` for a fresh second
-  opinion. Claude uses `/opinion investigate`; Codex uses `$opinion investigate` for disposable,
-  explicitly authorized investigation when source alone is insufficient.
+  opinion. Claude uses `/opinion investigate`; Codex uses `$opinion investigate` for a fresh
+  full-capability agent in the real worktree when source alone is insufficient.
   `/council` adds multi-perspective decision analysis, with automatic whole-topology fallback when
   only one engine is available.
 - **Autonomous goal mode** — write a sharp PRD, then paste one `/goal` command and the agent drives the entire feature — plan → review → implement → review → verify → E2E → PR — on its own, escalating hard calls to the Council instead of stopping to ask. Optional and PRD-gated; you watch and steer any time by typing in the prompt, and PR creation is the one gate that always waits for your yes. See [explainer](docs/explanation/autonomous-goal.md).
