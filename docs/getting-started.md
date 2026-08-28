@@ -45,7 +45,9 @@ git clone https://github.com/pablomarin/claude-codex-forge.git $HOME\claude-code
 & $HOME\claude-codex-forge\setup.ps1 -Global
 ```
 
-Global and project scopes are separate. A project refresh never rewrites the global harness.
+Global and project scopes are separate. Installing global first is the clearest path, but a project
+install may come first; a later `--global` / `-Global` recognizes the advisory machine stamp and
+materializes the global harness normally. A project refresh never rewrites global policy.
 
 ## 3. Install a fresh project
 
@@ -76,7 +78,10 @@ the reason and tries a fresh same-engine reviewer. Council fallback reruns the w
 current host so a discarded mixed attempt is never certified.
 
 For investigation, Claude Code uses `/opinion investigate`; Codex uses `$opinion investigate`.
-Expanded network/query/write capability is explicit and confined to the disposable investigator.
+Forge starts a fresh full agent in the real worktree with the selected host's normal configuration,
+state, memory, tools, MCP, network, database/API access, and write capability. Investigation adds no
+special Forge sandbox or allowlist; destructive and protected external mutations still use the
+same host prompts and explicit human authority as ordinary engineering work.
 
 ## 5. Verify installation and trust
 

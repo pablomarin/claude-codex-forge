@@ -2,10 +2,13 @@
 
 Files you should review and edit after running the setup script.
 
-## 1. Edit CLAUDE.md
+## 1. Add project-specific instructions
 
-Keep user-owned root instructions concise. Canonical workflow rules, coding standards, and principles
-live in `.forge/rules/`; bounded `CLAUDE.md` and `AGENTS.md` adapters point both hosts at Forge.
+Keep user-owned root instructions concise. Canonical workflow rules, coding standards, and
+principles live in `.forge/instructions.md` and `.forge/rules/`; bounded `CLAUDE.md` and `AGENTS.md`
+adapters point both hosts at Forge. Put shared project facts in a tracked project document or mirror
+the small user-owned overview outside the Forge markers in both root files. Setup never synchronizes
+or overwrites that user text.
 
 **Why this matters:** When you run the authoritative `setup.sh -F`, user text outside bounded Forge
 marker blocks is preserved while canonical `.forge/` content and generated host adapters are
@@ -65,42 +68,43 @@ You don't normally edit this file by hand — `/new-feature`, `/fix-bug`, and `/
 (top of the queue)
 ```
 
-Project goal lives in `CLAUDE.md` under the `## Project Overview` → `### Goal` subsection. Architecture decisions live as per-file ADRs in `docs/adr/NNNN-*.md` (one file per decision; `docs/adr/template.md` is the starter).
+Project goals and facts live in user-owned project documentation, not inside the managed Forge
+block. Architecture decisions live as per-file ADRs in `docs/adr/NNNN-*.md` (one file per decision;
+`docs/adr/template.md` is the starter).
 
-**When a `/forge-goal`-driven workflow is active**, additional sections appear in `.forge/local/state.md`:
+**When a native `/goal` run composed with Forge is active**, additional sections appear in `.forge/local/state.md`:
 
 - `## /goal session` — table with the autonomous-loop session nonce, originating workflow command, and issued-at timestamp. Absent when no loop is active; written by the workflow command checkpoint and REPLACED (not appended) on each new kickoff.
 - `## PR authorization` — single authorization line written when the user authorizes PR creation via the `AskUserQuestion` modal at the PR-create gate. Contains the timestamp, session nonce, and HEAD SHA at the moment of authorization. REPLACED (not appended) on each re-authorization.
-- `### Checklist` rows for reviewer iterations include `head=`<sha>`` so the evidence script can verify both reviewers cleared at the same iteration AND at the same HEAD.
+- `### Checklist` rows for reviewer iterations include `head=<sha>` so the evidence script can verify both reviewers cleared at the same iteration and the same HEAD.
 
 **REPLACE semantics are critical:** both `/goal session` and `## PR authorization` are managed as singletons. The workflow commands always overwrite existing content, never append. Appending would cause Layer 1's parsers (which use `head -1` on matching lines) to pick up stale data from previous sessions.
 
 ## 3. Release PR Skill (All Tech Stacks)
 
-The `/release` skill creates structured release PRs between environment branches:
+The release skill creates structured release PRs between environment branches. Claude Code uses
+`/release`; Codex uses `$release`:
 
 ```
 /release test    — Create PR from dev → test
 /release prod    — Create PR from test → prod
+$release test    — Same canonical workflow from Codex
+$release prod
 ```
 
 It fetches the latest branch state, reads all commits between the two branches, categorizes changes (Features, Fixes, Improvements, Chores), and creates a well-formatted PR with a dated title (`TEST 03/16` or `PROD 03/16`). Requires `gh` CLI and `dev`/`test`/`prod` branches.
 
 ## 4. Frontend Design Quality (TypeScript/Fullstack)
 
-For TypeScript and fullstack projects, the setup installs:
+Forge v6 installs the canonical UI skill and rules for every declared profile; `-t` does not prune
+the v6 rule/skill inventory. For UI work:
 
-- **`frontend-design` plugin** (built-in) — Auto-triggers creative direction for UI work
-- **`/ui-design` skill** (shipped with template) — Three-mode design router that auto-selects **Marketing/Expressive** (5 visual systems, animations, conversion patterns), **Product UI** (dashboards, tables, app shells, dense layouts), or **Trust-First** (healthcare/finance/legal — calm aesthetic, AAA accessibility, data masking). Includes 10 reference files: animation techniques, typography with 12 curated font pairings, 12 industry color palettes, UX anti-patterns, landing page conversion patterns, product UI patterns, trust-first patterns, 21st.dev component search via Playwright, platform size reference, and a mode-aware polish checklist. Auto-triggers when building UI, or invoke manually
-- **`rules/frontend-design.md`** — Slim defensive baseline: accessibility, responsive, semantic HTML
+- **Claude Code:** `/ui-design`
+- **Codex:** `$ui-design`
+- **Canonical source:** `.forge/skills/ui-design/` and `.forge/rules/frontend-design.md`
 
-**Optional plugin enhancements** (audited — see `rules/skill-audit.md` for the checklist):
-
-| Plugin                            | What it adds                                                                                                                       | Install                                                            |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `freshtechbro/claudedesignskills` | Three.js, GSAP, Framer Motion, Lottie, Babylon.js deep dives (PASS)                                                                | `/plugin marketplace add freshtechbro/claudedesignskills`          |
-| `dgreenheck/webgpu-claude-skill`  | WebGPU + Three.js TSL shaders, particle systems (APPROVED)                                                                         | `/skill install webgpu-threejs-tsl@dgreenheck/webgpu-claude-skill` |
-| `ibelick/ui-skills`               | Polish layer: baseline-ui, motion-performance, accessibility (CONDITIONAL — copy SKILL.md files manually, skip curl\|sh installer) | Clone repo, copy `skills/*/SKILL.md` to `.claude/skills/`          |
+Host-specific third-party plugins are optional and are not part of the Forge contract. Audit any
+one you add against `.forge/rules/skill-audit.md` and keep its policy out of the canonical harness.
 
 ## 5. Optional MCP Add-ons
 
@@ -108,9 +112,11 @@ The default `.mcp.json` includes Playwright and Context7. For web projects, you 
 
 **AI Image Generation** (shipped with template — no MCP server needed):
 
-The `/generate-image` skill lets Claude generate images via Google's Gemini API directly. It checks the [official docs](https://ai.google.dev/gemini-api/docs/image-generation) for current model IDs before each generation, so it won't break when Google updates models.
+Claude Code uses `/generate-image`; Codex uses `$generate-image`. Both load the same canonical skill,
+which calls Google's Gemini API directly and checks the official documentation for current model
+identifiers before generation.
 
-**Setup** (one time only — the only environment variable this template needs):
+**Setup** (one time only; needed only for the shipped image-generation skill):
 
 ```bash
 # 1. Get a free API key (no credit card required):
@@ -124,60 +130,39 @@ source ~/.zshrc
 [System.Environment]::SetEnvironmentVariable("GEMINI_API_KEY", "your-key-here", "User")
 ```
 
-You do this once and never think about it again. Claude reads the key from your environment automatically whenever it generates images. Without this key, the `/generate-image` skill will prompt you to set it up. Everything else in the template works without any API keys.
+The selected host reads the key from its environment when the skill runs. Without it, the skill asks
+you to configure it. Everything else in Forge works without a Gemini key.
 
-**Stock Photography MCP** (optional, free API keys):
+The canonical UI skill's `references/media-assets.md` provides prompting practices and workflow
+patterns for generated and stock images.
 
-| MCP Server             | What it does                                     | API Key                                                           | Install                                                                                             |
-| ---------------------- | ------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| **Pexels MCP**         | Stock photos AND video search                    | [pexels.com/api](https://www.pexels.com/api/) (free)              | See [garylab/pexels-mcp-server](https://github.com/garylab/pexels-mcp-server)                       |
-| **Unsplash Smart MCP** | Context-aware stock photos with auto-attribution | [unsplash.com/developers](https://unsplash.com/developers) (free) | See [drumnation/unsplash-smart-mcp-server](https://github.com/drumnation/unsplash-smart-mcp-server) |
-
-The `/ui-design` skill's `references/media-assets.md` provides prompting best practices and workflow patterns for both generated and stock images.
-
-**Development Tools:**
-
-| MCP Server           | What it does                                    | Install command                                                 |
-| -------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| **Vercel**           | Deploy previews, manage projects, DNS, env vars | `claude mcp add --transport http vercel https://mcp.vercel.com` |
-| **Next.js DevTools** | Live runtime/build/type error diagnostics       | `npx next-devtools-mcp@latest init`                             |
-
-After adding any MCP server, add its permission to `.claude/settings.json` → `permissions.allow` (e.g., `"mcp__nano_banana"`) to skip permission prompts.
+Add shared project MCP definitions to `.mcp.json`. Host-specific permission/trust settings remain in
+that host's native configuration (`.claude/settings.json` or `.codex/config.toml`); do not copy one
+host's syntax into the other.
 
 ## 6. Automated PR Reviews (Recommended)
 
-The `/review-pr-comments` command works by processing review comments left on your GitHub pull requests. For it to be useful, you need automated reviewers configured on your repo. Set up **at least one** of these:
+The review-comments workflow processes comments already present on a GitHub pull request. Configure
+the human or automated reviewers your repository trusts; Forge does not require a specific vendor.
 
-| Reviewer                   | How to enable                                                                                                  |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **GitHub Copilot**         | Repo Settings → Code review → Copilot → Enable. Copilot reviews PRs automatically.                             |
-| **OpenAI Codex**           | Install the [Codex GitHub App](https://github.com/apps/openai-codex). Configurable via `.codex/` in your repo. |
-| **Claude (via Anthropic)** | Install the [Claude GitHub App](https://github.com/apps/claude). Add a `claude-pr-review.yml` workflow.        |
-
-Once configured, the workflow becomes: create PR → automated reviewers leave comments → `/review-pr-comments` processes those comments → push fixes → merge.
+Once configured, the workflow becomes: create PR → automated reviewers leave comments → Claude
+`/review-pr-comments` or Codex `$workflow-review-pr-comments` processes them → push fixes → merge.
 
 > **No automated reviewers?** The workflow still works — you just skip `/review-pr-comments`.
 > Pre-PR gates still include fresh opinion review, simplification, verify-app, and verify-e2e.
 
 ## 7. Verify Setup
 
+Run the deterministic discovery check from the project root:
+
 ```bash
-# Restart Claude Code
-claude
-
-# Check hooks loaded
-/hooks
-# Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange
-
-# Check commands available
-/help
-# Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*
-
-# Test SessionStart hook
-/clear
-# Should silently inject branch context (no visible output — Claude just knows the branch)
-
-# Check memory
-/memory
-# Should show auto memory entry + CLAUDE.md files
+~/claude-codex-forge/scripts/verify-runtime.sh discovery --project-root "$(pwd -P)"
 ```
+
+```powershell
+& $HOME\claude-codex-forge\scripts\verify-runtime.ps1 discovery -ProjectRoot (Get-Location).Path
+```
+
+Then open each host you plan to use, accept its native project-trust prompt, and confirm its own
+help/hooks or skill discovery. Setup can be `MATERIALIZED` while an unauthenticated or untrusted host
+is still not `RUNTIME_READY`.

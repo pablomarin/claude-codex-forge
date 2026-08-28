@@ -39,6 +39,12 @@ capability matrix records tested baselines Claude Code `2.1.237` and Codex CLI `
 capabilities, not version strings alone, govern role eligibility. Grok Build remains a future
 adapter boundary, not a v1 support claim.
 
+The v6 onboarding and reference documentation now leads with Forge's adoption value, diagrams the
+dual-engine architecture and engineering lifecycle, shows the exact installed tree, distinguishes
+`MATERIALIZED` from `RUNTIME_READY`, and documents full-agent real-worktree investigation. Installer
+summaries name the complete v6 commit surface, and project-first setup no longer prevents the first
+global installation when the only existing machine artifact is Forge's advisory version stamp.
+
 ## 5.61 — 2026-07-27 · `/codex` plan review gains a NECESSITY axis — the loop can now argue for _less_
 
 **Found by dogfooding v5.59/v5.60 in a downstream project.** Across roughly 30 review rounds the loop caught every omission and **not once** flagged anything as unnecessary. Concretely: an approved plan carried a pre-authoring gate demanding five third-party artifacts (model source, resolved manifest node/config, tool + adapter versions, a custom strategy macro, and one more) before the team was allowed to start authoring. It survived the entire loop. When a human finally challenged it, Codex conceded immediately and cleanly — _"there is no reachable correctness failure uniquely prevented by collecting all five artifacts"_ — and reduced the ask to a single coordination question. The capability was present; only the trigger was missing.

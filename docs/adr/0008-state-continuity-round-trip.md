@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-06-02)
+Amended by [ADR 0010](0010-dual-engine-canonical-harness.md) (2026-08-27). The guarded continuity
+round-trip remains, with v6 state and seed snapshots under `.forge/local/`.
 
 ## Context
 

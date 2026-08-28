@@ -50,7 +50,7 @@ Before printing `Prerequisites OK`, `setup.sh` checks whether repo-root version 
 | `.nvmrc`                           | Pinned Node version (e.g. `20.11.0` or `20`). Preflight verifies `node --version` matches, or that `fnm`/`nvm`/`volta` can provide it.                             |
 | root `package.json` `engines.node` | Declared constraint (e.g. `">=20"`). Preflight checks `node --version` satisfies the minimum; warns otherwise.                                                     |
 
-**If a declared runtime is missing or mismatched, preflight prints a warning with install guidance and continues.** It does NOT set a non-zero exit code. It does NOT stop `setup.sh`. `--upgrade` works exactly the same as a fresh install.
+**If a declared runtime is missing or mismatched, preflight prints a warning with install guidance and continues.** It does NOT set a non-zero exit code. It does NOT stop `setup.sh`; the authoritative `-F` full refresh runs the same preflight.
 
 **If neither `.python-version` / `.nvmrc` / root `package.json` exists, preflight is silent** — the check doesn't run, so there's no noise for projects that don't pin versions.
 

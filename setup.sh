@@ -189,6 +189,16 @@ v6_preflight_no_legacy() {
                 family=${family%%/*}
                 family=".claude/$family"
                 [ -e "$root/$family" ] || continue
+                # Project setup records an advisory machine-version stamp before
+                # global setup may have run. A lone regular stamp is not a v5
+                # global harness; allow the documented project-first recovery
+                # path to materialize the real global v6 surfaces.
+                if [ "$scope" = global ] && [ "$destination" = ".claude/.forge-version" ] \
+                    && [ -d "$root/.claude" ] && [ ! -L "$root/.claude" ] \
+                    && [ -f "$root/.claude/.forge-version" ] && [ ! -L "$root/.claude/.forge-version" ] \
+                    && [ "$(find "$root/.claude" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = "1" ]; then
+                    continue
+                fi
                 # A lone custom native goal is not a legacy Forge harness. Let
                 # setup preserve it and report the explicit goal collision.
                 if [ "$scope" = project ] && [ "$family" = ".claude/commands" ] \
@@ -1082,13 +1092,12 @@ if [[ "$UPGRADE" == true ]]; then
     fi
     echo -e "${YELLOW}What was updated:${NC}"
     echo ""
-    echo "  .claude/commands/        Workflow commands (refreshed)"
-    echo "  .claude/hooks/           Hook scripts (refreshed)"
-    echo "  .claude/rules/           Coding standards (refreshed)"
-    echo "  .claude/agents/          Subagent definitions (refreshed)"
-    echo "  .claude/skills/          Skills (release, council, ui-design if typescript/fullstack)"
-    echo "  .claude/settings.json    Hooks and permissions (merged — your customizations kept)"
-    echo "  .mcp.json                MCP servers (merged — your customizations kept)"
+    echo "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and state template"
+    echo "  CLAUDE.md / AGENTS.md    Bounded host adapters; personal text outside Forge markers preserved"
+    echo "  .claude/                 Claude Code commands, agents, skills, hooks, and merged settings"
+    echo "  .codex/                  Codex agents, hooks, and merged configuration"
+    echo "  .agents/                 Codex workflow and skill adapters"
+    echo "  .mcp.json                Shared MCP servers (merged — your customizations kept)"
     echo ""
     # Drive "Not touched" from pre-copy booleans so we don't falsely claim a
     # file was preserved when this run actually recreated it from template.
@@ -1112,8 +1121,8 @@ if [[ "$UPGRADE" == true ]]; then
     echo ""
     echo -e "2. ${BLUE}Commit and push${NC}:"
     echo ""
-    echo "   git add .claude/ .mcp.json"
-    echo "   git commit -m \"chore: upgrade Claude Code automation templates\""
+    echo "   git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/"
+    echo "   git commit -m \"chore: upgrade Forge harness\""
     echo "   git push"
     echo ""
     # 5.16: dropped the consolidated cry-wolf drift preamble that fired on
@@ -1132,7 +1141,7 @@ if [[ "$UPGRADE" == true ]]; then
     if [[ "$had_continuity_md" == true ]] && [[ "$continuity_migrated" == true ]]; then
         echo -e "${GREEN}✓ CONTINUITY.md already migrated${continuity_migrated_paren}.${NC}"
         echo "  Its content was migrated to CLAUDE.md (durable), docs/adr/ (decisions),"
-        echo "  and .claude/local/state.md (volatile). Once you've confirmed that content"
+        echo "  and .forge/local/state.md (volatile). Once you've confirmed that content"
         echo "  landed (and nothing references the file), CONTINUITY.md can be removed:"
         echo ""
         echo "    rm CONTINUITY.md"
@@ -1195,7 +1204,7 @@ if [[ "$UPGRADE" == true ]]; then
         echo "     - Comments or labels that reference CONTINUITY.md as a location"
         echo ""
         echo "   CONTINUITY.md no longer exists -- its content moved to CLAUDE.md"
-        echo "   (durable), docs/adr/ (decisions), and .claude/local/state.md"
+        echo "   (durable), docs/adr/ (decisions), and .forge/local/state.md"
         echo "   (volatile). Remove these references; the 'preserve project-specific"
         echo "   content' rule does NOT apply to CONTINUITY pointers -- they are"
         echo "   stale infrastructure references.\""
@@ -1210,17 +1219,15 @@ else
     echo ""
     echo -e "${YELLOW}What was created:${NC}"
     echo ""
-    echo "  CLAUDE.md                Your project description (edit this!)"
-    echo "  .claude/local/state.md   Volatile per-developer workflow state (gitignored)"
-    echo "  .claude/state.template.md Canonical state template (always-refresh)"
-    echo "  .claude/settings.json    Hooks and permissions"
-    echo "  .mcp.json                MCP servers (Playwright + Context7)"
-    echo "  .claude/commands/        Workflow commands: /new-feature, /fix-bug, /quick-fix"
-    echo "  .claude/hooks/           Auto-run scripts (format, verify, memory)"
-    echo "  .claude/agents/          Subagent definitions (verify-app, verify-e2e)"
-    echo "  .claude/skills/           Skills (release, council, ui-design if typescript/fullstack)"
-    echo "  .claude/rules/           Coding standards + workflow rules (safe to update)"
-    echo "  docs/                    Changelog, ADRs (docs/adr/), PRDs, solutions knowledge base"
+    echo "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and local state"
+    echo "  .forge/local/state.md    Per-worktree workflow checkpoint (gitignored)"
+    echo "  CLAUDE.md / AGENTS.md    Thin Claude Code and Codex root adapters"
+    echo "  .claude/                 Claude Code commands, agents, skills, hooks, and settings"
+    echo "  .codex/                  Codex agents, hooks, and configuration"
+    echo "  .agents/                 Codex workflow and skill adapters"
+    echo "  .mcp.json                Shared MCP servers (Playwright + Context7)"
+    echo "  docs/adr/                Architecture decisions and index"
+    echo "  docs/                    Changelog, plans, PRDs, research, and solutions"
     echo ""
     echo -e "${YELLOW}Optional host integration enabled in .claude/settings.json:${NC}"
     echo ""
@@ -1228,12 +1235,11 @@ else
     echo ""
     if [[ ! -f "$HOME/.claude/CLAUDE.md" ]]; then
         echo -e "${RED}┌──────────────────────────────────────────────────────────────┐${NC}"
-        echo -e "${RED}│  ⚠ IMPORTANT: Global memory not set up yet!                 │${NC}"
+        echo -e "${RED}│  ⚠ IMPORTANT: Global Forge policy is not set up yet!        │${NC}"
         echo -e "${RED}│                                                              │${NC}"
         echo -e "${RED}│  Without global setup:                                       │${NC}"
-        echo -e "${RED}│  • Claude won't save learnings before context compression    │${NC}"
-        echo -e "${RED}│  • /memory won't show your auto memory directory             │${NC}"
-        echo -e "${RED}│  • Session knowledge will be lost on compaction              │${NC}"
+        echo -e "${RED}│  • Shared global grounding is not installed for either host  │${NC}"
+        echo -e "${RED}│  • Trusted native-goal authorization helpers are unavailable │${NC}"
         echo -e "${RED}│                                                              │${NC}"
         echo -e "${RED}│  Run: ${GREEN}$SCRIPT_DIR/setup.sh --global${RED}           │${NC}"
         echo -e "${RED}└──────────────────────────────────────────────────────────────┘${NC}"
@@ -1241,22 +1247,16 @@ else
     fi
     echo -e "${YELLOW}Next steps:${NC}"
     echo ""
-    echo -e "1. ${BLUE}Edit CLAUDE.md${NC} — Fill in your project description, tech stack, and commands"
-    echo "   (It's intentionally short — all rules live in .claude/rules/)"
-    echo ""
-    echo -e "2. ${BLUE}Set your project goal${NC} — In CLAUDE.md, add one sentence under '### Goal'"
-    echo "   (Volatile state lives in .claude/local/state.md — gitignored, populated by /new-feature)"
-    echo ""
-    echo -e "3. ${BLUE}Verify everything works${NC}:"
+    echo -e "1. ${BLUE}Verify both installed host surfaces${NC}:"
     echo ""
     echo "   /hooks       → Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    echo "   /help        → Should show Forge workflows for both installed hosts"
-    echo "   /memory      → Should show your auto memory directory"
+    echo "   /help        → Claude should show Forge commands; Codex should show the matching \$workflow-* skills"
+    echo "   scripts/verify-runtime.sh discovery --project-root \"$(pwd -P)\""
     echo ""
-    echo -e "4. ${BLUE}Commit and push${NC}:"
+    echo -e "2. ${BLUE}Commit the shared harness${NC} (.forge/local/ remains gitignored):"
     echo ""
-    echo "   git add .claude/ .mcp.json CLAUDE.md docs/"
-    echo "   git commit -m \"chore: add Claude Code automation setup\""
+    echo "   git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/"
+    echo "   git commit -m \"chore: add Forge engineering harness\""
     echo "   git push"
     echo ""
     echo -e "${GREEN}Harness materialized for Claude Code and Codex.${NC}"

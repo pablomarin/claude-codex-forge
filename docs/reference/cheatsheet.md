@@ -44,13 +44,14 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 │   Hooks read .forge/local/state.md     ← shared checkpoint │
 │                                                             │
 │ THEN RUN ONE OF THESE COMMANDS:                             │
+│   Claude uses /...; Codex uses matching $workflow-* skills  │
 │   /new-feature <name>  ← Full workflow (Research→PRD→Plan)  │
 │   /fix-bug <name>      ← Debugging workflow (Systematic)    │
 │   /quick-fix <name>    ← Trivial only (< 3 files)           │
 │   /finish-branch       ← Merge PR + cleanup + restart       │
 │                                                             │
 │ DECISION ANALYSIS:                                          │
-│   /council <question>  ← 3 main + 2 other; other chairs    │
+│   Claude: /council; Codex: $council ← dynamic topology      │
 │   Claude: /opinion     ← Fresh opinion (other engine first) │
 │   Codex:  $opinion     ← Same canonical opinion workflow   │
 │   Claude: /opinion investigate; Codex: $opinion investigate    │
@@ -75,7 +76,7 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 │ /clear     → Fresh context (rules re-loaded from disk)      │
 │ /compact   → Compact context (triggers PreCompact hook)     │
 │ /cost      → Check token usage                              │
-│ Escape     → Interrupt Claude                               │
+│ Escape     → Interrupt the active host                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 

@@ -1,15 +1,15 @@
-# Commands Reference
+# Commands and Skills Reference
 
-All slash commands and subagents available after setup.
+The host-native entry points and shared agent roles available after setup.
 
 ## Workflow Commands (ENFORCED — Start Here)
 
-| Command               | Purpose               | Notes                                                                            |
-| --------------------- | --------------------- | -------------------------------------------------------------------------------- |
-| `/new-feature <name>` | Full feature workflow | PRD → Research → Design (iterative) → Execute → Review (iterative) → PR → Finish |
-| `/fix-bug <name>`     | Bug fix workflow      | Search solutions → Systematic debugging → Fix → Review → Compound                |
-| `/quick-fix <name>`   | Trivial changes only  | < 3 files, no arch impact, still requires verify                                 |
-| `/finish-branch`      | Merge + cleanup       | Merge PR to main → Delete remote/local branch + worktree → Restart servers       |
+| Purpose | Claude Code | Codex |
+| --- | --- | --- |
+| Full feature workflow | `/new-feature <name>` | `$workflow-new-feature <name>` |
+| Bug-fix workflow | `/fix-bug <name>` | `$workflow-fix-bug <name>` |
+| Trivial change | `/quick-fix <name>` | `$workflow-quick-fix <name>` |
+| Merge and worktree cleanup | `/finish-branch` | `$workflow-finish-branch` |
 
 **Workflow commands guide the process.** `.forge/local/state.md` is the host-neutral durable
 checkpoint; hooks validate its current candidate evidence before commit/push/PR.
@@ -37,7 +37,7 @@ next step survive a host switch; the native Claude Code or Codex session does no
 
 Forge deliberately uses the name `opinion` because `review` is reserved by both supported hosts.
 Use `/opinion` in Claude Code and `$opinion` in Codex. Ordinary requests are hermetic and read-only;
-add `investigate` when the task needs network, execution, or a declared live-data query channel.
+add `investigate` when the task needs normal project tools, writes, network, databases, APIs, or MCP.
 The current host remains main; automatic selection prefers the other engine and visibly falls back
 to a fresh same-engine reviewer on launch or capability failure.
 
@@ -48,10 +48,10 @@ to a fresh same-engine reviewer on launch or capability failure.
 
 ## PRD Commands (Requirements)
 
-| Command                  | Purpose                           | Output                              |
-| ------------------------ | --------------------------------- | ----------------------------------- |
-| `/prd:discuss {feature}` | Interactive user story refinement | `docs/prds/{feature}-discussion.md` |
-| `/prd:create {feature}`  | Generate structured PRD           | `docs/prds/{feature}.md`            |
+| Purpose | Claude Code | Codex | Output |
+| --- | --- | --- | --- |
+| Interactive requirements | `/prd:discuss {feature}` | `$workflow-prd-discuss {feature}` | `docs/prds/{feature}-discussion.md` |
+| Structured PRD | `/prd:create {feature}` | `$workflow-prd-create {feature}` | `docs/prds/{feature}.md` |
 
 ## Quality Gates (Pre-PR — in this order)
 
@@ -74,9 +74,10 @@ For bug fixes, targeted research runs after root-cause isolation (Phase 2.5 of `
 
 ## PR Review Comments (Post-PR)
 
-| Command               | Purpose                              | Notes                                                           |
-| --------------------- | ------------------------------------ | --------------------------------------------------------------- |
-| `/review-pr-comments` | Address automated PR review comments | Requires GitHub Copilot, Codex, or Claude PR reviews configured |
+| Host | Invocation | Purpose |
+| --- | --- | --- |
+| Claude Code | `/review-pr-comments` | Address automated PR review comments |
+| Codex | `$workflow-review-pr-comments` | Address the same comments through the canonical workflow |
 
 ## Claude Code Built-in Commands
 
@@ -95,7 +96,9 @@ For bug fixes, targeted research runs after root-cause isolation (Phase 2.5 of `
 
 ## Subagents
 
-Custom subagents available via the Task tool.
+Canonical roles are materialized for each host and invoked through that host's native agent
+mechanism. Workflows call them automatically; the plain-language invocation below also works when
+you need a role directly.
 
 | Agent             | Purpose                                                                                           | Invocation                                            |
 | ----------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
@@ -113,7 +116,7 @@ Run from a fresh `claude-codex-forge` clone.
 | Flag                               | Purpose                                                                                                                                                                                                                                                                                                               |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-p "Project Name"`                | Project name (required for fresh installs)                                                                                                                                                                                                                                                                            |
-| `-t python\|typescript\|fullstack` | Pick the language profile (controls which `rules/*.md` get installed)                                                                                                                                                                                                                                                 |
+| `-t python\|typescript\|fullstack` | Record the project profile and determine Playwright eligibility; v6 does not prune the canonical v6 rules or skills by profile                                                                                                                                                                                      |
 | `-F`, `--full-refresh`             | Authoritative v6 refresh: reconcile canonical `.forge/` content and generated host adapters with ownership checks                                                                                                                                                                                                     |
 | `--global`                         | Install canonical global policy under `~/.forge/` plus bounded Claude Code and Codex adapters                                                                                                                                                                                                                         |
 | `--with-playwright`                | Scaffold Playwright config + auth fixture + reference CI workflow                                                                                                                                                                                                                                                     |

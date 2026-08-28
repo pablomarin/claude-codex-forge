@@ -1,4 +1,4 @@
-# Autonomous Goal Mode (`/forge-goal`)
+# Autonomous Goal Mode (Native `/goal` + Forge)
 
 > **TL;DR** — After your PRD is approved, Forge can compose the current host's native `/goal`
 > over the shared workflow state. It runs toward PR-ready autonomously while human-only authority
@@ -6,8 +6,8 @@
 
 ## What it is
 
-`/forge-goal` is Forge's composition contract for the native `/goal` provided by Claude Code or
-Codex. Forge does not install or shadow `/goal`; `/new-feature` or `/fix-bug` offers it at the right
+Forge supplies a composition contract for the native `/goal` provided by Claude Code or Codex.
+Forge does not install or shadow `/goal`; `/new-feature` or `/fix-bug` offers it at the right
 checkpoint, and `.forge/workflows/goal.md` defines the shared behavior.
 Both hosts resume the same native `/goal` composition contract from canonical Forge state, while
 the host-native session itself remains fresh.

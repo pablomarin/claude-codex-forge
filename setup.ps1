@@ -156,6 +156,20 @@ function Test-V6PreflightNoLegacy {
             $family = $tail.Split('/')[0]
             $familyPath = Join-Path $Root ".claude\$family"
             if (-not (Test-Path $familyPath)) { continue }
+            # Project setup may create only the advisory machine stamp before
+            # global setup runs. That lone regular file is not a v5 global
+            # harness and must not block the documented project-first path.
+            if ($Scope -eq "global" -and $destination -eq ".claude/.forge-version") {
+                $claudeRoot = Join-Path $Root ".claude"
+                $claudeRootItem = Get-Item -LiteralPath $claudeRoot -Force -ErrorAction SilentlyContinue
+                $members = @(Get-ChildItem -Force $claudeRoot)
+                $stamp = Join-Path $claudeRoot ".forge-version"
+                $stampItem = Get-Item -LiteralPath $stamp -Force -ErrorAction SilentlyContinue
+                if ($claudeRootItem -and -not ($claudeRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+                    $members.Count -eq 1 -and $members[0].Name -eq ".forge-version" -and
+                    $stampItem -and -not $stampItem.PSIsContainer -and
+                    -not ($stampItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+            }
             # A lone custom native goal is not a legacy Forge harness. Let
             # setup preserve it and report the explicit goal collision.
             if ($Scope -eq "project" -and $family -eq "commands") {
@@ -1225,13 +1239,12 @@ if ($Upgrade) {
     }
     Write-Color "What was updated:" "Yellow"
     Write-Host ""
-    Write-Host "  .claude\commands\        Workflow commands (refreshed)"
-    Write-Host "  .claude\hooks\           Hook scripts (refreshed)"
-    Write-Host "  .claude\rules\           Coding standards (refreshed)"
-    Write-Host "  .claude\agents\          Subagent definitions (refreshed)"
-    Write-Host "  .claude\skills\          Skills (release, council, ui-design if typescript/fullstack)"
-    Write-Host "  .claude\settings.json    Hooks and permissions (merged - your customizations kept)"
-    Write-Host "  .mcp.json                MCP servers (merged - your customizations kept)"
+    Write-Host "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and state template"
+    Write-Host "  CLAUDE.md / AGENTS.md    Bounded host adapters; personal text outside Forge markers preserved"
+    Write-Host "  .claude/                 Claude Code commands, agents, skills, hooks, and merged settings"
+    Write-Host "  .codex/                  Codex agents, hooks, and merged configuration"
+    Write-Host "  .agents/                 Codex workflow and skill adapters"
+    Write-Host "  .mcp.json                Shared MCP servers (merged - your customizations kept)"
     Write-Host ""
     # Drive "Not touched" from pre-copy booleans so we don't falsely claim a
     # file was preserved when this run actually recreated it from template.
@@ -1259,8 +1272,8 @@ if ($Upgrade) {
     Write-Color "Commit and push" "Blue"
     Write-Host ":"
     Write-Host ""
-    Write-Host "   git add .claude/ .mcp.json"
-    Write-Host "   git commit -m `"chore: upgrade Claude Code automation templates`""
+    Write-Host "   git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/"
+    Write-Host "   git commit -m `"chore: upgrade Forge harness`""
     Write-Host "   git push"
     Write-Host ""
     # 5.16: dropped the consolidated cry-wolf drift preamble that fired on
@@ -1279,7 +1292,7 @@ if ($Upgrade) {
     if ($hadContinuity -and $continuityMigrated) {
         Write-Color "+ CONTINUITY.md already migrated$continuityMigratedParen." "Green"
         Write-Host "  Its content was migrated to CLAUDE.md (durable), docs/adr/ (decisions),"
-        Write-Host "  and .claude/local/state.md (volatile). Once you've confirmed that content"
+        Write-Host "  and .forge/local/state.md (volatile). Once you've confirmed that content"
         Write-Host "  landed (and nothing references the file), CONTINUITY.md can be removed:"
         Write-Host ""
         Write-Host "    Remove-Item CONTINUITY.md"
@@ -1343,7 +1356,7 @@ if ($Upgrade) {
         Write-Host "     - Comments or labels that reference CONTINUITY.md as a location"
         Write-Host ""
         Write-Host "   CONTINUITY.md no longer exists -- its content moved to CLAUDE.md"
-        Write-Host "   (durable), docs/adr/ (decisions), and .claude/local/state.md"
+        Write-Host "   (durable), docs/adr/ (decisions), and .forge/local/state.md"
         Write-Host "   (volatile). Remove these references; the 'preserve project-specific"
         Write-Host "   content' rule does NOT apply to CONTINUITY pointers -- they are"
         Write-Host "   stale infrastructure references.`""
@@ -1358,17 +1371,15 @@ if ($Upgrade) {
     Write-Host ""
     Write-Color "What was created:" "Yellow"
     Write-Host ""
-    Write-Host "  CLAUDE.md                Your project description (edit this!)"
-    Write-Host "  .claude\local\state.md   Volatile per-developer workflow state (gitignored)"
-    Write-Host "  .claude\state.template.md Canonical state template (always-refresh)"
-    Write-Host "  .claude\settings.json    Hooks and permissions"
-    Write-Host "  .mcp.json                MCP servers (Playwright + Context7)"
-    Write-Host "  .claude\commands\        Workflow commands: /new-feature, /fix-bug, /quick-fix"
-    Write-Host "  .claude\hooks\           Auto-run scripts (format, verify, memory)"
-    Write-Host "  .claude\agents\          Subagent definitions (verify-app, verify-e2e)"
-    Write-Host "  .claude\rules\           Coding standards + workflow rules (safe to update)"
-    Write-Host "  .claude\skills\           Skills (release, council, ui-design if typescript/fullstack)"
-    Write-Host "  docs\                    Changelog, ADRs (docs\adr\), PRDs, solutions knowledge base"
+    Write-Host "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and local state"
+    Write-Host "  .forge/local/state.md    Per-worktree workflow checkpoint (gitignored)"
+    Write-Host "  CLAUDE.md / AGENTS.md    Thin Claude Code and Codex root adapters"
+    Write-Host "  .claude/                 Claude Code commands, agents, skills, hooks, and settings"
+    Write-Host "  .codex/                  Codex agents, hooks, and configuration"
+    Write-Host "  .agents/                 Codex workflow and skill adapters"
+    Write-Host "  .mcp.json                Shared MCP servers (Playwright + Context7)"
+    Write-Host "  docs/adr/                Architecture decisions and index"
+    Write-Host "  docs/                    Changelog, plans, PRDs, research, and solutions"
     Write-Host ""
     Write-Color "Optional host integration enabled in .claude\settings.json:" "Yellow"
     Write-Host ""
@@ -1378,12 +1389,11 @@ if ($Upgrade) {
     $globalClaude = Join-Path (Join-Path $HOME ".claude") "CLAUDE.md"
     if (-not (Test-Path $globalClaude)) {
         Write-Color "+--------------------------------------------------------------+" "Red"
-        Write-Color "|  WARNING: Global memory not set up yet!                       |" "Red"
+        Write-Color "|  WARNING: Global Forge policy is not set up yet!              |" "Red"
         Write-Color "|                                                               |" "Red"
         Write-Color "|  Without global setup:                                        |" "Red"
-        Write-Color "|  - Claude won't save learnings before context compression     |" "Red"
-        Write-Color "|  - /memory won't show your auto memory directory              |" "Red"
-        Write-Color "|  - Session knowledge will be lost on compaction               |" "Red"
+        Write-Color "|  - Shared global grounding is not installed for either host   |" "Red"
+        Write-Color "|  - Trusted native-goal authorization helpers are unavailable  |" "Red"
         Write-Color "|                                                               |" "Red"
         Write-Host  "|  Run: " -NoNewline -ForegroundColor Red
         Write-Host  "& $ScriptDir\setup.ps1 -Global" -NoNewline -ForegroundColor Green
@@ -1394,29 +1404,19 @@ if ($Upgrade) {
     Write-Color "Next steps:" "Yellow"
     Write-Host ""
     Write-Host "1. " -NoNewline
-    Write-Color "Edit CLAUDE.md" "Blue"
-    Write-Host " - Fill in your project description, tech stack, and commands"
-    Write-Host "   (It's intentionally short - all rules live in .claude\rules\)"
-    Write-Host ""
-    Write-Host "2. " -NoNewline
-    Write-Color "Set your project goal" "Blue"
-    Write-Host " - In CLAUDE.md, add one sentence under '### Goal'"
-    Write-Host "   (Volatile state lives in .claude\local\state.md - gitignored, populated by /new-feature)"
-    Write-Host ""
-    Write-Host "3. " -NoNewline
-    Write-Color "Verify everything works" "Blue"
+    Write-Color "Verify both installed host surfaces" "Blue"
     Write-Host ":"
     Write-Host ""
     Write-Host "   /hooks       -> Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    Write-Host "   /help        -> Should show Forge workflows for both installed hosts"
-    Write-Host "   /memory      -> Should show your auto memory directory"
+    Write-Host "   /help        -> Claude should show Forge commands; Codex should show the matching `$workflow-* skills"
+    Write-Host "   & '$ScriptDir\scripts\verify-runtime.ps1' discovery -ProjectRoot (Get-Location).Path"
     Write-Host ""
-    Write-Host "4. " -NoNewline
-    Write-Color "Commit and push" "Blue"
+    Write-Host "2. " -NoNewline
+    Write-Color "Commit the shared harness (.forge/local/ remains gitignored)" "Blue"
     Write-Host ":"
     Write-Host ""
-    Write-Host "   git add .claude/ .mcp.json CLAUDE.md docs/"
-    Write-Host "   git commit -m `"chore: add Claude Code automation setup`""
+    Write-Host "   git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/"
+    Write-Host "   git commit -m `"chore: add Forge engineering harness`""
     Write-Host "   git push"
     Write-Host ""
     Write-Color "Harness materialized for Claude Code and Codex." "Green"

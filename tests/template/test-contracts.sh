@@ -2577,6 +2577,46 @@ assert_contains "$GETTING_STARTED" 'MATERIALIZED' \
 assert_contains "$GETTING_STARTED" 'RUNTIME_READY' \
     "getting started distinguishes host readiness"
 
+start_test "README sells the v6 engineering harness and explains the operating model"
+assert_contains "$README" '## Why Forge instead of vanilla Claude Code or Codex?' \
+    "README leads with the adoption case beyond vanilla agent sessions"
+assert_contains "$README" 'engineering discipline' \
+    "README explains the discipline value proposition"
+assert_contains "$README" '## How the dual-engine harness works' \
+    "README explains the canonical dual-engine architecture"
+assert_contains "$README" '## What setup installs' \
+    "README shows the installed project surfaces"
+assert_contains "$README" 'MATERIALIZED' \
+    "README distinguishes installed files from runtime readiness"
+assert_contains "$README" 'RUNTIME_READY' \
+    "README explains authenticated runtime readiness"
+assert_contains "$README" 'one broad review, one repair pass, and one closure review' \
+    "README makes bounded resource discipline part of the product promise"
+assert_contains "$README" 'real worktree' \
+    "README explains full-agent investigation honestly"
+
+start_test "live setup and investigation docs match the v6 implementation"
+assert_not_contains "$GETTING_STARTED" 'confined to the disposable investigator' \
+    "getting started no longer describes full investigation as disposable"
+assert_contains "$GETTING_STARTED" 'real worktree' \
+    "getting started describes the full-agent investigation boundary"
+assert_not_contains "$COMMANDS_DOC" 'declared live-data query channel' \
+    "commands reference does not require the removed declared-channel handoff"
+assert_not_contains "$COMMANDS_DOC" 'controls which `rules/*.md` get installed' \
+    "commands reference does not claim that -t prunes the canonical ruleset"
+assert_contains "$COMMANDS_DOC" 'does not prune the canonical v6 rules or skills' \
+    "commands reference documents the actual v6 -t behavior"
+
+start_test "both installer summaries name the real v6 commit surfaces"
+for installer in "$REPO_ROOT/setup.sh" "$REPO_ROOT/setup.ps1"; do
+    assert_contains "$installer" '.forge/' "$(basename "$installer") summary names canonical .forge"
+    assert_contains "$installer" '.codex/' "$(basename "$installer") summary names Codex configuration"
+    assert_contains "$installer" '.agents/' "$(basename "$installer") summary names Codex skill adapters"
+    assert_contains "$installer" 'AGENTS.md' "$(basename "$installer") summary names the Codex root adapter"
+    assert_contains "$installer" 'git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/' \
+        "$(basename "$installer") gives complete v6 commit guidance"
+done
+
 assert_contains "$STRUCTURE_DOC" '.forge/instructions.md' \
     "file structure names the canonical instructions"
 assert_contains "$MEMORY_DOC" '.forge/local/state.md' \

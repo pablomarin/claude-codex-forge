@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-04-28)
+Amended by [ADR 0010](0010-dual-engine-canonical-harness.md) (2026-08-27). The non-auto-loaded,
+gitignored state boundary remains; its canonical v6 path is `.forge/local/state.md`.
 
 ## Context
 

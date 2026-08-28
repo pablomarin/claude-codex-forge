@@ -24,7 +24,7 @@ You can skip good practice when it feels optional. The harness makes it structur
 - `check-workflow-gates.sh` blocks `git commit`, `git push`, and `gh pr create` until `.forge/local/state.md` contains candidate-bound review and verification evidence
 - `check-bash-safety.sh` blocks dangerous Bash patterns before they run (pipe-to-shell, reverse shells, credential exfiltration)
 - `ConfigChange` hook logs every modification to `.claude/settings.json` so permission escalation is auditable
-- Every Stop turn reminds Claude to update state; `check-state-updated.sh` is advisory (gating moved to PreToolUse) but still nags if state goes stale and gates `docs/CHANGELOG.md` updates when 4+ files have changed
+- Every Stop turn reminds the current host to update state; `check-state-updated.sh` is advisory (gating moved to PreToolUse) but still warns if state goes stale and gates `docs/CHANGELOG.md` updates when 4+ files have changed
 
 Discipline is guided by commands and **guarded by hooks**. You can still override (it's your machine) but every override is explicit.
 

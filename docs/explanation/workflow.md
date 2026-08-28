@@ -2,6 +2,9 @@
 
 How a feature goes from idea to merged PR.
 
+The diagram uses Claude Code's slash-command spellings for readability. Codex exposes the same
+canonical workflows as `$workflow-*` skills; see the [commands map](../reference/commands.md).
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. START: Launch a Workflow Command                         │
@@ -157,7 +160,7 @@ How a feature goes from idea to merged PR.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## `/forge-goal` Autonomous Loop (Layer 2)
+## Native `/goal` with Forge Composition (Layer 2)
 
 When the workflow's gate checkpoint passes (PRD-complete for `/new-feature`; Plan-Approved for
 `/fix-bug`), Forge composes the current host's native `/goal` over the shared objective, nonce,

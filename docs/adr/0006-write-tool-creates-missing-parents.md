@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (2026-05-09)
+Historical v5 decision; state placement and cross-host initialization were superseded by
+[ADR 0010](0010-dual-engine-canonical-harness.md) (2026-08-27). The captured Claude Code experiment
+below remains historical evidence, not a v6 cross-host guarantee.
 
 ## Context
 

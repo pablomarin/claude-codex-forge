@@ -9,7 +9,7 @@ their native events into the same policy.
 | --- | --- | --- |
 | `SessionStart` | New/resumed host session, clear, or compaction | Injects current-host, branch, state, and drift context; remote fetch remains source-gated |
 | `Stop` | Main host finishes a turn | Builds candidate evidence and reminds the host to keep `.forge/local/state.md` current |
-| `PreToolUse` | Before a shell command | Audits commands, blocks dangerous patterns, enforces workflow evidence, and blocks agent-executed external mutation |
+| `PreToolUse` | Before a shell command | Audits commands, blocks dangerous patterns, enforces workflow evidence, and checks protected external-mutation authority |
 | `PostToolUse` | After supported file writes | Runs the configured formatter |
 | `PreCompact` | Before context compression | Reminds either host to save volatile drafts under `.forge/local/memory/` |
 | `SubagentStop` | Reviewer/producer finishes | Validates structured, candidate-bound review output |
@@ -34,6 +34,8 @@ commit, push, or PR creation. A successful process exit is not a clean gate. PR 
 bound to the active goal nonce and candidate.
 Artifact-bound review prompts, outputs, and receipts live under `.forge/local/reviews/`.
 
-`check-external-mutation-auth.{sh,ps1}` preserves the v6 human boundary: investigation may prepare
-an allowlisted deterministic command, but the developer executes every external mutation. An
-agent-written receipt does not grant a tool, credential, or runner.
+`check-external-mutation-auth.{sh,ps1}` preserves the v6 human boundary without reducing
+investigation to a special sandbox. A full investigator can use the selected host's normal tools,
+network, databases, APIs, and write access. When an operation is classified as a protected external
+mutation, the hook requires the same current human authorization as the main agent; an agent-written
+receipt cannot mint that authority.

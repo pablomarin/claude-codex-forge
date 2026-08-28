@@ -828,11 +828,11 @@ test_fresh_install_banner_no_continuity_ref() {
     else
         pass "fresh-install banner does not mention CONTINUITY.md"
     fi
-    # Positive: mentions state.md and docs/adr/ (the new artifacts).
-    if echo "$block" | grep -qF ".claude/local/state.md"; then
-        pass "banner mentions .claude/local/state.md (new artifact)"
+    # Positive: mentions canonical v6 state and ADR paths.
+    if echo "$block" | grep -qF ".forge/local/state.md"; then
+        pass "banner mentions .forge/local/state.md (canonical v6 artifact)"
     else
-        fail "banner does not mention .claude/local/state.md (got: $block)"
+        fail "banner does not mention .forge/local/state.md (got: $block)"
     fi
     if echo "$block" | grep -qF "docs/adr/"; then
         pass "banner mentions docs/adr/ (new artifact)"
@@ -1388,6 +1388,30 @@ for name in ("CLAUDE.md", "AGENTS.md"):
 print("preserved")
 PY
 assert_equals "$(cat "$BYTE_CASE/bytes.out")" "preserved" "BOM, CRLF prefix, suffix, placeholder text, and no-final-newline remain byte-identical"
+
+start_test "project setup followed by first global setup is a supported path"
+PROJECT_FIRST=$(scratch_dir project-first-global)
+make_project "$PROJECT_FIRST/project" flat
+mkdir -p "$PROJECT_FIRST/home"
+(cd "$PROJECT_FIRST/project" && HOME="$PROJECT_FIRST/home" "$REPO_ROOT/setup.sh" -p ProjectFirst > "$PROJECT_FIRST/project.log" 2>&1)
+assert_equals "$?" "0" "project setup succeeds before global setup"
+HOME="$PROJECT_FIRST/home" "$REPO_ROOT/setup.sh" --global > "$PROJECT_FIRST/global.log" 2>&1
+assert_equals "$?" "0" "global setup accepts the lone advisory machine stamp from project setup"
+assert_file_exists "$PROJECT_FIRST/home/.forge/version" "global setup materializes the canonical global harness"
+assert_file_exists "$PROJECT_FIRST/home/.claude/CLAUDE.md" "global setup installs the Claude global adapter"
+assert_file_exists "$PROJECT_FIRST/home/.codex/AGENTS.md" "global setup installs the Codex global adapter"
+
+start_test "fresh setup summary gives complete v6 commit guidance"
+SUMMARY_CASE=$(scratch_dir v6-summary)
+make_project "$SUMMARY_CASE" flat
+run_setup "$SUMMARY_CASE" "$SUMMARY_CASE/setup.log" -p Summary
+assert_equals "$?" "0" "summary fixture installs successfully"
+assert_contains "$SUMMARY_CASE/setup.log" '.forge/' "summary names canonical Forge files"
+assert_contains "$SUMMARY_CASE/setup.log" '.codex/' "summary names Codex configuration"
+assert_contains "$SUMMARY_CASE/setup.log" '.agents/' "summary names Codex skills"
+assert_contains "$SUMMARY_CASE/setup.log" 'AGENTS.md' "summary names the Codex root adapter"
+assert_contains "$SUMMARY_CASE/setup.log" 'git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/' \
+    "summary gives complete v6 commit command"
 
 # ===========================================================================
 # Report
