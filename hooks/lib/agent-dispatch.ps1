@@ -373,8 +373,13 @@ function Invoke-Engine([string]$Selected) {
     }
     if ($Selected -eq 'claude') {
         $tools = if ($script:ReproMode) { 'Read,Write,Edit,Bash' } elseif ($Profile -eq 'investigate') { 'Read,Write,Edit,Bash,WebSearch,WebFetch' } else { 'Read,Grep,Glob' }
-        $home = if ($Conversation -eq 'ephemeral') { Join-Path $scratch 'home' } else { Join-Path $SessionStore 'home' }
-        $environment.HOME = $home
+        $userProfile = [Environment]::GetFolderPath('UserProfile')
+        if (-not $userProfile) { $userProfile = $env:USERPROFILE }
+        $environment.HOME = $userProfile
+        $environment.USERPROFILE = $userProfile
+        $environment.USERNAME = $(if ($env:USERNAME) { $env:USERNAME } else { [Environment]::UserName })
+        if ($env:USER) { $environment.USER = $env:USER }
+        if ($env:LOGNAME) { $environment.LOGNAME = $env:LOGNAME }
         $arguments = @('-p', '--safe-mode', '--strict-mcp-config', '--mcp-config', (Join-Path $scratch 'mcp.json'), '--settings', (Join-Path $scratch 'claude-settings.json'), '--setting-sources', '', '--tools', $tools, '--permission-mode', 'dontAsk', '--add-dir', $snapshot, '--model', $model, '--effort', $effort, '--output-format', 'json')
         if ($Conversation -eq 'ephemeral') { $arguments += '--no-session-persistence' }
         elseif ($Conversation -eq 'new') { $arguments += @('--session-id', $SessionProvisionalId) }

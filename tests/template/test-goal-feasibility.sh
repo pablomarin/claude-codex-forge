@@ -259,7 +259,7 @@ case "${1:-}" in
   --version) echo 'claude-code 9.9.1'; exit 0 ;;
   --help) echo '--safe-mode --strict-mcp-config --setting-sources --session-id --resume'; exit 0 ;;
 esac
-printf '%s\n' "$*" >> "$FORGE_FAKE_GOAL_ARGV_LOG"
+printf 'home=%s user=%s logname=%s argv=%s\n' "${HOME:-}" "${USER:-}" "${LOGNAME:-}" "$*" >> "$FORGE_FAKE_GOAL_ARGV_LOG"
 session="$FORGE_GOAL_SESSION_ID"
 case "$*" in
   *--session-id*) printf 'native_activation=PASS\nphase=implementation\nnext_step=resume-verification\nprogress=fingerprint-a\nsession_id=%s\n' "$session" ;;
@@ -281,6 +281,7 @@ assert_equals "$?" "0" "Claude fake driver passes through the real live proving 
 assert_contains "$S/claude-live.json" '"status":"PASS"' "Claude live adapter/oracle can reach PASS"
 assert_contains "$S/claude-live.argv" '--safe-mode --strict-mcp-config' "Claude goal start uses the isolated safe-mode recipe"
 assert_contains "$S/claude-live.argv" '--resume 22222222-2222-4222-8222-' "Claude goal driver resumes the exact session"
+assert_contains "$S/claude-live.argv" "home=$H user=${USER:-} logname=${LOGNAME:-${USER:-}}" "Claude goal qualifier preserves the authenticated operator identity"
 FORGE_FAKE_GOAL_FAILURE=stale-session HOME="$H" FORGE_FAKE_GOAL_ARGV_LOG="$S/claude-live.argv" \
   "$REPO_ROOT/scripts/qualify-goal-feasibility.sh" --test-live-driver --engine-path "$FAKE_CLAUDE" \
   --authorization "$NATIVE_AUTH" --engine claude --project-root "$P" --output "$S/claude-stale.json" > "$S/claude-stale.log" 2>&1

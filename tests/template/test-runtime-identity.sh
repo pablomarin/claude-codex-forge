@@ -107,7 +107,8 @@ case "${1:-}" in
   --version) echo "${FORGE_FAKE_ENGINE_NAME:-fake} 9.9"; exit 0 ;;
   --help) echo '--safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable'; exit 0 ;;
 esac
-printf '%s\t%s\n' "${FORGE_FAKE_ENGINE_NAME:-fake}" "$*" >> "$FORGE_FAKE_ARGV_LOG"
+printf 'engine=%s home=%s user=%s logname=%s argv=%s\n' \
+  "${FORGE_FAKE_ENGINE_NAME:-fake}" "${HOME:-}" "${USER:-}" "${LOGNAME:-}" "$*" >> "$FORGE_FAKE_ARGV_LOG"
 case "$*" in
   *FORGE_INVESTIGATION*)
     case "${FORGE_FAKE_DISPATCH_FAILURE:-}" in
@@ -155,6 +156,9 @@ for engine in claude codex; do
     assert_contains "$LIVE/$engine.argv" 'FORGE_COUNCIL_START' "$engine constructs a persistent first council turn"
     assert_contains "$LIVE/$engine.argv" 'FORGE_INVESTIGATION' "$engine invokes the writable disposable investigation"
     if [ "$engine" = claude ]; then
+        assert_contains "$LIVE/$engine.argv" "home=$HOME user=${USER:-} logname=${LOGNAME:-${USER:-}}" "Claude live qualifier preserves the authenticated operator identity"
+        assert_contains "$LIVE/$engine.argv" 'Return exactly these four key=value lines and nothing else' "Claude council prompt requires the machine-bound response shape"
+        assert_contains "$LIVE/$engine.argv" 'return exactly these two key=value lines and nothing else' "Claude investigation prompt requires the machine-bound response shape"
         assert_contains "$LIVE/$engine.argv" '--safe-mode --no-session-persistence --strict-mcp-config' "Claude ephemeral turn repeats isolated flags"
         assert_contains "$LIVE/$engine.argv" '--resume 11111111-1111-4111-8111-' "Claude resumes the exact declared session"
         assert_not_contains "$LIVE/$engine.argv" '--resume 11111111-1111-4111-8111-.*--no-session-persistence' "Claude resume remains persistent"

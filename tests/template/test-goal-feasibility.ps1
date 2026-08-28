@@ -190,7 +190,7 @@ exit 0
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
 if ($Arguments[0] -eq "--version") { Write-Host "claude-code 9.9.1"; exit 0 }
 if ($Arguments[0] -eq "--help") { Write-Host "--safe-mode --strict-mcp-config --setting-sources --session-id --resume"; exit 0 }
-$joined = $Arguments -join " "; [IO.File]::AppendAllText($env:FORGE_FAKE_GOAL_ARGV_LOG, "$joined`n")
+$joined = $Arguments -join " "; [IO.File]::AppendAllText($env:FORGE_FAKE_GOAL_ARGV_LOG, "home=$env:HOME userprofile=$env:USERPROFILE username=$env:USERNAME argv=$joined`n")
 $session = $env:FORGE_GOAL_SESSION_ID
 if ($joined -match '--resume') { if ($env:FORGE_FAKE_GOAL_FAILURE -eq "stale-session") { $session = "wrong-session" }; Write-Host "checkpoint_resume=PASS`nphase=verification`nnext_step=budget-check`nprogress=fingerprint-a`nsession_id=$session`nFORGE_GOAL_BUDGET_EXHAUSTED`npaused=true`nFORGE_GOAL_STUCK_WARNING" }
 else { Write-Host "native_activation=PASS`nphase=implementation`nnext_step=resume-verification`nprogress=fingerprint-a`nsession_id=$session" }
@@ -199,6 +199,8 @@ else { Write-Host "native_activation=PASS`nphase=implementation`nnext_step=resum
     $liveGoalOutput = Join-Path $scratch "live-claude.json"
     & $qualifyGoal -Engine claude -ProjectRoot $goalProject -Output $liveGoalOutput -TestLiveDriver -EnginePath $liveClaude -Authorization $authorization.FullName -TrustedHome $globalTarget | Out-Null
     if ($LASTEXITCODE -ne 0 -or (Get-Content -Raw $liveGoalOutput | ConvertFrom-Json).status -ne "PASS") { throw "PowerShell Claude live goal driver failed" }
+    $goalArgv = [IO.File]::ReadAllText($env:FORGE_FAKE_GOAL_ARGV_LOG); $userProfile = [Environment]::GetFolderPath('UserProfile')
+    if ($goalArgv -notlike "*home=$userProfile userprofile=$userProfile username=$env:USERNAME*") { throw 'PowerShell Claude goal qualifier did not preserve the authenticated Windows identity' }
     $env:FORGE_FAKE_GOAL_FAILURE = "stale-session"; $stale = Join-Path $scratch "stale.json"
     & $qualifyGoal -Engine claude -ProjectRoot $goalProject -Output $stale -TestLiveDriver -EnginePath $liveClaude -Authorization $authorization.FullName -TrustedHome $globalTarget | Out-Null
     if ($LASTEXITCODE -eq 0) { throw "PowerShell stale Claude resume was accepted" }

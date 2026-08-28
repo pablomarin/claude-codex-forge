@@ -145,9 +145,9 @@ function Invoke-ForgeGuardedDispatch([string]$Binary) {
     $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-dispatch-live-" + [Guid]::NewGuid().ToString("N"))
     try {
         $primary = Join-Path $scratch "primary"; $candidate = Join-Path $scratch "candidate"; $investigation = Join-Path $scratch "investigation"; $replay = Join-Path $scratch "replay"
-        foreach ($dir in @($primary,$candidate,$replay,(Join-Path $scratch "home"),(Join-Path $scratch "codex-home"))) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        foreach ($dir in @($primary,$candidate,$replay,(Join-Path $scratch "codex-home"))) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
         & git -C $primary init -q; New-ForgeLiveCandidate $candidate
-        [IO.File]::WriteAllText((Join-Path $scratch "home\CLAUDE.md"), "FORGE_CANARY_USER_INSTRUCTION`n", $Utf8NoBom)
+        [IO.File]::WriteAllText((Join-Path $primary "CLAUDE.md"), "FORGE_CANARY_USER_INSTRUCTION`n", $Utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $scratch "codex-home\AGENTS.md"), "FORGE_CANARY_USER_INSTRUCTION`n", $Utf8NoBom)
         $emptyMcp = Join-Path $scratch "empty-mcp.json"; [IO.File]::WriteAllText($emptyMcp, '{"mcpServers":{}}', $Utf8NoBom)
         $schema = Join-Path $scratch "schema.json"; [IO.File]::WriteAllText($schema, '{"type":"object","additionalProperties":true}', $Utf8NoBom)
@@ -155,7 +155,10 @@ function Invoke-ForgeGuardedDispatch([string]$Binary) {
         $before = Get-ForgeCandidateIdentity $candidate; $sentinel = "FORGE_ISOLATION_OK_$Engine`_$PID"
         $config = Get-ForgeSha256Bytes ($Utf8NoBom.GetBytes("$Engine`nqualified-v1`n$before`n")); $seat = Get-ForgeSha256Bytes ($Utf8NoBom.GetBytes("$Engine`n$config`n$sentinel`n")); $session = "11111111-1111-4111-8111-{0:d12}" -f $PID
         $vars = @{ FORGE_DISPATCH_SENTINEL=$sentinel; FORGE_DISPATCH_SESSION_ID=$session; FORGE_DISPATCH_SEAT_HASH=$seat; FORGE_DISPATCH_CONFIG_HASH=$config }
-        if ($Engine -eq "claude") { $vars["HOME"] = Join-Path $scratch "home" } else { $vars["CODEX_HOME"] = Join-Path $scratch "codex-home" }
+        if ($Engine -eq "claude") {
+            $userProfile = [Environment]::GetFolderPath('UserProfile'); if (-not $userProfile) { $userProfile = $env:USERPROFILE }
+            $vars['HOME'] = $userProfile; $vars['USERPROFILE'] = $userProfile; $vars['USERNAME'] = $(if ($env:USERNAME) { $env:USERNAME } else { [Environment]::UserName })
+        } else { $vars["CODEX_HOME"] = Join-Path $scratch "codex-home" }
         if ($Engine -eq "claude") {
             $args = @("-p","--safe-mode","--no-session-persistence","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","json","--system-prompt","Return sentinel=$sentinel and canary_observed=false.",$sentinel)
         } else {
@@ -165,10 +168,10 @@ function Invoke-ForgeGuardedDispatch([string]$Binary) {
         if ($run.Code -ne 0 -or $run.Text -notmatch [regex]::Escape($sentinel) -or $run.Text -notmatch 'canary_observed["= :]+false' -or $run.Text -match 'FORGE_CANARY_') { throw "ephemeral response leaked a canary or missed the sentinel" }
         $script:ephemeral = "PASS"
         if ($Engine -eq "claude") {
-            $startArgs = @("-p","--safe-mode","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","json","--session-id",$session,"--system-prompt","FORGE_COUNCIL_START session_id=$session seat_hash=$seat config_hash=$config canary_observed=false","FORGE_COUNCIL_START")
+            $startArgs = @("-p","--safe-mode","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","json","--session-id",$session,"--system-prompt","Return exactly these four key=value lines and nothing else: session_id=$session, seat_hash=$seat, config_hash=$config, canary_observed=false.","FORGE_COUNCIL_START")
             $run = Invoke-ForgeLiveEngine $Binary $startArgs $vars $primary
             if ($run.Code -ne 0 -or -not (Test-ForgeBoundResponse $run.Text $session $seat $config)) { throw "Claude council first turn identity mismatch" }
-            $resumeArgs = @("-p","--safe-mode","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","json","--resume",$session,"--system-prompt","FORGE_COUNCIL_RESUME session_id=$session seat_hash=$seat config_hash=$config canary_observed=false","FORGE_COUNCIL_RESUME")
+            $resumeArgs = @("-p","--safe-mode","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","json","--resume",$session,"--system-prompt","Return exactly these four key=value lines and nothing else: session_id=$session, seat_hash=$seat, config_hash=$config, canary_observed=false.","FORGE_COUNCIL_RESUME")
         } else {
             $startArgs = @("-a","never","exec","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","-C",$primary,"--add-dir",$candidate,"--ignore-user-config","--ignore-rules","--sandbox","read-only","--json","--output-schema",$schema,"FORGE_COUNCIL_START seat_hash=$seat config_hash=$config canary_observed=false")
             $run = Invoke-ForgeLiveEngine $Binary $startArgs $vars $primary
@@ -184,7 +187,7 @@ function Invoke-ForgeGuardedDispatch([string]$Binary) {
         $script:councilResume = "PASS"
         Copy-Item -LiteralPath $candidate -Destination $investigation -Recurse
         $investigationVars = $vars.Clone(); $investigationVars["FORGE_DISPATCH_INVESTIGATION_ROOT"]=$investigation; $investigationVars["FORGE_DISPATCH_REPLAY_TARGET"]=$replay; $investigationVars["FORGE_DISPATCH_CANDIDATE_ID"]=$before
-        if ($Engine -eq "claude") { $investigationArgs = @("-p","--safe-mode","--no-session-persistence","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","Read,Write,Edit,Bash","--permission-mode","dontAsk","--output-format","json","--system-prompt","FORGE_INVESTIGATION candidate_id=$before write only artifacts/qualification.txt and respond candidate_id=$before canary_observed=false","FORGE_INVESTIGATION") }
+        if ($Engine -eq "claude") { $investigationArgs = @("-p","--safe-mode","--no-session-persistence","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","Read,Write,Edit,Bash","--permission-mode","dontAsk","--output-format","json","--system-prompt","FORGE_INVESTIGATION candidate_id=$before. Write only artifacts/qualification.txt, text <=65536 bytes. Then return exactly these two key=value lines and nothing else: candidate_id=$before, canary_observed=false.","FORGE_INVESTIGATION") }
         else { $investigationArgs = @("-a","never","exec","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","-C",$primary,"--add-dir",$investigation,"--ignore-user-config","--ignore-rules","--ephemeral","--sandbox","workspace-write","--json","FORGE_INVESTIGATION candidate_id=$before write only artifacts/qualification.txt and respond candidate_id=$before canary_observed=false") }
         $run = Invoke-ForgeLiveEngine $Binary $investigationArgs $investigationVars $investigation
         if ($run.Code -ne 0 -or (Get-ForgeCandidateIdentity $candidate) -cne $before) { throw "frozen candidate identity changed during investigation" }

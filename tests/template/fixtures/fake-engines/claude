@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -u
 log="${FAKE_CLAUDE_LOG:-}"
-[ -z "$log" ] || printf 'cwd=%s argv=%s\n' "$(pwd -P)" "$*" >> "$log"
+[ -z "$log" ] || printf 'cwd=%s home=%s user=%s logname=%s argv=%s\n' \
+  "$(pwd -P)" "${HOME:-}" "${USER:-}" "${LOGNAME:-}" "$*" >> "$log"
 clean_json() {
   printf '{"result":"schema_version=1\\nverdict=CLEAN\\nmax_severity=NONE\\nblocked_class=none\\nforge_canary_hash=%s\\nforge_config_hash=%s\\nforge_qualification_revision=%s","modelUsage":{"opus":{}},"provider":"anthropic"}\n' \
     "${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}"

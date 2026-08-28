@@ -80,7 +80,7 @@ public static class ForgeFakeEngine {
     string engine=Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).ToLowerInvariant();
     string behavior=E("FAKE_"+engine.ToUpperInvariant()+"_BEHAVIOR","clean"); string joined=String.Join(" ",args); string output="";
     for(int i=0;i+1<args.Length;i++) if(args[i]=="--output-last-message") output=args[i+1];
-    string log=E("FAKE_"+engine.ToUpperInvariant()+"_LOG"); if(log!="") File.AppendAllText(log,joined+Environment.NewLine);
+    string log=E("FAKE_"+engine.ToUpperInvariant()+"_LOG"); if(log!="") File.AppendAllText(log,"home="+E("HOME")+" userprofile="+E("USERPROFILE")+" username="+E("USERNAME")+" argv="+joined+Environment.NewLine);
     string argv=E("FAKE_"+engine.ToUpperInvariant()+"_ARGV_LOG"); if(argv!="") File.WriteAllLines(argv,args.Select(x=>x==""?"<EMPTY>":x));
     if(engine=="codex" && joined.Contains("--json") && !joined.Contains("exec resume")) Console.WriteLine("{\"type\":\"thread.started\",\"thread_id\":\""+E("FORGE_DISPATCH_SESSION_ID")+"\"}");
     if(behavior=="timeout") { var p=Process.Start(new ProcessStartInfo("cmd.exe","/d /c ping -n 30 127.0.0.1 >nul"){UseShellExecute=false,CreateNoWindow=true}); var pid=E("FAKE_CHILD_PID_FILE"); if(pid!="") File.WriteAllText(pid,p.Id.ToString()); Thread.Sleep(30000); return 0; }
@@ -165,6 +165,8 @@ public static class ForgeFakeEngine {
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'claude' 'council-advisor' 'none' 'resume' $exact) 0 'Claude exact-id resume succeeds'
     Assert-Contains $log "--session-id $exact" 'new turn binds exact Claude session'
     Assert-Contains $log "--resume $exact" 'second turn resumes exact Claude session'
+    $userProfile = [Environment]::GetFolderPath('UserProfile')
+    Assert-Contains $log "home=$userProfile userprofile=$userProfile username=$env:USERNAME" 'Claude child preserves the authenticated Windows identity'
     Remove-Item Env:FAKE_CLAUDE_LOG -ErrorAction SilentlyContinue
 
     Write-Host 'PowerShell session metadata leaf is no-follow'

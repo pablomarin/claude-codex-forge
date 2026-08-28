@@ -65,7 +65,7 @@ param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
 if ($Arguments[0] -eq "--version") { Write-Host "$env:FORGE_FAKE_ENGINE_NAME 9.9"; exit 0 }
 if ($Arguments[0] -eq "--help" -or ($Arguments -contains "--help")) { Write-Host "--safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable"; exit 0 }
 $joined = $Arguments -join " "
-[IO.File]::AppendAllText($env:FORGE_FAKE_ARGV_LOG, "$env:FORGE_FAKE_ENGINE_NAME`t$joined`n")
+[IO.File]::AppendAllText($env:FORGE_FAKE_ARGV_LOG, "engine=$env:FORGE_FAKE_ENGINE_NAME home=$env:HOME userprofile=$env:USERPROFILE username=$env:USERNAME argv=$joined`n")
 if ($joined -match 'FORGE_INVESTIGATION') {
   if ($env:FORGE_FAKE_DISPATCH_FAILURE -eq "path-escape") { [IO.File]::WriteAllText((Join-Path $env:FORGE_FAKE_ESCAPE_TARGET "escaped.txt"), "escape-attempt`n") }
   else {
@@ -95,6 +95,12 @@ Write-Host "{`"type`":`"turn.completed`",`"thread_id`":`"$env:FORGE_DISPATCH_SES
         if ($LASTEXITCODE -ne 0 -or (Get-Content -Raw $liveOutput | ConvertFrom-Json).status -ne "PASS") { throw "$engine guarded live driver failed" }
         $argv = [IO.File]::ReadAllText($env:FORGE_FAKE_ARGV_LOG)
         if ($argv -notmatch 'FORGE_COUNCIL_START' -or $argv -notmatch 'FORGE_INVESTIGATION') { throw "$engine live command construction incomplete" }
+        if ($engine -eq 'claude') {
+            $userProfile = [Environment]::GetFolderPath('UserProfile')
+            if ($argv -notlike "*home=$userProfile userprofile=$userProfile username=$env:USERNAME*") { throw 'Claude live qualifier did not preserve the authenticated Windows identity' }
+            if ($argv -notlike '*Return exactly these four key=value lines and nothing else*') { throw 'Claude council prompt does not require the machine-bound response shape' }
+            if ($argv -notlike '*return exactly these two key=value lines and nothing else*') { throw 'Claude investigation prompt does not require the machine-bound response shape' }
+        }
     }
     foreach ($failure in @("cross-seat", "canary", "candidate", "undeclared", "path-escape", "no-clobber")) {
         $env:FORGE_FAKE_ENGINE_NAME = "codex"; $env:FORGE_FAKE_DISPATCH_FAILURE = $failure; $env:FORGE_FAKE_CANARY_RESULT = if ($failure -eq "canary") { "true" } else { "" }

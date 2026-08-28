@@ -148,8 +148,9 @@ function Invoke-ForgeClaudeLiveGoal([string]$Binary, $Details) {
     if (-not (Test-ForgeAuthorization $Authorization $Details)) { throw "authorization is absent, stale, aliased, or outside the sealed root" }
     $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-goal-live-" + [Guid]::NewGuid().ToString("N"))
     try {
-        $fixture = Join-Path $scratch "project"; $home = Join-Path $scratch "home"; New-Item -ItemType Directory -Path $fixture,$home -Force | Out-Null; & git -C $fixture init -q
-        $mcp = Join-Path $scratch "empty-mcp.json"; [IO.File]::WriteAllText($mcp,'{"mcpServers":{}}',$Utf8NoBom); $session="22222222-2222-4222-8222-{0:d12}" -f $PID; $vars=@{FORGE_GOAL_SESSION_ID=$session;HOME=$home}
+        $fixture = Join-Path $scratch "project"; New-Item -ItemType Directory -Path $fixture -Force | Out-Null; & git -C $fixture init -q
+        $userProfile = [Environment]::GetFolderPath('UserProfile'); if (-not $userProfile) { $userProfile = $env:USERPROFILE }
+        $mcp = Join-Path $scratch "empty-mcp.json"; [IO.File]::WriteAllText($mcp,'{"mcpServers":{}}',$Utf8NoBom); $session="22222222-2222-4222-8222-{0:d12}" -f $PID; $vars=@{FORGE_GOAL_SESSION_ID=$session;HOME=$userProfile;USERPROFILE=$userProfile;USERNAME=$(if ($env:USERNAME) { $env:USERNAME } else { [Environment]::UserName })}
         $startArgs=@("-p","--safe-mode","--strict-mcp-config","--mcp-config",$mcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","text","--session-id",$session,"--system-prompt","Disposable Forge native goal oracle.","/goal Emit native_activation=PASS phase=implementation next_step=resume-verification progress=fingerprint-a session_id=$session")
         $run=Invoke-ForgeGoalLiveEngine $Binary $startArgs $vars $fixture; foreach($exact in @("native_activation=PASS","phase=implementation","next_step=resume-verification","progress=fingerprint-a","session_id=$session")){if($run.Code -ne 0 -or $run.Text -notmatch [regex]::Escape($exact)){throw "Claude native activation omitted $exact"}}
         $script:nativeActivation="PASS"; $checkpoint=Join-Path $scratch "checkpoint"; [IO.File]::WriteAllText($checkpoint,"phase=implementation`nnext_step=resume-verification`nprogress=fingerprint-a`nsession_id=$session`n",$Utf8NoBom)

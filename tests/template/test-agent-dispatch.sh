@@ -183,6 +183,7 @@ set -e
 assert_equals "$resume_rc" "0" "Claude council exact-id resume succeeds"
 assert_contains "$claude_log" "--session-id $session" "first council turn binds exact Claude session id"
 assert_contains "$claude_log" "--resume $session" "critique turn resumes the exact Claude session id"
+assert_contains "$claude_log" "home=$HOME user=${USER:-} logname=${LOGNAME:-${USER:-}}" "Claude child preserves the authenticated operator identity"
 
 S=$(scratch_dir dispatch-codex-resume); make_repo "$S"; council_prompt="$S/.forge/local/reviews/council-prompt.txt"; question_hash=$(printf 'same council question' | shasum -a 256 | awk '{print $1}'); printf 'question_hash=%s\nfirst advisor prompt\n' "$question_hash" > "$council_prompt"; capture_context "$S" claude sid
 base=$(git -C "$S" rev-parse HEAD); codex_log="$S/.forge/local/reviews/codex.log"

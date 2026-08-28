@@ -31,12 +31,14 @@ report after the bytes freeze; this tracked document does not self-certify a lat
 | Codex guarded dispatch | `PENDING` | Authenticated model qualification was not invoked before the final candidate freeze |
 | Codex native `/goal` | `BLOCKED` | No sealed physical operator TUI capture; `codex exec` and fake output are not substitutes |
 | Claude Code identity | `PASS` | `2.1.237 (Claude Code)`; physical binary SHA-256 `338901351d4ff17495738c67fc3e12a32c1b506738ac5e012eb782d3d8b5be43` |
-| Claude authentication | `BLOCKED` | `claude auth status` returned `loggedIn: false`, `authMethod: none` |
-| Claude guarded dispatch and native `/goal` | `BLOCKED` | An unauthenticated host cannot produce native runtime evidence |
+| Claude authentication | `PASS` | Physical operator login completed; `claude auth status` returned `loggedIn: true`, `authMethod: claude.ai` |
+| Claude guarded dispatch | `BLOCKED` | Authenticated live run passed ephemeral isolation and exact council resume; investigation did not produce the declared replay artifact |
+| Claude native `/goal` | `BLOCKED` | Not invoked: the live oracle requires a separate operator-issued goal authorization receipt |
 | Live Windows/native qualification | `PENDING` | Requires Windows PowerShell 5.1 plus authenticated host execution on the release candidate |
 
-No live model was called to produce this record. The missing Claude authentication, missing Codex
-TUI capture, and pending Windows job keep runtime readiness and release qualification blocked.
+An authenticated Claude model was called only through the bounded disposable qualification fixture.
+The incomplete Claude investigation replay, missing Codex TUI capture, and pending Windows job keep
+runtime readiness and release qualification blocked.
 
 ## Final qualification command
 
