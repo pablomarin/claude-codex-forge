@@ -11,6 +11,7 @@ function New-Fixture([string]$Name) {
   @'
 param([string]$Mode)
 Write-Output $(if($env:FAKE_MAIN){$env:FAKE_MAIN}else{'claude'})
+exit 0
 '@ | Set-Content (Join-Path $lib 'host-context.ps1')
   @("model-council-advisor`tclaude`tqualified","model-council-chair`tclaude`tqualified","model-council-advisor`tcodex`tqualified","model-council-chair`tcodex`tqualified")|Set-Content (Join-Path $repo '.forge\host-capabilities.tsv')
   @'
