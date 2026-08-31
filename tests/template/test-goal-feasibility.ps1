@@ -198,7 +198,8 @@ exit 0
     $env:FORGE_FAKE_GOAL_ARGV_LOG = Join-Path $scratch "live-claude.argv"
     $liveGoalOutput = Join-Path $scratch "live-claude.json"
     & $qualifyGoal -Engine claude -ProjectRoot $goalProject -Output $liveGoalOutput -TestLiveDriver -EnginePath $liveClaude -Authorization $authorization.FullName -TrustedHome $globalTarget | Out-Null
-    if ($LASTEXITCODE -ne 0 -or (Get-Content -Raw $liveGoalOutput | ConvertFrom-Json).status -ne "PASS") { throw "PowerShell Claude live goal driver failed" }
+    $liveGoalReceipt=Get-Content -Raw $liveGoalOutput|ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $liveGoalReceipt.status -ne "PASS") { throw "PowerShell Claude live goal driver failed: $($liveGoalReceipt.reason)" }
     $goalArgv = [IO.File]::ReadAllText($env:FORGE_FAKE_GOAL_ARGV_LOG); $userProfile = [Environment]::GetFolderPath('UserProfile')
     if ($goalArgv -notlike "*home=$userProfile userprofile=$userProfile username=$env:USERNAME*") { throw 'PowerShell Claude goal qualifier did not preserve the authenticated Windows identity' }
     $env:FORGE_FAKE_GOAL_FAILURE = "stale-session"; $stale = Join-Path $scratch "stale.json"

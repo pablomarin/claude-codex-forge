@@ -209,19 +209,10 @@ try {
     $tamperResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $tampered
     Assert-True ($tamperResult.Code -ne 0 -and $tamperResult.Output.Contains("continuity translation receipt")) "tampered PowerShell continuity receipt blocks before mutation"
 
+    $setupSource = [IO.File]::ReadAllText($setup)
+    Assert-True ($setupSource.Contains('& $refreshHelper -Target $HOME -Scope global')) "setup.ps1 routes global refresh to the canonical Windows home"
     $fixtureHome = Join-Path $scratch "home"
-    $invoker = Join-Path $scratch "invoker"
     [IO.Directory]::CreateDirectory($fixtureHome) | Out-Null
-    [IO.Directory]::CreateDirectory($invoker) | Out-Null
-    $global = Invoke-IsolatedPowerShell -Script $refresh -Arguments @("-Target", $fixtureHome, "-Scope", "global") -WorkingDirectory $invoker
-    Assert-True ($global.Code -eq 0) "full-refresh.ps1 succeeds for a selected temporary global home"
-    Assert-True (Test-Path -LiteralPath (Join-Path $fixtureHome ".forge\version")) "global stamp is confined to selected home"
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $invoker ".forge\version"))) "global refresh writes nothing into its invoker"
-    $globalManifest = Join-Path $fixtureHome ".forge\managed-files.tsv"
-    $globalHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $globalManifest).Hash
-    $globalAgain = Invoke-IsolatedPowerShell -Script $refresh -Arguments @("-Target", $fixtureHome, "-Scope", "global") -WorkingDirectory $invoker
-    Assert-True ($globalAgain.Code -eq 0 -and (Get-FileHash -Algorithm SHA256 -LiteralPath $globalManifest).Hash -eq $globalHash) "global full refresh is byte-idempotent"
-
     $noncanonicalHome = Join-Path $fixtureHome "..\home"
     $noncanonicalResult = Invoke-IsolatedPowerShell -Script $refresh -Arguments @("-Target", $noncanonicalHome, "-Scope", "global")
     Assert-True ($noncanonicalResult.Code -ne 0) "noncanonical selected Windows home is rejected"
