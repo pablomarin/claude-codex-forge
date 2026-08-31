@@ -208,7 +208,10 @@ try {
     $previewBefore = Get-ProjectSnapshot $previewProject
     $preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $previewProject `
         -Environment @{ HOME = (Join-Path $scratch "preview-home"); USERPROFILE = (Join-Path $scratch "preview-home") }
-    Assert-True ($preview.Code -eq 0 -and $preview.Output.Contains("UPGRADE: READY")) "setup.ps1 -FullRefresh -DryRun uses the real planner"
+    if ($preview.Code -ne 0 -or -not $preview.Output.Contains("UPGRADE: READY")) {
+        throw "FAIL: setup.ps1 -FullRefresh -DryRun uses the real planner (code=$($preview.Code); output=$($preview.Output.Trim()))"
+    }
+    Assert-True $true "setup.ps1 -FullRefresh -DryRun uses the real planner"
     Assert-True ((Get-ProjectSnapshot $previewProject) -ceq $previewBefore) "PowerShell preview leaves every target file byte-identical"
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $previewProject ".forge\version"))) "PowerShell preview writes no v6 stamp"
     $dryRunOnly = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-DryRun") -WorkingDirectory $previewProject

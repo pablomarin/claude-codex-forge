@@ -157,17 +157,17 @@ exit 72
     $fake = Join-Path $scratch "fake-goal-engine.ps1"
     @'
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
-if ($Arguments[0] -eq "--version") { Write-Host "$env:FORGE_FAKE_ENGINE_NAME 1.0"; exit 0 }
+if ($Arguments[0] -eq "--version") { Write-Output "$env:FORGE_FAKE_ENGINE_NAME 1.0"; exit 0 }
 if ($env:FORGE_FAKE_GOAL_FAILURE -eq $env:FORGE_GOAL_FIXTURE_ACTION) { exit 71 }
 switch ($env:FORGE_GOAL_FIXTURE_ACTION) {
   "activate" {
     @("phase=implementation", "next_step=resume-verification", "progress=fingerprint-a", "session_id=$env:FORGE_GOAL_SESSION_ID") | Set-Content (Join-Path $env:FORGE_GOAL_FIXTURE_DIR "checkpoint")
-    Write-Host "native-activation:$env:FORGE_GOAL_SESSION_ID"
+    Write-Output "native-activation:$env:FORGE_GOAL_SESSION_ID"
   }
   "resume" {
     if ((Get-Content -Raw (Join-Path $env:FORGE_GOAL_FIXTURE_DIR "checkpoint")) -notmatch [regex]::Escape("session_id=$env:FORGE_GOAL_SESSION_ID")) { exit 72 }
     @("phase=verification", "next_step=budget-check", "progress=fingerprint-a", "session_id=$env:FORGE_GOAL_SESSION_ID") | Set-Content (Join-Path $env:FORGE_GOAL_FIXTURE_DIR "checkpoint")
-    Write-Host "checkpoint-resume:$env:FORGE_GOAL_SESSION_ID"
+    Write-Output "checkpoint-resume:$env:FORGE_GOAL_SESSION_ID"
   }
   "manual-tui" {
     @("/goal activated", "checkpoint resumed", "FORGE_GOAL_BUDGET_EXHAUSTED", "FORGE_GOAL_STUCK_WARNING") | Set-Content $env:FORGE_GOAL_TRANSCRIPT
