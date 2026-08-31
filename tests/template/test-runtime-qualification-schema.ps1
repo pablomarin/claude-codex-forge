@@ -39,8 +39,8 @@ public static class ForgeRuntimeFake {
     Assert-True ($LASTEXITCODE -ne 0) 'fixture qualification stays non-certifying'
     Assert-True ((Get-Content -Raw $output) -match '(?m)^evidence_mode=fixture\r?$') 'fixture source is explicit'
     Assert-True ((Get-Content -Raw $output) -match '(?m)^overall_status=BLOCKED\r?$') 'fixture cannot certify PASS'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -Validate -Input $output | Out-Null
-    Assert-True ($LASTEXITCODE -eq 0) 'fixture receipt validates structurally'
+    $validationOutput=(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -Validate -Input $output 2>&1 | Out-String);$validationCode=$LASTEXITCODE
+    Assert-True ($validationCode -eq 0) "fixture receipt validates structurally: $($validationOutput.Trim())"
     $fakePass=Join-Path $temporary 'fake-pass.receipt';(Get-Content $output)|ForEach-Object{if($_ -eq 'overall_status=BLOCKED'){'overall_status=PASS'}else{$_}}|Set-Content $fakePass
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -Validate -Input $fakePass *> $null
     Assert-True ($LASTEXITCODE -ne 0) 'fixture PASS is rejected'

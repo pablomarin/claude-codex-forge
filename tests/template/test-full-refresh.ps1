@@ -162,7 +162,8 @@ try {
     $hookLeaves = @($legacyCommands | ForEach-Object { ($_ -split '/hooks/', 2)[1].Trim('"') })
     $duplicateLeaves = @($hookLeaves | Group-Object | Where-Object Count -ne 1)
     $expectedManaged = 'SubagentStop|subagent-review-receipt|powershell -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/.forge/hooks/check-subagent-review.ps1"'
-    Assert-True ($legacyCommands.Count -eq 9 -and $managedHooks.Count -eq 1 -and $managedHooks[0] -ceq $expectedManaged -and $duplicateLeaves.Count -eq 0) "each released Windows hook registration executes through exactly one thin delegate"
+    $hookDetail = "legacy=$($legacyCommands.Count); managed=$($managedHooks -join ' || '); duplicates=$($duplicateLeaves.Name -join ',')"
+    Assert-True ($legacyCommands.Count -eq 9 -and $managedHooks.Count -eq 1 -and $managedHooks[0] -ceq $expectedManaged -and $duplicateLeaves.Count -eq 0) "each released Windows hook registration executes through exactly one thin delegate ($hookDetail)"
     Assert-True ($inlineCommands.Count -eq 1) "semantically duplicate Windows PreCompact inline registration is suppressed"
 
     $danglingHook = New-Project "released-hooks-dangling"

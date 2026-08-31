@@ -61,6 +61,7 @@ qhash=$(hash_stream < "$question_file")
 workroot=$(git rev-parse --show-toplevel 2>/dev/null) || die 'Git worktree required'
 workroot=$(cd "$workroot" && pwd -P) || die 'cannot resolve Git worktree'
 review_root="$workroot/.forge/local/reviews/council-$qhash"
+reviews_root="$workroot/.forge/local/reviews"
 cursor="$workroot"
 for part in .forge local reviews "council-$qhash"; do
   cursor="$cursor/$part"
@@ -112,8 +113,10 @@ call_advisor() {
 
 RESULT_DIR=""; ATTEMPT_DIR=""
 run_attempt() {
-  local mode="$1" reason="$2" dir
-  dir="$review_root/$mode-$(date +%s)-$$"; mkdir -p "$dir"
+  local mode="$1" reason="$2" dir final_dir
+  dir="$reviews_root/.council-attempt-$(date +%s)-$$-$RANDOM"
+  final_dir="$review_root/$mode-$(date +%s)-$$"
+  mkdir "$dir" || return 12
   ATTEMPT_DIR="$dir"
   local seat sid bundle="$dir/anonymous-advice.txt" peer_bundle="$dir/anonymous-peer-reviews.txt"
   for seat in "${seats[@]}"; do call_advisor "$dir" "$seat" advice || return 10; done
@@ -136,8 +139,10 @@ run_attempt() {
       printf 'seat_label.%s=%s\npersona_binding.%s=%s\nintended_engine.%s.advice=%s\nactual_engine.%s.advice=%s\nintended_engine.%s.peer=%s\nactual_engine.%s.peer=%s\nsession_id.%s=%s\nturn_id.%s.advice=%s-advice\nturn_id.%s.peer=%s-peer\nadvisor_output_hash.%s=%s\npeer_output_hash.%s=%s\n' "$seat_label" "$seat_label" "$seat" "$(persona_for "$seat")" "$seat" "$selected_engine" "$seat" "$selected_engine" "$seat" "$selected_engine" "$seat" "$selected_engine" "$seat" "$(tr -d '\r\n' < "$dir/$seat.session")" "$seat" "$seat" "$seat" "$seat" "$seat" "$(hash_stream < "$dir/$seat-advice.out")" "$seat" "$(hash_stream < "$dir/$seat-peer.out")"
     done
     chair_engine=$(engine_for chair)
-    printf 'intended_engine.chair=%s\nactual_engine.chair=%s\nchair_session_id=ephemeral\nturn_id.chair=chair-synthesis\nadvisor_turns=5\npeer_turns=5\nchairman_turns=1\nturn_results=11\nminority_reports=mandatory\nchairman_output_hash=%s\nfinal_verdict_path=%s\n' "$chair_engine" "$chair_engine" "$(hash_stream < "$chair_out")" "$chair_out"; } > "$dir/topology.receipt"
-  RESULT_DIR="$dir"
+    printf 'intended_engine.chair=%s\nactual_engine.chair=%s\nchair_session_id=ephemeral\nturn_id.chair=chair-synthesis\nadvisor_turns=5\npeer_turns=5\nchairman_turns=1\nturn_results=11\nminority_reports=mandatory\nchairman_output_hash=%s\nfinal_verdict_path=%s\n' "$chair_engine" "$chair_engine" "$(hash_stream < "$chair_out")" "$final_dir/chair.out"; } > "$dir/topology.receipt"
+  mv "$dir" "$final_dir" || return 12
+  ATTEMPT_DIR="$final_dir"
+  RESULT_DIR="$final_dir"
   return 0
 }
 
@@ -162,7 +167,7 @@ fi
 if run_attempt "$mode" "$reason"; then printf 'Council receipt: %s/topology.receipt\n' "$RESULT_DIR"; exit 0; fi
 if [ "$FAILED_ENGINE" = "$other" ]; then
   printf 'Council mixed attempt failed; discarding partial artifacts and rerunning all seats on %s.\n' "$main" >&2
-  case "$ATTEMPT_DIR" in "$review_root"/*) rm -rf "$ATTEMPT_DIR" ;; *) die 'failed attempt path escaped council storage' ;; esac
+  case "$ATTEMPT_DIR" in "$reviews_root"/.council-attempt-*) rm -rf "$ATTEMPT_DIR" ;; *) die 'failed attempt path escaped council staging' ;; esac
   for seat in "${seats[@]}" chair; do set_engine "$seat" "$main"; done
   run_attempt same-engine-fallback runtime-other-failure || die 'main-engine council failure blocks verdict'
   printf 'Council receipt: %s/topology.receipt\n' "$RESULT_DIR"; exit 0

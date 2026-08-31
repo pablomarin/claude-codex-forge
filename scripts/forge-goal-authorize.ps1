@@ -25,7 +25,7 @@ if ($ObjectiveHash -notmatch '^[A-Za-z0-9._-]+$') { throw "BLOCKED: invalid obje
 if ($Nonce -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$') { throw "BLOCKED: nonce must be UUIDv4" }
 if ($Ceiling -lt 1) { throw "BLOCKED: ceiling must be positive" }
 $projectRoot = (& git -C $Project rev-parse --show-toplevel | Select-Object -First 1)
-if ($LASTEXITCODE -ne 0) { throw "BLOCKED: project is not a Git worktree" }
+if (-not $projectRoot) { throw "BLOCKED: project is not a Git worktree" }
 $projectRoot = (Resolve-Path $projectRoot).Path
 $common = (& git -C $projectRoot rev-parse --git-common-dir | Select-Object -First 1)
 if (-not [IO.Path]::IsPathRooted($common)) { $common = Join-Path $projectRoot $common }

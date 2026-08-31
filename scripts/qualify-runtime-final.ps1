@@ -78,30 +78,33 @@ function Test-Child([string]$Path,[string]$Hash,[string]$Schema){
     try{$receipt=Get-Content -LiteralPath $Path -Raw|ConvertFrom-Json}catch{return $false}
     return ($receipt.schema -ceq $Schema -and $receipt.status -in @('PASS','BLOCKED'))
 }
+$script:FinalValidationReason=''
+function Reject-Final([string]$Reason){$script:FinalValidationReason=$Reason;return $false}
 function Test-Final([string]$Path){
-    if(-not (Test-Regular $Path)){return $false};$f=Get-Fields $Path
-    if($f.format -cne 'forge-runtime-final-v1' -or $f.source_class -cne 'forge-runtime-qualifier' -or $f.evidence_mode -notin @('fixture','inventory','authenticated') -or $f.overall_status -notin @('PASS','BLOCKED')){return $false}
-    if(-not (Test-Path (Join-Path $f.project_root '.forge') -PathType Container) -or (Get-CandidateHash $f.project_root) -cne $f.candidate_sha256){return $false}
-    $head=(& git -C $f.project_root rev-parse HEAD|Select-Object -First 1);$tree=(& git -C $f.project_root rev-parse 'HEAD^{tree}'|Select-Object -First 1);if($f.git_head -cne $head -or $f.tree_sha -cne $tree){return $false}
+    $script:FinalValidationReason=''
+    if(-not (Test-Regular $Path)){return (Reject-Final 'receipt is not a regular file')};$f=Get-Fields $Path
+    if($f.format -cne 'forge-runtime-final-v1' -or $f.source_class -cne 'forge-runtime-qualifier' -or $f.evidence_mode -notin @('fixture','inventory','authenticated') -or $f.overall_status -notin @('PASS','BLOCKED')){return (Reject-Final 'top-level schema fields are invalid')}
+    if(-not (Test-Path (Join-Path $f.project_root '.forge') -PathType Container) -or (Get-CandidateHash $f.project_root) -cne $f.candidate_sha256){return (Reject-Final 'candidate binding is invalid')}
+    $head=(& git -C $f.project_root rev-parse HEAD|Select-Object -First 1);$tree=(& git -C $f.project_root rev-parse 'HEAD^{tree}'|Select-Object -First 1);if($f.git_head -cne $head -or $f.tree_sha -cne $tree){return (Reject-Final 'Git identity is invalid')}
     foreach($engine in @('claude','codex')){
         $binary=$f["${engine}_binary_path"];$binaryHash=$f["${engine}_binary_sha256"]
-        if($binary -eq 'none'){if($binaryHash -ne 'none'){return $false}}elseif(-not (Test-Regular $binary) -or (Get-Hash $binary) -cne $binaryHash){return $false}
-        if(-not (Test-Child $f["${engine}_dispatch_path"] $f["${engine}_dispatch_sha256"] 'forge.dispatch-isolation.v1')){return $false}
-        if(-not (Test-Child $f["${engine}_goal_path"] $f["${engine}_goal_sha256"] 'forge.goal-feasibility.v1')){return $false}
+        if($binary -eq 'none'){if($binaryHash -ne 'none'){return (Reject-Final "$engine binary fields disagree")}}elseif(-not (Test-Regular $binary) -or (Get-Hash $binary) -cne $binaryHash){return (Reject-Final "$engine binary binding is invalid")}
+        if(-not (Test-Child $f["${engine}_dispatch_path"] $f["${engine}_dispatch_sha256"] 'forge.dispatch-isolation.v1')){return (Reject-Final "$engine dispatch receipt is invalid")}
+        if(-not (Test-Child $f["${engine}_goal_path"] $f["${engine}_goal_sha256"] 'forge.goal-feasibility.v1')){return (Reject-Final "$engine goal receipt is invalid")}
     }
-    if($f.windows_status -notin @('PASS','PENDING')){return $false}
+    if($f.windows_status -notin @('PASS','PENDING')){return (Reject-Final 'Windows status is invalid')}
     if($f.windows_status -eq 'PASS'){
-        if(-not (Test-Regular $f.windows_attestation_path) -or (Get-Hash $f.windows_attestation_path) -cne $f.windows_attestation_sha256){return $false};$wf=Get-Fields $f.windows_attestation_path
-        if($wf.format -ne 'forge-windows-deterministic-v1' -or $wf.status -ne 'PASS' -or $wf.powershell_major -ne '5' -or $wf.powershell_minor -ne '1' -or $wf.candidate_clean -ne 'true' -or $wf.git_head -ne $head -or $wf.tree_sha -ne $tree -or -not (Test-CandidateClean $f.project_root)){return $false}
+        if(-not (Test-Regular $f.windows_attestation_path) -or (Get-Hash $f.windows_attestation_path) -cne $f.windows_attestation_sha256){return (Reject-Final 'Windows attestation binding is invalid')};$wf=Get-Fields $f.windows_attestation_path
+        if($wf.format -ne 'forge-windows-deterministic-v1' -or $wf.status -ne 'PASS' -or $wf.powershell_major -ne '5' -or $wf.powershell_minor -ne '1' -or $wf.candidate_clean -ne 'true' -or $wf.git_head -ne $head -or $wf.tree_sha -ne $tree -or -not (Test-CandidateClean $f.project_root)){return (Reject-Final 'Windows attestation fields are invalid')}
     }
     if($f.overall_status -eq 'PASS'){
-        if($f.evidence_mode -ne 'authenticated' -or $f.windows_status -ne 'PASS'){return $false}
+        if($f.evidence_mode -ne 'authenticated' -or $f.windows_status -ne 'PASS'){return (Reject-Final 'PASS lacks authenticated Windows evidence')}
         $expected=@{
           'claude_dispatch'='authenticated isolated review, exact-id resume, and full-agent worktree investigation passed';'codex_dispatch'='authenticated isolated review, exact-id resume, and full-agent worktree investigation passed';
           'claude_goal'='authenticated Claude native /goal activation, exact resume, budget pause, and stuck oracle passed';'codex_goal'='validated sealed physical operator Codex TUI capture'
         }
-        foreach($name in $expected.Keys){$child=Get-Content -LiteralPath $f["${name}_path"] -Raw|ConvertFrom-Json;if($child.status -ne 'PASS' -or $child.reason -cne $expected[$name]){return $false}}
-        if(-not (Test-Regular $f.codex_goal_capture_path) -or (Get-Hash $f.codex_goal_capture_path) -cne $f.codex_goal_capture_sha256){return $false}
+        foreach($name in $expected.Keys){$child=Get-Content -LiteralPath $f["${name}_path"] -Raw|ConvertFrom-Json;if($child.status -ne 'PASS' -or $child.reason -cne $expected[$name]){return (Reject-Final "$name PASS semantics are invalid")}}
+        if(-not (Test-Regular $f.codex_goal_capture_path) -or (Get-Hash $f.codex_goal_capture_path) -cne $f.codex_goal_capture_sha256){return (Reject-Final 'Codex goal capture binding is invalid')}
     }
     return $true
 }
@@ -111,7 +114,7 @@ if($WriteWindowsAttestation){
     $ProjectRoot=(Resolve-Path $ProjectRoot).Path;if(-not (Test-CandidateClean $ProjectRoot)){throw 'Windows deterministic attestation requires a clean candidate'};$head=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$tree=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1)
     [IO.File]::WriteAllLines($Output,@('format=forge-windows-deterministic-v1','status=PASS','powershell_major=5','powershell_minor=1','candidate_clean=true',"git_head=$head","tree_sha=$tree"),$Utf8NoBom);exit 0
 }
-if($Validate){if(Test-Final $Input){exit 0}else{exit 1}}
+if($Validate){if(Test-Final $Input){exit 0}else{[Console]::Error.WriteLine("BLOCKED: invalid final qualification receipt: $script:FinalValidationReason");exit 1}}
 $selected=0;foreach($flag in @($FixtureMode,$Inventory,$Live)){if($flag){$selected++}};if($selected -ne 1 -or -not $ProjectRoot -or -not $Output){throw 'select exactly one of FixtureMode, Inventory, or Live and provide ProjectRoot/Output'}
 $mode=$(if($FixtureMode){'fixture'}elseif($Inventory){'inventory'}else{'authenticated'});$ProjectRoot=(Resolve-Path $ProjectRoot).Path
 $parent=Split-Path -Parent $Output;if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null};$Output=[IO.Path]::GetFullPath($Output);$bundle="$Output.d";if(Test-Path $bundle){throw 'output bundle already exists'};New-Item -ItemType Directory -Path $bundle|Out-Null

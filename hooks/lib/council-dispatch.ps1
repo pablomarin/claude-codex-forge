@@ -60,7 +60,10 @@ function Invoke-Seat([string]$Dir,[string]$Seat,[string]$Phase,[string]$Bundle='
   if ($Phase -eq 'peer') {$args += @('--session-id',$Session)} else {$args += @('--session-id-output',(Join-Path $Dir "$Seat.session"))}; $null = & $agent @args; return $LASTEXITCODE
 }
 function Invoke-Attempt([string]$Mode,[string]$Reason) {
-  $dir=Join-Path $reviewRoot "$Mode-$([DateTime]::UtcNow.Ticks)"; New-Item -ItemType Directory -Path $dir | Out-Null
+  $reviewsRoot=Split-Path -Parent $reviewRoot
+  $dir=Join-Path $reviewsRoot ('.council-attempt-'+[Guid]::NewGuid().ToString('N'))
+  $finalDir=Join-Path $reviewRoot "$Mode-$([DateTime]::UtcNow.Ticks)"
+  New-Item -ItemType Directory -Path $dir | Out-Null
   $script:AttemptDir=$dir
   foreach($seat in $seats) { if ((Invoke-Seat $dir $seat 'advice') -ne 0) { return $null } }
   $bundle=Join-Path $dir 'anonymous-advice.txt'; foreach($seat in $seats) { Add-Content -LiteralPath $bundle -Value "### Advisor $($labels[$seat])"; Get-Content -LiteralPath (Join-Path $dir "$seat-advice.out") | Where-Object {$_ -notmatch '^(engine|author)='} | Add-Content -LiteralPath $bundle }
@@ -68,8 +71,11 @@ function Invoke-Attempt([string]$Mode,[string]$Reason) {
   $peers=Join-Path $dir 'anonymous-peer-reviews.txt'; foreach($seat in $seats) { Add-Content -LiteralPath $peers -Value "### Peer review $($labels[$seat])"; Get-Content -LiteralPath (Join-Path $dir "$seat-peer.out") | Where-Object {$_ -notmatch '^(engine|author)='} | Add-Content -LiteralPath $peers }; $chairPrompt=Join-Path $dir 'chair.prompt'; [IO.File]::WriteAllText($chairPrompt,"question_hash=$qhash`nrequires_read_only_channel=false`n"+(Get-Content -Raw $question)+"`nAnonymous advice:`n"+(Get-Content -Raw $bundle)+"`nAnonymous peer reviews:`n"+(Get-Content -Raw $peers)+"`nMinority reports are mandatory.`n"); $chairOut=Join-Path $dir 'chair.out'; $script:FailedEngine=$engine['chair']; $null = & $agent run --engine $engine['chair'] --fallback-policy none --role council-chair --profile review --artifact $artifact --workflow-base-sha $baseSha --workflow-base-ref $baseRef --prompt-file $chairPrompt --output $chairOut --conversation ephemeral --seat-id chair --timeout-seconds $timeout; if($LASTEXITCODE -ne 0){return $null}
   $receipt=@("schema_version=1","topology_mode=$Mode","trigger_reason=$Reason","main_host=$main","question_hash=$qhash","anonymized_bundle_hash=$(Sha $bundle)","anonymized_peer_bundle_hash=$(Sha $peers)","configuration_revision=$(Sha $capabilities)")
   foreach($seat in $seats) { $sid=(Get-Content -Raw (Join-Path $dir "$seat.session")).Trim(); $receipt += @("seat_label.$($labels[$seat])=$($labels[$seat])","persona_binding.$seat=$($personas[$seat])","intended_engine.$seat.advice=$($engine[$seat])","actual_engine.$seat.advice=$($engine[$seat])","intended_engine.$seat.peer=$($engine[$seat])","actual_engine.$seat.peer=$($engine[$seat])","session_id.$seat=$sid","turn_id.$seat.advice=$seat-advice","turn_id.$seat.peer=$seat-peer","advisor_output_hash.$seat=$(Sha (Join-Path $dir "$seat-advice.out"))","peer_output_hash.$seat=$(Sha (Join-Path $dir "$seat-peer.out"))") }
-  $receipt += @("intended_engine.chair=$($engine['chair'])","actual_engine.chair=$($engine['chair'])",'chair_session_id=ephemeral','turn_id.chair=chair-synthesis','advisor_turns=5','peer_turns=5','chairman_turns=1','turn_results=11','minority_reports=mandatory',"chairman_output_hash=$(Sha $chairOut)","final_verdict_path=$chairOut")
-  $receipt | Set-Content (Join-Path $dir 'topology.receipt'); return $dir
+  $receipt += @("intended_engine.chair=$($engine['chair'])","actual_engine.chair=$($engine['chair'])",'chair_session_id=ephemeral','turn_id.chair=chair-synthesis','advisor_turns=5','peer_turns=5','chairman_turns=1','turn_results=11','minority_reports=mandatory',"chairman_output_hash=$(Sha $chairOut)","final_verdict_path=$(Join-Path $finalDir 'chair.out')")
+  $receipt | Set-Content (Join-Path $dir 'topology.receipt')
+  [IO.Directory]::Move($dir,$finalDir)
+  $script:AttemptDir=$finalDir
+  return $finalDir
 }
 $mode=if($custom){'custom'}else{'mixed'}; $reason='healthy'
 if (-not (Test-EnginePreflight $main)) { Stop-Council "main engine $main failed council preflight" }
@@ -77,16 +83,12 @@ $usesOther = @(@($seats + 'chair') | Where-Object { $engine[$_] -eq $other }).Co
 if ($usesOther -and -not (Test-EnginePreflight $other)) { foreach($seat in @($seats+'chair')){$engine[$seat]=$main};$mode='same-engine-fallback';$reason='known-other-unavailable';$custom=$false }
 $result=Invoke-Attempt $mode $reason; if($result){Write-Output "Council receipt: $result\topology.receipt";exit 0}
 if($script:FailedEngine -eq $other){
-  $attemptPrefix=$reviewRoot.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-  if(!$script:AttemptDir.StartsWith($attemptPrefix,[StringComparison]::OrdinalIgnoreCase)){Stop-Council 'failed attempt path escaped council storage'}
+  $reviewsRoot=Split-Path -Parent $reviewRoot
+  $attemptPrefix=$reviewsRoot.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar+'.council-attempt-'
+  if(!$script:AttemptDir.StartsWith($attemptPrefix,[StringComparison]::OrdinalIgnoreCase)){Stop-Council 'failed attempt path escaped council staging'}
   $failedAttempt=$script:AttemptDir
   Remove-CouncilAttempt $failedAttempt $reviewRoot
   foreach($seat in @($seats+'chair')){$engine[$seat]=$main}
-  $result=Invoke-Attempt 'same-engine-fallback' 'runtime-other-failure';if($result){
-    # A failed Windows child can finish its final filesystem write after its
-    # process exits. Recheck the exact failed path before publishing success.
-    Remove-CouncilAttempt $failedAttempt $reviewRoot
-    Write-Output "Council receipt: $result\topology.receipt";exit 0
-  }
+  $result=Invoke-Attempt 'same-engine-fallback' 'runtime-other-failure';if($result){Write-Output "Council receipt: $result\topology.receipt";exit 0}
 }
 Stop-Council 'main-engine council failure blocks verdict'
