@@ -19,6 +19,29 @@ are materialized into downstream projects.
 Do not maintain shared rules twice. Change the appropriate canonical source, then update both native
 adapters only when their host-specific discovery syntax or behavior actually differs.
 
+## Source-mode dogfood
+
+Forge develops Forge directly from the canonical sources in this repository; it does not commit a
+second generated installation of itself. Root `CLAUDE.md` and `AGENTS.md` load the same contributor
+guide and Forge policy for their respective hosts.
+
+Translate installed paths to source paths when following a Forge workflow here:
+
+| Installed project path | Forge source-repository path |
+| --- | --- |
+| `.forge/instructions.md` | `FORGE.template.md` |
+| `.forge/workflows/<name>.md` | `commands/<name>.md` |
+| `.forge/rules/<name>.md` | `rules/<name>.md` |
+| `.forge/agents/<name>.md` | `agents/<name>.md` |
+| `.forge/skills/<name>/...` | `skills/<name>/...` |
+| `.forge/hooks/...` | `hooks/...` |
+| Installed helper named by a manifest | Its source in `scripts/` or `hooks/lib/` |
+
+Follow the source workflow directly—for example, read `commands/quick-fix.md` for a quick fix. Do
+not add tracked `.claude/`, `.codex/`, `.agents/`, or generated `.forge/` policy copies. Exact
+downstream materialization is verified in disposable projects by the setup, layout, and parity test
+suites.
+
 ## Repository map
 
 | Area | Purpose |

@@ -2741,6 +2741,18 @@ assert_contains "$REPO_ROOT/CLAUDE.template.md" 'v5 compatibility' \
 assert_contains "$REPO_ROOT/CLAUDE.template.md" 'templates/adapters/CLAUDE.block.template.md' \
     "legacy Claude template points maintainers to the v6 adapter source"
 
+SOURCE_PRIVATE_POLICY=""
+while IFS= read -r source_private_path; do
+    if [ -e "$REPO_ROOT/$source_private_path" ] || [ -L "$REPO_ROOT/$source_private_path" ]; then
+        SOURCE_PRIVATE_POLICY="${SOURCE_PRIVATE_POLICY}${SOURCE_PRIVATE_POLICY:+, }${source_private_path}"
+    fi
+done < <(git -C "$REPO_ROOT" ls-files '.claude/**' '.codex/**' '.agents/**')
+if [ -z "$SOURCE_PRIVATE_POLICY" ]; then
+    pass "Forge source mode carries no tracked host-private policy copies"
+else
+    fail "Forge source mode contains tracked generated or host-private policy: $SOURCE_PRIVATE_POLICY"
+fi
+
 start_test "README presents a readable workflow and one-source instruction mapping"
 assert_contains "$README" 'flowchart TB' \
     "engineering workflow uses a vertical Mermaid layout"
