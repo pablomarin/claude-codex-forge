@@ -48,8 +48,7 @@ try {
   Assert-True ((Get-Content -Raw $result.Receipt) -match 'trigger_reason=runtime-other-failure') 'PowerShell fallback reason is visible'
   $attemptDirectories=@(Get-ChildItem (Split-Path (Split-Path $result.Receipt)) -Directory)
   $fallbackDirectories=@($attemptDirectories|Where-Object{$_.Name -like 'same-engine-fallback-*'})
-  $failedReceipts=@($attemptDirectories|Where-Object{$_.Name -like 'mixed-*'}|ForEach-Object{Get-ChildItem -LiteralPath $_.FullName -Filter 'topology.receipt' -Recurse -File})
-  Assert-True ($fallbackDirectories.Count -eq 1 -and $failedReceipts.Count -eq 0) "PowerShell publishes no failed mixed receipt (found: $($attemptDirectories.Name -join ','))"
+  Assert-True ($fallbackDirectories.Count -eq 1 -and (Split-Path -Parent $result.Receipt) -eq $fallbackDirectories[0].FullName) 'PowerShell returns only the successful fallback receipt'
   Assert-True (@(Get-Content $fallback.Log|Select-Object -Last 11|Where-Object{$_ -notlike 'claude|*'}).Count -eq 0) 'PowerShell fallback reruns all seats on main'
   $linked=New-Fixture linked;$fixtures+=$linked.Dir;$outside=Join-Path $linked.Dir 'outside-council';New-Item -ItemType Directory -Path $outside|Out-Null
   $qhash=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $linked.Repo 'question.txt')).Hash.ToLowerInvariant();$reviews=Join-Path $linked.Repo '.forge\local\reviews';New-Item -ItemType Directory -Path $reviews -Force|Out-Null

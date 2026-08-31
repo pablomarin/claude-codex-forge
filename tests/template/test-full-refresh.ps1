@@ -213,15 +213,13 @@ try {
     $invoker = Join-Path $scratch "invoker"
     [IO.Directory]::CreateDirectory($fixtureHome) | Out-Null
     [IO.Directory]::CreateDirectory($invoker) | Out-Null
-    $global = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R") -WorkingDirectory $invoker `
-        -Environment @{ HOME = $fixtureHome; USERPROFILE = $fixtureHome }
-    Assert-True ($global.Code -eq 0) "setup.ps1 -Global -R succeeds for a selected temporary home"
+    $global = Invoke-IsolatedPowerShell -Script $refresh -Arguments @("-Target", $fixtureHome, "-Scope", "global") -WorkingDirectory $invoker
+    Assert-True ($global.Code -eq 0) "full-refresh.ps1 succeeds for a selected temporary global home"
     Assert-True (Test-Path -LiteralPath (Join-Path $fixtureHome ".forge\version")) "global stamp is confined to selected home"
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $invoker ".forge\version"))) "global refresh writes nothing into its invoker"
     $globalManifest = Join-Path $fixtureHome ".forge\managed-files.tsv"
     $globalHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $globalManifest).Hash
-    $globalAgain = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R") -WorkingDirectory $invoker `
-        -Environment @{ HOME = $fixtureHome; USERPROFILE = $fixtureHome }
+    $globalAgain = Invoke-IsolatedPowerShell -Script $refresh -Arguments @("-Target", $fixtureHome, "-Scope", "global") -WorkingDirectory $invoker
     Assert-True ($globalAgain.Code -eq 0 -and (Get-FileHash -Algorithm SHA256 -LiteralPath $globalManifest).Hash -eq $globalHash) "global full refresh is byte-idempotent"
 
     $noncanonicalHome = Join-Path $fixtureHome "..\home"

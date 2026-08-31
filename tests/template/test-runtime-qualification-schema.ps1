@@ -52,11 +52,13 @@ public static class ForgeRuntimeFake {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output $windows *> $null
     Assert-True ($LASTEXITCODE -eq 0 -and (Get-Content -Raw $windows) -match '(?m)^candidate_clean=true\r?$') 'clean Windows writer records candidate cleanliness'
     Add-Content -LiteralPath (Join-Path $project 'app.txt') -Value 'dirty tracked'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output (Join-Path $temporary 'windows-dirty.receipt') *> $null
-    Assert-True ($LASTEXITCODE -ne 0) 'Windows writer rejects tracked dirtiness'
+    $savedPreference=$ErrorActionPreference;$ErrorActionPreference='Continue'
+    try{& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output (Join-Path $temporary 'windows-dirty.receipt') *> $null;$dirtyCode=$LASTEXITCODE}finally{$ErrorActionPreference=$savedPreference}
+    Assert-True ($dirtyCode -ne 0) 'Windows writer rejects tracked dirtiness'
     [IO.File]::WriteAllText((Join-Path $project 'app.txt'),"candidate`n");[IO.File]::WriteAllText((Join-Path $project 'untracked.txt'),"untracked`n")
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output (Join-Path $temporary 'windows-untracked.receipt') *> $null
-    Assert-True ($LASTEXITCODE -ne 0) 'Windows writer rejects untracked dirtiness'
+    $savedPreference=$ErrorActionPreference;$ErrorActionPreference='Continue'
+    try{& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output (Join-Path $temporary 'windows-untracked.receipt') *> $null;$untrackedCode=$LASTEXITCODE}finally{$ErrorActionPreference=$savedPreference}
+    Assert-True ($untrackedCode -ne 0) 'Windows writer rejects untracked dirtiness'
     Remove-Item -LiteralPath (Join-Path $project 'untracked.txt')
 
     $noClean=Join-Path $temporary 'windows-no-clean.receipt';$head=(& git -C $project rev-parse HEAD);$tree=(& git -C $project rev-parse 'HEAD^{tree}')
