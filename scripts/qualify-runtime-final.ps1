@@ -63,7 +63,9 @@ function Invoke-QualificationChild([string[]]$Arguments,[string]$Receipt,[string
     try {
         if(-not $process.Start()){Write-BlockedChild $Receipt $Schema 'qualification child failed to start';return 127}
         if(-not $process.WaitForExit($TimeoutSeconds*1000)){
-            & taskkill.exe /PID $process.Id /T /F 2>$null|Out-Null
+            $savedErrorActionPreference=$ErrorActionPreference
+            try{$ErrorActionPreference='Continue';& taskkill.exe /PID $process.Id /T /F 2>&1|Out-Null}catch{}
+            finally{$ErrorActionPreference=$savedErrorActionPreference}
             try{$process.Kill()}catch{};$process.WaitForExit()
             Write-BlockedChild $Receipt $Schema 'qualification child timeout';return 124
         }
