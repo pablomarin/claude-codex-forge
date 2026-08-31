@@ -17,7 +17,7 @@ function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-Ch
 function Get-LatestReceipt([string]$Repository) { return (Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1).FullName }
 function New-Repository([string]$Name) {
     $path = Join-Path $temporary $Name
-    New-Item -ItemType Directory -Path (Join-Path $path '.forge/local'), (Join-Path $path '.forge') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $path '.forge/local/reviews'), (Join-Path $path '.forge') -Force | Out-Null
     & git -C $path init -q; & git -C $path config user.email test@example.invalid; & git -C $path config user.name ForgeTest
     [IO.File]::WriteAllText((Join-Path $path 'app.txt'), "base`n")
     Copy-Item -LiteralPath (Join-Path $root 'manifests/managed-v6.tsv') -Destination (Join-Path $path '.forge/managed-files.tsv')
