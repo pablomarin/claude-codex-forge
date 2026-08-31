@@ -98,10 +98,7 @@ public static class ForgeFakeEngine {
   static int RunReproduction() {
     var runner=E("FORGE_REPRO_RUNNER"); if(runner=="") return 70;
     var start=new ProcessStartInfo("powershell.exe","-NoProfile -ExecutionPolicy Bypass -File \""+runner.Replace("\"","\\\"")+"\""){UseShellExecute=false,CreateNoWindow=true};
-    var process=Process.Start(start); process.WaitForExit();
-    var log=E("FAKE_CODEX_LOG"); var directory=Path.GetDirectoryName(runner);
-    if(log!="") foreach(var name in new[]{"stdout","stderr","exit"}) { var path=Path.Combine(directory,".forge-reproduction."+name); if(File.Exists(path)) File.AppendAllText(log,"repro_"+name+"_base64="+Convert.ToBase64String(File.ReadAllBytes(path))+Environment.NewLine); }
-    return process.ExitCode;
+    var process=Process.Start(start); process.WaitForExit(); return process.ExitCode;
   }
   public static int Main(string[] args) {
     string engine=Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).ToLowerInvariant();
@@ -244,9 +241,7 @@ public static class ForgeFakeEngine {
     $reproPrompt = "schema_version=1`nhypothesis=qualified boundary`nprimary_program=boundary-repro.exe`nprimary_arg=primary`nprimary_expected_exit=0`nprimary_expected_output_hash=$match`ncontrol_program=boundary-repro.exe`ncontrol_arg=control`ncontrol_expected_exit=0`ncontrol_expected_output_hash=$control`n"
     $reproLog = Join-Path $repo '.forge/local/reviews/repro.log'; $env:FORGE_CODEX_AUTH_FILE = $auth; $env:FAKE_CODEX_BEHAVIOR = 'repro-boundary'; $env:FAKE_CODEX_LOG = $reproLog
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'investigation-repro' 'none' 'ephemeral' '' '' $reproPrompt) 0 'primary and control use qualified Codex reproduction boundaries'
-    $reproductionStatus = Get-ReceiptValue $repo 'reproduction_status'
-    if ($reproductionStatus -cne 'REPRODUCED') { $script:LastChildStderr = [IO.File]::ReadAllText($reproLog) }
-    Assert-Equal $reproductionStatus 'REPRODUCED' 'dispatcher computes a reproduced status'
+    Assert-Equal (Get-ReceiptValue $repo 'reproduction_status') 'REPRODUCED' 'dispatcher computes a reproduced status'
     Assert-Equal (Get-ShaFileForTest $state) $stateHash 'reproduction leaves Forge state byte-identical'
     Assert-Equal (Get-ShaFileForTest $auth) $authHash 'reproduction leaves protected auth byte-identical'
     if (Test-Path -LiteralPath $outside) { Fail 'reproduction escaped the disposable candidate' } else { Pass 'reproduction cannot write outside the disposable candidate' }

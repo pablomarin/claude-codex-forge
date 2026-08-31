@@ -361,16 +361,22 @@ function Invoke-Engine([string]$Selected) {
         $reproItem = Get-Item -LiteralPath $reproExecutable -Force
         if ($reproItem.PSIsContainer -or (($reproItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { return @{ Rc = 2; Class = 'artifact'; Reason = 'reproduction-program-not-regular'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
         $script:ReproRunner = Join-Path $primary '.forge-reproduction-runner.ps1'; $reproStdout = Join-Path $primary '.forge-reproduction.stdout'; $reproStderr = Join-Path $primary '.forge-reproduction.stderr'; $reproExit = Join-Path $primary '.forge-reproduction.exit'
-        $argumentLiterals = @($script:ReproArguments | ForEach-Object { ConvertTo-PowerShellLiteral ([string]$_) }) -join ','
+        $processArguments = @($script:ReproArguments | ForEach-Object { Escape-ProcessArgument ([string]$_) }) -join ' '
         $runnerLines = @(
-            '$ErrorActionPreference=''Continue'''
+            '$ErrorActionPreference=''Stop'''
             '$utf8=New-Object Text.UTF8Encoding($false)'
             '$env:FORGE_REPRO_NO_NETWORK=''1'''
-            ('$arguments=@(' + $argumentLiterals + ')')
-            ('Push-Location ' + (ConvertTo-PowerShellLiteral $snapshot))
-            ('try { $captured=@(& ' + (ConvertTo-PowerShellLiteral $reproExecutable) + ' @arguments 2> ' + (ConvertTo-PowerShellLiteral $reproStderr) + '); $code=$LASTEXITCODE; if ($null -eq $code) { $code=0 } } finally { Pop-Location }')
-            '$text=$captured -join [Environment]::NewLine; if ($captured.Count -gt 0) { $text += [Environment]::NewLine }'
-            ('[IO.File]::WriteAllText(' + (ConvertTo-PowerShellLiteral $reproStdout) + ', $text, $utf8)')
+            '$start=New-Object Diagnostics.ProcessStartInfo'
+            ('$start.FileName=' + (ConvertTo-PowerShellLiteral $reproExecutable))
+            ('$start.Arguments=' + (ConvertTo-PowerShellLiteral $processArguments))
+            ('$start.WorkingDirectory=' + (ConvertTo-PowerShellLiteral $snapshot))
+            '$start.UseShellExecute=$false; $start.CreateNoWindow=$true; $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true'
+            '$process=New-Object Diagnostics.Process; $process.StartInfo=$start'
+            'if(-not $process.Start()){throw ''reproduction process did not start''}'
+            '$stdoutTask=$process.StandardOutput.ReadToEndAsync(); $stderrTask=$process.StandardError.ReadToEndAsync(); $process.WaitForExit()'
+            '$code=$process.ExitCode; $stdout=$stdoutTask.Result; $stderr=$stderrTask.Result; $process.Dispose()'
+            ('[IO.File]::WriteAllText(' + (ConvertTo-PowerShellLiteral $reproStdout) + ', $stdout, $utf8)')
+            ('[IO.File]::WriteAllText(' + (ConvertTo-PowerShellLiteral $reproStderr) + ', $stderr, $utf8)')
             ('[IO.File]::WriteAllText(' + (ConvertTo-PowerShellLiteral $reproExit) + ', [string]$code + "`n", $utf8)')
             'exit 0'
         )
