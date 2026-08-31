@@ -11,7 +11,7 @@ $script:DispatchSequence = 0
 
 function Pass([string]$Message) { $script:Passed++; Write-Host "  PASS $Message" }
 function Fail([string]$Message) { $script:Failed++; [Console]::Error.WriteLine("  FAIL $Message") }
-function Assert-Equal($Actual, $Expected, [string]$Message) { if ([string]$Actual -ceq [string]$Expected) { Pass $Message } else { Fail "$Message expected=$Expected actual=$Actual" } }
+function Assert-Equal($Actual, $Expected, [string]$Message) { if ([string]$Actual -ceq [string]$Expected) { Pass $Message } else { $detail = if ($script:LastChildStderr) { ' stderr=' + ($script:LastChildStderr.Trim() -replace '[\r\n]+', ' | ') } else { '' }; Fail "$Message expected=$Expected actual=$Actual$detail" } }
 function Assert-True([bool]$Condition, [string]$Message) { if ($Condition) { Pass $Message } else { Fail $Message } }
 function Assert-Contains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -like "*$Needle*") { Pass $Message } else { Fail "$Message missing=$Needle" } }
 function Assert-NotContains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -notlike "*$Needle*") { Pass $Message } else { Fail "$Message unexpected=$Needle" } }
@@ -21,6 +21,7 @@ function Invoke-SilentPowerShell([object[]]$Arguments) {
     $quoted = @($Arguments | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' })
     try {
         $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $quoted -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        $script:LastChildStderr = if (Test-Path -LiteralPath $stderr) { [IO.File]::ReadAllText($stderr) } else { '' }
         return [int]$process.ExitCode
     }
     finally { Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue }
@@ -49,7 +50,7 @@ function Set-Context([string]$Repository, [string]$EngineHost, [string]$Session)
     finally { Pop-Location }
 }
 function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Session, [string]$Requested, [string]$Role = 'general', [string]$Fallback = 'automatic', [string]$Conversation = 'ephemeral', [string]$ExactSession = '', [string]$SessionOutput = '', [string]$PromptText = '', [string]$OutputPath = '') {
-    Set-Context $Repository $EngineHost $Session
+    if ($Conversation -ne 'resume') { Set-Context $Repository $EngineHost $Session }
     $script:DispatchSequence++; $prompt = Join-Path $Repository '.forge/local/reviews/prompt.txt'
     if ($PromptText) { [IO.File]::WriteAllText($prompt, $PromptText) }
     elseif ($Role -like 'council-*') { $question = Get-ShaTextForTest 'stable council question'; [IO.File]::WriteAllText($prompt, "question_hash=$question`nreview`n") } else { [IO.File]::WriteAllText($prompt, "review`n") }
@@ -172,7 +173,7 @@ public static class ForgeFakeEngine {
 
     Write-Host 'PowerShell protected host ambiguity and atomic output publication'
     $repo = New-Repository 'ambiguous hosts'; Set-Context $repo 'claude' 'claude-live'; $env:FAKE_CODEX_BEHAVIOR = 'clean'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
-    Assert-Equal (Invoke-Dispatch $repo 'codex' 'codex-live' 'auto') 2 'simultaneous Claude and Codex receipts cannot be caller-selected'
+    Assert-Equal (Invoke-Dispatch $repo 'codex' 'codex-live' 'auto') 0 'current Codex session can launch while Claude is also active'
     $repo = New-Repository 'atomic output'; $protected = Join-Path $repo '.forge/local/protected-output'; [IO.File]::WriteAllText($protected, "protected`n"); $protectedHash = Get-ShaFileForTest $protected
     $racedOutput = Join-Path $repo '.forge/local/reviews/raced-output'; $swapControl = Join-Path $repo '.forge/local/swap-control'; [IO.File]::WriteAllLines($swapControl, @($racedOutput, $protected))
     $env:FAKE_CHILD_PID_FILE = $swapControl; $env:FAKE_CODEX_BEHAVIOR = 'swap-output'
