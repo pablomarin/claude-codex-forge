@@ -146,6 +146,25 @@ try {
     $dryRunOnly = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-DryRun") -WorkingDirectory $previewProject
     Assert-True ($dryRunOnly.Code -ne 0) "PowerShell rejects -DryRun without -FullRefresh"
 
+    $multiBlocker = New-Project "multi-blocker"
+    Write-Text (Join-Path $multiBlocker ".claude\.forge-version") "5.61`n"
+    foreach ($hook in @("session-start.ps1", "check-bash-safety.ps1")) {
+        $hookPath = Join-Path $multiBlocker (".claude\hooks\" + $hook)
+        Export-GitBlob ("cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/" + $hook) $hookPath
+        [IO.File]::AppendAllText($hookPath, "`nDEVELOPER_MODIFIED_$hook`n", $utf8NoBom)
+    }
+    Write-Text (Join-Path $multiBlocker ".claude\settings.json") "{ malformed settings`n"
+    Write-V5State $multiBlocker "WINDOWS_MULTI_BLOCKER_STATE"
+    $sessionHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\session-start.ps1")).Hash
+    $safetyHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\check-bash-safety.ps1")).Hash
+    $settingsHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\settings.json")).Hash
+    $multiResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $multiBlocker
+    Assert-True ($multiResult.Code -ne 0) "PowerShell multi-blocker preview returns nonzero"
+    Assert-True ($multiResult.Output.Contains(".claude/hooks/session-start.ps1") -and $multiResult.Output.Contains(".claude/hooks/check-bash-safety.ps1") -and $multiResult.Output.Contains(".claude/settings.json")) "PowerShell preview lists every ordinary blocker"
+    Assert-True ($multiResult.Output.Contains("BLOCKERS: 3")) "PowerShell preview reports the complete blocker count"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\session-start.ps1")).Hash -eq $sessionHash -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\check-bash-safety.ps1")).Hash -eq $safetyHash -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\settings.json")).Hash -eq $settingsHash) "PowerShell blocked inventory preserves all source bytes"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $multiBlocker ".forge\version"))) "PowerShell blocked inventory writes no v6 stamp"
+
     $project = New-Project "project"
     Write-AdversarialV5State $project
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `

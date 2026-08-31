@@ -207,6 +207,37 @@ assert_equals "$?" "1" "old/new state conflict is never guessed"
 assert_contains "$S5C/conflict.log" "state conflict" "state conflict is explicit"
 assert_not_contains "$S5C/.forge/local/state.md" "OLD_STATE" "existing canonical state is untouched"
 
+start_test "preview reports every ordinary ownership blocker before staging"
+S5M=$(scratch_dir full-refresh-multi-blocker)
+make_git_repo "$S5M"
+mkdir -p "$S5M/.claude/hooks"
+printf '5.61\n' > "$S5M/.claude/.forge-version"
+for hook in session-start.sh check-bash-safety.sh; do
+    git -C "$REPO_ROOT" show "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/$hook" \
+        > "$S5M/.claude/hooks/$hook"
+    printf '\nDEVELOPER_MODIFIED_%s\n' "$hook" >> "$S5M/.claude/hooks/$hook"
+done
+printf '{ malformed settings\n' > "$S5M/.claude/settings.json"
+write_active_v5_state "$S5M" "MULTI_BLOCKER_STATE"
+session_hash=$(hash_file "$S5M/.claude/hooks/session-start.sh")
+safety_hash=$(hash_file "$S5M/.claude/hooks/check-bash-safety.sh")
+settings_hash=$(hash_file "$S5M/.claude/settings.json")
+multi_log="${S5M}.preview.log"
+run_refresh "$S5M" "$multi_log" -F --dry-run
+assert_equals "$?" "1" "multi-blocker preview returns nonzero"
+assert_contains "$multi_log" ".claude/hooks/session-start.sh" "preview lists the first modified hook"
+assert_contains "$multi_log" ".claude/hooks/check-bash-safety.sh" "preview lists the second modified hook"
+assert_contains "$multi_log" ".claude/settings.json" "preview lists malformed settings"
+assert_contains "$multi_log" "BLOCKERS: 3" "preview reports the complete blocker count"
+assert_hash_equals "$S5M/.claude/hooks/session-start.sh" "$session_hash" "first blocker remains byte-identical"
+assert_hash_equals "$S5M/.claude/hooks/check-bash-safety.sh" "$safety_hash" "second blocker remains byte-identical"
+assert_hash_equals "$S5M/.claude/settings.json" "$settings_hash" "malformed settings remain byte-identical"
+assert_file_missing "$S5M/.forge/version" "blocked inventory writes no v6 stamp"
+assert_file_missing "$S5M/.forge/local/migration-guard" "blocked inventory writes no guard"
+assert_file_missing "$S5M/.forge/local/migration-journals" "blocked inventory writes no journal"
+assert_file_missing "$S5M/.forge/local/migration-backups" "blocked inventory writes no backup"
+assert_file_missing "$S5M/.forge/local/migration-reports" "blocked inventory writes no report"
+
 start_test "symlink destination and injected commit failure cannot produce a partial stamp"
 S6=$(scratch_dir full-refresh-symlink)
 make_git_repo "$S6"
