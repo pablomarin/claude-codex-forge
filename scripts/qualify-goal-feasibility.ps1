@@ -156,7 +156,12 @@ function Invoke-ForgeClaudeLiveGoal([string]$Binary, $Details) {
         $script:nativeActivation="PASS"; $checkpoint=Join-Path $scratch "checkpoint"; [IO.File]::WriteAllText($checkpoint,"phase=implementation`nnext_step=resume-verification`nprogress=fingerprint-a`nsession_id=$session`n",$Utf8NoBom)
         $resumeArgs=@("-p","--safe-mode","--strict-mcp-config","--mcp-config",$mcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","text","--resume",$session,"--system-prompt","Resume exact Forge goal checkpoint.","Emit checkpoint_resume=PASS phase=verification next_step=budget-check progress=fingerprint-a session_id=$session FORGE_GOAL_BUDGET_EXHAUSTED paused=true FORGE_GOAL_STUCK_WARNING")
         $run=Invoke-ForgeGoalLiveEngine $Binary $resumeArgs $vars $fixture; foreach($exact in @("checkpoint_resume=PASS","phase=verification","next_step=budget-check","progress=fingerprint-a","session_id=$session","FORGE_GOAL_BUDGET_EXHAUSTED","paused=true","FORGE_GOAL_STUCK_WARNING")){if($run.Code -ne 0 -or $run.Text -notmatch [regex]::Escape($exact)){throw "Claude goal resume omitted $exact"}}
-        $script:checkpointResume="PASS"; $fields=Get-ForgeGoalFields $Authorization; $turnDir=Join-Path $scratch "goal-counters\$($fields['nonce'])\turns"; New-Item -ItemType Directory -Path $turnDir -Force|Out-Null; $turn=Join-Path $turnDir "turn-1"; $stream=[IO.File]::Open($turn,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);$stream.Dispose(); try{$stream=[IO.File]::Open($turn,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);$stream.Dispose();throw "duplicate turn charge clobbered oracle"}catch[IO.IOException]{}
+        $script:checkpointResume="PASS"; $fields=Get-ForgeGoalFields $Authorization; $turnDir=Join-Path $scratch "goal-counters\$($fields['nonce'])\turns"; New-Item -ItemType Directory -Path $turnDir -Force|Out-Null; $turn=Join-Path $turnDir "turn-1"; $stream=[IO.File]::Open($turn,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);$stream.Dispose()
+        try {
+            $stream=[IO.File]::Open($turn,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            $stream.Dispose()
+            throw "duplicate turn charge clobbered oracle"
+        } catch [IO.IOException] {}
         $script:budgetOracle="PASS";$script:stuckOracle="PASS";return "authenticated Claude native /goal activation, exact resume, budget pause, and stuck oracle passed"
     } finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
 }
