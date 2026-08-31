@@ -115,9 +115,9 @@ if ($FullRefresh) {
         [Console]::Error.WriteLine("BLOCKED: full-refresh helper not found: $refreshHelper")
         exit 1
     }
-    if ($Global) { $refreshArguments = @("-Target", $HOME, "-Scope", "global") }
-    else { $refreshArguments = @("-Target", (Get-Location).Path, "-Scope", "project") }
-    if ($DryRun) { $refreshArguments += "-DryRun" }
+    if ($Global) { $refreshArguments = @{ Target = $HOME; Scope = "global" } }
+    else { $refreshArguments = @{ Target = (Get-Location).Path; Scope = "project" } }
+    if ($DryRun) { $refreshArguments["DryRun"] = $true }
     & $refreshHelper @refreshArguments
     if (-not $Global) {
         if ($LASTEXITCODE -eq 0) { Write-NativeGoalCollisions (Get-Location).Path }

@@ -466,8 +466,12 @@ try {
     $tamperResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $tampered
     Assert-True ($tamperResult.Code -ne 0 -and $tamperResult.Output.Contains("continuity translation receipt")) "tampered PowerShell continuity receipt blocks before mutation"
 
-    $setupSource = [IO.File]::ReadAllText($setup)
-    Assert-True ($setupSource.Contains('& $refreshHelper -Target $HOME -Scope global')) "setup.ps1 routes global refresh to the canonical Windows home"
+    $globalPreviewHome = Join-Path $scratch "global-preview"
+    Write-Text (Join-Path $globalPreviewHome ".claude\.forge-version") "5.61`n"
+    $globalPreviewBefore = Get-ProjectSnapshot $globalPreviewHome
+    $globalPreview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R", "-DryRun") `
+        -Environment @{ HOME = $globalPreviewHome; USERPROFILE = $globalPreviewHome }
+    Assert-True ($globalPreview.Code -eq 0 -and $globalPreview.Output.Contains("UPGRADE: READY") -and ((Get-ProjectSnapshot $globalPreviewHome) -ceq $globalPreviewBefore)) "setup.ps1 routes global preview to the canonical Windows home without writes"
     $fixtureHome = Join-Path $scratch "home"
     [IO.Directory]::CreateDirectory($fixtureHome) | Out-Null
     $noncanonicalHome = Join-Path $fixtureHome "..\home"
