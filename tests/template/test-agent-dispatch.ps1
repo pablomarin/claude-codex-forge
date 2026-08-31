@@ -17,7 +17,7 @@ function Assert-Contains([string]$Path, [string]$Needle, [string]$Message) { if 
 function Assert-NotContains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -notlike "*$Needle*") { Pass $Message } else { Fail "$Message unexpected=$Needle" } }
 function Invoke-SilentNative([scriptblock]$Command) {
     $previousErrorActionPreference = $ErrorActionPreference
-    try { $ErrorActionPreference = 'Continue'; & $Command *> $null; return $LASTEXITCODE }
+    try { $ErrorActionPreference = 'Continue'; . $Command *> $null; return $LASTEXITCODE }
     finally { $ErrorActionPreference = $previousErrorActionPreference }
 }
 function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; return $line.Substring($Key.Length + 1) }
