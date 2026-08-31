@@ -115,6 +115,7 @@ function Publish-OwnedReviewFile([string]$Source, [string]$Destination, [string]
     }
     if ((Resolve-Path -LiteralPath $parent).Path -cne [IO.Path]::GetFullPath($parent)) { throw "BLOCKED[invariant]: $Label parent changed before publication" }
     $temporary = "$Destination.publish.$invocationId"
+    $backup = "$Destination.backup.$invocationId"
     try {
         $input = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
         try {
@@ -125,11 +126,11 @@ function Publish-OwnedReviewFile([string]$Source, [string]$Destination, [string]
         $temporaryItem = Get-Item -LiteralPath $temporary -Force
         if (($temporaryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "BLOCKED[invariant]: $Label publication temporary changed" }
         if ((Resolve-Path -LiteralPath $parent).Path -cne [IO.Path]::GetFullPath($parent)) { throw "BLOCKED[invariant]: $Label parent changed during publication" }
-        [IO.File]::Replace($temporary, $Destination, $null, $true)
+        [IO.File]::Replace($temporary, $Destination, $backup, $true)
         $published = Get-Item -LiteralPath $Destination -Force
         if ($published.PSIsContainer -or (($published.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw "BLOCKED[invariant]: $Label publication is not a regular file" }
     }
-    finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+    finally { Remove-Item -LiteralPath $temporary,$backup -Force -ErrorAction SilentlyContinue }
 }
 function Escape-ProcessArgument([string]$Value) {
     if ($Value.Length -eq 0) { return '""' }
