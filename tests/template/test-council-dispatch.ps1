@@ -46,7 +46,8 @@ try {
   $fallback=New-Fixture fallback;$fixtures+=$fallback.Dir;$result=Invoke-Fixture $fallback 'codex:chair:ephemeral'
   Assert-True ($result.Rc -eq 0) 'PowerShell other-chair failure reruns all-main'
   Assert-True ((Get-Content -Raw $result.Receipt) -match 'trigger_reason=runtime-other-failure') 'PowerShell fallback reason is visible'
-  Assert-True (@((Get-ChildItem (Split-Path (Split-Path $result.Receipt)) -Directory)).Count -eq 1) 'PowerShell discards failed mixed artifacts'
+  $attemptDirectories=@(Get-ChildItem (Split-Path (Split-Path $result.Receipt)) -Directory)
+  Assert-True ($attemptDirectories.Count -eq 1) "PowerShell discards failed mixed artifacts (found: $($attemptDirectories.Name -join ','))"
   Assert-True (@(Get-Content $fallback.Log|Select-Object -Last 11|Where-Object{$_ -notlike 'claude|*'}).Count -eq 0) 'PowerShell fallback reruns all seats on main'
   $linked=New-Fixture linked;$fixtures+=$linked.Dir;$outside=Join-Path $linked.Dir 'outside-council';New-Item -ItemType Directory -Path $outside|Out-Null
   $qhash=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $linked.Repo 'question.txt')).Hash.ToLowerInvariant();$reviews=Join-Path $linked.Repo '.forge\local\reviews';New-Item -ItemType Directory -Path $reviews -Force|Out-Null
