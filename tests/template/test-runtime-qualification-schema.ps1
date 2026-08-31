@@ -37,8 +37,8 @@ public static class ForgeRuntimeFake {
     Copy-Item (Join-Path $bin 'runtime-fake.exe') (Join-Path $bin 'claude.exe');Copy-Item (Join-Path $bin 'runtime-fake.exe') (Join-Path $bin 'codex.exe')
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -FixtureMode -ProjectRoot $project -Output $output -EngineDir $bin | Out-Null
     Assert-True ($LASTEXITCODE -ne 0) 'fixture qualification stays non-certifying'
-    Assert-True ((Get-Content -Raw $output) -match '(?m)^evidence_mode=fixture$') 'fixture source is explicit'
-    Assert-True ((Get-Content -Raw $output) -match '(?m)^overall_status=BLOCKED$') 'fixture cannot certify PASS'
+    Assert-True ((Get-Content -Raw $output) -match '(?m)^evidence_mode=fixture\r?$') 'fixture source is explicit'
+    Assert-True ((Get-Content -Raw $output) -match '(?m)^overall_status=BLOCKED\r?$') 'fixture cannot certify PASS'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -Validate -Input $output | Out-Null
     Assert-True ($LASTEXITCODE -eq 0) 'fixture receipt validates structurally'
     $fakePass=Join-Path $temporary 'fake-pass.receipt';(Get-Content $output)|ForEach-Object{if($_ -eq 'overall_status=BLOCKED'){'overall_status=PASS'}else{$_}}|Set-Content $fakePass
@@ -50,7 +50,7 @@ public static class ForgeRuntimeFake {
 
     $windows=Join-Path $temporary 'windows-clean.receipt'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output $windows *> $null
-    Assert-True ($LASTEXITCODE -eq 0 -and (Get-Content -Raw $windows) -match '(?m)^candidate_clean=true$') 'clean Windows writer records candidate cleanliness'
+    Assert-True ($LASTEXITCODE -eq 0 -and (Get-Content -Raw $windows) -match '(?m)^candidate_clean=true\r?$') 'clean Windows writer records candidate cleanliness'
     Add-Content -LiteralPath (Join-Path $project 'app.txt') -Value 'dirty tracked'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -WriteWindowsAttestation -ProjectRoot $project -Output (Join-Path $temporary 'windows-dirty.receipt') *> $null
     Assert-True ($LASTEXITCODE -ne 0) 'Windows writer rejects tracked dirtiness'
@@ -63,7 +63,7 @@ public static class ForgeRuntimeFake {
     [IO.File]::WriteAllLines($noClean,@('format=forge-windows-deterministic-v1','status=PASS','powershell_major=5','powershell_minor=1',"git_head=$head","tree_sha=$tree"))
     $noCleanFinal=Join-Path $temporary 'no-clean-final.receipt'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -FixtureMode -ProjectRoot $project -Output $noCleanFinal -EngineDir $bin -WindowsAttestation $noClean *> $null
-    Assert-True ((Get-Content -Raw $noCleanFinal) -match '(?m)^windows_status=PENDING$') 'final validator rejects Windows PASS without candidate_clean'
+    Assert-True ((Get-Content -Raw $noCleanFinal) -match '(?m)^windows_status=PENDING\r?$') 'final validator rejects Windows PASS without candidate_clean'
 
     $hangBin=Join-Path $temporary 'hanging-bin';New-Item -ItemType Directory -Path $hangBin|Out-Null;$hangMarker=Join-Path $temporary 'hang-used'
     $hangSource=@'

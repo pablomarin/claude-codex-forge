@@ -10,6 +10,7 @@ try {
     $project = Join-Path $scratch "project"
     New-Item -ItemType Directory -Path (Join-Path $project ".forge") -Force | Out-Null
     & git -C $project init -q
+    & git -C $project config core.autocrlf false
     & git -C $project config user.email forge@example.invalid
     & git -C $project config user.name Forge
     [IO.File]::WriteAllText((Join-Path $project "caller.txt"), "caller`n")
@@ -18,21 +19,21 @@ try {
     $fake = Join-Path $scratch "fake-engine.ps1"
     @'
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
-if ($Arguments[0] -eq "--version") { Write-Host "$env:FORGE_FAKE_ENGINE_NAME 1.0"; exit 0 }
+if ($Arguments[0] -eq "--version") { Write-Output "$env:FORGE_FAKE_ENGINE_NAME 1.0"; exit 0 }
 switch ($env:FORGE_DISPATCH_FIXTURE_ACTION) {
   "ephemeral" {
-    if ($env:FORGE_FAKE_CANARY_LEAK -eq "1") { Write-Host "FORGE_CANARY_LEAK" }
-    else { Write-Host "ephemeral:$env:FORGE_DISPATCH_SENTINEL`:canary=false" }
+    if ($env:FORGE_FAKE_CANARY_LEAK -eq "1") { Write-Output "FORGE_CANARY_LEAK" }
+    else { Write-Output "ephemeral:$env:FORGE_DISPATCH_SENTINEL`:canary=false" }
   }
   "council-start" {
     New-Item -ItemType Directory -Path $env:FORGE_DISPATCH_SESSION_STORE -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $env:FORGE_DISPATCH_SESSION_STORE $env:FORGE_DISPATCH_SESSION_ID), $env:FORGE_DISPATCH_SEAT_HASH)
-    Write-Host "thread.started:$env:FORGE_DISPATCH_SESSION_ID"
+    Write-Output "thread.started:$env:FORGE_DISPATCH_SESSION_ID"
   }
   "council-resume" {
     $seat = [IO.File]::ReadAllText((Join-Path $env:FORGE_DISPATCH_SESSION_STORE $env:FORGE_DISPATCH_SESSION_ID))
     if ($seat -cne $env:FORGE_DISPATCH_SEAT_HASH) { exit 75 }
-    Write-Host "thread.resumed:$env:FORGE_DISPATCH_SESSION_ID"
+    Write-Output "thread.resumed:$env:FORGE_DISPATCH_SESSION_ID"
   }
   "investigate" {
     New-Item -ItemType Directory -Path (Split-Path -Parent $env:FORGE_DISPATCH_INVESTIGATION_ARTIFACT) -Force | Out-Null
