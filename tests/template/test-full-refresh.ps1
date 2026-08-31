@@ -202,6 +202,8 @@ function Invoke-IsolatedPowerShell {
 try {
     $previewProject = New-Project "preview"
     Write-Text (Join-Path $previewProject ".claude\.forge-version") "5.61`n"
+    Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/session-start.ps1" `
+        (Join-Path $previewProject ".claude\hooks\session-start.ps1")
     Write-V5State $previewProject "WINDOWS_DRY_RUN_STATE"
     $previewBefore = Get-ProjectSnapshot $previewProject
     $preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $previewProject `
