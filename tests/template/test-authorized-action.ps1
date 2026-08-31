@@ -9,8 +9,14 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $scratch '.forge/local/actions') -Force | Out-Null
     & git -C $scratch init -q; & git -C $scratch config user.email test@example.invalid; & git -C $scratch config user.name ForgeTest
     [IO.File]::WriteAllText((Join-Path $scratch 'x'), 'x'); & git -C $scratch add x; & git -C $scratch commit -qm base
+    $prepareWrapper = Join-Path $scratch 'prepare-action.ps1'
+    [IO.File]::WriteAllText($prepareWrapper, @'
+param([string]$Action, [string]$Output)
+& $Action -Mode prepare -Adapter gh-issue-close -System github -Operation close-issue -Target 'owner/repo#12' -Arg @('owner/repo','12') -ExpectedEffect 'issue closes' -Output $Output
+exit $LASTEXITCODE
+'@)
     $pending = Join-Path $scratch '.forge/local/actions/pending.action'; Push-Location $scratch
-    try { $rendered = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode prepare -Adapter gh-issue-close -System github -Operation close-issue -Target 'owner/repo#12' -Arg owner/repo 12 -ExpectedEffect 'issue closes' -Output $pending 2>&1 | Out-String); $prepareRc = $LASTEXITCODE }
+    try { $rendered = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $prepareWrapper -Action $action -Output $pending 2>&1 | Out-String); $prepareRc = $LASTEXITCODE }
     finally { Pop-Location }
     Check ($prepareRc -eq 0) 'allowlisted direct adapter prepares successfully'
     Check ($rendered -like '*developer must execute*') 'rendered instruction requires developer execution'
