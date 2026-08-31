@@ -266,14 +266,16 @@ Implement `inventory_legacy` as a read-only pass over the stamp, selected finger
 
 - [ ] **Step 4: Render one complete actionable report**
 
-Call inventory before creating stage/guard in both dry-run and execution. If findings exist, call
-Task 1's renderer with `UPGRADE: BLOCKED`, `ACTIVE_FORGE: unchanged`, and
+For dry-run, call inventory before creating temporary staging and without a persistent guard. For
+execution, acquire the transaction guard first and then run the complete inventory under that guard
+before creating staging. If findings exist, call Task 1's renderer with `UPGRADE: BLOCKED`,
+`ACTIVE_FORGE: unchanged`, and
 `NEXT_STEP: resolve every listed blocker, then rerun full refresh preview`; return nonzero through
 `RefreshBlocked("upgrade inventory contains blocking findings")`, and do not stage.
 
 - [ ] **Step 5: Make staging consume the proven inventory**
 
-Change `prepare_legacy` to accept `inventory: LegacyInventory`, use its selector/region selector/proven set, and remove duplicate first-error fingerprint/JSON discovery. Revalidate each proven source hash under the execution guard before copying or deleting; a changed hash is a transaction race and blocks without applying.
+Change `prepare_legacy` to accept `inventory: LegacyInventory`, use its selector/region selector/proven set, and remove duplicate first-error fingerprint/JSON discovery. Preview consumes its guard-free inventory; execution consumes the complete inventory produced after acquiring the guard. Revalidate each proven source hash before copying or deleting; a later changed hash is a transaction race and blocks without applying.
 
 - [ ] **Step 6: Run focused GREEN and commit**
 
