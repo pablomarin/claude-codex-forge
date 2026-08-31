@@ -187,12 +187,12 @@ exit 0
     $liveClaude = Join-Path $scratch "live-claude.ps1"
     @'
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
-if ($Arguments[0] -eq "--version") { Write-Host "claude-code 9.9.1"; exit 0 }
-if ($Arguments[0] -eq "--help") { Write-Host "--safe-mode --strict-mcp-config --setting-sources --session-id --resume"; exit 0 }
+if ($Arguments[0] -eq "--version") { Write-Output "claude-code 9.9.1"; exit 0 }
+if ($Arguments[0] -eq "--help") { Write-Output "--safe-mode --strict-mcp-config --setting-sources --session-id --resume"; exit 0 }
 $joined = $Arguments -join " "; [IO.File]::AppendAllText($env:FORGE_FAKE_GOAL_ARGV_LOG, "home=$env:HOME userprofile=$env:USERPROFILE username=$env:USERNAME argv=$joined`n")
 $session = $env:FORGE_GOAL_SESSION_ID
-if ($joined -match '--resume') { if ($env:FORGE_FAKE_GOAL_FAILURE -eq "stale-session") { $session = "wrong-session" }; Write-Host "checkpoint_resume=PASS`nphase=verification`nnext_step=budget-check`nprogress=fingerprint-a`nsession_id=$session`nFORGE_GOAL_BUDGET_EXHAUSTED`npaused=true`nFORGE_GOAL_STUCK_WARNING" }
-else { Write-Host "native_activation=PASS`nphase=implementation`nnext_step=resume-verification`nprogress=fingerprint-a`nsession_id=$session" }
+if ($joined -match '--resume') { if ($env:FORGE_FAKE_GOAL_FAILURE -eq "stale-session") { $session = "wrong-session" }; Write-Output "checkpoint_resume=PASS`nphase=verification`nnext_step=budget-check`nprogress=fingerprint-a`nsession_id=$session`nFORGE_GOAL_BUDGET_EXHAUSTED`npaused=true`nFORGE_GOAL_STUCK_WARNING" }
+else { Write-Output "native_activation=PASS`nphase=implementation`nnext_step=resume-verification`nprogress=fingerprint-a`nsession_id=$session" }
 '@ | Set-Content -LiteralPath $liveClaude -Encoding UTF8
     $env:FORGE_FAKE_GOAL_ARGV_LOG = Join-Path $scratch "live-claude.argv"
     $liveGoalOutput = Join-Path $scratch "live-claude.json"

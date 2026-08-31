@@ -81,6 +81,7 @@ $mode=if($custom){'custom'}else{'mixed'}; $reason='healthy'
 if (-not (Test-EnginePreflight $main)) { Stop-Council "main engine $main failed council preflight" }
 $usesOther = @(@($seats + 'chair') | Where-Object { $engine[$_] -eq $other }).Count -gt 0
 if ($usesOther -and -not (Test-EnginePreflight $other)) { foreach($seat in @($seats+'chair')){$engine[$seat]=$main};$mode='same-engine-fallback';$reason='known-other-unavailable';$custom=$false }
+$existingAttemptPaths=@(Get-ChildItem -LiteralPath $reviewRoot -Directory -ErrorAction SilentlyContinue|ForEach-Object{$_.FullName})
 $result=Invoke-Attempt $mode $reason; if($result){Write-Output "Council receipt: $result\topology.receipt";exit 0}
 if($script:FailedEngine -eq $other){
   $reviewsRoot=Split-Path -Parent $reviewRoot
@@ -89,6 +90,9 @@ if($script:FailedEngine -eq $other){
   $failedAttempt=$script:AttemptDir
   Remove-CouncilAttempt $failedAttempt $reviewRoot
   foreach($seat in @($seats+'chair')){$engine[$seat]=$main}
-  $result=Invoke-Attempt 'same-engine-fallback' 'runtime-other-failure';if($result){Write-Output "Council receipt: $result\topology.receipt";exit 0}
+  $result=Invoke-Attempt 'same-engine-fallback' 'runtime-other-failure';if($result){
+    Get-ChildItem -LiteralPath $reviewRoot -Directory -ErrorAction SilentlyContinue|Where-Object{$_.FullName -ne $result -and $_.FullName -notin $existingAttemptPaths}|ForEach-Object{Remove-Item -LiteralPath (Join-Path $_.FullName 'topology.receipt') -Force -ErrorAction SilentlyContinue}
+    Write-Output "Council receipt: $result\topology.receipt";exit 0
+  }
 }
 Stop-Council 'main-engine council failure blocks verdict'

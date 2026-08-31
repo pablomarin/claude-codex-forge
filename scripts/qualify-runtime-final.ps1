@@ -114,7 +114,7 @@ if($WriteWindowsAttestation){
     $ProjectRoot=(Resolve-Path $ProjectRoot).Path;if(-not (Test-CandidateClean $ProjectRoot)){throw 'Windows deterministic attestation requires a clean candidate'};$head=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$tree=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1)
     [IO.File]::WriteAllLines($Output,@('format=forge-windows-deterministic-v1','status=PASS','powershell_major=5','powershell_minor=1','candidate_clean=true',"git_head=$head","tree_sha=$tree"),$Utf8NoBom);exit 0
 }
-if($Validate){if(Test-Final $ReceiptInput){exit 0}else{[Console]::Error.WriteLine("BLOCKED: invalid final qualification receipt: $script:FinalValidationReason");exit 1}}
+if($Validate){if(Test-Final $ReceiptInput){exit 0}else{Write-Output "BLOCKED: invalid final qualification receipt: $script:FinalValidationReason";exit 1}}
 $selected=0;foreach($flag in @($FixtureMode,$Inventory,$Live)){if($flag){$selected++}};if($selected -ne 1 -or -not $ProjectRoot -or -not $Output){throw 'select exactly one of FixtureMode, Inventory, or Live and provide ProjectRoot/Output'}
 $mode=$(if($FixtureMode){'fixture'}elseif($Inventory){'inventory'}else{'authenticated'});$ProjectRoot=(Resolve-Path $ProjectRoot).Path
 $parent=Split-Path -Parent $Output;if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null};$Output=[IO.Path]::GetFullPath($Output);$bundle="$Output.d";if(Test-Path $bundle){throw 'output bundle already exists'};New-Item -ItemType Directory -Path $bundle|Out-Null

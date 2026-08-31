@@ -209,22 +209,22 @@ try {
     $tamperResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $tampered
     Assert-True ($tamperResult.Code -ne 0 -and $tamperResult.Output.Contains("continuity translation receipt")) "tampered PowerShell continuity receipt blocks before mutation"
 
-    $home = Join-Path $scratch "home"
+    $fixtureHome = Join-Path $scratch "home"
     $invoker = Join-Path $scratch "invoker"
-    [IO.Directory]::CreateDirectory($home) | Out-Null
+    [IO.Directory]::CreateDirectory($fixtureHome) | Out-Null
     [IO.Directory]::CreateDirectory($invoker) | Out-Null
     $global = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R") -WorkingDirectory $invoker `
-        -Environment @{ HOME = $home; USERPROFILE = $home }
+        -Environment @{ HOME = $fixtureHome; USERPROFILE = $fixtureHome }
     Assert-True ($global.Code -eq 0) "setup.ps1 -Global -R succeeds for a selected temporary home"
-    Assert-True (Test-Path -LiteralPath (Join-Path $home ".forge\version")) "global stamp is confined to selected home"
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixtureHome ".forge\version")) "global stamp is confined to selected home"
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $invoker ".forge\version"))) "global refresh writes nothing into its invoker"
-    $globalManifest = Join-Path $home ".forge\managed-files.tsv"
+    $globalManifest = Join-Path $fixtureHome ".forge\managed-files.tsv"
     $globalHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $globalManifest).Hash
     $globalAgain = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R") -WorkingDirectory $invoker `
-        -Environment @{ HOME = $home; USERPROFILE = $home }
+        -Environment @{ HOME = $fixtureHome; USERPROFILE = $fixtureHome }
     Assert-True ($globalAgain.Code -eq 0 -and (Get-FileHash -Algorithm SHA256 -LiteralPath $globalManifest).Hash -eq $globalHash) "global full refresh is byte-idempotent"
 
-    $noncanonicalHome = Join-Path $home "..\home"
+    $noncanonicalHome = Join-Path $fixtureHome "..\home"
     $noncanonicalResult = Invoke-IsolatedPowerShell -Script $refresh -Arguments @("-Target", $noncanonicalHome, "-Scope", "global")
     Assert-True ($noncanonicalResult.Code -ne 0) "noncanonical selected Windows home is rejected"
 
