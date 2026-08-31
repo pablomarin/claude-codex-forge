@@ -15,6 +15,11 @@ function Assert-Equal($Actual, $Expected, [string]$Message) { if ([string]$Actua
 function Assert-True([bool]$Condition, [string]$Message) { if ($Condition) { Pass $Message } else { Fail $Message } }
 function Assert-Contains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -like "*$Needle*") { Pass $Message } else { Fail "$Message missing=$Needle" } }
 function Assert-NotContains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -notlike "*$Needle*") { Pass $Message } else { Fail "$Message unexpected=$Needle" } }
+function Invoke-SilentNative([scriptblock]$Command) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try { $ErrorActionPreference = 'Continue'; & $Command *> $null; return $LASTEXITCODE }
+    finally { $ErrorActionPreference = $previousErrorActionPreference }
+}
 function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; return $line.Substring($Key.Length + 1) }
 function Get-LatestReceipt([string]$Repository) { return (Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1).FullName }
 function New-Repository([string]$Name) {
@@ -35,7 +40,7 @@ function Set-State([string]$Repository, [string]$Base, [string]$BaseRef) {
 function Set-Context([string]$Repository, [string]$EngineHost, [string]$Session) {
     $env:FORGE_HOST_CONTEXT_TEST_MODE = '1'; $env:FORGE_HOST_CONTEXT_TEST_ROOT = Join-Path $Repository '.forge/local/test-host-authority'; $env:FORGE_HOST_CONTEXT_TEST_LAUNCHER = $dispatcher
     Push-Location $Repository
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hostContext -Mode issue-test -Host $EngineHost -SessionId $Session | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'context capture failed' } }
+    try { $contextRc = Invoke-SilentNative { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hostContext -Mode issue-test -Host $EngineHost -SessionId $Session }; if ($contextRc -ne 0) { throw 'context capture failed' } }
     finally { Pop-Location }
 }
 function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Session, [string]$Requested, [string]$Role = 'general', [string]$Fallback = 'automatic', [string]$Conversation = 'ephemeral', [string]$ExactSession = '', [string]$SessionOutput = '', [string]$PromptText = '', [string]$OutputPath = '') {
@@ -52,7 +57,7 @@ function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Sess
     $argumentsJson = Join-Path $Repository ".forge/local/reviews/launch-$($script:DispatchSequence).json"
     [IO.File]::WriteAllText($argumentsJson, ($arguments | ConvertTo-Json -Compress))
     Push-Location $Repository
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $contextLauncher $hostContext $EngineHost $argumentsJson | Out-Null; return $LASTEXITCODE }
+    try { return Invoke-SilentNative { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $contextLauncher $hostContext $EngineHost $argumentsJson } }
     finally { Pop-Location }
 }
 function Get-ShaTextForTest([string]$Text) { $bytes = [Text.Encoding]::UTF8.GetBytes($Text); $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
@@ -140,16 +145,13 @@ public static class ForgeFakeEngine {
     $repo = New-Repository 'verify pair'; $env:FAKE_CODEX_BEHAVIOR = 'clean'
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'code-spec') 0 'code-spec receipt is created'; $spec = Get-LatestReceipt $repo
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'code-quality') 0 'code-quality receipt is created'; $quality = Get-LatestReceipt $repo
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Mode verify-pair -CodeSpecReceipt $spec -CodeQualityReceipt $quality *> $null
-    Assert-Equal $LASTEXITCODE 0 'current distinct pair certifies'
+    Assert-Equal (Invoke-SilentNative { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Mode verify-pair -CodeSpecReceipt $spec -CodeQualityReceipt $quality }) 0 'current distinct pair certifies'
     Add-Content -LiteralPath (Join-Path $repo 'app.txt') -Value 'mutated candidate'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Mode verify-pair -CodeSpecReceipt $spec -CodeQualityReceipt $quality *> $null
-    Assert-Equal $LASTEXITCODE 2 'candidate mutation invalidates the pair'
+    Assert-Equal (Invoke-SilentNative { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Mode verify-pair -CodeSpecReceipt $spec -CodeQualityReceipt $quality }) 2 'candidate mutation invalidates the pair'
     [IO.File]::WriteAllText((Join-Path $repo 'app.txt'), "base`n")
     $qualityOutput = (Get-Content -LiteralPath $quality | Where-Object { $_ -like 'output_path=*' } | Select-Object -First 1).Substring(12)
     Add-Content -LiteralPath $qualityOutput -Value 'mutated output'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Mode verify-pair -CodeSpecReceipt $spec -CodeQualityReceipt $quality *> $null
-    Assert-Equal $LASTEXITCODE 2 'review output mutation invalidates the pair'
+    Assert-Equal (Invoke-SilentNative { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher -Mode verify-pair -CodeSpecReceipt $spec -CodeQualityReceipt $quality }) 2 'review output mutation invalidates the pair'
 
     Write-Host 'PowerShell timeout tree cleanup and semantic non-fallback'
     $repo = New-Repository 'timeout cleanup'; $env:FAKE_CODEX_BEHAVIOR = 'timeout'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'; $pidFile = Join-Path $repo '.forge/local/child.pid'; $env:FAKE_CHILD_PID_FILE = $pidFile
@@ -241,7 +243,7 @@ public static class ForgeFakeEngine {
     $repo = New-Repository 'junction rejection'; $outside = Join-Path $temporary 'outside'; New-Item -ItemType Directory -Path $outside | Out-Null
     & cmd.exe /d /c mklink /J "$(Join-Path $repo 'junction')" "$outside" | Out-Null
     $base = (& git -C $repo rev-parse HEAD); Set-State $repo $base 'x'; Push-Location $repo
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $fingerprint -Mode capture -Artifact 'git:working-tree' -WorkflowBaseSha $base -WorkflowBaseRef x -Output (Join-Path $repo '.forge/local/fp') | Out-Null; $junctionRc = $LASTEXITCODE }
+    try { $junctionRc = Invoke-SilentNative { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $fingerprint -Mode capture -Artifact 'git:working-tree' -WorkflowBaseSha $base -WorkflowBaseRef x -Output (Join-Path $repo '.forge/local/fp') } }
     finally { Pop-Location }
     if ($junctionRc -ne 0) { Pass 'untracked junction or reparse point is rejected' } else { Fail 'untracked junction was accepted' }
     foreach ($reserved in @('sessions','session-stores')) {
@@ -254,8 +256,7 @@ public static class ForgeFakeEngine {
 
     Write-Host 'PowerShell materialized Codex host-context invocation'
     $installed = Join-Path $temporary 'materialized adapters'; New-Item -ItemType Directory -Path $installed | Out-Null
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts/materialize-adapters.ps1') -RepoRoot $root -Target $installed -Scope project -Platform windows *> $null
-    Assert-Equal $LASTEXITCODE 0 'PowerShell adapters materialize'
+    Assert-Equal (Invoke-SilentNative { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts/materialize-adapters.ps1') -RepoRoot $root -Target $installed -Scope project -Platform windows }) 0 'PowerShell adapters materialize'
     $hooks = Get-Content -LiteralPath (Join-Path $installed '.codex/hooks.json') -Raw | ConvertFrom-Json
     $hostEntry = @($hooks.hooks.session_start | Where-Object { $_.forgeManagedId -eq 'host-context' })[0]
     Assert-Equal (($hostEntry.command -join '|')) 'powershell.exe|-NoProfile|-ExecutionPolicy|Bypass|-File|.forge/hooks/lib/host-context.ps1|-Mode|hook|-Host|codex' 'Codex host-context invokes the Windows hook directly'
