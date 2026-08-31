@@ -16,9 +16,14 @@ function Assert-True([bool]$Condition, [string]$Message) { if ($Condition) { Pas
 function Assert-Contains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -like "*$Needle*") { Pass $Message } else { Fail "$Message missing=$Needle" } }
 function Assert-NotContains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -notlike "*$Needle*") { Pass $Message } else { Fail "$Message unexpected=$Needle" } }
 function Invoke-SilentPowerShell([object[]]$Arguments) {
-    $previousErrorActionPreference = $ErrorActionPreference
-    try { $ErrorActionPreference = 'Continue'; & powershell.exe @Arguments *> $null; return $LASTEXITCODE }
-    finally { $ErrorActionPreference = $previousErrorActionPreference }
+    $stdout = Join-Path $temporary ("child-stdout-" + [Guid]::NewGuid().ToString('N'))
+    $stderr = Join-Path $temporary ("child-stderr-" + [Guid]::NewGuid().ToString('N'))
+    $quoted = @($Arguments | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' })
+    try {
+        $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $quoted -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        return [int]$process.ExitCode
+    }
+    finally { Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue }
 }
 function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; return $line.Substring($Key.Length + 1) }
 function Get-LatestReceipt([string]$Repository) { return (Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1).FullName }
@@ -64,6 +69,7 @@ function Get-ShaTextForTest([string]$Text) { $bytes = [Text.Encoding]::UTF8.GetB
 function Get-ShaFileForTest([string]$Path) { $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($Path)))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
 
 try {
+    Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-Command','exit 2')) 2 'PowerShell child helper preserves a nonzero exit code'
     New-Item -ItemType Directory -Path $bin -Force | Out-Null
     [IO.File]::WriteAllText($contextLauncher, @'
 param([string]$ContextPath, [string]$EngineHost, [string]$ArgumentsJsonPath)
