@@ -75,6 +75,7 @@ try {
 param([string]$ContextPath, [string]$EngineHost, [string]$ArgumentsJsonPath)
 $argumentsJson = [IO.File]::ReadAllText($ArgumentsJsonPath)
 & $ContextPath -Mode launch -Host $EngineHost -LaunchArgumentsJson $argumentsJson
+exit $LASTEXITCODE
 '@)
     $source = @'
 using System;
