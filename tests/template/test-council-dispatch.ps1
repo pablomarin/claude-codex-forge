@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $source = Join-Path $root 'hooks\lib\council-dispatch.ps1'
+$powershellExe = (Get-Command powershell.exe).Source
 $passes = 0
 function Assert-True([bool]$Condition,[string]$Message) { if(!$Condition){throw $Message};$script:passes++;Write-Host "  PASS: $Message" }
 function New-Fixture([string]$Name) {
@@ -32,7 +33,7 @@ exit 0
 function Invoke-Fixture([hashtable]$Fixture,[string]$Failure='',[string[]]$Extra=@()) {
   $gitDir=Split-Path -Parent (Get-Command git.exe).Source;$env:PATH="$($Fixture.Bin);$gitDir;$env:SystemRoot\System32";$env:FAKE_MAIN='claude';$env:FAKE_LOG=$Fixture.Log;$env:FAKE_FAIL_MATCH=$Failure;$env:FAKE_FAIL_MARKER=Join-Path $Fixture.Dir 'failure-used'
   $args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$Fixture.Council,'--question-file',(Join-Path $Fixture.Repo 'question.txt'),'--artifact',(Join-Path $Fixture.Repo 'artifact.txt'),'--workflow-base-sha','deadbeef','--workflow-base-ref','refs/heads/main')+$Extra
-  $output=& powershell.exe @args 2>&1;$rc=$LASTEXITCODE;$receiptLine=@($output|Where-Object{$_ -like 'Council receipt:*'}|Select-Object -Last 1);$receipt=if($receiptLine.Count){$receiptLine[0] -replace '^Council receipt: ',''}else{''};return @{Rc=$rc;Output=@($output);Receipt=$receipt}
+  $output=& $powershellExe @args 2>&1;$rc=$LASTEXITCODE;$receiptLine=@($output|Where-Object{$_ -like 'Council receipt:*'}|Select-Object -Last 1);$receipt=if($receiptLine.Count){$receiptLine[0] -replace '^Council receipt: ',''}else{''};return @{Rc=$rc;Output=@($output);Receipt=$receipt}
 }
 $originalPath=$env:PATH;$fixtures=@()
 try {
