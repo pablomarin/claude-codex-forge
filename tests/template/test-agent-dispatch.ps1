@@ -128,7 +128,7 @@ public static class ForgeFakeEngine {
     Add-Type -TypeDefinition $source -Language CSharp -OutputAssembly (Join-Path $bin 'forge-fake.exe') -OutputType ConsoleApplication
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'claude.exe')
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'codex.exe')
-    $env:PATH = "$bin;$($env:PATH)"; $env:FORGE_DISPATCH_TEST_MODE = '1'
+    $env:PATH = "$bin;$($env:PATH)"; $env:FORGE_DISPATCH_TEST_MODE = '1'; $env:FORGE_DISPATCH_TEST_TRACE = '1'
 
     Write-Host 'PowerShell four-mode selection and fallback matrix'
     foreach ($tuple in @(@('claude','codex','codex'), @('codex','claude','claude'), @('claude','claude','claude'), @('codex','codex','codex'))) {
