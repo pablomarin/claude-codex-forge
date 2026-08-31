@@ -72,7 +72,7 @@ function Invoke-QualificationChild([string[]]$Arguments,[string]$Receipt,[string
         return $rc
     } finally {$process.Dispose()}
 }
-function Test-Regular([string]$Path){return ((Test-Path -LiteralPath $Path -PathType Leaf)-and -not ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint))}
+function Test-Regular([string]$Path){if(-not $Path){return $false};return ((Test-Path -LiteralPath $Path -PathType Leaf)-and -not ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint))}
 function Test-Child([string]$Path,[string]$Hash,[string]$Schema){
     if(-not (Test-Regular $Path) -or (Get-Hash $Path) -cne $Hash){return $false}
     try{$receipt=Get-Content -LiteralPath $Path -Raw|ConvertFrom-Json}catch{return $false}

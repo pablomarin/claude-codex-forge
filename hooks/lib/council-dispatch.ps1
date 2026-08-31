@@ -15,6 +15,13 @@ function New-CouncilDirectory([string]$Worktree, [string]$QuestionHash) {
   }
   return [IO.Path]::GetFullPath($cursor)
 }
+function Remove-CouncilAttempt([string]$Path,[string]$ReviewRoot) {
+  if(-not (Test-Path -LiteralPath $Path)){return}
+  $quarantine=Join-Path (Split-Path -Parent $ReviewRoot) ('.discarded-council-'+[Guid]::NewGuid().ToString('N'))
+  [IO.Directory]::Move($Path,$quarantine)
+  try{[IO.Directory]::Delete($quarantine,$true)}catch{}
+  if(Test-Path -LiteralPath $Path){Stop-Council 'failed mixed attempt artifacts could not be discarded'}
+}
 function Usage { @'
 usage: council-dispatch.ps1 --question-file FILE --artifact ARTIFACT --workflow-base-sha SHA --workflow-base-ref REF [--seat-engine SEAT=claude|codex|main|other]
 Six fresh sessions and eleven turns; runtime other failure reruns the complete topology on main (same-engine-fallback).
@@ -73,14 +80,12 @@ if($script:FailedEngine -eq $other){
   $attemptPrefix=$reviewRoot.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
   if(!$script:AttemptDir.StartsWith($attemptPrefix,[StringComparison]::OrdinalIgnoreCase)){Stop-Council 'failed attempt path escaped council storage'}
   $failedAttempt=$script:AttemptDir
-  [IO.Directory]::Delete($failedAttempt, $true)
-  if (Test-Path -LiteralPath $failedAttempt) { Stop-Council 'failed mixed attempt artifacts could not be discarded' }
+  Remove-CouncilAttempt $failedAttempt $reviewRoot
   foreach($seat in @($seats+'chair')){$engine[$seat]=$main}
   $result=Invoke-Attempt 'same-engine-fallback' 'runtime-other-failure';if($result){
     # A failed Windows child can finish its final filesystem write after its
     # process exits. Recheck the exact failed path before publishing success.
-    if(Test-Path -LiteralPath $failedAttempt){[IO.Directory]::Delete($failedAttempt,$true)}
-    if(Test-Path -LiteralPath $failedAttempt){Stop-Council 'failed mixed attempt artifacts could not be discarded'}
+    Remove-CouncilAttempt $failedAttempt $reviewRoot
     Write-Output "Council receipt: $result\topology.receipt";exit 0
   }
 }

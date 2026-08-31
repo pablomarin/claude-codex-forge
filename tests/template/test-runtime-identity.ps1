@@ -66,24 +66,24 @@ exit 0
     $liveFake = Join-Path $scratch "fake-live-engine.ps1"
     @'
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
-if ($Arguments[0] -eq "--version") { Write-Host "$env:FORGE_FAKE_ENGINE_NAME 9.9"; exit 0 }
-if ($Arguments[0] -eq "--help" -or ($Arguments -contains "--help")) { Write-Host "-a --search --permission-mode --safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable"; exit 0 }
+if ($Arguments[0] -eq "--version") { Write-Output "$env:FORGE_FAKE_ENGINE_NAME 9.9"; exit 0 }
+if ($Arguments[0] -eq "--help" -or ($Arguments -contains "--help")) { Write-Output "-a --search --permission-mode --safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable"; exit 0 }
 $joined = $Arguments -join " "
 [IO.File]::AppendAllText($env:FORGE_FAKE_ARGV_LOG, "engine=$env:FORGE_FAKE_ENGINE_NAME cwd=$((Get-Location).Path) home=$env:HOME userprofile=$env:USERPROFILE username=$env:USERNAME argv=$joined`n")
 if ($joined -match 'FORGE_INVESTIGATION') {
   New-Item -ItemType Directory -Path (Split-Path -Parent $env:FORGE_DISPATCH_INVESTIGATION_ARTIFACT) -Force | Out-Null
   [IO.File]::WriteAllText($env:FORGE_DISPATCH_INVESTIGATION_ARTIFACT, "bounded-reproduction`n")
-  Write-Host "worktree=$((Get-Location).Path)`nartifact_written=true"; exit 0
+  Write-Output "worktree=$((Get-Location).Path)`nartifact_written=true"; exit 0
 }
 if ($env:FORGE_FAKE_ENGINE_NAME -eq "claude") {
-  if ($joined -match '--no-session-persistence' -and $joined -notmatch 'FORGE_INVESTIGATION') { $canary = if ($env:FORGE_FAKE_CANARY_RESULT) { $env:FORGE_FAKE_CANARY_RESULT } else { "false" }; Write-Host "sentinel=$env:FORGE_DISPATCH_SENTINEL`ncanary_observed=$canary"; exit 0 }
+  if ($joined -match '--no-session-persistence' -and $joined -notmatch 'FORGE_INVESTIGATION') { $canary = if ($env:FORGE_FAKE_CANARY_RESULT) { $env:FORGE_FAKE_CANARY_RESULT } else { "false" }; Write-Output "sentinel=$env:FORGE_DISPATCH_SENTINEL`ncanary_observed=$canary"; exit 0 }
   $seat = $env:FORGE_DISPATCH_SEAT_HASH; if ($env:FORGE_FAKE_DISPATCH_FAILURE -eq "cross-seat" -and $joined -match '--resume') { $seat = "wrong-seat" }
-  Write-Host "session_id=$env:FORGE_DISPATCH_SESSION_ID`nseat_hash=$seat`nconfig_hash=$env:FORGE_DISPATCH_CONFIG_HASH`ncanary_observed=false"; exit 0
+  Write-Output "session_id=$env:FORGE_DISPATCH_SESSION_ID`nseat_hash=$seat`nconfig_hash=$env:FORGE_DISPATCH_CONFIG_HASH`ncanary_observed=false"; exit 0
 }
-if ($joined -match '--ephemeral') { $canary = if ($env:FORGE_FAKE_CANARY_RESULT) { $env:FORGE_FAKE_CANARY_RESULT } else { "false" }; Write-Host "{`"type`":`"item.completed`",`"sentinel`":`"$env:FORGE_DISPATCH_SENTINEL`",`"canary_observed`":$canary}"; exit 0 }
+if ($joined -match '--ephemeral') { $canary = if ($env:FORGE_FAKE_CANARY_RESULT) { $env:FORGE_FAKE_CANARY_RESULT } else { "false" }; Write-Output "{`"type`":`"item.completed`",`"sentinel`":`"$env:FORGE_DISPATCH_SENTINEL`",`"canary_observed`":$canary}"; exit 0 }
 $seat = $env:FORGE_DISPATCH_SEAT_HASH; if ($env:FORGE_FAKE_DISPATCH_FAILURE -eq "cross-seat" -and $joined -match 'exec resume') { $seat = "wrong-seat" }
-if ($joined -match 'FORGE_COUNCIL_START') { Write-Host "{`"type`":`"thread.started`",`"thread_id`":`"$env:FORGE_DISPATCH_SESSION_ID`"}" }
-Write-Host "{`"type`":`"turn.completed`",`"thread_id`":`"$env:FORGE_DISPATCH_SESSION_ID`",`"seat_hash`":`"$seat`",`"config_hash`":`"$env:FORGE_DISPATCH_CONFIG_HASH`",`"canary_observed`":false}"
+if ($joined -match 'FORGE_COUNCIL_START') { Write-Output "{`"type`":`"thread.started`",`"thread_id`":`"$env:FORGE_DISPATCH_SESSION_ID`"}" }
+Write-Output "{`"type`":`"turn.completed`",`"thread_id`":`"$env:FORGE_DISPATCH_SESSION_ID`",`"seat_hash`":`"$seat`",`"config_hash`":`"$env:FORGE_DISPATCH_CONFIG_HASH`",`"canary_observed`":false}"
 '@ | Set-Content -LiteralPath $liveFake -Encoding UTF8
     foreach ($engine in @("claude", "codex")) {
         $env:FORGE_FAKE_ENGINE_NAME = $engine

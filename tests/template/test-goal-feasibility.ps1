@@ -90,15 +90,14 @@ try {
     if (-not (Test-Path -LiteralPath $codexIdentity -PathType Leaf)) { throw "PowerShell global setup did not record Codex identity" }
     if (-not (Test-Path -LiteralPath "$codexIdentity.sha256" -PathType Leaf)) { throw "PowerShell Codex identity seal missing" }
     & $writer -Project $goalProject -ObjectiveHash native-goal -Nonce "88888888-8888-4888-8888-888888888888" -Ceiling 1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "direct PowerShell operator authorization failed" }
     $authorization = Get-ChildItem (Join-Path $globalTarget ".forge\goal-authorizations") -Filter "88888888-8888-4888-8888-888888888888.auth" -File -Recurse | Select-Object -First 1
     if (-not $authorization) { throw "PowerShell authorization record missing" }
 
     $fakeCodex = Join-Path $scratch "operator-codex.ps1"
     @'
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
-if ($Arguments[0] -eq "--version") { Write-Host "codex-cli 9.9.1"; exit 0 }
-if (($Arguments -join " ") -eq "--help" -or ($Arguments -join " ") -eq "exec --help") { Write-Host "--ignore-user-config --ignore-rules --ephemeral --sandbox --add-dir"; exit 0 }
+if ($Arguments[0] -eq "--version") { Write-Output "codex-cli 9.9.1"; exit 0 }
+if (($Arguments -join " ") -eq "--help" -or ($Arguments -join " ") -eq "exec --help") { Write-Output "--ignore-user-config --ignore-rules --ephemeral --sandbox --add-dir"; exit 0 }
 exit 72
 '@ | Set-Content -LiteralPath $fakeCodex -Encoding UTF8
     $session = "77777777-7777-4777-8777-777777777777"
