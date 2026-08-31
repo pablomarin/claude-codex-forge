@@ -5,6 +5,15 @@ $hook = Join-Path $root 'hooks/check-external-mutation-auth.ps1'
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('Forge Action PS ' + [Guid]::NewGuid().ToString('N'))
 $script:Passed = 0; $script:Failed = 0
 function Check([bool]$Condition, [string]$Message) { if ($Condition) { $script:Passed++; Write-Host "  PASS $Message" } else { $script:Failed++; [Console]::Error.WriteLine("  FAIL $Message") } }
+function Invoke-ExpectedFailure([scriptblock]$Command) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $Command 2>$null | Out-Null
+        return $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousPreference }
+}
 try {
     New-Item -ItemType Directory -Path (Join-Path $scratch '.forge/local/actions') -Force | Out-Null
     & git -C $scratch init -q; & git -C $scratch config user.email test@example.invalid; & git -C $scratch config user.name ForgeTest
@@ -22,7 +31,7 @@ exit $LASTEXITCODE
     Check ($rendered -like '*developer must execute*') 'rendered instruction requires developer execution'
     Check ((Get-Content -LiteralPath $pending -Raw) -like '*status=PENDING_HUMAN_EXECUTION*') 'pending manifest cannot unlock an agent runner'
     $bad = Join-Path $scratch '.forge/local/actions/bad.action'; Push-Location $scratch
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode prepare -Adapter shell -System github -Operation x -Target y -Arg '$(echo pwned)' -ExpectedEffect z -Output $bad 2>$null | Out-Null; $badRc = $LASTEXITCODE }
+    try { $badRc = Invoke-ExpectedFailure { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode prepare -Adapter shell -System github -Operation x -Target y -Arg '$(echo pwned)' -ExpectedEffect z -Output $bad } }
     finally { Pop-Location }
     Check ($badRc -ne 0 -and -not (Test-Path -LiteralPath (Join-Path $scratch 'pwned'))) 'non-allowlisted nested shell text remains inert'
     Add-Content -LiteralPath $pending -Value 'approved=true'
@@ -37,21 +46,21 @@ exit $LASTEXITCODE
     [IO.File]::WriteAllText((Join-Path $sibling 'x'), 'x'); & git -C $sibling add x; & git -C $sibling commit -qm base
     $copied = Join-Path $sibling '.forge/local/actions/copied.action'; Copy-Item -LiteralPath $pending -Destination $copied
     Push-Location $sibling
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode report -Manifest $copied -Outcome SUCCESS -Output (Join-Path $sibling '.forge/local/actions/copied.receipt') 2>$null | Out-Null; $copiedRc = $LASTEXITCODE }
+    try { $copiedRc = Invoke-ExpectedFailure { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode report -Manifest $copied -Outcome SUCCESS -Output (Join-Path $sibling '.forge/local/actions/copied.receipt') } }
     finally { Pop-Location }
     Check ($copiedRc -eq 2) 'copied sibling manifest is rejected by worktree identity'
     Push-Location $scratch
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode report -Manifest $pending -Outcome SUCCESS -Output (Join-Path $scratch 'outside.receipt') 2>$null | Out-Null; $outsideRc = $LASTEXITCODE }
+    try { $outsideRc = Invoke-ExpectedFailure { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode report -Manifest $pending -Outcome SUCCESS -Output (Join-Path $scratch 'outside.receipt') } }
     finally { Pop-Location }
     Check ($outsideRc -eq 2) 'report output outside Forge local actions is rejected'
     $existing = Join-Path $scratch '.forge/local/actions/existing.receipt'; [IO.File]::WriteAllText($existing, 'owner')
     Push-Location $scratch
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode report -Manifest $pending -Outcome SUCCESS -Output $existing 2>$null | Out-Null; $existingRc = $LASTEXITCODE }
+    try { $existingRc = Invoke-ExpectedFailure { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode report -Manifest $pending -Outcome SUCCESS -Output $existing } }
     finally { Pop-Location }
     Check ($existingRc -eq 2 -and [IO.File]::ReadAllText($existing) -ceq 'owner') 'existing report output is never clobbered'
     $linked = Join-Path $scratch '.forge/local/actions/report-link.receipt'; & cmd.exe /d /c mklink /H "$linked" "$reported" | Out-Null
     Push-Location $scratch
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode report -Manifest $pending -Outcome SUCCESS -Output $linked 2>$null | Out-Null; $linkedRc = $LASTEXITCODE }
+    try { $linkedRc = Invoke-ExpectedFailure { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $action -Mode report -Manifest $pending -Outcome SUCCESS -Output $linked } }
     finally { Pop-Location }
     Check ($linkedRc -eq 2) 'linked report output is rejected without clobbering'
     Remove-Item -LiteralPath $sibling -Recurse -Force -ErrorAction SilentlyContinue
