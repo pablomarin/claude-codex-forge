@@ -1,4 +1,4 @@
-# hooks/lib/review-breaker.ps1 — PowerShell mirror of hooks/lib/review-breaker.sh:
+﻿# hooks/lib/review-breaker.ps1 — PowerShell mirror of hooks/lib/review-breaker.sh:
 # convergence-breaker for the code-review loop (v5.54, ADR 0009). READ-ONLY: emits
 # 4 sentinel lines, never writes. Small state.md reader — NO git diff machinery.
 #

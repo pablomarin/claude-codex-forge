@@ -1,4 +1,4 @@
-# SessionStart hook: silently inject git context into Claude.
+﻿# SessionStart hook: silently inject git context into Claude.
 # Source-gated: git fetch + behind-check ONLY on startup|resume.
 
 $ErrorActionPreference = 'SilentlyContinue'

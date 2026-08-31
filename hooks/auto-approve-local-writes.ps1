@@ -1,4 +1,4 @@
-# PermissionRequest hook: auto-approve Write/Edit on .forge/local/**
+﻿# PermissionRequest hook: auto-approve Write/Edit on .forge/local/**
 #
 # Workaround for anthropics/claude-code#36593 — Claude Code v2.1.80+
 # regression where path-scoped Write/Edit allow rules in settings.json

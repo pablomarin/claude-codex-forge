@@ -49,8 +49,8 @@ try {
     }
 
     Write-Host 'PowerShell installed fallback seam'
-    $project = Join-Path $temporary 'project'; $home = Join-Path $temporary 'home'; $bin = Join-Path $temporary 'bin'
-    New-Item -ItemType Directory -Path $project,$home,$bin -Force | Out-Null
+    $project = Join-Path $temporary 'project'; $testHome = Join-Path $temporary 'home'; $bin = Join-Path $temporary 'bin'
+    New-Item -ItemType Directory -Path $project,$testHome,$bin -Force | Out-Null
     & git -C $project init -q; & git -C $project config user.email forge@example.invalid; & git -C $project config user.name Forge
     [IO.File]::WriteAllText((Join-Path $project 'app.txt'), "base`n")
     & git -C $project add app.txt; & git -C $project commit -qm base
@@ -68,7 +68,7 @@ public static class ForgeTask11Fake {
 }
 '@
     Add-Type -TypeDefinition $fake -Language CSharp -OutputAssembly (Join-Path $bin 'claude.exe') -OutputType ConsoleApplication
-    $env:PATH = "$bin;$originalPath"; $env:FORGE_ENGINE_IDENTITY_FIXTURE = '1'; $env:HOME = $home
+    $env:PATH = "$bin;$originalPath"; $env:FORGE_ENGINE_IDENTITY_FIXTURE = '1'; $env:HOME = $testHome
     Push-Location $project
     try { $setupOutput = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'setup.ps1') -Project Integration -Tech fullstack 2>&1) -join "`n"; $setupRc = $LASTEXITCODE }
     finally { Pop-Location }

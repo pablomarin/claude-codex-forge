@@ -1,4 +1,4 @@
-# hooks/lib/default-branch.ps1 — detect the repo's default branch.
+﻿# hooks/lib/default-branch.ps1 — detect the repo's default branch.
 #
 # Detection chain (mirrors hooks/lib/default-branch.sh):
 #   1. git symbolic-ref refs/remotes/origin/HEAD --short

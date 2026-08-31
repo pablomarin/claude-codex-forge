@@ -1,4 +1,4 @@
-# .claude/hooks/check-bash-safety.ps1
+﻿# .claude/hooks/check-bash-safety.ps1
 # PreToolUse hook for Bash: audit logging + dangerous pattern blocking.
 #
 # Fires BEFORE every Bash command. Logs all commands to ~/.claude/audit.log.

@@ -46,7 +46,10 @@ exit 0
     foreach ($engine in @("claude", "codex")) {
         $output = Join-Path $scratch "$engine.json"
         & $qualify -Engine $engine -ProjectRoot $project -Output $output -FixtureMode -EnginePath $fake | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "$engine deterministic dispatch fixture failed" }
+        if ($LASTEXITCODE -ne 0) {
+            $detail = if (Test-Path -LiteralPath $output) { Get-Content -LiteralPath $output -Raw } else { 'receipt missing' }
+            throw "$engine deterministic dispatch fixture failed: $detail"
+        }
         $receipt = Get-Content -Raw $output | ConvertFrom-Json
         if ($receipt.status -ne "PASS" -or $receipt.ephemeral -ne "PASS" -or $receipt.council_resume -ne "PASS" -or $receipt.investigation_full_agent -ne "PASS") { throw "$engine incomplete PASS receipt" }
     }

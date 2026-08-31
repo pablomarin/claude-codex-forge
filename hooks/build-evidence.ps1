@@ -1,4 +1,4 @@
-# hooks/build-evidence.ps1 — emit FORGE_GOAL_EVIDENCE JSON.
+﻿# hooks/build-evidence.ps1 — emit FORGE_GOAL_EVIDENCE JSON.
 # Mirrors hooks/build-evidence.sh. See that file for design notes.
 #
 # Read-only. Parses .claude/local/state.md plus git/gh/E2E state and emits a

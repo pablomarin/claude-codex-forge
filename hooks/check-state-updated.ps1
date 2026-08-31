@@ -1,4 +1,4 @@
-# .claude/hooks/check-state-updated.ps1
+﻿# .claude/hooks/check-state-updated.ps1
 # This hook runs when Claude is about to stop responding.
 #
 # THREE CONCERNS -- only ONE blocks:

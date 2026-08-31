@@ -104,8 +104,12 @@ function Invoke-IsolatedPowerShell {
     }
     Push-Location $WorkingDirectory
     try {
-        $output = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script @Arguments 2>&1 | Out-String)
-        $code = $LASTEXITCODE
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $output = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script @Arguments 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousPreference }
     } finally {
         Pop-Location
         foreach ($key in $Environment.Keys) {
@@ -120,7 +124,7 @@ try {
     Write-AdversarialV5State $project
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
         -Environment @{ HOME = (Join-Path $scratch "unused-home"); USERPROFILE = (Join-Path $scratch "unused-home") }
-    Assert-True ($first.Code -eq 0) "setup.ps1 -R translates a project under Windows PowerShell 5.1"
+    Assert-True ($first.Code -eq 0) "setup.ps1 -R translates a project under Windows PowerShell 5.1: $($first.Output.Trim())"
     $canonicalState = Join-Path $project ".forge\local\state.md"
     Assert-True ((Test-Path -LiteralPath $canonicalState) -and ([IO.File]::ReadAllText($canonicalState).Contains("WINDOWS_STATE_TRANSLATION"))) "translated canonical state preserves the active checkpoint"
     $canonicalStateText = [IO.File]::ReadAllText($canonicalState)

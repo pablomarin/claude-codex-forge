@@ -231,7 +231,7 @@ function Merge-ManagedJsonObject {
                 } else { $merged.Add($ownedItem) }
             }
             foreach ($item in $remaining) { $merged.Add($item) }
-            $targetProperty.Value = $merged.ToArray()
+            $targetProperty.Value = @($merged)
         } else {
             # Every key present in the Forge template is managed. Unknown user
             # keys are absent from Owned and therefore remain untouched.
@@ -316,7 +316,7 @@ function Convert-McpJsonToCodexToml {
         }
     }
     $text = if ($lines.Count) { ($lines -join "`n") + "`n" } else { "" }
-    return [pscustomobject]@{ Text=$text; Blocked=$blocked.ToArray() }
+    return [pscustomobject]@{ Text=$text; Blocked=@($blocked) }
 }
 
 function Set-CodexTomlBlock {
@@ -471,7 +471,7 @@ if ($Scope -eq "project") {
 }
 [IO.File]::WriteAllText((Join-Path $Target ".forge\version"), "6`n", $Utf8NoBom)
 $Installed.Add([pscustomobject]@{ Path=".forge/version"; CanonicalRevision="-" })
-Write-InstallManifest $Installed.ToArray()
+Write-InstallManifest -Records @($Installed)
 Write-Host "INSTALLATION: MATERIALIZED"
 foreach ($engine in Get-EngineAvailability) {
     if ($engine.Availability -eq "ABSENT") { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED binary unavailable; host surface remains materialized" }

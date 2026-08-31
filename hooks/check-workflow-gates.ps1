@@ -1,4 +1,4 @@
-# .claude/hooks/check-workflow-gates.ps1
+﻿# .claude/hooks/check-workflow-gates.ps1
 # PreToolUse hook for Bash: blocks commit/push/PR if quality gates aren't complete.
 #
 # Fires BEFORE Bash commands. Only activates when:

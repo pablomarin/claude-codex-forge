@@ -72,7 +72,8 @@ $result=Invoke-Attempt $mode $reason; if($result){Write-Output "Council receipt:
 if($script:FailedEngine -eq $other){
   $attemptPrefix=$reviewRoot.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
   if(!$script:AttemptDir.StartsWith($attemptPrefix,[StringComparison]::OrdinalIgnoreCase)){Stop-Council 'failed attempt path escaped council storage'}
-  Remove-Item -LiteralPath $script:AttemptDir -Recurse -Force
+  [IO.Directory]::Delete($script:AttemptDir, $true)
+  if (Test-Path -LiteralPath $script:AttemptDir) { Stop-Council 'failed mixed attempt artifacts could not be discarded' }
   foreach($seat in @($seats+'chair')){$engine[$seat]=$main}
   $result=Invoke-Attempt 'same-engine-fallback' 'runtime-other-failure';if($result){Write-Output "Council receipt: $result\topology.receipt";exit 0}
 }
