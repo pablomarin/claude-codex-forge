@@ -12,6 +12,7 @@ $script:DispatchSequence = 0
 function Pass([string]$Message) { $script:Passed++; Write-Host "  PASS $Message" }
 function Fail([string]$Message) { $script:Failed++; [Console]::Error.WriteLine("  FAIL $Message") }
 function Assert-Equal($Actual, $Expected, [string]$Message) { if ([string]$Actual -ceq [string]$Expected) { Pass $Message } else { Fail "$Message expected=$Expected actual=$Actual" } }
+function Assert-True([bool]$Condition, [string]$Message) { if ($Condition) { Pass $Message } else { Fail $Message } }
 function Assert-Contains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -like "*$Needle*") { Pass $Message } else { Fail "$Message missing=$Needle" } }
 function Assert-NotContains([string]$Path, [string]$Needle, [string]$Message) { if ((Get-Content -LiteralPath $Path -Raw) -notlike "*$Needle*") { Pass $Message } else { Fail "$Message unexpected=$Needle" } }
 function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; return $line.Substring($Key.Length + 1) }
