@@ -58,19 +58,20 @@ function Invoke-ForgeDispatchFixture {
         $investigation = Join-Path $scratch "investigation-worktree"
         New-Item -ItemType Directory -Path (Join-Path $candidate ".agents\skills\canary") -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $scratch "sessions") -Force | Out-Null
-        & git -C $candidate init -q
-        & git -C $candidate config user.email forge@example.invalid
-        & git -C $candidate config user.name Forge
+        & git -C $candidate init -q 2>$null | Out-Null
+        & git -C $candidate config core.autocrlf false 2>$null | Out-Null
+        & git -C $candidate config user.email forge@example.invalid 2>$null | Out-Null
+        & git -C $candidate config user.name Forge 2>$null | Out-Null
         [IO.File]::WriteAllText((Join-Path $candidate "keep.txt"), "keep-base`n", $Utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $candidate "delete.txt"), "delete-base`n", $Utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $candidate "rename-old.txt"), "rename-base`n", $Utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $candidate "script.sh"), "#!/bin/sh`necho base`n", $Utf8NoBom)
-        & git -C $candidate add keep.txt delete.txt rename-old.txt script.sh
-        & git -C $candidate update-index --chmod=+x script.sh
-        & git -C $candidate commit -qm base
+        & git -C $candidate add keep.txt delete.txt rename-old.txt script.sh 2>$null | Out-Null
+        & git -C $candidate update-index --chmod=+x script.sh 2>$null | Out-Null
+        & git -C $candidate commit -qm base 2>$null | Out-Null
         [IO.File]::WriteAllText((Join-Path $candidate "keep.txt"), "keep-candidate`n", $Utf8NoBom)
         Remove-Item -LiteralPath (Join-Path $candidate "delete.txt")
-        & git -C $candidate mv rename-old.txt rename-new.txt
+        & git -C $candidate mv rename-old.txt rename-new.txt 2>$null | Out-Null
         [IO.File]::WriteAllText((Join-Path $candidate "AGENTS.md"), "FORGE_CANARY_CANDIDATE_INSTRUCTION`n", $Utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $candidate ".agents\skills\canary\SKILL.md"), "---`nname: canary`ndescription: FORGE_CANARY_SKILL`n---`n", $Utf8NoBom)
         $before = Get-ForgeCandidateIdentity $candidate
@@ -120,13 +121,13 @@ function Invoke-ForgeLiveEngine {
 
 function New-ForgeLiveCandidate([string]$Root) {
     New-Item -ItemType Directory -Path (Join-Path $Root ".agents\skills\canary") -Force | Out-Null
-    & git -C $Root init -q; & git -C $Root config user.email forge@example.invalid; & git -C $Root config user.name Forge
+    & git -C $Root init -q 2>$null | Out-Null; & git -C $Root config core.autocrlf false 2>$null | Out-Null; & git -C $Root config user.email forge@example.invalid 2>$null | Out-Null; & git -C $Root config user.name Forge 2>$null | Out-Null
     [IO.File]::WriteAllText((Join-Path $Root "keep.txt"), "keep-base`n", $Utf8NoBom)
     [IO.File]::WriteAllText((Join-Path $Root "delete.txt"), "delete-base`n", $Utf8NoBom)
     [IO.File]::WriteAllText((Join-Path $Root "rename-old.txt"), "rename-base`n", $Utf8NoBom)
     [IO.File]::WriteAllText((Join-Path $Root "script.sh"), "#!/bin/sh`necho base`n", $Utf8NoBom)
-    & git -C $Root add keep.txt delete.txt rename-old.txt script.sh; & git -C $Root update-index --chmod=+x script.sh; & git -C $Root commit -qm base
-    [IO.File]::WriteAllText((Join-Path $Root "keep.txt"), "keep-candidate`n", $Utf8NoBom); Remove-Item (Join-Path $Root "delete.txt"); & git -C $Root mv rename-old.txt rename-new.txt
+    & git -C $Root add keep.txt delete.txt rename-old.txt script.sh 2>$null | Out-Null; & git -C $Root update-index --chmod=+x script.sh 2>$null | Out-Null; & git -C $Root commit -qm base 2>$null | Out-Null
+    [IO.File]::WriteAllText((Join-Path $Root "keep.txt"), "keep-candidate`n", $Utf8NoBom); Remove-Item (Join-Path $Root "delete.txt"); & git -C $Root mv rename-old.txt rename-new.txt 2>$null | Out-Null
     [IO.File]::WriteAllText((Join-Path $Root "AGENTS.md"), "FORGE_CANARY_CANDIDATE_INSTRUCTION`n", $Utf8NoBom)
     [IO.File]::WriteAllText((Join-Path $Root ".agents\skills\canary\SKILL.md"), "---`nname: canary`ndescription: FORGE_CANARY_SKILL`n---`n", $Utf8NoBom)
 }
@@ -140,7 +141,7 @@ function Invoke-ForgeGuardedDispatch([string]$Binary) {
     try {
         $primary = Join-Path $scratch "primary"; $candidate = Join-Path $scratch "candidate"; $investigation = $ProjectRoot
         foreach ($dir in @($primary,$candidate,(Join-Path $scratch "codex-home"))) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        & git -C $primary init -q; New-ForgeLiveCandidate $candidate
+        & git -C $primary init -q 2>$null | Out-Null; New-ForgeLiveCandidate $candidate
         [IO.File]::WriteAllText((Join-Path $primary "CLAUDE.md"), "FORGE_CANARY_USER_INSTRUCTION`n", $Utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $scratch "codex-home\AGENTS.md"), "FORGE_CANARY_USER_INSTRUCTION`n", $Utf8NoBom)
         $emptyMcp = Join-Path $scratch "empty-mcp.json"; [IO.File]::WriteAllText($emptyMcp, '{"mcpServers":{}}', $Utf8NoBom)

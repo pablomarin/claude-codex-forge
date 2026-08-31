@@ -10,7 +10,7 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $Begin = "<!-- forge:begin v6 -->"
 $End = "<!-- forge:end v6 -->"
 $Manifest = Join-Path $RepoRoot "manifests\managed-v6.tsv"
-$Installed = New-Object System.Collections.Generic.List[object]
+$Installed = @()
 
 function Test-SafeRelativePath {
     param([string]$Path)
@@ -76,8 +76,8 @@ function Get-ForgeMaterializerTextHash([string]$Text) {
 function Get-CodexCapabilityRevision([string]$Path) {
     $rootHelp = (& $Path --help 2>&1) -join "`n"
     $execHelp = (& $Path exec --help 2>&1) -join "`n"
-    $combined = $rootHelp + $execHelp; $lines = New-Object System.Collections.Generic.List[string]; $lines.Add("forge-codex-capability-v1")
-    foreach ($flag in @("--ignore-user-config", "--ignore-rules", "--ephemeral", "--sandbox", "--add-dir")) { $lines.Add("$flag=" + $(if ($combined -match [regex]::Escape($flag)) { "present" } else { "absent" })) }
+    $combined = $rootHelp + $execHelp; $lines = @("forge-codex-capability-v1")
+    foreach ($flag in @("--ignore-user-config", "--ignore-rules", "--ephemeral", "--sandbox", "--add-dir")) { $lines += "$flag=" + $(if ($combined -match [regex]::Escape($flag)) { "present" } else { "absent" }) }
     return Get-ForgeMaterializerTextHash (($lines -join "`n") + "`n")
 }
 
@@ -215,9 +215,8 @@ function Merge-ManagedJsonObject {
         if ($ownedValue -is [System.Management.Automation.PSCustomObject] -and $targetValue -is [System.Management.Automation.PSCustomObject]) {
             Merge-ManagedJsonObject $targetValue $ownedValue
         } elseif ($ownedValue -is [Array] -and $targetValue -is [Array]) {
-            $remaining = New-Object System.Collections.Generic.List[object]
-            foreach ($item in $targetValue) { $remaining.Add($item) }
-            $merged = New-Object System.Collections.Generic.List[object]
+            [object[]]$remaining = @($targetValue)
+            [object[]]$merged = @()
             foreach ($ownedItem in $ownedValue) {
                 $identity = Get-ManagedJsonIdentity $ownedItem
                 $match = $null
@@ -226,12 +225,12 @@ function Merge-ManagedJsonObject {
                 }
                 if ($match) {
                     if ($ownedItem -is [System.Management.Automation.PSCustomObject] -and $match -is [System.Management.Automation.PSCustomObject]) { Merge-ManagedJsonObject $match $ownedItem }
-                    $merged.Add($match)
-                    [void]$remaining.Remove($match)
-                } else { $merged.Add($ownedItem) }
+                    $merged += $match
+                    $remaining = @($remaining | Where-Object { (Get-ManagedJsonIdentity $_) -cne $identity })
+                } else { $merged += $ownedItem }
             }
-            foreach ($item in $remaining) { $merged.Add($item) }
-            $targetProperty.Value = @($merged)
+            foreach ($item in $remaining) { $merged += $item }
+            $targetProperty.Value = [object[]]$merged
         } else {
             # Every key present in the Forge template is managed. Unknown user
             # keys are absent from Owned and therefore remain untouched.
@@ -283,40 +282,40 @@ function Merge-CodexHookEntries {
 
 function Convert-McpJsonToCodexToml {
     param([string]$Path)
-    $lines = New-Object System.Collections.Generic.List[string]
-    $blocked = New-Object System.Collections.Generic.List[string]
+    $lines = @()
+    $blocked = @()
     if (-not $Path -or -not (Test-Path $Path)) { return [pscustomobject]@{ Text=""; Blocked=@() } }
     $payload = Get-Content -Raw $Path | ConvertFrom-Json
     if (-not $payload.PSObject.Properties["mcpServers"]) { return [pscustomobject]@{ Text=""; Blocked=@() } }
     foreach ($property in $payload.mcpServers.PSObject.Properties | Sort-Object Name) {
         $name = $property.Name
         $server = $property.Value
-        if ($name -notmatch '^[A-Za-z0-9_-]+$') { $blocked.Add("unsupported MCP server '$name'"); continue }
+        if ($name -notmatch '^[A-Za-z0-9_-]+$') { $blocked += "unsupported MCP server '$name'"; continue }
         if ($name -eq "playwright" -and $server.type -eq "stdio" -and $server.command -eq "npx" -and
             (($server.args | ConvertTo-Json -Compress) -eq '["-y","@playwright/mcp@latest"]') -and @($server.env.PSObject.Properties).Count -eq 0) { continue }
         if ($name -eq "context7" -and $server.type -eq "http" -and $server.url -eq "https://mcp.context7.com/mcp") { continue }
         $unknown = @($server.PSObject.Properties.Name | Where-Object { @("type", "command", "args", "env", "cwd", "transport", "url") -notcontains $_ })
-        if ($unknown.Count) { $blocked.Add("$name`: unsupported fields $($unknown -join ',')"); continue }
-        if ($server.type -and $server.type -ne "stdio") { $blocked.Add("$name`: transport type is not safely translatable"); continue }
-        if (-not ($server.command -is [string])) { $blocked.Add("$name`: command transport is not safely translatable"); continue }
+        if ($unknown.Count) { $blocked += "$name`: unsupported fields $($unknown -join ',')"; continue }
+        if ($server.type -and $server.type -ne "stdio") { $blocked += "$name`: transport type is not safely translatable"; continue }
+        if (-not ($server.command -is [string])) { $blocked += "$name`: command transport is not safely translatable"; continue }
         $args = @($server.args)
-        if (@($args | Where-Object { -not ($_ -is [string]) }).Count) { $blocked.Add("$name`: args are not safely translatable"); continue }
+        if (@($args | Where-Object { -not ($_ -is [string]) }).Count) { $blocked += "$name`: args are not safely translatable"; continue }
         $environment = @($server.env.PSObject.Properties)
         if (@($environment | Where-Object { -not ($_.Value -is [string]) -or $_.Value -notmatch '^\$\{[A-Za-z_][A-Za-z0-9_]*\}$' }).Count) {
-            $blocked.Add("$name`: literal or malformed env value preserved only in .mcp.json"); continue
+            $blocked += "$name`: literal or malformed env value preserved only in .mcp.json"; continue
         }
-        $lines.Add("")
-        $lines.Add("[mcp_servers.$name]")
-        $lines.Add("command = $($server.command | ConvertTo-Json -Compress)")
+        $lines += ""
+        $lines += "[mcp_servers.$name]"
+        $lines += "command = $($server.command | ConvertTo-Json -Compress)"
         $renderedArgs = @($args | ForEach-Object { $_ | ConvertTo-Json -Compress }) -join ", "
-        $lines.Add("args = [$renderedArgs]")
+        $lines += "args = [$renderedArgs]"
         if ($environment.Count) {
             $renderedEnv = @($environment | Sort-Object Name | ForEach-Object { "$($_.Name | ConvertTo-Json -Compress) = $($_.Value | ConvertTo-Json -Compress)" }) -join ", "
-            $lines.Add("env = { $renderedEnv }")
+            $lines += "env = { $renderedEnv }"
         }
     }
     $text = if ($lines.Count) { ($lines -join "`n") + "`n" } else { "" }
-    return [pscustomobject]@{ Text=$text; Blocked=@($blocked) }
+    return [pscustomobject]@{ Text=$text; Blocked=$blocked }
 }
 
 function Set-CodexTomlBlock {
@@ -416,21 +415,21 @@ foreach ($row in $rows) {
     switch ($row.Kind) {
         "canonical" {
             Install-CanonicalFile $source $destination $row.Destination
-            $Installed.Add([pscustomobject]@{ Path=$row.Destination; CanonicalRevision=(Get-FileRevision $destination) })
+            $Installed += [pscustomobject]@{ Path=$row.Destination; CanonicalRevision=(Get-FileRevision $destination) }
         }
         "adapter" {
             $canonical = Join-Path $Target ($row.CanonicalPath -replace '/', '\')
             if (-not (Test-Path $canonical)) { throw "adapter canonical target missing: $($row.CanonicalPath)" }
             $canonicalRevision = Get-FileRevision $canonical
             Render-Adapter $source $destination $row.CanonicalPath $canonicalRevision
-            $Installed.Add([pscustomobject]@{ Path=$row.Destination; CanonicalRevision=$canonicalRevision })
+            $Installed += [pscustomobject]@{ Path=$row.Destination; CanonicalRevision=$canonicalRevision }
         }
         "marker" {
             $canonical = Join-Path $Target ($row.CanonicalPath -replace '/', '\')
             if (-not (Test-Path $canonical)) { throw "marker canonical target missing: $($row.CanonicalPath)" }
             $canonicalRevision = Get-FileRevision $canonical
             Set-ForgeMarkerBlock $source $destination $canonicalRevision
-            $Installed.Add([pscustomobject]@{ Path=$row.Destination; CanonicalRevision=$canonicalRevision })
+            $Installed += [pscustomobject]@{ Path=$row.Destination; CanonicalRevision=$canonicalRevision }
         }
     }
 }
@@ -458,8 +457,8 @@ if ($Scope -eq "project") {
         [IO.File]::WriteAllText("$writer.sha256", (Get-FileRevision $writer) + "`n", $Utf8NoBom)
     }
     Write-CodexIdentity $writerRevision $captureRevision
-    $Installed.Add([pscustomobject]@{ Path=".forge/bin/codex.identity"; CanonicalRevision="-" })
-    $Installed.Add([pscustomobject]@{ Path=".forge/bin/codex.identity.sha256"; CanonicalRevision="-" })
+    $Installed += [pscustomobject]@{ Path=".forge/bin/codex.identity"; CanonicalRevision="-" }
+    $Installed += [pscustomobject]@{ Path=".forge/bin/codex.identity.sha256"; CanonicalRevision="-" }
     $capture = Join-Path $Target ".forge\bin\forge-goal-capture.ps1"
     if (Test-Path $capture) {
         $sealed = [IO.File]::ReadAllText($capture).Replace('__FORGE_CAPTURE_PATH__', $capture).Replace('__FORGE_CAPTURE_ROOT__', (Join-Path $Target ".forge\goal-captures")).Replace('__FORGE_CODEX_IDENTITY__', (Join-Path $Target ".forge\bin\codex.identity")).Replace('__FORGE_CAPTURE_REVISION__', $captureRevision).Replace('__FORGE_WRITER_REVISION__', $writerRevision)
@@ -470,8 +469,8 @@ if ($Scope -eq "project") {
     Set-CodexTomlBlock (Join-Path $RepoRoot "settings\codex-config.template.toml") (Join-Path $Target ".codex\config.toml")
 }
 [IO.File]::WriteAllText((Join-Path $Target ".forge\version"), "6`n", $Utf8NoBom)
-$Installed.Add([pscustomobject]@{ Path=".forge/version"; CanonicalRevision="-" })
-Write-InstallManifest -Records @($Installed)
+$Installed += [pscustomobject]@{ Path=".forge/version"; CanonicalRevision="-" }
+Write-InstallManifest -Records $Installed
 Write-Host "INSTALLATION: MATERIALIZED"
 foreach ($engine in Get-EngineAvailability) {
     if ($engine.Availability -eq "ABSENT") { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED binary unavailable; host surface remains materialized" }

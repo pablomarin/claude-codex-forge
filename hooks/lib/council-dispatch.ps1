@@ -72,9 +72,16 @@ $result=Invoke-Attempt $mode $reason; if($result){Write-Output "Council receipt:
 if($script:FailedEngine -eq $other){
   $attemptPrefix=$reviewRoot.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
   if(!$script:AttemptDir.StartsWith($attemptPrefix,[StringComparison]::OrdinalIgnoreCase)){Stop-Council 'failed attempt path escaped council storage'}
-  [IO.Directory]::Delete($script:AttemptDir, $true)
-  if (Test-Path -LiteralPath $script:AttemptDir) { Stop-Council 'failed mixed attempt artifacts could not be discarded' }
+  $failedAttempt=$script:AttemptDir
+  [IO.Directory]::Delete($failedAttempt, $true)
+  if (Test-Path -LiteralPath $failedAttempt) { Stop-Council 'failed mixed attempt artifacts could not be discarded' }
   foreach($seat in @($seats+'chair')){$engine[$seat]=$main}
-  $result=Invoke-Attempt 'same-engine-fallback' 'runtime-other-failure';if($result){Write-Output "Council receipt: $result\topology.receipt";exit 0}
+  $result=Invoke-Attempt 'same-engine-fallback' 'runtime-other-failure';if($result){
+    # A failed Windows child can finish its final filesystem write after its
+    # process exits. Recheck the exact failed path before publishing success.
+    if(Test-Path -LiteralPath $failedAttempt){[IO.Directory]::Delete($failedAttempt,$true)}
+    if(Test-Path -LiteralPath $failedAttempt){Stop-Council 'failed mixed attempt artifacts could not be discarded'}
+    Write-Output "Council receipt: $result\topology.receipt";exit 0
+  }
 }
 Stop-Council 'main-engine council failure blocks verdict'

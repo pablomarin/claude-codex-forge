@@ -120,11 +120,10 @@ foreach($engine in @('claude','codex')){
     $binary='';if($EngineDir){$binary=Join-Path $EngineDir "$engine.exe"}else{$command=Get-Command $engine -ErrorAction SilentlyContinue;if($command){$binary=$command.Source}};$binaries[$engine]=$binary
     $dispatchOut=Join-Path $bundle "$engine-dispatch.json";$goalOut=Join-Path $bundle "$engine-goal.json";$children["${engine}_dispatch"]=$dispatchOut;$children["${engine}_goal"]=$goalOut
     if($FixtureMode){
-        $previousChildPreference=$ErrorActionPreference;$ErrorActionPreference='Continue'
-        try{
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatch -Engine $engine -ProjectRoot $ProjectRoot -Output $dispatchOut -FixtureMode -EnginePath $binary *> $null
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $goal -Engine $engine -ProjectRoot $ProjectRoot -Output $goalOut -FixtureMode -EnginePath $binary *> $null
-        }finally{$ErrorActionPreference=$previousChildPreference}
+        $dispatchArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatch,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$dispatchOut,'-FixtureMode','-EnginePath',$binary)
+        $goalArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$goal,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$goalOut,'-FixtureMode','-EnginePath',$binary)
+        $null=Invoke-QualificationChild -Arguments $dispatchArguments -Receipt $dispatchOut -Schema 'forge.dispatch-isolation.v1' -TimeoutSeconds $QualificationTimeoutSeconds
+        $null=Invoke-QualificationChild -Arguments $goalArguments -Receipt $goalOut -Schema 'forge.goal-feasibility.v1' -TimeoutSeconds $QualificationTimeoutSeconds
     }else{
         $previous=$env:FORGE_LIVE_QUALIFICATION;if($Live){$env:FORGE_LIVE_QUALIFICATION='1'}else{Remove-Item Env:FORGE_LIVE_QUALIFICATION -ErrorAction SilentlyContinue}
         try{
@@ -135,11 +134,10 @@ foreach($engine in @('claude','codex')){
                 $null=Invoke-QualificationChild -Arguments $dispatchArguments -Receipt $dispatchOut -Schema 'forge.dispatch-isolation.v1' -TimeoutSeconds $QualificationTimeoutSeconds
                 $null=Invoke-QualificationChild -Arguments $goalArguments -Receipt $goalOut -Schema 'forge.goal-feasibility.v1' -TimeoutSeconds $QualificationTimeoutSeconds
             }else{
-                $previousChildPreference=$ErrorActionPreference;$ErrorActionPreference='Continue'
-                try{
-                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatch -Engine $engine -ProjectRoot $ProjectRoot -Output $dispatchOut *> $null
-                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $goal -Engine $engine -ProjectRoot $ProjectRoot -Output $goalOut @extra *> $null
-                }finally{$ErrorActionPreference=$previousChildPreference}
+                $dispatchArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatch,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$dispatchOut)
+                $goalArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$goal,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$goalOut)+$extra
+                $null=Invoke-QualificationChild -Arguments $dispatchArguments -Receipt $dispatchOut -Schema 'forge.dispatch-isolation.v1' -TimeoutSeconds $QualificationTimeoutSeconds
+                $null=Invoke-QualificationChild -Arguments $goalArguments -Receipt $goalOut -Schema 'forge.goal-feasibility.v1' -TimeoutSeconds $QualificationTimeoutSeconds
             }
         }finally{if($null -eq $previous){Remove-Item Env:FORGE_LIVE_QUALIFICATION -ErrorAction SilentlyContinue}else{$env:FORGE_LIVE_QUALIFICATION=$previous}}
     }
