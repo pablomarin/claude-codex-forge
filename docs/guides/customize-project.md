@@ -4,19 +4,19 @@ Files you should review and edit after running the setup script.
 
 ## 1. Add project-specific instructions
 
-Keep user-owned root instructions concise. Canonical workflow rules, coding standards, and
-principles live in `.forge/instructions.md` and `.forge/rules/`; bounded `CLAUDE.md` and `AGENTS.md`
-adapters point both hosts at Forge. Put shared project facts in a tracked project document or mirror
-the small user-owned overview outside the Forge markers in both root files. Setup never synchronizes
-or overwrites that user text.
+Keep user-owned root instructions concise. Canonical Forge workflow rules, coding standards, and
+principles live in setup-managed `.forge/instructions.md` and `.forge/rules/`; bounded `CLAUDE.md`
+and `AGENTS.md` adapters point both hosts at them.
+
+Put shared project facts in one team-owned tracked document, for example `docs/agent-context.md`:
 
 **Why this matters:** When you run the authoritative `setup.sh -F`, user text outside bounded Forge
 marker blocks is preserved while canonical `.forge/` content and generated host adapters are
 reconciled with ownership checks.
 
-Fill in the placeholders:
-
 ```markdown
+# Project Context
+
 ## Project Overview
 
 My Awesome App - Description of what it does
@@ -32,6 +32,20 @@ My Awesome App - Description of what it does
 cd src && uv run pytest # Run tests
 cd frontend && pnpm build # Build frontend
 ```
+
+Point each host to it once, outside the bounded Forge marker:
+
+```markdown
+# CLAUDE.md user-owned section
+@docs/agent-context.md
+
+# AGENTS.md user-owned section
+Read `docs/agent-context.md` before making project changes.
+```
+
+From then on, edit only `docs/agent-context.md` for shared guidance. Keep genuinely Claude-only or
+Codex-only instructions in the corresponding root file. Setup preserves those user-owned pointers
+and never tries to synchronize their surrounding text.
 
 > **Why so slim?** Host root instructions stay focused while canonical shared policy lives in
 > `.forge/instructions.md` and `.forge/rules/`.

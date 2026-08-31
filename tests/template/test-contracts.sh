@@ -2711,4 +2711,62 @@ FIRST_CHANGELOG_VERSION=$(grep -m1 '^## [0-9]' "$REPO_ROOT/docs/CHANGELOG.md")
 assert_equals "$FIRST_CHANGELOG_VERSION" '## 6.0 — 2026-08-27' \
     "6.0 is the top changelog release"
 
+start_test "Forge source repository uses one contributor guide with thin host adapters"
+assert_file_exists "$REPO_ROOT/CONTRIBUTING.md" \
+    "canonical contributor guide exists"
+assert_file_exists "$REPO_ROOT/AGENTS.md" \
+    "Codex-native source-repository adapter exists"
+assert_contains "$REPO_ROOT/CLAUDE.md" '@CONTRIBUTING.md' \
+    "Claude adapter imports the canonical contributor guide"
+assert_contains "$REPO_ROOT/CLAUDE.md" '@FORGE.template.md' \
+    "Claude adapter imports the installed-policy source"
+assert_contains "$REPO_ROOT/AGENTS.md" 'Read `CONTRIBUTING.md` and `FORGE.template.md`' \
+    "Codex adapter points to the same two canonical sources"
+for adapter in "$REPO_ROOT/CLAUDE.md" "$REPO_ROOT/AGENTS.md"; do
+    if [ -f "$adapter" ]; then
+        adapter_lines=$(wc -l < "$adapter" | tr -d ' ')
+        if [ "$adapter_lines" -le 15 ]; then
+            pass "$(basename "$adapter") stays a thin discovery adapter"
+        else
+            fail "$(basename "$adapter") duplicates policy ($adapter_lines lines; expected at most 15)"
+        fi
+    fi
+done
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`FORGE.template.md` is the canonical policy installed into downstream projects' \
+    "contributor guide distinguishes source-repository guidance from installed policy"
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`manifests/managed-v6.tsv`' \
+    "contributor guide names the installation ownership manifest"
+assert_contains "$REPO_ROOT/CLAUDE.template.md" 'v5 compatibility' \
+    "legacy Claude template is explicitly labeled as a compatibility surface"
+assert_contains "$REPO_ROOT/CLAUDE.template.md" 'templates/adapters/CLAUDE.block.template.md' \
+    "legacy Claude template points maintainers to the v6 adapter source"
+
+start_test "README presents a readable workflow and one-source instruction mapping"
+assert_contains "$README" 'flowchart TB' \
+    "engineering workflow uses a vertical Mermaid layout"
+assert_not_contains "$README" 'flowchart LR' \
+    "engineering workflow is not compressed into one horizontal strip"
+for phase in DEFINE BUILD CERTIFY SHIP; do
+    assert_contains "$README" "$phase</b>" \
+        "engineering workflow names the $phase phase"
+done
+assert_contains "$README" '### One source of truth, two native adapters' \
+    "README explains the native-adapter architecture"
+assert_contains "$README" '`FORGE.template.md` | `.forge/instructions.md`' \
+    "README maps canonical policy into downstream projects"
+assert_contains "$README" '`templates/adapters/CLAUDE.block.template.md` | Forge-owned block in `CLAUDE.md`' \
+    "README maps the Claude adapter source"
+assert_contains "$README" '`templates/adapters/AGENTS.block.template.md` | Forge-owned block in `AGENTS.md`' \
+    "README maps the Codex adapter source"
+assert_contains "$README" 'Do not copy shared policy between `CLAUDE.md` and `AGENTS.md`' \
+    "README tells users not to maintain duplicated host instructions"
+assert_not_contains "$README" 'edit `.forge/instructions.md` in the installed project' \
+    "README does not tell users to edit setup-managed canonical policy"
+assert_contains "$README" '`docs/agent-context.md`' \
+    "README recommends one team-owned project context file"
+assert_not_contains "$REPO_ROOT/docs/guides/customize-project.md" 'mirror' \
+    "customization guide does not recommend duplicated project guidance"
+assert_contains "$REPO_ROOT/docs/guides/customize-project.md" '`docs/agent-context.md`' \
+    "customization guide uses the same neutral project context convention"
+
 report "test-contracts.sh"

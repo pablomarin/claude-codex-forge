@@ -142,19 +142,14 @@ discards that attempt and reruns the whole council on the current host.
 ## The engineering workflow
 
 ```mermaid
-flowchart LR
-    PRD[Approve PRD] --> Research[Research current APIs and dependencies]
-    Research --> Plan[Compare approaches and approve plan]
-    Plan --> PlanReview[Fresh plan review]
-    PlanReview --> TDD[Implement RED → GREEN → refactor]
-    TDD --> PreliminaryE2E[Preliminary user-journey E2E]
-    PreliminaryE2E --> Simplify[Document and simplify]
-    Simplify --> Freeze[Freeze exact candidate]
-    Freeze --> Review[Code-spec + code-quality review]
-    Review --> Verify[verify-app + full E2E]
-    Verify --> Promote[Promote exact verified tree]
-    Promote --> Authorization[Human authorizes PR mutation]
-    Authorization --> PR[Push and open PR]
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 40, "rankSpacing": 64}}}%%
+flowchart TB
+    Define["<b>1 · DEFINE</b><br/>Approve the PRD<br/>Research current APIs and dependencies<br/>Compare approaches and approve the plan"]
+    Build["<b>2 · BUILD</b><br/>Run a fresh plan review<br/>Implement RED → GREEN → refactor<br/>Exercise the preliminary user journey"]
+    Certify["<b>3 · CERTIFY</b><br/>Document and simplify<br/>Freeze the exact candidate<br/>Run code-spec + code-quality review<br/>Run verify-app + full E2E"]
+    Ship["<b>4 · SHIP</b><br/>Promote the exact verified tree<br/>Human authorizes the external mutation<br/>Push the branch and open the PR"]
+
+    Define ==> Build ==> Certify ==> Ship
 ```
 
 The main workflows are:
@@ -245,6 +240,29 @@ your-project/
 
 Global setup adds canonical policy and trusted native-goal helpers under `~/.forge/`, plus bounded
 global adapters at `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
+
+### One source of truth, two native adapters
+
+Forge does **not** ask teams to keep two copies of the same instructions synchronized. Both hosts
+discover the filename they support natively, and each root file points into one shared policy:
+
+| Forge source | Installed destination | Role |
+| --- | --- | --- |
+| `FORGE.template.md` | `.forge/instructions.md` | Canonical shared policy for both engines |
+| `templates/adapters/CLAUDE.block.template.md` | Forge-owned block in `CLAUDE.md` | Claude Code discovery and host-specific composition |
+| `templates/adapters/AGENTS.block.template.md` | Forge-owned block in `AGENTS.md` | Codex discovery and host-specific composition |
+| `CLAUDE.template.md` | No new v6 destination | Retained only to reconcile proven v5 installations |
+
+`.forge/instructions.md` is setup-managed; change `FORGE.template.md` when developing the harness,
+not the installed copy. In a downstream project, keep team-owned facts and commands in one neutral
+tracked file such as `docs/agent-context.md`. Add a one-time `@docs/agent-context.md` import outside
+the Forge block in `CLAUDE.md` and a one-time `Read docs/agent-context.md` instruction outside the
+Forge block in `AGENTS.md`. After that, edit only the neutral document.
+
+For a genuinely Claude-only instruction, use the user-owned part of `CLAUDE.md`; for a genuinely
+Codex-only instruction, use the user-owned part of `AGENTS.md`.
+Do not copy shared policy between `CLAUDE.md` and `AGENTS.md`. Setup refreshes only the Forge-owned
+blocks and preserves user-authored text outside them.
 
 Setup preserves user content according to explicit ownership:
 

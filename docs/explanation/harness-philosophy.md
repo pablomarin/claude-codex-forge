@@ -44,7 +44,8 @@ Three of those travel with the repo. Auto-memory and `.forge/local/state.md` sta
 
 One GitHub repo becomes the hub:
 
-- Shared `CLAUDE.md` — project description, tech stack, commands
+- Shared `.forge/instructions.md` — project policy discovered through thin `CLAUDE.md` and
+  `AGENTS.md` native adapters
 - Shared `.forge/rules/` — canonical coding standards, workflow rules, security baseline
 - Shared `.forge/workflows/` — canonical workflows used through each host's adapters
 - Shared hooks — consistent quality gates across the team
