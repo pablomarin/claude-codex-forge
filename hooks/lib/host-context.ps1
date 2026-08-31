@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][ValidateSet('hook', 'issue-test', 'verify', 'launch')][string]$Mode,
-    [ValidateSet('claude', 'codex')][string]$Host,
+    [Alias('Host')][ValidateSet('claude', 'codex')][string]$EngineHost,
     [string]$SessionId,
     [string[]]$LaunchArguments = @(),
     [string]$LaunchArgumentsJson,
@@ -80,16 +80,16 @@ try {
     if ($Mode -eq 'hook') {
         $raw = [Console]::In.ReadToEnd(); $nativeSession = ''
         try { $json = $raw | ConvertFrom-Json; if ($json.session_id) { $nativeSession = [string]$json.session_id } elseif ($json.thread_id) { $nativeSession = [string]$json.thread_id } } catch {}
-        Write-Receipt $Host $nativeSession | Out-Null; exit 0
+        Write-Receipt $EngineHost $nativeSession | Out-Null; exit 0
     }
     if ($Mode -eq 'issue-test') {
         if ($env:FORGE_HOST_CONTEXT_TEST_MODE -ne '1') { throw 'BLOCKED[invariant]: test receipt issue mode is disabled' }; Assert-TestModeAllowed
-        Write-Output (Write-Receipt $Host $SessionId); exit 0
+        Write-Output (Write-Receipt $EngineHost $SessionId); exit 0
     }
     $launcher = Get-Launcher; $council = Get-Council
     if ($Mode -eq 'launch') {
-        $receipt = Test-Receipt $Host $launcher $council
-        $env:FORGE_NATIVE_HOST = $Host; $env:FORGE_NATIVE_SESSION_ID = $receipt.Session; $env:FORGE_HOST_CONTEXT_FILE = $receipt.Path; $env:FORGE_HOST_CONTEXT_LAUNCHER_HASH = $receipt.LauncherHash
+        $receipt = Test-Receipt $EngineHost $launcher $council
+        $env:FORGE_NATIVE_HOST = $EngineHost; $env:FORGE_NATIVE_SESSION_ID = $receipt.Session; $env:FORGE_HOST_CONTEXT_FILE = $receipt.Path; $env:FORGE_HOST_CONTEXT_LAUNCHER_HASH = $receipt.LauncherHash
         $boundArguments = if ($LaunchArgumentsJson) { @($LaunchArgumentsJson | ConvertFrom-Json) } else { @($LaunchArguments) }
         $target = if ($LaunchTarget -eq 'council') { $council } else { $launcher }
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $target @boundArguments

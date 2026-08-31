@@ -30,14 +30,14 @@ function Set-State([string]$Repository, [string]$Base, [string]$BaseRef) {
     $body = "<!-- forge:state-schema v6 -->`n# Project State`n`n## Identity`n`n| Field | Value |`n| --- | --- |`n| Worktree root | $rootPath |`n| Git common directory | $common |`n| Last active host | claude |`n| Workflow base ref | $BaseRef |`n| Workflow base SHA | $Base |`n`n## Workflow`n`n## Receipts`n| Field | Value |`n| Review iteration | 1 |`n"
     [IO.File]::WriteAllText((Join-Path $Repository '.forge/local/state.md'), $body)
 }
-function Set-Context([string]$Repository, [string]$Host, [string]$Session) {
+function Set-Context([string]$Repository, [string]$EngineHost, [string]$Session) {
     $env:FORGE_HOST_CONTEXT_TEST_MODE = '1'; $env:FORGE_HOST_CONTEXT_TEST_ROOT = Join-Path $Repository '.forge/local/test-host-authority'; $env:FORGE_HOST_CONTEXT_TEST_LAUNCHER = $dispatcher
     Push-Location $Repository
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hostContext -Mode issue-test -Host $Host -SessionId $Session | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'context capture failed' } }
+    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hostContext -Mode issue-test -Host $EngineHost -SessionId $Session | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'context capture failed' } }
     finally { Pop-Location }
 }
-function Invoke-Dispatch([string]$Repository, [string]$Host, [string]$Session, [string]$Requested, [string]$Role = 'general', [string]$Fallback = 'automatic', [string]$Conversation = 'ephemeral', [string]$ExactSession = '', [string]$SessionOutput = '', [string]$PromptText = '', [string]$OutputPath = '') {
-    Set-Context $Repository $Host $Session
+function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Session, [string]$Requested, [string]$Role = 'general', [string]$Fallback = 'automatic', [string]$Conversation = 'ephemeral', [string]$ExactSession = '', [string]$SessionOutput = '', [string]$PromptText = '', [string]$OutputPath = '') {
+    Set-Context $Repository $EngineHost $Session
     $script:DispatchSequence++; $prompt = Join-Path $Repository '.forge/local/reviews/prompt.txt'
     if ($PromptText) { [IO.File]::WriteAllText($prompt, $PromptText) }
     elseif ($Role -like 'council-*') { $question = Get-ShaTextForTest 'stable council question'; [IO.File]::WriteAllText($prompt, "question_hash=$question`nreview`n") } else { [IO.File]::WriteAllText($prompt, "review`n") }
@@ -48,7 +48,7 @@ function Invoke-Dispatch([string]$Repository, [string]$Host, [string]$Session, [
     if ($ExactSession) { $arguments += @('-SessionId', $ExactSession) }
     if ($SessionOutput) { $arguments += @('-SessionIdOutput', $SessionOutput) }
     Push-Location $Repository
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hostContext -Mode launch -Host $Host -LaunchArgumentsJson ($arguments | ConvertTo-Json -Compress) | Out-Null; return $LASTEXITCODE }
+    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hostContext -Mode launch -Host $EngineHost -LaunchArgumentsJson ($arguments | ConvertTo-Json -Compress) | Out-Null; return $LASTEXITCODE }
     finally { Pop-Location }
 }
 function Get-ShaTextForTest([string]$Text) { $bytes = [Text.Encoding]::UTF8.GetBytes($Text); $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
