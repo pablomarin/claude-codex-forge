@@ -103,7 +103,7 @@ function Test-ForgeAuthorization([string]$Receipt, $Details) {
     $fields = Get-ForgeGoalFields $Receipt
     $writer = Join-Path $TrustedHome ".forge\bin\forge-goal-authorize.ps1"; if (-not (Test-Path $writer)) { return $false }
     $writerText = [IO.File]::ReadAllText($writer); if ($writerText -notmatch '(?m)^\$WriterRevision = ''([^'']+)''$') { return $false }; $writerRevision = $Matches[1]
-    return ($fields["format"] -ceq "forge-goal-authorization-v1" -and $fields["project_root"] -ceq $Details.Root -and $fields["git_common_dir"] -ceq $Details.Common -and $fields["project_id"] -ceq $Details.Id -and $fields["approval_channel"] -ceq "physical-operator-action" -and $fields["writer_revision"] -ceq $writerRevision -and $fields["ceiling"] -eq "1")
+    return ($fields["format"] -ceq "forge-goal-authorization-v1" -and $fields["project_root"] -ieq $Details.Root -and $fields["git_common_dir"] -ieq $Details.Common -and $fields["project_id"] -ceq $Details.Id -and $fields["approval_channel"] -ceq "physical-operator-action" -and $fields["writer_revision"] -ceq $writerRevision -and $fields["ceiling"] -eq "1")
 }
 
 function Test-ForgeTrustedCodexCapture([string]$Receipt, $Details) {

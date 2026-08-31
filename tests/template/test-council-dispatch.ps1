@@ -56,7 +56,7 @@ try {
   $qhash=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $linked.Repo 'question.txt')).Hash.ToLowerInvariant();$reviews=Join-Path $linked.Repo '.forge\local\reviews';New-Item -ItemType Directory -Path $reviews -Force|Out-Null
   & cmd.exe /d /c mklink /J "$(Join-Path $reviews "council-$qhash")" "$outside"|Out-Null
   $result=Invoke-Fixture $linked
-  Assert-True ($result.Rc -ne 0) 'PowerShell linked council receipt root blocks before dispatch'
+  Assert-True ((($result.Output|Out-String) -match 'council receipt storage ancestors must be no-follow directories')) 'PowerShell linked council receipt root blocks before dispatch'
   Assert-True (@(Get-ChildItem -LiteralPath $outside -Force).Count -eq 0) 'PowerShell linked council target remains untouched'
 }
 finally{$env:PATH=$originalPath;foreach($dir in $fixtures){Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue}}
