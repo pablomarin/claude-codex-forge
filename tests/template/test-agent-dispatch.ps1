@@ -5,6 +5,7 @@ $hostContext = Join-Path $root 'hooks/lib/host-context.ps1'
 $fingerprint = Join-Path $root 'hooks/lib/candidate-fingerprint.ps1'
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('Forge Dispatch PS ' + [Guid]::NewGuid().ToString('N'))
 $bin = Join-Path $temporary 'fake engines'
+$contextLauncher = Join-Path $temporary 'launch-host-context.ps1'
 $script:Passed = 0; $script:Failed = 0
 $script:DispatchSequence = 0
 
@@ -47,8 +48,10 @@ function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Sess
     if ($Role -like 'council-*') { $arguments += @('-SeatId', 'advisor-1') }
     if ($ExactSession) { $arguments += @('-SessionId', $ExactSession) }
     if ($SessionOutput) { $arguments += @('-SessionIdOutput', $SessionOutput) }
+    $argumentsJson = Join-Path $Repository ".forge/local/reviews/launch-$($script:DispatchSequence).json"
+    [IO.File]::WriteAllText($argumentsJson, ($arguments | ConvertTo-Json -Compress))
     Push-Location $Repository
-    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hostContext -Mode launch -Host $EngineHost -LaunchArgumentsJson ($arguments | ConvertTo-Json -Compress) | Out-Null; return $LASTEXITCODE }
+    try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $contextLauncher $hostContext $EngineHost $argumentsJson | Out-Null; return $LASTEXITCODE }
     finally { Pop-Location }
 }
 function Get-ShaTextForTest([string]$Text) { $bytes = [Text.Encoding]::UTF8.GetBytes($Text); $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
@@ -56,6 +59,11 @@ function Get-ShaFileForTest([string]$Path) { $sha = [Security.Cryptography.SHA25
 
 try {
     New-Item -ItemType Directory -Path $bin -Force | Out-Null
+    [IO.File]::WriteAllText($contextLauncher, @'
+param([string]$ContextPath, [string]$EngineHost, [string]$ArgumentsJsonPath)
+$argumentsJson = [IO.File]::ReadAllText($ArgumentsJsonPath)
+& $ContextPath -Mode launch -Host $EngineHost -LaunchArgumentsJson $argumentsJson
+'@)
     $source = @'
 using System;
 using System.Diagnostics;

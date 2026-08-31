@@ -90,7 +90,14 @@ public static class ForgeTask11Fake {
         "{`"session_id`":`"seam-session`",`"cwd`":`"$($project.Replace('\','\\'))`"}" | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $context -Mode hook -Host claude | Out-Null
         $before = Get-Hash $state
         $arguments = @('-Mode','run','-Engine','auto','-FallbackPolicy','automatic','-Role','general','-Profile','review','-Artifact','git:working-tree','-WorkflowBaseSha',$base,'-WorkflowBaseRef',"refs/heads/$branch",'-PromptFile',$prompt,'-Output',$result,'-TimeoutSeconds','2')
-        $dispatchOutput = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $context -Mode launch -Host claude -LaunchArgumentsJson ($arguments | ConvertTo-Json -Compress) 2>&1) -join "`n"; $dispatchRc = $LASTEXITCODE
+        $argumentsJson = Join-Path $reviews 'launch-arguments.json'; [IO.File]::WriteAllText($argumentsJson, ($arguments | ConvertTo-Json -Compress))
+        $contextLauncher = Join-Path $reviews 'launch-host-context.ps1'
+        [IO.File]::WriteAllText($contextLauncher, @'
+param([string]$ContextPath, [string]$EngineHost, [string]$ArgumentsJsonPath)
+$argumentsJson = [IO.File]::ReadAllText($ArgumentsJsonPath)
+& $ContextPath -Mode launch -Host $EngineHost -LaunchArgumentsJson $argumentsJson
+'@)
+        $dispatchOutput = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $contextLauncher $context claude $argumentsJson 2>&1) -join "`n"; $dispatchRc = $LASTEXITCODE
     } finally { Pop-Location }
     Assert-True ($dispatchRc -eq 0) 'installed dispatcher completes same-engine fallback'
     Assert-True ($dispatchOutput -like '*visible fallback*') 'fallback is visible'
