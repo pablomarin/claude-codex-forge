@@ -56,7 +56,8 @@ function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Sess
     elseif ($Role -like 'council-*') { $question = Get-ShaTextForTest 'stable council question'; [IO.File]::WriteAllText($prompt, "question_hash=$question`nreview`n") } else { [IO.File]::WriteAllText($prompt, "review`n") }
     $base = (& git -C $Repository rev-parse HEAD)
     if (-not $OutputPath) { $OutputPath = Join-Path $Repository ".forge/local/reviews/result-$($script:DispatchSequence).txt" }
-    $arguments = @('-Mode', 'run', '-Engine', $Requested, '-FallbackPolicy', $Fallback, '-Role', $Role, '-Profile', $(if ($Role -like 'investigation*') { 'investigate' } else { 'review' }), '-Artifact', 'git:working-tree', '-WorkflowBaseSha', $base, '-WorkflowBaseRef', 'refs/heads/test-base', '-PromptFile', $prompt, '-Output', $OutputPath, '-Conversation', $Conversation, '-TimeoutSeconds', '2')
+    $timeout = if ($Role -eq 'investigation-repro') { '10' } else { '2' }
+    $arguments = @('-Mode', 'run', '-Engine', $Requested, '-FallbackPolicy', $Fallback, '-Role', $Role, '-Profile', $(if ($Role -like 'investigation*') { 'investigate' } else { 'review' }), '-Artifact', 'git:working-tree', '-WorkflowBaseSha', $base, '-WorkflowBaseRef', 'refs/heads/test-base', '-PromptFile', $prompt, '-Output', $OutputPath, '-Conversation', $Conversation, '-TimeoutSeconds', $timeout)
     if ($Role -like 'council-*') { $arguments += @('-SeatId', 'advisor-1') }
     if ($ExactSession) { $arguments += @('-SessionId', $ExactSession) }
     if ($SessionOutput) { $arguments += @('-SessionIdOutput', $SessionOutput) }
@@ -128,7 +129,7 @@ public static class ForgeFakeEngine {
     Add-Type -TypeDefinition $source -Language CSharp -OutputAssembly (Join-Path $bin 'forge-fake.exe') -OutputType ConsoleApplication
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'claude.exe')
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'codex.exe')
-    $env:PATH = "$bin;$($env:PATH)"; $env:FORGE_DISPATCH_TEST_MODE = '1'; $env:FORGE_DISPATCH_TEST_TRACE = '1'
+    $env:PATH = "$bin;$($env:PATH)"; $env:FORGE_DISPATCH_TEST_MODE = '1'
 
     Write-Host 'PowerShell four-mode selection and fallback matrix'
     foreach ($tuple in @(@('claude','codex','codex'), @('codex','claude','claude'), @('claude','claude','claude'), @('codex','codex','codex'))) {
