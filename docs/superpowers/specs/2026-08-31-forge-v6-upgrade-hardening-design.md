@@ -21,6 +21,13 @@ Audits of two existing downstream repositories exposed the common shapes this de
 - root files beginning with a historical `forge:migrated` sentinel before the old Forge region;
 - enabled legacy plugins that may overlap the v6 harness.
 
+A second audit added two more supported profiles:
+
+- an exact v5.60 core with a historical project `AGENTS.md`, content-identical untracked Codex skill
+  copies, a custom project agent, and one legacy state store;
+- a v5.61 stamp followed by a deliberately developed cross-host runtime, custom `.agents` skills,
+  modified legacy workflows, and two divergent local state stores.
+
 The upgrade must handle those shapes explicitly. It must not silently delete uncertain content or
 attempt a semantic LLM merge.
 
@@ -73,7 +80,9 @@ A successful full refresh may write the v6 stamp only after proving all of the f
 
 Historical bytes may remain under `.forge/local/migration-backups/`; backups are not active host
 discovery surfaces. If the planner cannot prove the invariant, it writes no v6 stamp and changes no
-live files.
+live files. Independently installed plugins are not a second filesystem harness; a plugin overlap
+may allow materialization while keeping the affected host `RUNTIME_READY: BLOCKED` until qualified
+or resolved.
 
 ## Ownership Classification
 
@@ -121,15 +130,24 @@ project context once, outside Forge-managed regions.
 
 - Proven generated v5 `.claude/`, `.codex/`, or `.agents/` files are replaced or removed according
   to the versioned ownership and tombstone manifests.
+- Historical cross-host copies may be treated as managed only when their bytes match a versioned
+  alias fingerprint for the stamped release. A familiar name or similar prose is not provenance.
 - Unknown native files are preserved. If their names, hooks, commands, skills, or matchers overlap a
   required v6 surface, the migration is `BLOCKED` with the exact collision.
 - Settings merges preserve unrelated user entries. Proven v5 Forge entries are removed before v6
   entries are installed so a hook cannot run twice.
 - Enabled legacy plugins are classified by actual overlap. Inert plugins are preserved and
-  reported; plugins that can provide competing Forge policy are preserved but block full refresh
-  until the user disables or reconciles them.
+  reported; plugins that can provide competing Forge behavior are preserved and allow filesystem
+  migration, but keep that host `RUNTIME_READY: BLOCKED` until the user disables, reconciles, or
+  qualifies them.
 - Existing custom native goals remain protected and continue to use the existing runtime-readiness
   collision rules.
+
+An independently developed active harness—such as a custom runtime referenced by root instructions,
+Claude hooks, Codex hooks, and native skills—is not a legacy file collection. The report groups its
+paths and registrations as one `AMBIGUOUS_ACTIVE` system and gives two choices: keep it and do not
+migrate, or explicitly retire/archive it before rerunning full refresh. Forge never silently deletes
+that project-owned runtime, even when its responsibilities overlap v6.
 
 ## State, Backups, and Transaction Flow
 
@@ -145,9 +163,12 @@ The existing full-refresh transaction remains the foundation:
    reports, or project files.
 6. Execution repeats discovery under the guard, revalidates source hashes, creates raw backups for
    every replaced/deleted destination, and records the journal.
-7. Commit with the existing no-clobber/rollback behavior, translate supported
-   `.claude/local/state.md` to `.forge/local/state.md`, invalidate legacy evidence, and write the v6
-   stamp last.
+7. Commit with the existing no-clobber/rollback behavior, translate the single supported active
+   legacy state to `.forge/local/state.md`, invalidate legacy evidence, and write the v6 stamp last.
+
+If discovery finds multiple plausible active state stores, it preserves all of them and blocks with
+their paths, hashes, and modification times. It does not guess which objective is current. The user
+selects or reconciles the authoritative state, then reruns preview.
 
 The report uses the existing action categories (`CREATED`, `REWRITTEN`, `DELETED`, `PRESERVED`,
 `PRESERVED_COMPAT`, `PRESERVED_COMPAT_BLOCKED`, `BLOCKED`) plus a final summary:
@@ -194,9 +215,23 @@ The owning Bash and PowerShell behavioral suites cover these supported upgrade s
 9. dry-run for every case → byte-identical Git worktree, local state, global state, and stamps;
 10. injected transaction failure → rollback restores exact pre-upgrade bytes.
 
-Two sanitized integration fixtures model the audited downstream repository shapes without copying
+Additional integration assertions cover:
+
+- an exact v5 core plus historical project `AGENTS.md`, content-identical untracked skill aliases,
+  and a custom project agent: exact aliases are replaced, custom content is preserved, and any
+  obsolete active root reference is reported in one pass;
+- a stamped v5 repository with an independently developed active cross-host runtime and two local
+  state stores: preview groups the runtime collision, reports both states, performs no writes, and
+  refuses to claim a clean migration until the project owner chooses which harness/state to keep.
+
+Four sanitized integration fixtures model the audited downstream repository shapes without copying
 private project content. They complement, rather than duplicate, the version-by-version fingerprint
 matrix.
+
+Full refresh operates on the current canonical worktree only. It never edits sibling linked
+worktrees. After the migration commit is merged, other branches receive the tracked v6 layout through
+normal merge/rebase; each worktree retains and translates its own gitignored local state when setup
+is run there.
 
 ## Documentation and Release Boundary
 
