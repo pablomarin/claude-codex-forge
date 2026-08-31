@@ -5,8 +5,37 @@ Common issues and their solutions.
 ## Setup script says files already exist
 
 This is expected when Forge finds protected user content or existing host adapters. Use the
-authoritative `setup.sh -F` (`setup.ps1 -FullRefresh`) path; it reconciles only ownership-proven
-Forge content and preserves user text outside managed blocks.
+authoritative preview first:
+
+```bash
+~/claude-codex-forge/setup.sh -F --dry-run
+```
+
+```powershell
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
+```
+
+Resolve every named blocker, then rerun without the dry-run flag. Full refresh reconciles only
+ownership-proven Forge content and preserves user text outside managed blocks.
+
+## Full-refresh preview says `UPGRADE: BLOCKED`
+
+This is a safety result, not a partial installation. Preview writes no target files and prints all
+known blockers together. Common groups are:
+
+- `ROOT_POLICY_AMBIGUOUS`: remove only obsolete project-owned v5 references; keep neutral project
+  context.
+- `CUSTOM_HARNESS_COLLISION`: explicitly keep the independently developed harness, or archive it
+  and remove its active registrations before adopting Forge v6.
+- `MULTIPLE_STATE_SOURCES`: compare the reported hashes/timestamps, choose one state, and archive
+  the non-selected copy.
+- `LEGACY_FILE_MODIFIED` / `LEGACY_ALIAS_AMBIGUOUS`: restore exact released bytes or archive and
+  remove that active legacy surface; Forge will not guess ownership.
+
+Rerun preview until it says `UPGRADE: READY`; execution should finish with `ACTIVE_FORGE: v6`.
+`MATERIALIZED` can still coexist with a per-host `RUNTIME_READY: BLOCKED` diagnostic—for example,
+an overlapping enabled plugin or missing host authentication. Resolve that host diagnostic without
+manually duplicating policy between `CLAUDE.md` and `AGENTS.md`.
 
 ## Memory not persisting?
 
@@ -147,6 +176,7 @@ migration path. Current hooks read **only** `.forge/local/state.md`; they never 
 ~/claude-codex-forge/setup.sh --migrate
 
 # Option B — authoritative v6 refresh (if there's nothing to migrate):
+~/claude-codex-forge/setup.sh -F --dry-run
 ~/claude-codex-forge/setup.sh -F
 ```
 
@@ -368,8 +398,10 @@ The Forge ships a PTY shim (since v5.22) that works around this. If you're hitti
    ls .forge/hooks/lib/codex-pty-helper.py # required on Unix
    ```
 
-   If any are missing, run the authoritative `setup.sh -F` (or `setup.ps1 -FullRefresh`) from your
-   local Forge checkout. It reconciles ownership-proven canonical files and generated adapters.
+   If any are missing, preview with `setup.sh -F --dry-run` (or
+   `setup.ps1 -FullRefresh -DryRun`) from your local Forge checkout. Execute the same full-refresh
+   command without the dry-run flag only after `UPGRADE: READY`; it reconciles ownership-proven
+   canonical files and generated adapters.
 
 2. **Confirm the runtime dependency:**
 

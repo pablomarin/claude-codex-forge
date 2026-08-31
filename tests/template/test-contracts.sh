@@ -2568,6 +2568,31 @@ assert_contains "$UPGRADING" 'PRESERVED_COMPAT_BLOCKED' \
 assert_contains "$UPGRADING" 'scripts/recover-full-refresh.sh' \
     "upgrade guide explains explicit recovery"
 
+start_test "v6 upgrade docs lead with preview and one-active-Forge outcomes"
+for upgrade_doc in "$README" "$GETTING_STARTED" "$REPO_ROOT/docs/guides/setup-scenarios.md" "$UPGRADING"; do
+    assert_contains "$upgrade_doc" 'setup.sh -F --dry-run' \
+        "$(basename "$upgrade_doc") shows the Unix no-write preview"
+    assert_contains "$upgrade_doc" 'setup.ps1 -FullRefresh -DryRun' \
+        "$(basename "$upgrade_doc") shows the Windows no-write preview"
+done
+for report_doc in "$README" "$UPGRADING"; do
+    assert_contains "$report_doc" 'UPGRADE: READY' "$(basename "$report_doc") explains a ready preview"
+    assert_contains "$report_doc" 'UPGRADE: BLOCKED' "$(basename "$report_doc") explains a blocked preview"
+    assert_contains "$report_doc" 'ACTIVE_FORGE: v6' "$(basename "$report_doc") explains successful convergence"
+    assert_contains "$report_doc" '`-f`' "$(basename "$report_doc") distinguishes the v6 force refresh"
+    assert_contains "$report_doc" '`-F`' "$(basename "$report_doc") distinguishes authoritative migration"
+done
+assert_contains "$UPGRADING" 'current worktree' \
+    "upgrade guide scopes full refresh to the current worktree"
+assert_contains "$UPGRADING" 'sibling worktrees' \
+    "upgrade guide says sibling worktrees are not mutated"
+assert_contains "$UPGRADING" 'Do not manually synchronize `CLAUDE.md` and `AGENTS.md`' \
+    "upgrade guide preserves one shared policy source"
+assert_contains "$UPGRADING" 'independently developed harness' \
+    "upgrade guide explains the explicit custom-runtime choice"
+assert_contains "$UPGRADING" 'archive the non-selected state' \
+    "upgrade guide gives a state-reconciliation action"
+
 assert_contains "$GETTING_STARTED" '| Claude Code | `2.1.237`' \
     "compatibility table records the qualified Claude baseline"
 assert_contains "$GETTING_STARTED" '| Codex CLI | `0.144.1`' \
@@ -2677,8 +2702,8 @@ else
 fi
 STALE_SETUP=$(grep -nHE 'setup\.sh (-f|--upgrade)|setup\.ps1[^[:cntrl:]]*-(Force|Upgrade)' \
     "${ACTIVE_V6_DOCS[@]}" 2>/dev/null || true)
-if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh (-f|--upgrade)|setup\.ps1[^[:cntrl:]]*-(Force|Upgrade)'; then
-    STALE_SETUP="README live sections contain an obsolete incremental/force-upgrade instruction${STALE_SETUP:+$'\n'$STALE_SETUP}"
+if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh --upgrade|setup\.ps1[^[:cntrl:]]*-Upgrade'; then
+    STALE_SETUP="README live sections contain an obsolete upgrade instruction${STALE_SETUP:+$'\n'$STALE_SETUP}"
 fi
 if [ -z "$STALE_SETUP" ]; then
     pass "active v6 docs use authoritative full refresh rather than old force/upgrade commands"

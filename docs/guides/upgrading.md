@@ -1,21 +1,32 @@
 # Upgrading to Forge 6
 
-Forge 6 changes harness ownership. Upgrade an installed repository with an authoritative full
-refresh, not a sequence of force copies:
+Forge 6 changes harness ownership. Upgrade an installed repository with one previewed,
+authoritative full refresh—not a sequence of force copies:
 
 ```bash
 git -C ~/claude-codex-forge pull
 cd /path/to/project
+~/claude-codex-forge/setup.sh -F --dry-run
+# Resolve every named blocker. When the preview says UPGRADE: READY:
 ~/claude-codex-forge/setup.sh -F
 ```
 
 ```powershell
 git -C $HOME\claude-codex-forge pull
 Set-Location C:\path\to\project
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh # -R is the short alias
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
+# Resolve every named blocker. When the preview says UPGRADE: READY:
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh
 ```
 
-The command must run at the canonical repository root. Unix full refresh requires Python 3.
+The command must run at the canonical repository root. Unix full refresh requires Python 3. The
+preview uses the same planner and staging validation as execution but creates no guard, backup,
+report, stamp, or project/global file. Execution repeats discovery under the transaction guard, so
+a stale preview never authorizes changed bytes.
+
+`-f` / `-Force` refreshes an existing v6 install only. `-F` / `-FullRefresh` previews or executes a
+v5/mixed-to-v6 migration. If ordinary force detects legacy machinery, it points you back to the
+read-only preview instead of layering v6 beside v5.
 
 ## What the Transaction Does
 
@@ -28,6 +39,9 @@ trees.
 It creates one canonical `.forge/` harness and thin native adapters under `.claude/`, `.codex/`, and
 `.agents/`. Active v5 state is translated to `.forge/local/state.md`; legacy review, goal, and
 authorization evidence is invalidated because it cannot certify the new contract.
+
+Do not manually synchronize `CLAUDE.md` and `AGENTS.md`. Project-owned text stays outside their
+bounded Forge blocks, and both blocks load the same `.forge/instructions.md` policy.
 
 ## Protected Content
 
@@ -60,25 +74,65 @@ Every action is classified:
 diagnostics cover binary availability, capabilities, discovery, authenticated trust, goal
 collisions, and Codex hook registration.
 
+The final summary is the quick decision point:
+
+| Summary | Meaning | Next step |
+| ------- | ------- | --------- |
+| `UPGRADE: READY` + `ACTIVE_FORGE: unchanged` | Read-only preview found a safe plan. | Run the same full-refresh command without the dry-run flag. |
+| `UPGRADE: BLOCKED` | One or more ownership, root-policy, custom-harness, JSON, or state choices are unresolved. | Resolve every listed item; rerun preview. No migration was applied. |
+| `UPGRADE: READY` + `ACTIVE_FORGE: v6` | Transaction committed one canonical v6 harness and thin host adapters. | Review preserved content and separately qualify each host. |
+| `MATERIALIZED` + host `RUNTIME_READY: BLOCKED` | Filesystem migration succeeded, but that host is not yet safely runnable. | Follow the named host diagnostic; do not rerun filesystem migration blindly. |
+
+An enabled plugin can cause the last outcome without being a second filesystem harness. Forge
+preserves the plugin, completes a safe migration, and keeps only that host's runtime readiness
+blocked until the overlap is disabled, reconciled, or qualified.
+
+## Custom Harnesses and Competing State
+
+An independently developed harness such as `.agent-workflows/` is project-owned. Forge will not
+delete or silently merge it. A grouped `CUSTOM_HARNESS_COLLISION` report means the project owner
+must choose one of two paths:
+
+1. Keep the custom harness and stop the Forge migration; or
+2. Adopt Forge v6: commit or back up the current project, archive the custom runtime under a
+   non-discovered project location such as `docs/archive/legacy-agent-workflows/`, and remove only
+   its reviewed root/settings/hook registrations.
+
+`MULTIPLE_STATE_SOURCES` lists each plausible state path, hash, and modification time. Compare the
+states, choose the authoritative one, archive the non-selected state, and put the chosen content at
+the single source the report names before rerunning preview. Preserve custom skills, agents, hooks,
+and documentation that do not collide with required Forge surfaces.
+
+Root-policy findings are also manual by design. Replace only obsolete project-owned references such
+as `@CONTINUITY.md`, the retired Codex-only review command, or old `.claude/rules/` imports; do not replace the whole root
+file or copy shared Forge policy into both native files.
+
 ## Project and Global Scopes
 
 A project refresh never changes home-directory configuration. Refresh the global harness
-separately when setup reports it stale:
+separately when setup reports it stale, previewing first:
 
 ```bash
+~/claude-codex-forge/setup.sh --global -F --dry-run
 ~/claude-codex-forge/setup.sh --global -F
 ```
 
 ```powershell
-& $HOME\claude-codex-forge\setup.ps1 -Global -FullRefresh # or -Global -R
+& $HOME\claude-codex-forge\setup.ps1 -Global -FullRefresh -DryRun
+& $HOME\claude-codex-forge\setup.ps1 -Global -FullRefresh
 ```
 
 Do not combine full refresh with force, incremental upgrade, continuity migration, or Playwright
 scaffolding flags.
 
+Full refresh changes only the current worktree. It does not edit sibling worktrees or guess which
+sibling branch should receive the migration. Commit the successful harness migration, merge or
+rebase it normally, then refresh another worktree only when that branch contains the migration.
+
 ## Recover a Blocked Full Refresh
 
-Most failures roll back automatically and print `ROLLED_BACK`; fix the cause and rerun full refresh.
+Most failures roll back automatically and print `ROLLED_BACK`; fix the cause, rerun the read-only
+preview, and execute only after it is ready.
 If the report names a `recovery_required` journal, do not delete the journal or either preserved
 version. Resolve any concurrent edit, then run the exact journal path reported:
 

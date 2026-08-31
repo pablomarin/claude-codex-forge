@@ -107,16 +107,22 @@ Pull the Forge clone and run the breaking v6 refresh:
 ```bash
 git -C ~/claude-codex-forge pull
 cd /path/to/project
+~/claude-codex-forge/setup.sh -F --dry-run
+# Resolve every named blocker, then:
 ~/claude-codex-forge/setup.sh -F
 ```
 
 ```powershell
 git -C $HOME\claude-codex-forge pull
 Set-Location C:\path\to\project
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh # -R is equivalent
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
+# Resolve every named blocker, then:
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh
 ```
 
-See [Upgrading](guides/upgrading.md) before resolving any `BLOCKED` report.
+The preview writes nothing. `UPGRADE: READY` means the migration can run; `UPGRADE: BLOCKED` gives
+the complete reconciliation list. Execution is complete only when it reports `ACTIVE_FORGE: v6`.
+See [Upgrading](guides/upgrading.md) before resolving any blocked report.
 
 ## Next
 
