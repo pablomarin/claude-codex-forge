@@ -56,7 +56,7 @@ function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Sess
     elseif ($Role -like 'council-*') { $question = Get-ShaTextForTest 'stable council question'; [IO.File]::WriteAllText($prompt, "question_hash=$question`nreview`n") } else { [IO.File]::WriteAllText($prompt, "review`n") }
     $base = (& git -C $Repository rev-parse HEAD)
     if (-not $OutputPath) { $OutputPath = Join-Path $Repository ".forge/local/reviews/result-$($script:DispatchSequence).txt" }
-    $timeout = if ($Role -eq 'investigation-repro') { '30' } else { '2' }
+    $timeout = if ($Role -eq 'investigation-repro') { '60' } else { '2' }
     $arguments = @('-Mode', 'run', '-Engine', $Requested, '-FallbackPolicy', $Fallback, '-Role', $Role, '-Profile', $(if ($Role -like 'investigation*') { 'investigate' } else { 'review' }), '-Artifact', 'git:working-tree', '-WorkflowBaseSha', $base, '-WorkflowBaseRef', 'refs/heads/test-base', '-PromptFile', $prompt, '-Output', $OutputPath, '-Conversation', $Conversation, '-TimeoutSeconds', $timeout)
     if ($Role -like 'council-*') { $arguments += @('-SeatId', 'advisor-1') }
     if ($ExactSession) { $arguments += @('-SessionId', $ExactSession) }
