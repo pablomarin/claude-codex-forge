@@ -28,6 +28,7 @@ usage() {
     echo "  -t, --tech STACK    Tech stack: python, typescript, fullstack (default: fullstack)"
     echo "  -f, --force         Overwrite existing files (destructive)"
     echo "  -F, --full-refresh  Authoritative transactional v5 -> v6 harness refresh"
+    echo "      --dry-run       Preview full refresh without writing target files (requires -F)"
     echo "  -u, --upgrade       Smart upgrade: merge new hooks/permissions into existing settings"
     echo "      --migrate       Migrate legacy CONTINUITY.md content to the new structure"
     echo "  -g, --global        Set up global memory system (~/.claude/)"
@@ -41,6 +42,7 @@ usage() {
     echo "  $0 -t python                # Python-only project"
     echo "  $0 -f                       # Force overwrite existing files"
     echo "  $0 -F                       # Ownership-aware full harness refresh"
+    echo "  $0 -F --dry-run             # Read-only full refresh preview"
     echo "  $0 --upgrade                # Upgrade: add new hooks/rules, merge settings"
     echo "  $0 --migrate                # Migrate CONTINUITY.md to .claude/local/state.md + ADRs"
     echo "  $0 --global                 # Set up global memory (run once per machine)"
@@ -53,6 +55,7 @@ PROJECT_NAME=""
 TECH_STACK="fullstack"
 FORCE=false
 FULL_REFRESH=false
+DRY_RUN=false
 UPGRADE=false
 MIGRATE=false
 GLOBAL=false
@@ -78,6 +81,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -F|--full-refresh)
             FULL_REFRESH=true
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN=true
             shift
             ;;
         -u|--upgrade)
@@ -109,6 +116,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [ "$DRY_RUN" = true ] && [ "$FULL_REFRESH" != true ]; then
+    echo -e "${RED}ERROR: --dry-run requires --full-refresh.${NC}" >&2
+    exit 1
+fi
+
 if [ "$FULL_REFRESH" = true ] && { [ "$FORCE" = true ] || [ "$UPGRADE" = true ] || [ "$MIGRATE" = true ] || [ "$WITH_PLAYWRIGHT" = true ]; }; then
     echo -e "${RED}ERROR: --full-refresh cannot be combined with --force, --upgrade, --migrate, or --with-playwright.${NC}" >&2
     exit 1
@@ -130,9 +142,13 @@ if [ "$FULL_REFRESH" = true ]; then
     refresh_helper="$SCRIPT_DIR/scripts/full-refresh.sh"
     [ -f "$refresh_helper" ] || { echo "BLOCKED: full-refresh helper not found: $refresh_helper" >&2; exit 1; }
     if [ "$GLOBAL" = true ]; then
-        bash "$refresh_helper" --target "${HOME:?HOME is required for global full refresh}" --scope global
+        refresh_args=(--target "${HOME:?HOME is required for global full refresh}" --scope global)
     else
-        bash "$refresh_helper" --target "$(pwd -P)" --scope project
+        refresh_args=(--target "$(pwd -P)" --scope project)
+    fi
+    [ "$DRY_RUN" = true ] && refresh_args+=(--dry-run)
+    bash "$refresh_helper" "${refresh_args[@]}"
+    if [ "$GLOBAL" != true ]; then
         report_native_goal_collisions "$(pwd -P)"
     fi
     exit $?
@@ -211,15 +227,15 @@ v6_preflight_no_legacy() {
         esac
         if [ "$UPGRADE" = true ]; then
             if [ "$scope" = global ]; then
-                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Run: '$SCRIPT_DIR/setup.sh' --global -F" >&2
+                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: '$SCRIPT_DIR/setup.sh' --global -F --dry-run" >&2
             else
-                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Run: '$SCRIPT_DIR/setup.sh' -F" >&2
+                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: '$SCRIPT_DIR/setup.sh' -F --dry-run" >&2
             fi
         else
             if [ "$scope" = global ]; then
-                echo "BLOCKED: legacy Forge harness detected. Run the explicit authoritative refresh: '$SCRIPT_DIR/setup.sh' --global -F" >&2
+                echo "BLOCKED: legacy Forge harness detected. Preview first: '$SCRIPT_DIR/setup.sh' --global -F --dry-run" >&2
             else
-                echo "BLOCKED: legacy Forge harness detected. Run the explicit authoritative refresh: '$SCRIPT_DIR/setup.sh' -F" >&2
+                echo "BLOCKED: legacy Forge harness detected. Preview first: '$SCRIPT_DIR/setup.sh' -F --dry-run" >&2
             fi
         fi
         return 1

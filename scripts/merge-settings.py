@@ -16,6 +16,7 @@ Exit codes:
 
 import argparse
 import contextlib
+import dataclasses
 import hashlib
 import json
 import os
@@ -24,6 +25,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime
@@ -41,6 +43,46 @@ TERMINAL_JOURNAL_PHASES = {"committed", "rolled_back", "recovered"}
 
 class RefreshBlocked(RuntimeError):
     """A fail-closed migration disposition that must be shown to the operator."""
+
+
+@dataclasses.dataclass(frozen=True, order=True)
+class UpgradeFinding:
+    code: str
+    scope: str
+    path: str
+    detail: str
+    resolution: str
+
+
+def print_refresh_report(
+    report: dict[str, list[str]],
+    findings: tuple[UpgradeFinding, ...],
+    *,
+    upgrade: str,
+    active_forge: str,
+    next_step: str,
+) -> None:
+    for category, values in report.items():
+        entries = sorted(set(values))
+        if entries:
+            for entry in entries:
+                print(f"{category}: {entry}")
+        else:
+            print(f"{category}: (none)")
+    for finding in findings:
+        print(
+            f"BLOCKED: code={finding.code} scope={finding.scope} path={finding.path} "
+            f"detail={finding.detail} resolution={finding.resolution}"
+        )
+    print(f"UPGRADE: {upgrade}")
+    print(f"ACTIVE_FORGE: {active_forge}")
+    print(
+        "CHANGES: "
+        f"created={len(set(report['CREATED']))} rewritten={len(set(report['REWRITTEN']))} "
+        f"deleted={len(set(report['DELETED']))} preserved={len(set(report['PRESERVED']))}"
+    )
+    print(f"BLOCKERS: {len(findings)}")
+    print(f"NEXT_STEP: {next_step}")
 
 
 def sha256_path(path: Path) -> str:
@@ -955,6 +997,11 @@ def materialize_stage(repo_root: Path, stage: Path, scope: str, platform: str) -
         command.extend(["--repo-root", str(repo_root), "--target", str(stage), "--scope", scope, "--platform", platform])
     environment = os.environ.copy()
     environment["FORGE_TRANSACTION_STAGE"] = "1"
+    runtime_home = stage.parent / "runtime-home"
+    environment["HOME"] = str(runtime_home)
+    environment["USERPROFILE"] = str(runtime_home)
+    environment["CODEX_HOME"] = str(runtime_home / ".codex")
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
     completed = subprocess.run(command, text=True, capture_output=True, env=environment, check=False)
     if completed.returncode:
         raise RefreshBlocked(
@@ -1218,7 +1265,13 @@ def prune_empty_transaction_directories(root: Path) -> None:
             (root / relative).rmdir()
 
 
-def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> None:
+def full_refresh(
+    repo_root: Path,
+    target: Path,
+    scope: str,
+    platform: str,
+    dry_run: bool = False,
+) -> None:
     repo_root = repo_root.resolve(strict=True)
     if scope not in {"project", "global"} or platform not in {"unix", "windows"}:
         raise RefreshBlocked("invalid full-refresh scope or platform")
@@ -1248,8 +1301,14 @@ def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> No
 
     validate_no_incomplete_journal(target)
     txid = f"{int(time.time())}-{uuid.uuid4().hex}"
-    guard = acquire_guard(target, txid)
-    work_root = target / ".forge/local/migration-staging" / txid
+    temporary: Optional[tempfile.TemporaryDirectory] = None
+    guard: Optional[Path] = None
+    if dry_run:
+        temporary = tempfile.TemporaryDirectory(prefix="forge-full-refresh-preview-")
+        work_root = Path(temporary.name)
+    else:
+        guard = acquire_guard(target, txid)
+        work_root = target / ".forge/local/migration-staging" / txid
     stage = work_root / "stage"
     quarantine = work_root / "quarantine"
     journal_path = target / ".forge/local/migration-journals" / f"{txid}.json"
@@ -1308,9 +1367,27 @@ def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> No
         # collision-free backups under .forge/local/migration-backups/<txid>.
         for backup in stage.rglob("*.bak.*"):
             backup.unlink()
-        backup_root = stage / ".forge/local/migration-backups" / txid
         initial_operations = operation_files(stage, target, quarantine)
         deletes = deletion_operations(target, quarantine, legacy_deletions, report)
+        for operation in initial_operations:
+            if operation["original_hash"]:
+                report["REWRITTEN"].append(operation["relative"])
+            else:
+                report["CREATED"].append(operation["relative"])
+        if dry_run:
+            print(materializer_output)
+            if report["PRESERVED_COMPAT_BLOCKED"]:
+                print("claude RUNTIME_READY: BLOCKED preserved compatibility plugin requires qualification")
+            print_refresh_report(
+                report,
+                (),
+                upgrade="READY",
+                active_forge="unchanged",
+                next_step="run full refresh without --dry-run",
+            )
+            return
+
+        backup_root = stage / ".forge/local/migration-backups" / txid
         for operation in initial_operations + deletes:
             if not operation["original_hash"]:
                 continue
@@ -1319,11 +1396,6 @@ def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> No
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
 
-        for operation in initial_operations:
-            if operation["original_hash"]:
-                report["REWRITTEN"].append(operation["relative"])
-            else:
-                report["CREATED"].append(operation["relative"])
         report_path = stage / ".forge/local/migration-reports" / f"{txid}.tsv"
         report_path.parent.mkdir(parents=True, exist_ok=True)
         with report_path.open("w", encoding="utf-8", newline="\n") as handle:
@@ -1365,24 +1437,29 @@ def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> No
         journal["phase"] = "committed"
         durable_json(journal_path, journal)
         print(materializer_output)
-        for category, entries in report.items():
-            if entries:
-                for entry in entries:
-                    print(f"{category}: {entry}")
-            else:
-                print(f"{category}: (none)")
         if report["PRESERVED_COMPAT_BLOCKED"]:
             print("claude RUNTIME_READY: BLOCKED preserved compatibility plugin requires qualification")
         print("INSTALLATION: MATERIALIZED")
+        print_refresh_report(
+            report,
+            (),
+            upgrade="READY",
+            active_forge="v6",
+            next_step="review per-host RUNTIME_READY diagnostics",
+        )
     except RefreshBlocked as error:
         report["BLOCKED"].append(str(error))
         print(f"BLOCKED: {error}", file=sys.stderr)
         raise
     finally:
-        if journal.get("phase") != "recovery_required":
-            shutil.rmtree(work_root, ignore_errors=True)
-        shutil.rmtree(guard, ignore_errors=True)
-        prune_empty_transaction_directories(target)
+        if temporary is not None:
+            temporary.cleanup()
+        else:
+            if journal.get("phase") != "recovery_required":
+                shutil.rmtree(work_root, ignore_errors=True)
+            if guard is not None:
+                shutil.rmtree(guard, ignore_errors=True)
+            prune_empty_transaction_directories(target)
 
 
 def full_refresh_cli(argv: list[str]) -> int:
@@ -1391,9 +1468,10 @@ def full_refresh_cli(argv: list[str]) -> int:
     parser.add_argument("--target", required=True, type=Path)
     parser.add_argument("--scope", required=True, choices=("project", "global"))
     parser.add_argument("--platform", required=True, choices=("unix", "windows"))
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     try:
-        full_refresh(args.repo_root, args.target, args.scope, args.platform)
+        full_refresh(args.repo_root, args.target, args.scope, args.platform, args.dry_run)
     except (RefreshBlocked, OSError, ValueError, json.JSONDecodeError) as error:
         print(f"BLOCKED: {error}", file=sys.stderr)
         return 1

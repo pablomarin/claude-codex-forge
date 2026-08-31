@@ -9,9 +9,11 @@ init_counters
 
 run_refresh() {
     local target="$1" log="$2"
+    local physical_target
     shift 2
     mkdir -p "$target/.fakehome"
-    (cd "$target" && HOME="$target/.fakehome" "$REPO_ROOT/setup.sh" "$@") >"$log" 2>&1
+    physical_target=$(cd "$target" && pwd -P)
+    (cd "$physical_target" && HOME="$physical_target/.fakehome" "$REPO_ROOT/setup.sh" "$@") >"$log" 2>&1
 }
 
 make_git_repo() {
@@ -27,6 +29,18 @@ write_active_v5_state() {
         | sed '1{/forge:state-schema v6/d;}' > "$target/.claude/local/state.md"
 }
 
+snapshot_project() {
+    local root="$1"
+    (
+        cd "$root" || exit 1
+        find . -path './.git' -prune -o -type f -print \
+            | LC_ALL=C sort \
+            | while IFS= read -r file; do
+                printf '%s\t%s\n' "$file" "$(hash_file "$file")"
+            done
+    )
+}
+
 start_test "full-refresh flags are explicit and force/full-refresh are incompatible"
 S1=$(scratch_dir full-refresh-flags)
 make_git_repo "$S1"
@@ -35,6 +49,45 @@ assert_contains "$S1/help" "-F, --full-refresh" "Bash help documents authoritati
 run_refresh "$S1" "$S1/conflict" -f -F
 assert_equals "$?" "1" "Bash rejects combining force and full refresh"
 assert_contains "$S1/conflict" "cannot be combined" "flag conflict is explained"
+
+start_test "full-refresh preview uses the real planner without target writes"
+S1P=$(scratch_dir full-refresh-preview)
+make_git_repo "$S1P"
+mkdir -p "$S1P/.claude/hooks" "$S1P/.fakehome"
+printf '5.61\n' > "$S1P/.claude/.forge-version"
+git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/session-start.sh \
+    > "$S1P/.claude/hooks/session-start.sh"
+write_active_v5_state "$S1P" "DRY_RUN_STATE"
+preview_log="${S1P}.preview.log"
+before=$(snapshot_project "$S1P")
+run_refresh "$S1P" "$preview_log" -F --dry-run
+assert_equals "$?" "0" "exact v5 preview is ready"
+after=$(snapshot_project "$S1P")
+assert_equals "$after" "$before" "preview leaves every target file byte-identical"
+assert_file_missing "$S1P/.forge/version" "preview writes no v6 stamp"
+assert_file_missing "$S1P/.forge/local/migration-guard" "preview writes no transaction guard"
+assert_contains "$preview_log" "UPGRADE: READY" "preview has a final readiness summary"
+assert_contains "$preview_log" "ACTIVE_FORGE: unchanged" "preview does not claim mutation"
+
+S1G=$(scratch_dir full-refresh-preview-global)
+make_git_repo "$S1G"
+mkdir -p "$S1G/.fakehome/.claude"
+printf '5.61\n' > "$S1G/.fakehome/.claude/.forge-version"
+global_log="${S1G}.preview.log"
+before_global=$(snapshot_project "$S1G/.fakehome")
+run_refresh "$S1G" "$global_log" -g -F --dry-run
+assert_equals "$?" "0" "global exact v5 preview is ready"
+after_global=$(snapshot_project "$S1G/.fakehome")
+assert_equals "$after_global" "$before_global" "global preview leaves HOME byte-identical"
+assert_file_missing "$S1G/.fakehome/.forge/version" "global preview writes no v6 stamp"
+
+run_refresh "$S1P" "${S1P}.dry-run-only.log" --dry-run
+assert_equals "$?" "1" "dry-run without full refresh is rejected"
+run_refresh "$S1P" "${S1P}.dry-run-conflict.log" -f -F --dry-run
+assert_equals "$?" "1" "force and full-refresh preview remain incompatible"
+run_refresh "$S1P" "${S1P}.force-v5.log" -f
+assert_equals "$?" "1" "ordinary force refuses a stamped v5 harness"
+assert_contains "${S1P}.force-v5.log" "-F --dry-run" "v5 force refusal points to read-only preview first"
 
 start_test "state-path helper prefers validated v6 and falls back only for unmigrated v5"
 S2=$(scratch_dir state-path)

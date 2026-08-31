@@ -60,6 +60,20 @@ function Write-AdversarialV5State {
     Write-Text $path $state
 }
 
+function Get-ProjectSnapshot {
+    param([string]$Project)
+    $prefix = $Project.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    return @(
+        Get-ChildItem -LiteralPath $Project -Force -File -Recurse |
+            Where-Object { -not $_.FullName.StartsWith((Join-Path $Project ".git") + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) } |
+            Sort-Object FullName |
+            ForEach-Object {
+                $relative = $_.FullName.Substring($prefix.Length)
+                "$relative`t$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)"
+            }
+    ) -join "`n"
+}
+
 function Export-GitBlob {
     param([string]$RevisionPath, [string]$Destination)
     $parent = Split-Path -Parent $Destination
@@ -120,6 +134,18 @@ function Invoke-IsolatedPowerShell {
 }
 
 try {
+    $previewProject = New-Project "preview"
+    Write-Text (Join-Path $previewProject ".claude\.forge-version") "5.61`n"
+    Write-V5State $previewProject "WINDOWS_DRY_RUN_STATE"
+    $previewBefore = Get-ProjectSnapshot $previewProject
+    $preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $previewProject `
+        -Environment @{ HOME = (Join-Path $scratch "preview-home"); USERPROFILE = (Join-Path $scratch "preview-home") }
+    Assert-True ($preview.Code -eq 0 -and $preview.Output.Contains("UPGRADE: READY")) "setup.ps1 -FullRefresh -DryRun uses the real planner"
+    Assert-True ((Get-ProjectSnapshot $previewProject) -ceq $previewBefore) "PowerShell preview leaves every target file byte-identical"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $previewProject ".forge\version"))) "PowerShell preview writes no v6 stamp"
+    $dryRunOnly = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-DryRun") -WorkingDirectory $previewProject
+    Assert-True ($dryRunOnly.Code -ne 0) "PowerShell rejects -DryRun without -FullRefresh"
+
     $project = New-Project "project"
     Write-AdversarialV5State $project
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
