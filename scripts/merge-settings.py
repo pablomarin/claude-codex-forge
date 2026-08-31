@@ -34,6 +34,9 @@ from typing import Optional
 
 
 STATE_SCHEMA = b"<!-- forge:state-schema v6 -->\n"
+RECONCILIATION_SENTINEL = re.compile(
+    rb"\A<!-- forge:(?:migrated|reconciled) \d{4}-\d{2}-\d{2} -->\r?\n(?:\r?\n)?"
+)
 CONTINUITY_RECEIPT_SCHEMA = "forge-continuity-state-translation-v1"
 CONTINUITY_RECEIPT_RELATIVE = Path(
     ".forge/local/migration-evidence/continuity-state-v5-v6.json"
@@ -173,7 +176,9 @@ def read_tsv(path: Path, expected_fields: int) -> list[list[str]]:
     return rows
 
 
-def released_ownership(repo_root: Path) -> tuple[dict[str, tuple[str, str]], list[list[str]]]:
+def released_ownership(
+    repo_root: Path,
+) -> tuple[dict[str, tuple[str, str]], list[list[str]], list[list[str]]]:
     releases = {
         version: (fingerprint_set, region_set)
         for version, _commit, _mode, fingerprint_set, region_set in read_tsv(
@@ -181,7 +186,8 @@ def released_ownership(repo_root: Path) -> tuple[dict[str, tuple[str, str]], lis
         )
     }
     fingerprints = read_tsv(repo_root / "manifests/legacy-v5-fingerprints.tsv", 5)
-    return releases, fingerprints
+    aliases = read_tsv(repo_root / "manifests/legacy-v5-aliases.tsv", 5)
+    return releases, fingerprints, aliases
 
 
 def transaction_destination_allowed(
@@ -244,7 +250,7 @@ def fingerprint_hashes(
 def inventory_legacy(
     repo_root: Path, target: Path, scope: str, platform: str
 ) -> LegacyInventory:
-    releases, fingerprints = released_ownership(repo_root)
+    releases, fingerprints, aliases = released_ownership(repo_root)
     findings: list[UpgradeFinding] = []
     proven_legacy: set[str] = set()
     current_v6 = False
@@ -317,6 +323,31 @@ def inventory_legacy(
                 )
             )
 
+    if not current_v6:
+        for selectors, _source, destination, row_scope, expected in aliases:
+            if row_scope != scope:
+                continue
+            path = target / relative_path(destination)
+            if not path.exists() and not path.is_symlink():
+                continue
+            reject_link_ancestors(target, relative_path(destination))
+            if not path.is_file():
+                raise RefreshBlocked(f"legacy alias destination is not a regular file: {destination}")
+            selected = bool(selector and selector in selectors.split(","))
+            digest = sha256_path(path)
+            if selected and digest == expected:
+                proven_legacy.add(destination)
+            else:
+                findings.append(
+                    UpgradeFinding(
+                        "LEGACY_ALIAS_AMBIGUOUS",
+                        scope,
+                        destination,
+                        "cross-host alias is modified or is not proven for the stamped release",
+                        "archive the project-owned file or restore the exact released alias bytes",
+                    )
+                )
+
     json_paths = (
         [".claude/settings.json", ".mcp.json", ".codex/hooks.json"]
         if scope == "project"
@@ -341,6 +372,11 @@ def inventory_legacy(
                     "repair the JSON syntax without changing ownership, then rerun preview",
                 )
             )
+
+    findings.extend(root_instruction_findings(repo_root, target, scope, region_selector))
+    if scope == "project":
+        findings.extend(active_harness_findings(target))
+        findings.extend(state_source_findings(target))
 
     return LegacyInventory(
         selector=selector,
@@ -478,6 +514,182 @@ def recognize_mixed_regions(
             f"ambiguous legacy {scope} instructions: {reason} manifest segmentation"
         )
     return successful[0][2]
+
+
+def strip_reconciliation_sentinel(raw: bytes) -> tuple[bytes, bytes]:
+    match = RECONCILIATION_SENTINEL.match(raw)
+    if match is None:
+        return b"", raw
+    return raw[: match.end()], raw[match.end() :]
+
+
+def retired_reference_detail(raw: bytes) -> str:
+    tokens = (
+        "@CONTINUITY.md",
+        "/codex",
+        ".claude/commands/",
+        ".claude/rules/",
+        ".claude/hooks/",
+    )
+    matches: list[str] = []
+    for number, line in enumerate(raw.decode("utf-8", errors="replace").splitlines(), 1):
+        present = sorted(token for token in tokens if token in line)
+        if present:
+            matches.append(f"line {number} ({', '.join(present)})")
+    return "; ".join(matches)
+
+
+def without_v6_marker_block(raw: bytes) -> bytes:
+    return re.sub(
+        rb"(?s)<!-- forge:begin v6 -->.*?<!-- forge:end v6 -->",
+        b"",
+        raw,
+    )
+
+
+def root_instruction_findings(
+    repo_root: Path, target: Path, scope: str, region_selector: str
+) -> tuple[UpgradeFinding, ...]:
+    relatives = (
+        ("CLAUDE.md", "AGENTS.md")
+        if scope == "project"
+        else (".claude/CLAUDE.md", ".codex/AGENTS.md")
+    )
+    findings: list[UpgradeFinding] = []
+    for relative in relatives:
+        path = target / relative
+        if not path.exists() and not path.is_symlink():
+            continue
+        reject_link_ancestors(target, relative_path(relative))
+        if not path.is_file():
+            raise RefreshBlocked(f"root instructions are not a regular file: {relative}")
+        raw = path.read_bytes()
+        active = raw
+        legacy_destination = "CLAUDE.md" if scope == "project" else ".claude/CLAUDE.md"
+        if relative == legacy_destination:
+            _sentinel, legacy_body = strip_reconciliation_sentinel(raw)
+            looks_legacy = (
+                legacy_body.startswith(b"# CLAUDE.md - ")
+                if scope == "project"
+                else legacy_body.startswith(b"# Global Claude Code Instructions")
+            )
+            if looks_legacy:
+                try:
+                    active = recognize_mixed_regions(
+                        repo_root, legacy_body, scope, relative, region_selector
+                    )
+                except RefreshBlocked as error:
+                    findings.append(
+                        UpgradeFinding(
+                            "ROOT_POLICY_AMBIGUOUS",
+                            scope,
+                            relative,
+                            str(error),
+                            "reconcile the project-owned root text, then rerun full refresh preview",
+                        )
+                    )
+                    continue
+        detail = retired_reference_detail(without_v6_marker_block(active))
+        if detail:
+            findings.append(
+                UpgradeFinding(
+                    "ROOT_POLICY_AMBIGUOUS",
+                    scope,
+                    relative,
+                    f"retired active Forge references: {detail}",
+                    "replace only the obsolete project-owned references with neutral project context",
+                )
+            )
+    return tuple(findings)
+
+
+def active_harness_findings(target: Path) -> tuple[UpgradeFinding, ...]:
+    harness_relative = Path(".agent-workflows")
+    harness = target / harness_relative
+    if not harness.exists() and not harness.is_symlink():
+        return ()
+    reject_link_ancestors(target, harness_relative)
+    if not harness.is_dir():
+        raise RefreshBlocked("independent harness root is not a regular directory: .agent-workflows")
+    authority_files: list[str] = []
+    for candidate in sorted(harness.rglob("*")):
+        if candidate.is_symlink():
+            raise RefreshBlocked(f"independent harness contains a symlink/reparse point: {candidate}")
+        if candidate.is_file() and (
+            "runtime" in candidate.relative_to(harness).parts
+            or "policy" in candidate.name.lower()
+        ):
+            authority_files.append(candidate.relative_to(target).as_posix())
+    references: list[str] = []
+    for relative in (
+        "CLAUDE.md",
+        "AGENTS.md",
+        ".claude/settings.json",
+        ".codex/hooks.json",
+        ".codex/config.toml",
+    ):
+        source = target / relative
+        if not source.is_file() or source.is_symlink():
+            continue
+        if ".agent-workflows" in source.read_text(encoding="utf-8", errors="replace"):
+            references.append(relative)
+    if not authority_files or not references:
+        return ()
+    signals = ", ".join(sorted(authority_files + references))
+    return (
+        UpgradeFinding(
+            "CUSTOM_HARNESS_COLLISION",
+            "project",
+            ".agent-workflows",
+            f"independent active harness authority: {signals}",
+            "archive or retire the custom harness, remove its active registrations, then rerun -F --dry-run",
+        ),
+    )
+
+
+def state_source_findings(target: Path) -> tuple[UpgradeFinding, ...]:
+    plausible: list[tuple[str, Path]] = []
+    receipt_problem = ""
+    for relative in (
+        ".claude/local/state.md",
+        ".forge/local/state.md",
+        ".agent-workflows/local/state.md",
+    ):
+        path = target / relative
+        if not path.exists() and not path.is_symlink():
+            continue
+        reject_link_ancestors(target, relative_path(relative))
+        if not path.is_file():
+            raise RefreshBlocked(f"state source is not a regular file: {relative}")
+        raw = path.read_bytes()
+        if raw.startswith(STATE_SCHEMA) or raw.startswith(b"# Project State"):
+            plausible.append((relative, path))
+    if len(plausible) < 2:
+        return ()
+    by_relative = {relative: path for relative, path in plausible}
+    if set(by_relative) == {".claude/local/state.md", ".forge/local/state.md"}:
+        try:
+            validate_continuity_receipt(
+                target,
+                by_relative[".claude/local/state.md"],
+                by_relative[".forge/local/state.md"],
+            )
+            return ()
+        except RefreshBlocked as error:
+            receipt_problem = f"; continuity translation receipt invalid: {error}"
+    sources = ", ".join(
+        f"{relative} sha256={sha256_path(path)} mtime_ns={path.stat().st_mtime_ns}"
+        for relative, path in plausible
+    )
+    return (
+        UpgradeFinding(
+            "MULTIPLE_STATE_SOURCES",
+            "project",
+            ".forge/local/state.md",
+            f"state conflict: multiple plausible state sources: {sources}{receipt_problem}",
+            "choose one authoritative state, archive the others, then rerun -F --dry-run",
+        ),
+    )
 
 
 def strip_legacy_evidence(raw: bytes) -> bytes:
@@ -887,22 +1099,23 @@ def prepare_legacy(
             raise RefreshBlocked("legacy root instructions are not a regular file")
     if root_instruction.is_file():
         raw = root_instruction.read_bytes()
+        sentinel_prefix, legacy_body = strip_reconciliation_sentinel(raw)
         looks_legacy = (
-            raw.startswith(b"# CLAUDE.md - ")
+            legacy_body.startswith(b"# CLAUDE.md - ")
             if scope == "project"
-            else raw.startswith(b"# Global Claude Code Instructions")
+            else legacy_body.startswith(b"# Global Claude Code Instructions")
         )
         if looks_legacy:
             preserved = recognize_mixed_regions(
                 repo_root,
-                raw,
+                legacy_body,
                 scope,
                 root_instruction.relative_to(target).as_posix(),
                 region_selector,
             )
             staged_root = stage / root_instruction.relative_to(target)
             staged_root.parent.mkdir(parents=True, exist_ok=True)
-            staged_root.write_bytes(preserved)
+            staged_root.write_bytes(sentinel_prefix + preserved)
             report["PRESERVED"].append(f"{root_instruction.relative_to(target)} user regions (byte-exact)")
             recognized = True
         else:

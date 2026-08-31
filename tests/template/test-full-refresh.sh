@@ -238,6 +238,104 @@ assert_file_missing "$S5M/.forge/local/migration-journals" "blocked inventory wr
 assert_file_missing "$S5M/.forge/local/migration-backups" "blocked inventory writes no backup"
 assert_file_missing "$S5M/.forge/local/migration-reports" "blocked inventory writes no report"
 
+start_test "sentinel roots reconcile managed prose while preserving project bytes"
+S5R=$(scratch_dir full-refresh-sentinel-root)
+make_git_repo "$S5R"
+mkdir -p "$S5R/.claude"
+printf '5.60\n' > "$S5R/.claude/.forge-version"
+{
+    printf '<!-- forge:migrated 2026-04-28 -->\n\n'
+    git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:CLAUDE.template.md \
+        | sed \
+            -e 's/\[PROJECT DESCRIPTION - 2-3 sentences explaining what this project does\]/PROJECT_SENTINEL_BYTES/' \
+            -e 's#\.claude/rules/testing\.md#.forge/rules/testing.md#' \
+            -e 's#/codex <instruction>    #/opinion <instruction>  #'
+} > "$S5R/CLAUDE.md"
+write_active_v5_state "$S5R" "SENTINEL_ROOT_STATE"
+run_refresh "$S5R" "$S5R/refresh.log" -F
+assert_equals "$?" "0" "sentinel-prefixed released root migrates"
+assert_contains "$S5R/CLAUDE.md" "<!-- forge:migrated 2026-04-28 -->" "leading reconciliation sentinel is preserved"
+assert_contains "$S5R/CLAUDE.md" "PROJECT_SENTINEL_BYTES" "project-owned root region survives"
+assert_equals "$(grep -c '<!-- forge:begin v6 -->' "$S5R/CLAUDE.md")" "1" "root contains one v6 adapter block"
+assert_not_contains "$S5R/CLAUDE.md" "/codex" "retired v5 command prose is removed"
+assert_not_contains "$S5R/CLAUDE.md" ".claude/rules/" "retired v5 policy prose is removed"
+
+S5A=$(scratch_dir full-refresh-ambiguous-agents)
+make_git_repo "$S5A"
+mkdir -p "$S5A/.claude"
+printf '5.60\n' > "$S5A/.claude/.forge-version"
+printf '# Project instructions\n\n@CONTINUITY.md\nUse /codex and .claude/rules/ for policy.\n' > "$S5A/AGENTS.md"
+write_active_v5_state "$S5A" "AMBIGUOUS_AGENTS_STATE"
+agents_hash=$(hash_file "$S5A/AGENTS.md")
+agents_log="${S5A}.preview.log"
+run_refresh "$S5A" "$agents_log" -F --dry-run
+assert_equals "$?" "1" "project-owned AGENTS with retired active policy blocks"
+assert_equals "$(grep -c 'code=ROOT_POLICY_AMBIGUOUS' "$agents_log")" "1" "obsolete root references are grouped once"
+assert_hash_equals "$S5A/AGENTS.md" "$agents_hash" "ambiguous AGENTS remains byte-identical"
+assert_file_missing "$S5A/.forge/version" "ambiguous root cannot stamp v6"
+
+S5AC=$(scratch_dir full-refresh-clean-agents)
+make_git_repo "$S5AC"
+mkdir -p "$S5AC/.claude"
+printf '5.60\n' > "$S5AC/.claude/.forge-version"
+printf '# Team context\n\nCLEAN_PROJECT_AGENTS_BYTES\n' > "$S5AC/AGENTS.md"
+write_active_v5_state "$S5AC" "CLEAN_AGENTS_STATE"
+run_refresh "$S5AC" "$S5AC/refresh.log" -F
+assert_equals "$?" "0" "clean project-owned AGENTS migrates"
+assert_contains "$S5AC/AGENTS.md" "CLEAN_PROJECT_AGENTS_BYTES" "clean AGENTS project context is preserved"
+assert_equals "$(grep -c '<!-- forge:begin v6 -->' "$S5AC/AGENTS.md")" "1" "clean AGENTS receives one bounded v6 adapter"
+
+start_test "version-bound cross-host aliases reconcile without touching custom agents"
+S5L=$(scratch_dir full-refresh-alias)
+make_git_repo "$S5L"
+mkdir -p "$S5L/.claude" "$S5L/.agents/skills/ui-design" "$S5L/.claude/agents"
+printf '5.60\n' > "$S5L/.claude/.forge-version"
+git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/ui-design/SKILL.template.md \
+    > "$S5L/.agents/skills/ui-design/SKILL.md"
+printf 'CUSTOM_PROJECT_AGENT_BYTES\n' > "$S5L/.claude/agents/project-quality.md"
+custom_agent_hash=$(hash_file "$S5L/.claude/agents/project-quality.md")
+write_active_v5_state "$S5L" "ALIAS_STATE"
+run_refresh "$S5L" "$S5L/refresh.log" -F
+assert_equals "$?" "0" "exact version-bound legacy alias migrates"
+assert_contains "$S5L/.agents/skills/ui-design/SKILL.md" "forge-generated: true" "exact alias becomes the v6 Codex adapter"
+assert_hash_equals "$S5L/.claude/agents/project-quality.md" "$custom_agent_hash" "custom Claude agent remains byte-identical"
+
+S5LM=$(scratch_dir full-refresh-alias-modified)
+make_git_repo "$S5LM"
+mkdir -p "$S5LM/.claude" "$S5LM/.agents/skills/ui-design"
+printf '5.60\n' > "$S5LM/.claude/.forge-version"
+git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/ui-design/SKILL.template.md \
+    > "$S5LM/.agents/skills/ui-design/SKILL.md"
+printf '\nPROJECT_ALIAS_CHANGE\n' >> "$S5LM/.agents/skills/ui-design/SKILL.md"
+modified_alias_hash=$(hash_file "$S5LM/.agents/skills/ui-design/SKILL.md")
+write_active_v5_state "$S5LM" "MODIFIED_ALIAS_STATE"
+run_refresh "$S5LM" "${S5LM}.preview.log" -F --dry-run
+assert_equals "$?" "1" "modified cross-host alias blocks"
+assert_contains "${S5LM}.preview.log" ".agents/skills/ui-design/SKILL.md" "modified alias is actionable"
+assert_hash_equals "$S5LM/.agents/skills/ui-design/SKILL.md" "$modified_alias_hash" "modified alias remains untouched"
+
+start_test "independent harness and multiple state sources are grouped before mutation"
+S5H=$(scratch_dir full-refresh-independent-harness)
+make_git_repo "$S5H"
+mkdir -p "$S5H/.claude" "$S5H/.agent-workflows/runtime" "$S5H/.agent-workflows/local"
+printf '5.61\n' > "$S5H/.claude/.forge-version"
+printf 'console.log("CUSTOM_RUNTIME_BYTES")\n' > "$S5H/.agent-workflows/runtime/workflow-runtime.mjs"
+printf '# Project agent policy\n\nRun .agent-workflows/runtime/workflow-runtime.mjs for hooks.\n' > "$S5H/AGENTS.md"
+write_active_v5_state "$S5H" "CLAUDE_STATE_BYTES"
+sed '1{/forge:state-schema v6/d;}; s/(what you.re actively working on)/CUSTOM_STATE_BYTES/' "$REPO_ROOT/state.template.md" \
+    > "$S5H/.agent-workflows/local/state.md"
+harness_before=$(snapshot_project "$S5H")
+harness_log="${S5H}.preview.log"
+run_refresh "$S5H" "$harness_log" -F --dry-run
+assert_equals "$?" "1" "independent harness with multiple states blocks preview"
+assert_equals "$(grep -c 'code=CUSTOM_HARNESS_COLLISION' "$harness_log")" "1" "independent harness is grouped once"
+assert_equals "$(grep -c 'code=MULTIPLE_STATE_SOURCES' "$harness_log")" "1" "multiple state sources are grouped once"
+assert_contains "$harness_log" ".claude/local/state.md" "legacy state path is reported"
+assert_contains "$harness_log" ".agent-workflows/local/state.md" "custom state path is reported"
+assert_contains "$harness_log" "$(hash_file "$S5H/.claude/local/state.md")" "legacy state hash is reported"
+assert_contains "$harness_log" "$(hash_file "$S5H/.agent-workflows/local/state.md")" "custom state hash is reported"
+assert_equals "$(snapshot_project "$S5H")" "$harness_before" "grouped preview leaves the project byte-identical"
+
 start_test "symlink destination and injected commit failure cannot produce a partial stamp"
 S6=$(scratch_dir full-refresh-symlink)
 make_git_repo "$S6"
@@ -501,6 +599,8 @@ git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:CLAUDE.templat
     > "$S17/CLAUDE.md"
 sed -i.bak 's/# CLAUDE.md - \[Project Name\]/# CLAUDE.md - Spaces, punctuation!/' "$S17/CLAUDE.md"
 sed -i.bak 's/\[One sentence describing what this project does and who benefits\.\]/CUSTOM_USER_REGION_!@#$%^\&*()/' "$S17/CLAUDE.md"
+sed -i.bak -e 's#\.claude/rules/testing\.md#.forge/rules/testing.md#' \
+    -e 's#/codex <instruction>    #/opinion <instruction>  #' "$S17/CLAUDE.md"
 rm -f "$S17/CLAUDE.md.bak"
 run_refresh "$S17" "$S17/refresh.log" -F
 assert_equals "$?" "0" "exact managed regions with customized user bytes migrate"
@@ -513,6 +613,7 @@ git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.
     > "$S17G/home/.claude/CLAUDE.md"
 sed -i.bak 's/<!-- Add your personal preferences below\. Examples: -->/GLOBAL_CUSTOM_REGION_!@#$%^\&*()/' \
     "$S17G/home/.claude/CLAUDE.md"
+sed -i.bak 's#~/.claude/rules/#~/.forge/rules/#g' "$S17G/home/.claude/CLAUDE.md"
 rm -f "$S17G/home/.claude/CLAUDE.md.bak"
 S17G_HOME=$(cd "$S17G/home" && pwd -P)
 (cd "$S17G/invoker" && HOME="$S17G_HOME" "$REPO_ROOT/setup.sh" --global -F) \
@@ -670,7 +771,7 @@ make_git_repo "$S20"
 git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:CLAUDE.template.md \
     > "$S20/CLAUDE.md"
 python3 -c 'import sys
-p=sys.argv[1]; b=open(p,"rb").read(); b=b.replace(b"# CLAUDE.md - [Project Name]",b"# CLAUDE.md - Anchor-like user text"); b=b.replace(b"[One sentence describing what this project does and who benefits.]",b"Developer text mentions ### Research Enforcement inline and must survive."); open(p,"wb").write(b)' "$S20/CLAUDE.md"
+p=sys.argv[1]; b=open(p,"rb").read(); b=b.replace(b"# CLAUDE.md - [Project Name]",b"# CLAUDE.md - Anchor-like user text"); b=b.replace(b"[One sentence describing what this project does and who benefits.]",b"Developer text mentions ### Research Enforcement inline and must survive."); b=b.replace(b".claude/rules/testing.md",b".forge/rules/testing.md").replace(b"/codex <instruction>    #",b"/opinion <instruction>  #"); open(p,"wb").write(b)' "$S20/CLAUDE.md"
 run_refresh "$S20" "$S20/refresh.log" -F
 assert_equals "$?" "0" "inline boundary-looking user text does not select a false region"
 assert_contains "$S20/CLAUDE.md" 'Developer text mentions ### Research Enforcement inline' \
@@ -693,7 +794,7 @@ mkdir -p "$S20G/home/.claude" "$S20G/invoker"
 git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.template.md \
     > "$S20G/home/.claude/CLAUDE.md"
 python3 -c 'import sys
-p=sys.argv[1]; b=open(p,"rb").read(); b=b.replace(b"<!-- Add your personal preferences below. Examples: -->",b"Developer text mentions ## Cross-Project Conventions inline."); open(p,"wb").write(b)' "$S20G/home/.claude/CLAUDE.md"
+p=sys.argv[1]; b=open(p,"rb").read(); b=b.replace(b"<!-- Add your personal preferences below. Examples: -->",b"Developer text mentions ## Cross-Project Conventions inline."); b=b.replace(b"~/.claude/rules/",b"~/.forge/rules/"); open(p,"wb").write(b)' "$S20G/home/.claude/CLAUDE.md"
 S20G_HOME=$(cd "$S20G/home" && pwd -P)
 (cd "$S20G/invoker" && HOME="$S20G_HOME" "$REPO_ROOT/setup.sh" --global -F) \
     > "$S20G/refresh.log" 2>&1

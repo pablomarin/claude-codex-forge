@@ -165,6 +165,56 @@ try {
     Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\session-start.ps1")).Hash -eq $sessionHash -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\check-bash-safety.ps1")).Hash -eq $safetyHash -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\settings.json")).Hash -eq $settingsHash) "PowerShell blocked inventory preserves all source bytes"
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $multiBlocker ".forge\version"))) "PowerShell blocked inventory writes no v6 stamp"
 
+    $sentinelRoot = New-Project "sentinel-root"
+    Write-Text (Join-Path $sentinelRoot ".claude\.forge-version") "5.60`n"
+    $releasedRoot = Join-Path $scratch "released-CLAUDE.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:CLAUDE.template.md" $releasedRoot
+    $releasedText = [IO.File]::ReadAllText($releasedRoot).Replace(
+        "[PROJECT DESCRIPTION - 2-3 sentences explaining what this project does]", "WINDOWS_SENTINEL_PROJECT_BYTES"
+    ).Replace(".claude/rules/testing.md", ".forge/rules/testing.md").Replace(
+        "/codex <instruction>    #", "/opinion <instruction>  #"
+    )
+    Write-Text (Join-Path $sentinelRoot "CLAUDE.md") ("<!-- forge:migrated 2026-04-28 -->`n`n" + $releasedText)
+    Write-V5State $sentinelRoot "WINDOWS_SENTINEL_STATE"
+    $sentinelResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $sentinelRoot
+    $sentinelInstalled = [IO.File]::ReadAllText((Join-Path $sentinelRoot "CLAUDE.md"))
+    Assert-True ($sentinelResult.Code -eq 0 -and $sentinelInstalled.Contains("WINDOWS_SENTINEL_PROJECT_BYTES") -and ([regex]::Matches($sentinelInstalled, '<!-- forge:begin v6 -->').Count -eq 1) -and -not $sentinelInstalled.Contains("/codex") -and -not $sentinelInstalled.Contains(".claude/rules/")) "PowerShell reconciles a sentinel-prefixed root without losing project bytes"
+
+    $ambiguousAgents = New-Project "ambiguous-agents"
+    Write-Text (Join-Path $ambiguousAgents ".claude\.forge-version") "5.60`n"
+    Write-Text (Join-Path $ambiguousAgents "AGENTS.md") "# Project instructions`n`n@CONTINUITY.md`nUse /codex and .claude/rules/ for policy.`n"
+    Write-V5State $ambiguousAgents "WINDOWS_AMBIGUOUS_AGENTS_STATE"
+    $ambiguousHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $ambiguousAgents "AGENTS.md")).Hash
+    $ambiguousResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $ambiguousAgents
+    Assert-True ($ambiguousResult.Code -ne 0 -and ([regex]::Matches($ambiguousResult.Output, 'code=ROOT_POLICY_AMBIGUOUS').Count -eq 1) -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $ambiguousAgents "AGENTS.md")).Hash -eq $ambiguousHash) "PowerShell groups ambiguous project-owned root references without mutation"
+
+    $aliasProject = New-Project "legacy-alias"
+    Write-Text (Join-Path $aliasProject ".claude\.forge-version") "5.60`n"
+    $aliasPath = Join-Path $aliasProject ".agents\skills\ui-design\SKILL.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/ui-design/SKILL.template.md" $aliasPath
+    Write-V5State $aliasProject "WINDOWS_ALIAS_STATE"
+    $aliasResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $aliasProject
+    Assert-True ($aliasResult.Code -eq 0 -and [IO.File]::ReadAllText($aliasPath).Contains("forge-generated: true")) "PowerShell replaces an exact version-bound cross-host alias"
+    $modifiedAlias = New-Project "legacy-alias-modified"
+    Write-Text (Join-Path $modifiedAlias ".claude\.forge-version") "5.60`n"
+    $modifiedAliasPath = Join-Path $modifiedAlias ".agents\skills\ui-design\SKILL.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/ui-design/SKILL.template.md" $modifiedAliasPath
+    [IO.File]::AppendAllText($modifiedAliasPath, "`nWINDOWS_PROJECT_ALIAS_CHANGE`n", $utf8NoBom)
+    Write-V5State $modifiedAlias "WINDOWS_MODIFIED_ALIAS_STATE"
+    $modifiedAliasResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $modifiedAlias
+    Assert-True ($modifiedAliasResult.Code -ne 0 -and $modifiedAliasResult.Output.Contains(".agents/skills/ui-design/SKILL.md")) "PowerShell blocks a modified cross-host alias"
+
+    $customHarness = New-Project "independent-harness"
+    Write-Text (Join-Path $customHarness ".claude\.forge-version") "5.61`n"
+    Write-Text (Join-Path $customHarness ".agent-workflows\runtime\workflow-runtime.mjs") "console.log('WINDOWS_CUSTOM_RUNTIME')`n"
+    Write-Text (Join-Path $customHarness "AGENTS.md") "# Project policy`n`nRun .agent-workflows/runtime/workflow-runtime.mjs for hooks.`n"
+    Write-V5State $customHarness "WINDOWS_CLAUDE_STATE"
+    $customState = [IO.File]::ReadAllText((Join-Path $root "state.template.md")) -replace '^<!-- forge:state-schema v6 -->\r?\n', ''
+    Write-Text (Join-Path $customHarness ".agent-workflows\local\state.md") $customState
+    $customBefore = Get-ProjectSnapshot $customHarness
+    $customResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $customHarness
+    Assert-True ($customResult.Code -ne 0 -and ([regex]::Matches($customResult.Output, 'code=CUSTOM_HARNESS_COLLISION').Count -eq 1) -and ([regex]::Matches($customResult.Output, 'code=MULTIPLE_STATE_SOURCES').Count -eq 1) -and ((Get-ProjectSnapshot $customHarness) -ceq $customBefore)) "PowerShell groups independent harness and multiple-state choices without mutation"
+
     $project = New-Project "project"
     Write-AdversarialV5State $project
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
