@@ -265,7 +265,10 @@ def inventory_legacy(
         if not stamp.is_file():
             raise RefreshBlocked("legacy Forge release stamp is not a regular file")
     version = stamp.read_text(encoding="utf-8", errors="replace").strip() if stamp.is_file() else ""
-    if version and version not in releases:
+    # Current v6 releases before upgrade hardening still wrote the historical
+    # advisory stamp. It is inert once the canonical v6 stamp exists and must
+    # not make an otherwise healthy v6 install look like an unsupported v5.
+    if version and not current_v6 and version not in releases:
         findings.append(
             UpgradeFinding(
                 "UNSUPPORTED_LEGACY_RELEASE",
@@ -275,8 +278,8 @@ def inventory_legacy(
                 "install a supported released v5 snapshot or reconcile the legacy harness manually",
             )
         )
-    selector, region_selector = releases.get(version, ("", ""))
-    recognized = bool(version and version in releases)
+    selector, region_selector = releases.get(version, ("", "")) if not current_v6 else ("", "")
+    recognized = bool(version and version in releases and not current_v6)
     if recognized:
         proven_legacy.add(stamp_relative)
 
@@ -376,7 +379,7 @@ def inventory_legacy(
     findings.extend(root_instruction_findings(repo_root, target, scope, region_selector))
     if scope == "project":
         findings.extend(active_harness_findings(target))
-        findings.extend(state_source_findings(target))
+        findings.extend(state_source_findings(target, current_v6))
 
     return LegacyInventory(
         selector=selector,
@@ -647,7 +650,7 @@ def active_harness_findings(target: Path) -> tuple[UpgradeFinding, ...]:
     )
 
 
-def state_source_findings(target: Path) -> tuple[UpgradeFinding, ...]:
+def state_source_findings(target: Path, current_v6: bool = False) -> tuple[UpgradeFinding, ...]:
     plausible: list[tuple[str, Path]] = []
     receipt_problem = ""
     for relative in (
@@ -664,6 +667,17 @@ def state_source_findings(target: Path) -> tuple[UpgradeFinding, ...]:
         raw = path.read_bytes()
         if raw.startswith(STATE_SCHEMA) or raw.startswith(b"# Project State"):
             plausible.append((relative, path))
+    if current_v6:
+        legacy = target / ".claude/local/state.md"
+        canonical_template = target / ".forge/state.template.md"
+        if (
+            legacy.is_file()
+            and not legacy.is_symlink()
+            and canonical_template.is_file()
+            and not canonical_template.is_symlink()
+            and legacy.read_bytes() == canonical_template.read_bytes()
+        ):
+            plausible = [item for item in plausible if item[0] != ".claude/local/state.md"]
     if len(plausible) < 2:
         return ()
     by_relative = {relative: path for relative, path in plausible}

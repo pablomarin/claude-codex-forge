@@ -41,6 +41,72 @@ snapshot_project() {
     )
 }
 
+install_released_core() {
+    local target="$1" version="$2" commit="$3"
+    mkdir -p "$target/.claude/hooks" "$target/.claude/commands"
+    printf '%s\n' "$version" > "$target/.claude/.forge-version"
+    git -C "$REPO_ROOT" show "$commit:hooks/session-start.sh" \
+        > "$target/.claude/hooks/session-start.sh"
+    git -C "$REPO_ROOT" show "$commit:commands/new-feature.md" \
+        > "$target/.claude/commands/new-feature.md"
+    write_active_v5_state "$target" "PROFILE_${version}_STATE"
+}
+
+assert_one_active_forge() {
+    local project="$1" label="$2" command adapter target
+    assert_contains "$project/.forge/version" "6" "$label has the v6 stamp"
+    assert_file_exists "$project/.forge/instructions.md" "$label has one canonical instruction source"
+    assert_file_exists "$project/.forge/managed-files.tsv" "$label has the canonical ownership manifest"
+    assert_equals "$(grep -c '<!-- forge:begin v6 -->' "$project/CLAUDE.md")" "1" \
+        "$label has one Claude root adapter"
+    assert_equals "$(grep -c '<!-- forge:begin v6 -->' "$project/AGENTS.md")" "1" \
+        "$label has one Codex root adapter"
+    if find "$project/.claude/commands" -type f -name '*.md' -print -quit 2>/dev/null | grep -q .; then
+        while IFS= read -r adapter; do
+            if ! grep -qF 'forge-generated: true' "$adapter" || ! grep -qF 'canonical-path:' "$adapter"; then
+                fail "$label retained a non-thin Claude workflow: ${adapter#"$project/"}"
+                return
+            fi
+        done < <(find "$project/.claude/commands" -type f -name '*.md' -print | LC_ALL=C sort)
+    fi
+    pass "$label retains only thin Claude workflow adapters"
+    assert_file_missing "$project/.claude/commands/codex.md" "$label retires the legacy /codex workflow"
+    if [ -f "$project/.claude/settings.json" ]; then
+        python3 - "$project" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+settings = json.loads((root / ".claude/settings.json").read_text())
+for blocks in settings.get("hooks", {}).values():
+    for block in blocks:
+        for hook in block.get("hooks", []):
+            if hook.get("type") == "prompt":
+                raise SystemExit(1)
+            command = hook.get("command", "")
+            marker = "$CLAUDE_PROJECT_DIR/.claude/hooks/"
+            if marker in command:
+                leaf = command.split(marker, 1)[1].split('"', 1)[0].split()[0]
+                delegate = root / ".claude/hooks" / leaf
+                if not delegate.is_file() or ".forge/hooks/" not in delegate.read_text(errors="replace"):
+                    raise SystemExit(1)
+PY
+        assert_equals "$?" "0" "$label has no active v5 prompt or full-body hook registration"
+    else
+        pass "$label has no Claude settings surface requiring legacy-hook reconciliation"
+    fi
+    while IFS=$'\t' read -r kind _source destination scope platform _host ownership _selector _proof; do
+        case "$kind" in ''|'#'*) continue ;; esac
+        if [ "$scope" = project ] && [ "$kind" = legacy ] && [ "$ownership" = whole-file ] \
+            && [[ "$destination" == .claude/rules/* ]] && [ "$platform" != windows ]; then
+            target="$project/$destination"
+            if [ -e "$target" ]; then
+                fail "$label retained managed v5 policy: $destination"
+                return
+            fi
+        fi
+    done < "$REPO_ROOT/manifests/legacy-v5.tsv"
+    pass "$label has no managed v5 rule body"
+}
+
 start_test "full-refresh flags are explicit and force/full-refresh are incompatible"
 S1=$(scratch_dir full-refresh-flags)
 make_git_repo "$S1"
@@ -869,6 +935,169 @@ assert_file_missing "$S22/noncanonical-python-invoked" \
 /bin/bash "$REPO_ROOT/scripts/full-refresh.sh" \
     --target "$S22/missing-home" --scope global > "$S22/missing.log" 2>&1
 assert_equals "$?" "1" "nonexistent selected global home is rejected"
+
+start_test "sanitized downstream profiles preview, reconcile, and converge on one active Forge"
+PROFILE_ROOT=$(scratch_dir full-refresh-downstream-profiles)
+
+# Profile 1: mostly exact v5.60, a sentinel root, project content, and an overlapping plugin.
+P1="$PROFILE_ROOT/profile-1"
+make_git_repo "$P1"
+install_released_core "$P1" "5.60" "80dffe872cc0830243a617eacfecce1e5fc2a6f5"
+{
+    printf '<!-- forge:migrated 2026-04-28 -->\n\n'
+    git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:CLAUDE.template.md \
+        | sed \
+            -e 's/\[PROJECT DESCRIPTION - 2-3 sentences explaining what this project does\]/PROFILE_ONE_PROJECT_CONTEXT/' \
+            -e 's#\.claude/rules/testing\.md#.forge/rules/testing.md#' \
+            -e 's#/codex <instruction>    #/opinion <instruction>  #'
+} > "$P1/CLAUDE.md"
+mkdir -p "$P1/.claude/rules" "$P1/docs/adr"
+printf '# Project domain rule\n\nPROFILE_ONE_RULE_BYTES\n' > "$P1/.claude/rules/project-domain.md"
+printf '# Project ADR\n\nPROFILE_ONE_ADR_BYTES\n' > "$P1/docs/adr/0099-project.md"
+printf '%s\n' \
+    '{' \
+    '  "enabledPlugins": {"superpowers@claude-plugins-official": true},' \
+    '  "developerSetting": "PROFILE_ONE_SETTING"' \
+    '}' > "$P1/.claude/settings.json"
+printf 'SIBLING_TRACKED_BYTES\n' > "$P1/sibling.txt"
+git -C "$P1" add sibling.txt
+git -C "$P1" -c user.name=Forge -c user.email=forge@example.invalid commit -qm "profile base"
+P1_SIBLING="$PROFILE_ROOT/profile-1-sibling"
+git -C "$P1" worktree add -qb profile-sibling "$P1_SIBLING"
+write_active_v5_state "$P1_SIBLING" "SIBLING_STATE_BYTES"
+sibling_before=$(snapshot_project "$P1_SIBLING")
+p1_before=$(snapshot_project "$P1")
+run_refresh "$P1" "${P1}.preview.log" -F --dry-run
+assert_equals "$?" "0" "profile 1 preview is ready"
+assert_equals "$(snapshot_project "$P1")" "$p1_before" "profile 1 preview is byte-identical"
+assert_contains "${P1}.preview.log" "claude RUNTIME_READY: BLOCKED" \
+    "profile 1 separates plugin readiness from filesystem migration"
+run_refresh "$P1" "${P1}.refresh.log" -F
+assert_equals "$?" "0" "profile 1 executes successfully"
+assert_one_active_forge "$P1" "profile 1"
+assert_contains "$P1/.claude/settings.json" "superpowers@claude-plugins-official" \
+    "profile 1 preserves the overlapping plugin"
+assert_contains "$P1/.claude/rules/project-domain.md" "PROFILE_ONE_RULE_BYTES" \
+    "profile 1 preserves the project-owned rule"
+assert_contains "$P1/docs/adr/0099-project.md" "PROFILE_ONE_ADR_BYTES" \
+    "profile 1 preserves the project ADR"
+assert_equals "$(snapshot_project "$P1_SIBLING")" "$sibling_before" \
+    "profile 1 migration never changes the linked sibling worktree"
+manifest_before=$(hash_file "$P1/.forge/managed-files.tsv")
+run_refresh "$P1" "${P1}.force.log" -f
+assert_equals "$?" "0" "ordinary force remains valid after profile 1 reaches v6"
+assert_hash_equals "$P1/.forge/managed-files.tsv" "$manifest_before" \
+    "ordinary v6 force keeps the managed manifest stable"
+p1_v6_before=$(snapshot_project "$P1")
+run_refresh "$P1" "${P1}.v6-preview.log" -F --dry-run
+assert_equals "$?" "0" "v6 full-refresh preview reports ready without remigration"
+assert_contains "${P1}.v6-preview.log" "UPGRADE: READY" "v6 preview remains explicit"
+assert_equals "$(snapshot_project "$P1")" "$p1_v6_before" "v6 preview is byte-identical"
+git -C "$P1" worktree remove --force "$P1_SIBLING"
+
+# Profile 2: tracked v5.58 plus inert Codex-native content and project CI documentation.
+P2="$PROFILE_ROOT/profile-2"
+make_git_repo "$P2"
+install_released_core "$P2" "5.58" "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34"
+mkdir -p "$P2/.codex" "$P2/.agents/skills/project-audit" "$P2/docs/ci"
+printf 'PROFILE_TWO_CODEX_CONTEXT\n' > "$P2/.codex/project-context.md"
+printf '%s\n' '---' 'name: project-audit' 'description: Project-owned audit skill.' '---' \
+    > "$P2/.agents/skills/project-audit/SKILL.md"
+printf '# Project CI\n\nPROFILE_TWO_CI_BYTES\n' > "$P2/docs/ci/README.md"
+git -C "$P2" add .claude .codex .agents docs
+git -C "$P2" -c user.name=Forge -c user.email=forge@example.invalid commit -qm "tracked mixed profile"
+p2_before=$(snapshot_project "$P2")
+run_refresh "$P2" "${P2}.preview.log" -F --dry-run
+assert_equals "$?" "0" "profile 2 preview is ready"
+assert_equals "$(snapshot_project "$P2")" "$p2_before" "profile 2 preview is byte-identical"
+run_refresh "$P2" "${P2}.refresh.log" -F
+assert_equals "$?" "0" "profile 2 executes successfully"
+assert_one_active_forge "$P2" "profile 2"
+assert_contains "$P2/.codex/project-context.md" "PROFILE_TWO_CODEX_CONTEXT" \
+    "profile 2 preserves inert Codex-native context"
+assert_contains "$P2/.agents/skills/project-audit/SKILL.md" "Project-owned audit skill" \
+    "profile 2 preserves its custom skill"
+assert_contains "$P2/docs/ci/README.md" "PROFILE_TWO_CI_BYTES" \
+    "profile 2 preserves custom CI documentation"
+
+# Profile 3: historical project AGENTS references block once; exact aliases and a custom agent survive.
+P3="$PROFILE_ROOT/profile-3"
+make_git_repo "$P3"
+install_released_core "$P3" "5.60" "80dffe872cc0830243a617eacfecce1e5fc2a6f5"
+mkdir -p "$P3/.agents/skills/generate-image" "$P3/.agents/skills/ui-design" "$P3/.claude/agents"
+git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/generate-image/SKILL.template.md \
+    > "$P3/.agents/skills/generate-image/SKILL.md"
+git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/ui-design/SKILL.template.md \
+    > "$P3/.agents/skills/ui-design/SKILL.md"
+printf '# Custom agent\n\nPROFILE_THREE_AGENT_BYTES\n' > "$P3/.claude/agents/project-quality.md"
+printf '# Historical project policy\n\n@CONTINUITY.md\nUse /codex and .claude/rules/ for policy.\n' > "$P3/AGENTS.md"
+p3_before=$(snapshot_project "$P3")
+run_refresh "$P3" "${P3}.blocked.log" -F --dry-run
+assert_equals "$?" "1" "profile 3 reports ambiguous historical project policy"
+assert_equals "$(grep -c 'code=ROOT_POLICY_AMBIGUOUS' "${P3}.blocked.log")" "1" \
+    "profile 3 groups all obsolete root references"
+assert_contains "${P3}.blocked.log" "@CONTINUITY.md" "profile 3 reports continuity references"
+assert_contains "${P3}.blocked.log" "/codex" "profile 3 reports retired reviewer references"
+assert_contains "${P3}.blocked.log" ".claude/rules/" "profile 3 reports legacy policy references"
+assert_equals "$(snapshot_project "$P3")" "$p3_before" "blocked profile 3 remains byte-identical"
+printf '# Project policy\n\nPROFILE_THREE_NEUTRAL_CONTEXT\n' > "$P3/AGENTS.md"
+run_refresh "$P3" "${P3}.ready.log" -F --dry-run
+assert_equals "$?" "0" "profile 3 becomes ready after only project-owned prose is reconciled"
+run_refresh "$P3" "${P3}.refresh.log" -F
+assert_equals "$?" "0" "profile 3 executes successfully after reconciliation"
+assert_one_active_forge "$P3" "profile 3"
+assert_contains "$P3/.agents/skills/generate-image/SKILL.md" "forge-generated: true" \
+    "profile 3 replaces the exact generate-image alias"
+assert_contains "$P3/.agents/skills/ui-design/SKILL.md" "forge-generated: true" \
+    "profile 3 replaces the exact UI alias"
+assert_contains "$P3/.claude/agents/project-quality.md" "PROFILE_THREE_AGENT_BYTES" \
+    "profile 3 preserves its custom agent"
+
+# Profile 4: an independently developed runtime and two states require an explicit owner choice.
+P4="$PROFILE_ROOT/profile-4"
+make_git_repo "$P4"
+install_released_core "$P4" "5.61" "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff"
+mkdir -p "$P4/.agent-workflows/runtime" "$P4/.agent-workflows/local" \
+    "$P4/.agents/skills/custom-runtime" "$P4/.claude/hooks"
+printf 'console.log("PROFILE_FOUR_RUNTIME")\n' > "$P4/.agent-workflows/runtime/workflow-runtime.mjs"
+printf '# Runtime policy\n\nPROFILE_FOUR_POLICY\n' > "$P4/.agent-workflows/policy.md"
+sed "s/(what you're actively working on)/PROFILE_FOUR_NEWER_STATE/" "$REPO_ROOT/state.template.md" \
+    > "$P4/.agent-workflows/local/state.md"
+printf '# Project policy\n\nRun .agent-workflows/runtime/workflow-runtime.mjs.\n' > "$P4/AGENTS.md"
+printf '%s\n' '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"node .agent-workflows/runtime/workflow-runtime.mjs"}]}]}}' \
+    > "$P4/.claude/settings.json"
+printf '%s\n' '---' 'name: custom-runtime' 'description: Project-owned runtime skill.' '---' \
+    > "$P4/.agents/skills/custom-runtime/SKILL.md"
+printf '#!/usr/bin/env bash\nprintf "PROFILE_FOUR_CUSTOM_HOOK\\n"\n' > "$P4/.claude/hooks/project-runtime.sh"
+p4_before=$(snapshot_project "$P4")
+run_refresh "$P4" "${P4}.blocked.log" -F --dry-run
+assert_equals "$?" "1" "profile 4 blocks for an explicit harness and state decision"
+assert_equals "$(grep -c 'code=CUSTOM_HARNESS_COLLISION' "${P4}.blocked.log")" "1" \
+    "profile 4 groups the independent harness once"
+assert_equals "$(grep -c 'code=MULTIPLE_STATE_SOURCES' "${P4}.blocked.log")" "1" \
+    "profile 4 groups the competing states once"
+assert_equals "$(snapshot_project "$P4")" "$p4_before" "blocked profile 4 remains byte-identical"
+mkdir -p "$P4/docs/archive/legacy-agent-workflows" "$P4/docs/archive/legacy-state"
+cp "$P4/.claude/local/state.md" "$P4/docs/archive/legacy-state/claude-state.md"
+cp "$P4/.agent-workflows/local/state.md" "$P4/.claude/local/state.md"
+mv "$P4/.agent-workflows" "$P4/docs/archive/legacy-agent-workflows/runtime"
+printf '# Project policy\n\nPROFILE_FOUR_NEUTRAL_CONTEXT\n' > "$P4/AGENTS.md"
+printf '{}\n' > "$P4/.claude/settings.json"
+run_refresh "$P4" "${P4}.ready.log" -F --dry-run
+assert_equals "$?" "0" "profile 4 becomes ready after the explicit owner choice"
+run_refresh "$P4" "${P4}.refresh.log" -F
+assert_equals "$?" "0" "profile 4 executes after explicit reconciliation"
+assert_one_active_forge "$P4" "profile 4"
+assert_contains "$P4/docs/archive/legacy-agent-workflows/runtime/runtime/workflow-runtime.mjs" \
+    "PROFILE_FOUR_RUNTIME" "profile 4 preserves the archived independent runtime"
+assert_contains "$P4/docs/archive/legacy-state/claude-state.md" "PROFILE_5.61_STATE" \
+    "profile 4 preserves the non-selected state backup"
+assert_contains "$P4/.forge/local/state.md" "PROFILE_FOUR_NEWER_STATE" \
+    "profile 4 migrates the owner-selected state"
+assert_contains "$P4/.agents/skills/custom-runtime/SKILL.md" "Project-owned runtime skill" \
+    "profile 4 preserves its custom skill"
+assert_contains "$P4/.claude/hooks/project-runtime.sh" "PROFILE_FOUR_CUSTOM_HOOK" \
+    "profile 4 preserves its unregistered custom hook"
 
 cleanup_scratch_dirs
 report "test-full-refresh.sh"

@@ -85,6 +85,51 @@ function Export-GitBlob {
     if ($LASTEXITCODE -ne 0) { throw "git blob export failed: $RevisionPath" }
 }
 
+function Install-ReleasedCore {
+    param([string]$Project, [string]$Version, [string]$Commit)
+    Write-Text (Join-Path $Project ".claude\.forge-version") "$Version`n"
+    Export-GitBlob ("${Commit}:hooks/session-start.ps1") (Join-Path $Project ".claude\hooks\session-start.ps1")
+    Export-GitBlob ("${Commit}:commands/new-feature.md") (Join-Path $Project ".claude\commands\new-feature.md")
+    Write-V5State $Project ("WINDOWS_PROFILE_" + $Version + "_STATE")
+}
+
+function Assert-OneActiveForge {
+    param([string]$Project, [string]$Label)
+    $version = Join-Path $Project ".forge\version"
+    $instructions = Join-Path $Project ".forge\instructions.md"
+    $manifest = Join-Path $Project ".forge\managed-files.tsv"
+    $claudeRoot = [IO.File]::ReadAllText((Join-Path $Project "CLAUDE.md"))
+    $codexRoot = [IO.File]::ReadAllText((Join-Path $Project "AGENTS.md"))
+    Assert-True ((Test-Path -LiteralPath $version -PathType Leaf) -and ([IO.File]::ReadAllText($version).Trim() -eq "6")) "$Label has the v6 stamp"
+    Assert-True ((Test-Path -LiteralPath $instructions -PathType Leaf) -and (Test-Path -LiteralPath $manifest -PathType Leaf)) "$Label has one canonical Forge source and ownership manifest"
+    Assert-True (([regex]::Matches($claudeRoot, '<!-- forge:begin v6 -->').Count -eq 1) -and ([regex]::Matches($codexRoot, '<!-- forge:begin v6 -->').Count -eq 1)) "$Label has one bounded adapter per native root"
+    $commands = @(Get-ChildItem -LiteralPath (Join-Path $Project ".claude\commands") -Filter "*.md" -File -Recurse -ErrorAction SilentlyContinue)
+    $nonThin = @($commands | Where-Object {
+        $text = [IO.File]::ReadAllText($_.FullName)
+        -not ($text.Contains("forge-generated: true") -and $text.Contains("canonical-path:"))
+    })
+    Assert-True ($nonThin.Count -eq 0 -and -not (Test-Path -LiteralPath (Join-Path $Project ".claude\commands\codex.md"))) "$Label retains only thin Claude workflows and no retired codex command"
+    $settingsPath = Join-Path $Project ".claude\settings.json"
+    $badHook = $false
+    if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+        $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+        foreach ($eventProperty in $settings.hooks.PSObject.Properties) {
+            foreach ($block in $eventProperty.Value) {
+                foreach ($hook in $block.hooks) {
+                    if ($hook.type -eq "prompt") { $badHook = $true }
+                    $command = [string]$hook.command
+                    if ($command.Contains('$CLAUDE_PROJECT_DIR/.claude/hooks/')) {
+                        $leaf = (($command -split '\.claude/hooks/', 2)[1] -split '["''\s]', 2)[0]
+                        $delegate = Join-Path $Project (".claude\hooks\" + ($leaf -replace '/', '\'))
+                        if (-not (Test-Path -LiteralPath $delegate -PathType Leaf) -or -not [IO.File]::ReadAllText($delegate).Contains(".forge/hooks/")) { $badHook = $true }
+                    }
+                }
+            }
+        }
+    }
+    Assert-True (-not $badHook) "$Label has no active v5 prompt or full-body hook registration"
+}
+
 function Install-V561WindowsHooks {
     param([string]$Project)
     $settingsPath = Join-Path $Project ".claude\settings.json"
@@ -214,6 +259,82 @@ try {
     $customBefore = Get-ProjectSnapshot $customHarness
     $customResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $customHarness
     Assert-True ($customResult.Code -ne 0 -and ([regex]::Matches($customResult.Output, 'code=CUSTOM_HARNESS_COLLISION').Count -eq 1) -and ([regex]::Matches($customResult.Output, 'code=MULTIPLE_STATE_SOURCES').Count -eq 1) -and ((Get-ProjectSnapshot $customHarness) -ceq $customBefore)) "PowerShell groups independent harness and multiple-state choices without mutation"
+
+    $profiles = Join-Path $scratch "downstream-profiles"
+    [IO.Directory]::CreateDirectory($profiles) | Out-Null
+
+    $profile1 = New-Project "profile-1"
+    Install-ReleasedCore $profile1 "5.60" "80dffe872cc0830243a617eacfecce1e5fc2a6f5"
+    $profile1RootBlob = Join-Path $profiles "profile-1-CLAUDE.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:CLAUDE.template.md" $profile1RootBlob
+    $profile1Root = [IO.File]::ReadAllText($profile1RootBlob).Replace(
+        "[PROJECT DESCRIPTION - 2-3 sentences explaining what this project does]", "WINDOWS_PROFILE_ONE_CONTEXT"
+    ).Replace(".claude/rules/testing.md", ".forge/rules/testing.md").Replace(
+        "/codex <instruction>    #", "/opinion <instruction>  #"
+    )
+    Write-Text (Join-Path $profile1 "CLAUDE.md") ("<!-- forge:migrated 2026-04-28 -->`n`n" + $profile1Root)
+    Write-Text (Join-Path $profile1 ".claude\rules\project-domain.md") "WINDOWS_PROFILE_ONE_RULE`n"
+    Write-Text (Join-Path $profile1 "docs\adr\0099-project.md") "WINDOWS_PROFILE_ONE_ADR`n"
+    Write-Text (Join-Path $profile1 ".claude\settings.json") '{"enabledPlugins":{"superpowers@claude-plugins-official":true},"developerSetting":"keep"}'
+    $profile1Before = Get-ProjectSnapshot $profile1
+    $profile1Preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $profile1
+    Assert-True ($profile1Preview.Code -eq 0 -and $profile1Preview.Output.Contains("UPGRADE: READY") -and $profile1Preview.Output.Contains("claude RUNTIME_READY: BLOCKED") -and ((Get-ProjectSnapshot $profile1) -ceq $profile1Before)) "Windows profile 1 previews ready without writes and separates plugin readiness"
+    $profile1Run = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $profile1
+    Assert-True ($profile1Run.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $profile1 ".claude\rules\project-domain.md")).Contains("WINDOWS_PROFILE_ONE_RULE") -and [IO.File]::ReadAllText((Join-Path $profile1 "docs\adr\0099-project.md")).Contains("WINDOWS_PROFILE_ONE_ADR")) "Windows profile 1 preserves project content and executes"
+    Assert-OneActiveForge $profile1 "Windows profile 1"
+
+    $profile2 = New-Project "profile-2"
+    Install-ReleasedCore $profile2 "5.58" "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34"
+    Write-Text (Join-Path $profile2 ".codex\project-context.md") "WINDOWS_PROFILE_TWO_CODEX`n"
+    Write-Text (Join-Path $profile2 ".agents\skills\project-audit\SKILL.md") "---`nname: project-audit`ndescription: Project-owned audit skill.`n---`n"
+    Write-Text (Join-Path $profile2 "docs\ci\README.md") "WINDOWS_PROFILE_TWO_CI`n"
+    & git -C $profile2 add .claude .codex .agents docs
+    & git -C $profile2 -c user.name=Forge -c user.email=forge@example.invalid commit -qm "tracked mixed profile"
+    $profile2Before = Get-ProjectSnapshot $profile2
+    $profile2Preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $profile2
+    Assert-True ($profile2Preview.Code -eq 0 -and ((Get-ProjectSnapshot $profile2) -ceq $profile2Before)) "Windows profile 2 tracked mixed tree previews without writes"
+    $profile2Run = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $profile2
+    Assert-True ($profile2Run.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $profile2 ".codex\project-context.md")).Contains("WINDOWS_PROFILE_TWO_CODEX") -and [IO.File]::ReadAllText((Join-Path $profile2 "docs\ci\README.md")).Contains("WINDOWS_PROFILE_TWO_CI")) "Windows profile 2 preserves custom Codex and CI content"
+    Assert-OneActiveForge $profile2 "Windows profile 2"
+
+    $profile3 = New-Project "profile-3"
+    Install-ReleasedCore $profile3 "5.60" "80dffe872cc0830243a617eacfecce1e5fc2a6f5"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/generate-image/SKILL.template.md" (Join-Path $profile3 ".agents\skills\generate-image\SKILL.md")
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/ui-design/SKILL.template.md" (Join-Path $profile3 ".agents\skills\ui-design\SKILL.md")
+    Write-Text (Join-Path $profile3 ".claude\agents\project-quality.md") "WINDOWS_PROFILE_THREE_AGENT`n"
+    Write-Text (Join-Path $profile3 "AGENTS.md") "# Project`n`n@CONTINUITY.md`nUse /codex and .claude/rules/.`n"
+    $profile3Blocked = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $profile3
+    Assert-True ($profile3Blocked.Code -ne 0 -and ([regex]::Matches($profile3Blocked.Output, 'code=ROOT_POLICY_AMBIGUOUS').Count -eq 1)) "Windows profile 3 groups obsolete project root references"
+    Write-Text (Join-Path $profile3 "AGENTS.md") "# Project`n`nWINDOWS_PROFILE_THREE_NEUTRAL`n"
+    $profile3Run = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $profile3
+    Assert-True ($profile3Run.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $profile3 ".agents\skills\ui-design\SKILL.md")).Contains("forge-generated: true") -and [IO.File]::ReadAllText((Join-Path $profile3 ".claude\agents\project-quality.md")).Contains("WINDOWS_PROFILE_THREE_AGENT")) "Windows profile 3 replaces exact aliases and preserves its custom agent"
+    Assert-OneActiveForge $profile3 "Windows profile 3"
+
+    $profile4 = New-Project "profile-4"
+    Install-ReleasedCore $profile4 "5.61" "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff"
+    Write-Text (Join-Path $profile4 ".agent-workflows\runtime\workflow-runtime.mjs") "console.log('WINDOWS_PROFILE_FOUR_RUNTIME')`n"
+    Write-Text (Join-Path $profile4 ".agent-workflows\policy.md") "WINDOWS_PROFILE_FOUR_POLICY`n"
+    $profile4State = [IO.File]::ReadAllText((Join-Path $root "state.template.md")).Replace("(what you're actively working on)", "WINDOWS_PROFILE_FOUR_NEWER_STATE")
+    Write-Text (Join-Path $profile4 ".agent-workflows\local\state.md") $profile4State
+    Write-Text (Join-Path $profile4 "AGENTS.md") "Run .agent-workflows/runtime/workflow-runtime.mjs.`n"
+    Write-Text (Join-Path $profile4 ".claude\settings.json") '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"node .agent-workflows/runtime/workflow-runtime.mjs"}]}]}}'
+    Write-Text (Join-Path $profile4 ".agents\skills\custom-runtime\SKILL.md") "---`nname: custom-runtime`ndescription: Project runtime skill.`n---`n"
+    Write-Text (Join-Path $profile4 ".claude\hooks\project-runtime.ps1") "Write-Output 'WINDOWS_PROFILE_FOUR_HOOK'`n"
+    $profile4Before = Get-ProjectSnapshot $profile4
+    $profile4Blocked = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $profile4
+    Assert-True ($profile4Blocked.Code -ne 0 -and ([regex]::Matches($profile4Blocked.Output, 'code=CUSTOM_HARNESS_COLLISION').Count -eq 1) -and ([regex]::Matches($profile4Blocked.Output, 'code=MULTIPLE_STATE_SOURCES').Count -eq 1) -and ((Get-ProjectSnapshot $profile4) -ceq $profile4Before)) "Windows profile 4 groups harness and state choices without writes"
+    $archiveRuntime = Join-Path $profile4 "docs\archive\legacy-agent-workflows\runtime"
+    $archiveState = Join-Path $profile4 "docs\archive\legacy-state\claude-state.md"
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $archiveRuntime)) | Out-Null
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $archiveState)) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $profile4 ".claude\local\state.md") -Destination $archiveState
+    Copy-Item -LiteralPath (Join-Path $profile4 ".agent-workflows\local\state.md") -Destination (Join-Path $profile4 ".claude\local\state.md") -Force
+    Move-Item -LiteralPath (Join-Path $profile4 ".agent-workflows") -Destination $archiveRuntime
+    Write-Text (Join-Path $profile4 "AGENTS.md") "# Project`n`nWINDOWS_PROFILE_FOUR_NEUTRAL`n"
+    Write-Text (Join-Path $profile4 ".claude\settings.json") "{}`n"
+    $profile4Run = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $profile4
+    Assert-True ($profile4Run.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $archiveRuntime "runtime\workflow-runtime.mjs")).Contains("WINDOWS_PROFILE_FOUR_RUNTIME") -and [IO.File]::ReadAllText((Join-Path $profile4 ".forge\local\state.md")).Contains("WINDOWS_PROFILE_FOUR_NEWER_STATE")) "Windows profile 4 executes only after explicit archive and state selection"
+    Assert-OneActiveForge $profile4 "Windows profile 4"
 
     $project = New-Project "project"
     Write-AdversarialV5State $project

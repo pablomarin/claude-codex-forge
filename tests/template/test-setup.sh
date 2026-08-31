@@ -1246,7 +1246,8 @@ for mode in default force upgrade; do
     esac
     rc=$?
     [ "$rc" -ne 0 ] && pass "$mode v5 preflight exits nonzero" || fail "$mode v5 preflight unexpectedly succeeded"
-    assert_contains "$legacy/setup.log" 'authoritative refresh' "$mode prints executable full-refresh remediation"
+    assert_contains "$legacy/setup.log" 'Preview first' "$mode points to preview before mutation"
+    assert_contains "$legacy/setup.log" '--dry-run' "$mode remediation is explicitly read-only"
     assert_contains "$legacy/setup.log" 'setup.sh' "$mode remediation identifies the Forge installer"
     assert_contains "$legacy/setup.log" '-F' "$mode remediation uses authoritative -F"
     assert_hash_equals "$legacy/.claude/settings.json" "$before" "$mode leaves v5 settings byte-preserved"
@@ -1292,7 +1293,8 @@ for mode in default force upgrade; do
     esac
     rc=$?
     [ "$rc" -ne 0 ] && pass "$mode global v5 preflight exits nonzero" || fail "$mode global v5 preflight unexpectedly succeeded"
-    assert_contains "$global_legacy/setup.log" 'authoritative refresh' "$mode global mode prints full-refresh remediation"
+    assert_contains "$global_legacy/setup.log" 'Preview first' "$mode global mode points to preview before mutation"
+    assert_contains "$global_legacy/setup.log" '--dry-run' "$mode global remediation is explicitly read-only"
     assert_contains "$global_legacy/setup.log" '--global' "$mode global remediation preserves global scope"
     assert_contains "$global_legacy/setup.log" '-F' "$mode global remediation uses authoritative -F"
     assert_hash_equals "$global_legacy/.claude/settings.json" "$global_before" "$mode global mode preserves v5 settings bytes"
@@ -1349,7 +1351,8 @@ for surface in skill agent; do
         esac
         rc=$?
         [ "$rc" -ne 0 ] && pass "$surface-only $mode preflight exits nonzero" || fail "$surface-only $mode preflight materialized v6 beside legacy policy"
-        assert_contains "$legacy/setup.log" 'authoritative refresh' "$surface-only $mode prints full-refresh remediation"
+        assert_contains "$legacy/setup.log" 'Preview first' "$surface-only $mode points to preview before mutation"
+        assert_contains "$legacy/setup.log" '--dry-run' "$surface-only $mode remediation is explicitly read-only"
         assert_contains "$legacy/setup.log" '-F' "$surface-only $mode remediation is executable"
         after=$(find "$legacy/.claude" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)
         assert_equals "$after" "$before" "$surface-only $mode preflight performs no write"

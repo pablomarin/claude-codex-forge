@@ -193,8 +193,8 @@ function Test-V6PreflightNoLegacy {
             if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: & '$ScriptDir\setup.ps1' -Global -FullRefresh -DryRun" }
             throw "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: & '$ScriptDir\setup.ps1' -FullRefresh -DryRun"
         }
-        if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness detected. Run: & '$ScriptDir\setup.ps1' -Global -R" }
-        throw "BLOCKED: legacy Forge harness detected. Run: & '$ScriptDir\setup.ps1' -R"
+        if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness detected. Preview first: & '$ScriptDir\setup.ps1' -Global -FullRefresh -DryRun" }
+        throw "BLOCKED: legacy Forge harness detected. Preview first: & '$ScriptDir\setup.ps1' -FullRefresh -DryRun"
     }
 }
 
