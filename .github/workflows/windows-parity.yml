@@ -22,9 +22,13 @@ jobs:
         run: |
           $artifacts = Join-Path $env:RUNNER_TEMP 'forge-windows-powershell51'
           New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
+          $previousErrorActionPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\template\run-all.ps1 2>&1 |
             Tee-Object -FilePath (Join-Path $artifacts 'windows-powershell-51.log')
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $suiteExitCode = $LASTEXITCODE
+          $ErrorActionPreference = $previousErrorActionPreference
+          if ($suiteExitCode -ne 0) { exit $suiteExitCode }
           .\scripts\qualify-runtime-final.ps1 -WriteWindowsAttestation -ProjectRoot . `
             -Output (Join-Path $artifacts 'windows-powershell-51.receipt')
       - name: Upload deterministic PowerShell result
