@@ -16,6 +16,24 @@ source "$REPO_ROOT/tests/template/lib.sh"
 
 init_counters
 
+WORKFLOW_STAGE=$(sed -n 's/^# conversion-stage:[[:space:]]*//p' \
+    "$REPO_ROOT/manifests/workflow-capabilities.tsv" | head -1)
+HOST_NEUTRAL_WORKFLOWS=0
+case "$WORKFLOW_STAGE" in
+    development|complete) HOST_NEUTRAL_WORKFLOWS=1 ;;
+esac
+
+# ---------------------------------------------------------------------------
+# Contract 0: v6 layout suites must stay in the deterministic driver
+# ---------------------------------------------------------------------------
+start_test "v6 canonical-layout suites are registered"
+
+RUN_ALL="$REPO_ROOT/tests/template/run-all.sh"
+assert_contains "$RUN_ALL" 'test-dual-layout.sh' \
+    "run-all registers the canonical layout suite"
+assert_contains "$RUN_ALL" 'test-platform-parity.sh' \
+    "run-all registers the centralized platform parity suite"
+
 # ---------------------------------------------------------------------------
 # Contract 1: verify-e2e VERDICT values must match caller branches
 # ---------------------------------------------------------------------------
@@ -84,6 +102,7 @@ fi
 # ---------------------------------------------------------------------------
 # Contract 2: SUGGESTED_PATH header must be consumed by callers
 # ---------------------------------------------------------------------------
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "SUGGESTED_PATH header ↔ caller persistence instructions"
 
 # Agent defines SUGGESTED_PATH in its response header.
@@ -469,6 +488,18 @@ assert_contains "$NF" "skipped in regression mode" \
 assert_contains "$FB" "skipped in regression mode" \
     "fix-bug.md Phase 5.4b explains hard-SHAPE skip in regression"
 
+else
+start_test "host-neutral E2E callers delegate detailed validation to the canonical agent"
+for caller in "$NF" "$FB"; do
+    name=$(basename "$caller")
+    assert_contains "$caller" "verify-e2e" "$name invokes the canonical E2E role"
+    assert_contains "$caller" 'SUGGESTED_PATH:' "$name consumes the canonical report-path header"
+    assert_contains "$caller" 'SURFACE_COVERAGE_WARNING' "$name handles the canonical coverage warning"
+    assert_contains "$caller" 'FAIL_INVALID_USE_CASE' "$name handles invalid use cases"
+    assert_contains "$caller" '.forge/local/' "$name keeps reports in canonical local evidence"
+done
+fi
+
 # ---------------------------------------------------------------------------
 # Contract 3: --playwright-dir marker file ↔ command consumers
 # setup.sh writes .claude/playwright-dir. Commands must read it.
@@ -479,10 +510,17 @@ assert_contains "$REPO_ROOT/setup.sh" ".claude/playwright-dir" \
     "setup.sh writes marker file"
 assert_contains "$REPO_ROOT/setup.ps1" "playwright-dir" \
     "setup.ps1 writes marker file (Windows parity)"
-assert_contains "$NF" ".claude/playwright-dir" \
-    "commands/new-feature.md reads marker file"
-assert_contains "$FB" ".claude/playwright-dir" \
-    "commands/fix-bug.md reads marker file"
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
+    assert_contains "$NF" ".claude/playwright-dir" \
+        "commands/new-feature.md reads marker file"
+    assert_contains "$FB" ".claude/playwright-dir" \
+        "commands/fix-bug.md reads marker file"
+else
+    assert_not_contains "$NF" ".claude/playwright-dir" \
+        "new-feature.md has no Claude-private Playwright dependency"
+    assert_not_contains "$FB" ".claude/playwright-dir" \
+        "fix-bug.md has no Claude-private Playwright dependency"
+fi
 
 # ---------------------------------------------------------------------------
 # Contract 3b: settings.template.json Stop hook ordering
@@ -872,6 +910,7 @@ fi
 # ---------------------------------------------------------------------------
 # Contract: DRIFT-PREFLIGHT-NEW blocks in new-feature.md and fix-bug.md byte-identical
 # ---------------------------------------------------------------------------
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "DRIFT-PREFLIGHT-NEW blocks byte-identical across new-feature.md and fix-bug.md"
 
 NF="$REPO_ROOT/commands/new-feature.md"
@@ -908,6 +947,16 @@ elif [[ "$NF_AL" == "$FB_AL" ]]; then
 else
     fail "DRIFT-PREFLIGHT-ALREADY blocks differ between new-feature.md and fix-bug.md"
     diff <(printf '%s' "$NF_AL") <(printf '%s' "$FB_AL") | head -10
+fi
+
+else
+start_test "host-neutral workflows rely on the shared session-start drift advisory"
+for caller in "$NF" "$FB"; do
+    name=$(basename "$caller")
+    assert_contains "$caller" '.forge/instructions.md' "$name loads canonical installed instructions"
+    assert_contains "$caller" 'Last active host' "$name records host-switch continuity"
+    assert_not_contains "$caller" 'DRIFT-PREFLIGHT-' "$name has no duplicated host-specific drift block"
+done
 fi
 
 # ---------------------------------------------------------------------------
@@ -1223,6 +1272,7 @@ fi
 # AC-2 byte-identical STATE-INIT contract: the bash block in commands/new-feature.md
 # and commands/fix-bug.md between # STATE-INIT-BEGIN and # STATE-INIT-END markers
 # must be byte-identical (mirrors the existing DRIFT-PREFLIGHT-NEW contract from PR #1).
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "state-init-block-byte-identical-across-commands"
 extract_state_init() {
     awk '/^# STATE-INIT-BEGIN/{flag=1} flag{print} /^# STATE-INIT-END/{flag=0}' "$1"
@@ -1251,6 +1301,16 @@ for f in "$NF" "$FB"; do
     assert_contains "$f" "empty placeholder"                       "$bn seed resets Now to its empty placeholder"
     assert_contains "$f" "gate sections are NOT seeded"            "$bn seed excludes gate sections"
 done
+else
+start_test "host-neutral development workflows use canonical state ownership"
+for f in "$NF" "$FB"; do
+    bn=$(basename "$f")
+    assert_contains "$f" '.forge/state.template.md' "$bn initializes from the canonical state template"
+    assert_contains "$f" '.forge/local/state.md' "$bn uses canonical developer-owned state"
+    assert_contains "$f" "file read/write capabilities" "$bn avoids host-private shell state writes"
+    assert_contains "$f" 'Last active host' "$bn persists host-switch continuity"
+done
+fi
 
 # ---------------------------------------------------------------------------
 # Contract: guarded fold-back (state-continuity-roundtrip, v5.52)
@@ -1258,6 +1318,26 @@ done
 # guarded by the seed snapshot, section-scoped, fail-loud on divergence.
 # ---------------------------------------------------------------------------
 FBR="$REPO_ROOT/commands/finish-branch.md"
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "1" ]; then
+start_test "host-neutral finish-branch preserves guarded narrative fold before cleanup"
+assert_contains "$FBR" ".state-seed-snapshot.md"        "finish-branch reads the seed snapshot"
+assert_contains "$FBR" "## State"                       "finish-branch fold names the State narrative section"
+assert_contains "$FBR" "## Open Questions"              "finish-branch fold names Open Questions"
+assert_contains "$FBR" "## Blockers"                    "finish-branch fold names Blockers"
+assert_contains "$FBR" "FOLD_SAFE_STOP"                 "finish-branch stops on a missing or malformed seed"
+assert_contains "$FBR" "FOLD_DIVERGED"                  "finish-branch stops on primary-state divergence"
+assert_contains "$FBR" "stop cleanup"                   "finish-branch does not remove the worktree after a fold failure"
+assert_contains "$FBR" "Do not touch"                   "finish-branch preserves workflow and gate sections"
+assert_contains "$FBR" "## /goal session"               "finish-branch preserves goal authority"
+assert_contains "$FBR" ".forge/memory/"                 "finish-branch keeps durable memory separate"
+fold_line=$(grep -n '^## 3\. Preserve Continuity' "$FBR" | head -1 | cut -d: -f1)
+cleanup_line=$(grep -n '^## 4\. Cleanup' "$FBR" | head -1 | cut -d: -f1)
+if [ -n "$fold_line" ] && [ -n "$cleanup_line" ] && [ "$fold_line" -lt "$cleanup_line" ]; then
+    pass "guarded fold precedes cleanup ($fold_line < $cleanup_line)"
+else
+    fail "guarded fold must precede cleanup (fold=$fold_line cleanup=$cleanup_line)"
+fi
+else
 start_test "fold-back: guarded narrative fold present and ordered before worktree removal"
 assert_contains "$FBR" "extract_foldable"               "finish-branch defines/uses extract_foldable"
 assert_contains "$FBR" ".state-seed-snapshot.md"        "finish-branch reads the seed snapshot"
@@ -1280,10 +1360,12 @@ assert_contains "$FBR" "foldable_is_valid"              "finish-branch fold has 
 # Bind to the actual gate-exclusion clause, not a coincidental ## Workflow heading elsewhere in the file.
 assert_contains "$FBR" "Do NOT touch"                   "finish-branch fold action explicitly excludes the gate sections (Do NOT touch)"
 assert_contains "$FBR" "## /goal session"              "finish-branch fold names the gate sections it must not touch"
+fi
 
 # Byte-drift guard: the EXTRACT-FOLDABLE block must be identical (modulo indentation)
 # across new-feature.md step 2b, fix-bug.md step 2b, and finish-branch.md 2.2b — a silent
 # drift between the seed-snapshot extraction and the fold extraction breaks divergence detection.
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "EXTRACT-FOLDABLE block identical (indent-normalized) across the three command files"
 norm_ef() { sed -n '/^[[:space:]]*# EXTRACT-FOLDABLE-BEGIN/,/^[[:space:]]*# EXTRACT-FOLDABLE-END/p' "$1" | sed 's/^[[:space:]]*//'; }
 ef_nf=$(norm_ef "$NF"); ef_fb=$(norm_ef "$FB"); ef_fbr=$(norm_ef "$FBR")
@@ -1294,6 +1376,7 @@ elif [ "$ef_nf" = "$ef_fb" ] && [ "$ef_nf" = "$ef_fbr" ]; then
 else
     fail "EXTRACT-FOLDABLE block drifted across command files"
     diff <(printf '%s' "$ef_nf") <(printf '%s' "$ef_fbr") | head -10
+fi
 fi
 
 # Contract: state.template documents the round-trip (state-continuity-roundtrip, v5.52)
@@ -1316,6 +1399,7 @@ assert_file_exists "$REPO_ROOT/docs/adr/0008-state-continuity-round-trip.md" "AD
 # This test enumerates all common write patterns. If a future regression invents
 # a new way to write files (e.g., `dd of=...`, `python -c 'open(...)'`), we'll
 # add it here when we see it.
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "state-init-block-has-no-bash-writes-under-dot-claude"
 for cmd_file in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md"; do
     block=$(extract_state_init "$cmd_file")
@@ -1465,6 +1549,14 @@ for cmd_file in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
         pass "$name Step 2b prose uses Read+Write tools, no banned writes"
     fi
 done
+else
+start_test "host-neutral state initialization has no host-private path"
+for f in "$NF" "$FB"; do
+    bn=$(basename "$f")
+    assert_not_contains "$f" '.claude/local/state.md' "$bn does not depend on Claude-private state"
+    assert_not_contains "$f" '.codex/' "$bn does not depend on Codex-private state"
+done
+fi
 
 # ---------------------------------------------------------------------------
 # Contract: codex-pty shim — env vars + issue refs + helper present
@@ -1577,8 +1669,8 @@ done
 #     stop_hook_active early-return in check-state-updated.{sh,ps1}.
 #
 #     The early-return takes different forms in each file:
-#       .sh  — `[ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0` (uppercase var, after parsing)
-#       .ps1 — `if ($data.stop_hook_active -eq $true) {`
+#       .sh  — `[ "$STOP_HOOK_ACTIVE" = "true" ] && forge_allow` (host-aware JSON allow)
+#       .ps1 — `if ($data.stop_hook_active -eq $true) {` followed by `Exit-ForgeAllow`
 #     We match on those exact guard patterns (not the comment that mentions
 #     stop_hook_active in lowercase, which appears in the parsing block and
 #     would give a false earlier line number via tail -1).
@@ -1586,13 +1678,22 @@ done
 for f in "$REPO_ROOT/hooks/check-state-updated.sh" "$REPO_ROOT/hooks/check-state-updated.ps1"; do
     [ -f "$f" ] || { fail "consumer missing: $f"; continue; }
     case "$(basename "$f")" in
-        check-state-updated.sh)  guard_pattern='STOP_HOOK_ACTIVE.*exit 0' ;;
+        check-state-updated.sh)  guard_pattern='STOP_HOOK_ACTIVE.*forge_allow' ;;
         check-state-updated.ps1) guard_pattern='data\.stop_hook_active' ;;
         *) fail "unexpected consumer file: $(basename "$f")"; continue ;;
     esac
     EVIDENCE_LINE=$(grep -n 'build-evidence' "$f" | head -1 | cut -d: -f1)
     EXIT_LINE=$(grep -En "$guard_pattern" "$f" | tail -1 | cut -d: -f1)
-    if [ -n "$EVIDENCE_LINE" ] && [ -n "$EXIT_LINE" ] && [ "$EVIDENCE_LINE" -lt "$EXIT_LINE" ]; then
+    ALLOW_OK=0
+    case "$(basename "$f")" in
+        check-state-updated.sh) [ -n "$EXIT_LINE" ] && ALLOW_OK=1 ;;
+        check-state-updated.ps1)
+            if [ -n "$EXIT_LINE" ] && sed -n "${EXIT_LINE},$((EXIT_LINE + 3))p" "$f" | grep -q 'Exit-ForgeAllow'; then
+                ALLOW_OK=1
+            fi
+            ;;
+    esac
+    if [ -n "$EVIDENCE_LINE" ] && [ -n "$EXIT_LINE" ] && [ "$ALLOW_OK" -eq 1 ] && [ "$EVIDENCE_LINE" -lt "$EXIT_LINE" ]; then
         pass "$(basename "$f") invokes build-evidence BEFORE stop_hook_active early-return"
     else
         fail "$(basename "$f") consumer ordering wrong (build-evidence line $EVIDENCE_LINE not before early-return line $EXIT_LINE)"
@@ -1628,6 +1729,7 @@ done
 # ---------------------------------------------------------------------------
 # Contract: /forge-goal Layer 2 — workflow commands have their checkpoint sections
 # ---------------------------------------------------------------------------
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 start_test "Layer 2 — /new-feature has PRD-Complete Checkpoint with correct content"
 
 NF="$REPO_ROOT/commands/new-feature.md"
@@ -1669,6 +1771,16 @@ else
 fi
 # P1.4: REPLACE semantics documented
 assert_contains "$FB" "REPLACE" "fix-bug.md documents REPLACE semantics for /goal session and PR auth"
+else
+start_test "host-neutral development workflows compose native goal with durable Forge authority"
+for f in "$NF" "$FB"; do
+    bn=$(basename "$f")
+    assert_contains "$f" 'native `/goal`' "$bn composes the active host native goal"
+    assert_contains "$f" 'nonce' "$bn binds persistent authorization to an objective nonce"
+    assert_contains "$f" 'human' "$bn keeps PR mutation human-authorized"
+    assert_not_contains "$f" 'AskUserQuestion' "$bn has no Claude-only prompt syntax"
+done
+fi
 
 # ---------------------------------------------------------------------------
 # Contract: /forge-goal Layer 2 — rules/workflow.md has council-during-/goal rule
@@ -1690,7 +1802,8 @@ ST_TPL="$REPO_ROOT/state.template.md"
 assert_file_exists "$ST_TPL" "state.template.md exists"
 assert_contains "$ST_TPL" "## /goal session" "/goal session section documented"
 assert_contains "$ST_TPL" "## PR authorization" "PR authorization section documented"
-assert_contains "$ST_TPL" "Code review iteration" "reviewer-iteration head-SHA convention documented"
+assert_contains "$ST_TPL" "Spec review receipt" "structured spec-review receipt documented"
+assert_contains "$ST_TPL" "Quality review receipt" "structured quality-review receipt documented"
 assert_contains "$ST_TPL" "REPLACE semantics" "REPLACE semantics documented in state.template.md"
 # P1.2: state.template must NOT have a pre-populated empty /goal session table
 # (The section documents the FORMAT, not an empty instance.)
@@ -1789,7 +1902,7 @@ start_test "Layer 2 — PS guard runtime parity with Bash guard (nonce-mismatch 
 if command -v pwsh > /dev/null 2>&1; then
     # Test 1: nonce mismatch → both guards must exit 2 with "nonce mismatch" in stderr
     scratch=$(scratch_dir parity-nonce-mismatch)
-    mkdir -p "$scratch/.claude/local"
+    mkdir -p "$scratch/.forge/local"
     cat > "$scratch/.claude/local/state.md" <<'EOF'
 ## /goal session
 
@@ -1870,7 +1983,7 @@ start_test "Layer 2 — Bash guard uses LAST PR authorization line when multiple
 
 if command -v git > /dev/null 2>&1; then
     scratch=$(scratch_dir stale-dup-contract)
-    mkdir -p "$scratch/.claude/local"
+    mkdir -p "$scratch/.forge/local"
     (
         cd "$scratch"
         git init -q -b main >/dev/null 2>&1 || git init -q >/dev/null 2>&1
@@ -1879,7 +1992,8 @@ if command -v git > /dev/null 2>&1; then
         echo x > a; git add a; git commit -qm init >/dev/null 2>&1
         HEAD_SHA=$(git rev-parse HEAD)
 
-        cat > .claude/local/state.md <<EOF
+        cat > .forge/local/state.md <<EOF
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -1927,23 +2041,20 @@ fi
 # appears in their error messages and in the canonical-stem comment block of
 # compute_plan_review_gate.
 # ---------------------------------------------------------------------------
-start_test "Per-iter clean-line vocabulary parity"
-
-# Canonical stems — changing either side requires changing both files +
-# updating this contract.
-PLAN_STEM='Plan review iteration .* — codex clean — plan='
-CODE_STEM='Code review iteration .* — codex clean — head='
+start_test "candidate-bound structured receipt vocabulary parity"
 
 ok=1
-for f in state.template.md rules/workflow.md commands/new-feature.md commands/fix-bug.md \
-         hooks/check-workflow-gates.sh hooks/check-workflow-gates.ps1 \
-         hooks/build-evidence.sh hooks/build-evidence.ps1; do
-    grep -qE "$PLAN_STEM" "$REPO_ROOT/$f" \
-        || { fail "$f missing canonical Plan review per-iter stem"; ok=0; }
-    grep -qE "$CODE_STEM" "$REPO_ROOT/$f" \
-        || { fail "$f missing canonical Code review per-iter stem"; ok=0; }
+for f in state.template.md rules/workflow.md commands/opinion.md; do
+    for token in "code-spec" "code-quality"; do
+        grep -qF "$token" "$REPO_ROOT/$f" \
+            || { fail "$f missing structured review lens: $token"; ok=0; }
+    done
 done
-[ "$ok" = "1" ] && pass "8 files carry both canonical stems"
+for f in state.template.md rules/workflow.md hooks/build-evidence.sh hooks/build-evidence.ps1; do
+    grep -qiF "candidate" "$REPO_ROOT/$f" \
+        || { fail "$f missing candidate binding"; ok=0; }
+done
+[ "$ok" = "1" ] && pass "structured review lenses remain bound to one candidate"
 
 # ---------------------------------------------------------------------------
 # Contract: "Ground Your Claims" rule parity across its three shipping copies
@@ -1977,9 +2088,10 @@ done
 # The two copies live between <!-- DEV-DEMO-BEGIN --> / <!-- DEV-DEMO-END -->
 # sentinels and MUST be byte-identical (same pattern as the DRIFT-PREFLIGHT
 # blocks). The block must carry its load-bearing stems, and the Gate-2
-# diagram-edge honesty rule must appear in commands/codex.md + rules/workflow.md.
+# diagram-edge honesty rule must appear in host-neutral review + rules/workflow.md.
 start_test "Developer Demo block parity (new-feature ↔ fix-bug) + Gate-2 honesty rule"
 
+if [ "$HOST_NEUTRAL_WORKFLOWS" = "0" ]; then
 extract_demo_block() {
     awk '/<!-- DEV-DEMO-BEGIN/{f=1} f{print} /<!-- DEV-DEMO-END/{f=0}' "$1"
 }
@@ -2001,17 +2113,27 @@ for stem in "git diff --name-status" "git merge-base" "default-branch.sh" "body-
     echo "$NF_DEMO" | grep -qF -- "$stem" || { fail "DEV-DEMO block missing required stem: $stem"; ok=0; }
 done
 
+else
+ok=1
+for workflow in commands/new-feature.md commands/fix-bug.md; do
+    grep -qF 'Developer Demo' "$REPO_ROOT/$workflow" \
+        || { fail "$workflow does not invoke Developer Demo honesty"; ok=0; }
+    grep -qF 'file:line' "$REPO_ROOT/$workflow" \
+        || { fail "$workflow does not require file:line evidence"; ok=0; }
+done
+fi
+
 # Gate-2 diagram-honesty rule must be present in both review surfaces, with its
 # load-bearing parts (not just the phrase): the rule names "diagram edge", binds
 # to "file:line" evidence, and is a "P1" finding.
-for surface in commands/codex.md rules/workflow.md; do
+for surface in commands/opinion.md rules/workflow.md; do
     for token in "diagram edge" "file:line" "P1"; do
         grep -qiF -- "$token" "$REPO_ROOT/$surface" \
             || { fail "$surface missing Gate-2 honesty-rule token: $token"; ok=0; }
     done
 done
 
-[ "$ok" = "1" ] && pass "DEV-DEMO block carries required stems + Gate-2 honesty rule present in codex.md & workflow.md"
+[ "$ok" = "1" ] && pass "DEV-DEMO block carries required stems + Gate-2 honesty rule present in opinion.md & workflow.md"
 
 # ---------------------------------------------------------------------------
 # Contract: plan-stage "spec-loss is P1" severity rule parity (v5.50)
@@ -2027,7 +2149,16 @@ start_test "Plan-stage spec-loss=P1 rule parity (workflow ↔ new-feature ↔ fi
 
 ok=1
 for surface in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
-    for token in "spec-loss is P1" "wrong feature to be built" "does **not** relax the exit"; do
+    if [ "$HOST_NEUTRAL_WORKFLOWS" = "1" ] && [ "$surface" != "rules/workflow.md" ]; then
+        if [ "$surface" = "commands/fix-bug.md" ]; then
+            required_tokens=("spec-loss is P1" "wrong fix" "does **not** relax")
+        else
+            required_tokens=("spec-loss is P1" "wrong feature" "does **not** relax")
+        fi
+    else
+        required_tokens=("spec-loss is P1" "wrong feature to be built" "does **not** relax the exit")
+    fi
+    for token in "${required_tokens[@]}"; do
         grep -qF -- "$token" "$REPO_ROOT/$surface" \
             || { fail "$surface missing plan-stage spec-loss token: $token"; ok=0; }
     done
@@ -2039,217 +2170,21 @@ grep -qF -- "no P0/P1/P2 from all available reviewers on the same pass" "$REPO_R
 [ "$ok" = "1" ] && pass "plan-stage spec-loss=P1 rule present in all 3 surfaces; strict exit preserved"
 
 # ---------------------------------------------------------------------------
-# Contract: /codex hermetic modes capture the verdict via --output-last-message
+# Contract: Task 5 host-neutral review replaces direct /codex launch policy.
 # ---------------------------------------------------------------------------
-# `codex exec [review]` dumps a multi-MB transcript (banner + full diff +
-# reasoning) to stdout; the clean verdict is the LAST message. Without
-# `--output-last-message`, Claude has to hand-extract the verdict from megabytes
-# (the fragile pattern that caused a field misreport — see the council v5.27
-# two-file fix in skills/council/references/peer-review-protocol.md). Investigate
-# mode (D) already captures the OLM file; this asserts the three hermetic modes
-# (A Code Review / B Design Review / C General) do too.
-start_test "/codex hermetic modes (A/B/C) capture the verdict via --output-last-message"
-
+start_test "host-neutral opinion command and transitional codex cutover"
+REVIEW_MD="$REPO_ROOT/commands/opinion.md"
 CODEX_MD="$REPO_ROOT/commands/codex.md"
-# Print the lines of a `## ` section, from its heading to the next `## ` heading.
-# index() is a LITERAL match — avoids regex trouble with the ")" in "## A) ...".
-codex_section() { awk -v s="$1" 'index($0,s){f=1;next} f&&/^## /{f=0} f' "$CODEX_MD"; }
-
-ok=1
-for mode in "## A) Code Review Mode" "## B) Design Review Mode" "## C) General Mode"; do
-    sec=$(codex_section "$mode")
-    # The clean verdict goes to an OLM file. Match flag+path adjacency (only the
-    # COMMAND has "--output-last-message /tmp/codex_response.txt"; the Step-3 prose
-    # says "the --output-last-message file (`/tmp/codex_response.txt`)" — flag and
-    # path non-adjacent) so a regression dropping the flag from the command is caught.
-    echo "$sec" | grep -qF -- "--output-last-message /tmp/codex_response.txt" \
-        || { fail "codex.md '$mode' command lacks --output-last-message /tmp/codex_response.txt (no clean verdict file)"; ok=0; }
-    # ...AND the verbose stdout is redirected to a forensic log so the multi-MB
-    # transcript never enters Claude's context (the half that actually achieves
-    # the goal — adding only --output-last-message still streams stdout to Claude).
-    # Match the EXACT redirect (only present in the command, not the Step-3 prose
-    # that merely names the forensic file) — so the test catches a regression that
-    # drops the redirect from the command while keeping the explanatory prose.
-    echo "$sec" | grep -qF -- "> /tmp/codex_response_full.txt 2>&1" \
-        || { fail "codex.md '$mode' command lacks the '> /tmp/codex_response_full.txt 2>&1' forensic redirect (stdout still dumped to Claude)"; ok=0; }
-done
-# The stale-OLM clear must use a hook-safe truncate (`: > /tmp/...`), NOT
-# `rm -f /tmp/...` — check-bash-safety.sh blocks `rm -[rf]* /<path>` as
-# root-targeting, which would block the /codex block at runtime.
-if grep -qE 'rm[[:space:]]+-[rf]*[[:space:]]+/tmp/codex_response' "$CODEX_MD"; then
-    fail "codex.md uses 'rm -f /tmp/codex_response*' — check-bash-safety blocks it; use ': > /tmp/...' truncate instead"
+if [ "$WORKFLOW_STAGE" = "complete" ]; then
+    assert_file_missing "$CODEX_MD" "completed cutover removes the codex shim"
+    assert_contains "$REPO_ROOT/manifests/managed-v6.tsv" $'tombstone\t-\t.claude/commands/codex.md' "retired shim has a provenance-aware tombstone"
 else
-    pass "codex.md clears the stale OLM with a hook-safe truncate (no blocked 'rm -f /tmp/...')"
+    assert_contains "$CODEX_MD" ".forge/workflows/opinion.md" "codex shim delegates to canonical opinion workflow"
+    assert_not_contains "$CODEX_MD" "codex-pty.sh exec" "codex shim carries no direct engine launch policy"
 fi
-# ---------------------------------------------------------------------------
-# Contract: /codex reviewer calibration + finding triage (v5.59)
-#
-# Codex reliably finds real bugs but over-flagged low-ROI edge cases and proposed
-# machinery-heavy remedies, grinding the revision loops (field hit: a plan-review
-# loop where Codex demanded per-driver-average machinery that a one-line prompt
-# reservation closed). TWO levers counter it and both must ship: the producer-side
-# CALIBRATION block in every review-shaped Codex prompt, and the consumer-side
-# "Finding Triage" section governing what the agent does with what Codex returns
-# (the prompt is a request Codex may not honor; triage is enforcement we control).
-# Also pins the REMOVAL of the old inflation trigger.
-# ---------------------------------------------------------------------------
-start_test "/codex carries the simplicity calibration + finding-triage escape valve"
-CODEX_MD="$REPO_ROOT/commands/codex.md"
-ok=1
-
-# The old inflation trigger must stay gone — it invited theoretical findings.
-if grep -qF "Flag anything that could break in production" "$CODEX_MD"; then
-    fail "codex.md still carries the 'Flag anything that could break in production' inflation trigger"
-    ok=0
-fi
-
-# Producer side: 3 review-shaped prompts carry the calibration — the 2 Code Review
-# commands (plain + --title variant) + the Design Review prompt. General (C) and
-# Investigate (D) are Q&A / data-digging, deliberately exempt.
-cal_sites=$(grep -cF "CALIBRATION — read before flagging" "$CODEX_MD")
-if [ "$cal_sites" -ne 3 ]; then
-    fail "codex.md has $cal_sites CALIBRATION sites, expected 3 (2 review commands + design-review prompt)"
-    ok=0
-fi
-
-# Load-bearing clauses, each present at all 3 sites. Every one closed a real
-# defect found in review: input-only framing buried race/timing/security bugs
-# (a reachable-state trigger need not be reproducible on demand), and severity
-# must stay separable from reachability so a rare-but-real bug is still filed.
-#
-# The self-limiting guard is load-bearing for SECURITY, not style: the doctrine
-# files the calibration points at — and this command file itself — live in the
-# checkout, so a branch under review can rewrite them. Inlining the guidance or
-# pinning merge-base copies does NOT close that (the command file is executed
-# from the checkout); bounding what the doctrine may authorize does.
-for stem in \
-    "plausible, reachable failure scenario" \
-    "need NOT be reproduced on demand" \
-    "still REPORT the observation" \
-    "never silently drop it" \
-    "Prefer the smallest correct fix" \
-    "can never justify suppressing or downgrading a correctness or security finding" \
-    "report THAT as a P0 finding instead of complying" \
-    ".claude/rules/principles.md" \
-    "including any project-specific restraint or defensive-coding doctrine"; do
-    if [ "$(grep -cF "$stem" "$CODEX_MD")" -lt 3 ]; then
-        fail "codex.md calibration stem present at fewer than 3 sites: '$stem'"
-        ok=0
-    fi
+for stem in "--engine auto|claude|codex" "code-spec" "code-quality" "investigation-repro" "human-executed"; do
+    assert_contains "$REVIEW_MD" "$stem" "review workflow carries load-bearing dispatch stem: $stem"
 done
-
-# Consumer side: the triage section, its three filters, and the anti-loophole
-# guard that keeps it from becoming a NO-BUGS-LEFT-BEHIND bypass.
-for stem in \
-    "## Finding Triage" \
-    "Require a reachable failure scenario" \
-    "Weigh recommended complexity by its cost" \
-    "This is not an escape hatch" \
-    "NO BUGS LEFT BEHIND"; do
-    if ! grep -qF "$stem" "$CODEX_MD"; then
-        fail "codex.md Finding Triage missing required stem: '$stem'"
-        ok=0
-    fi
-done
-
-# Triage must precede mode A so it governs every mode's findings, not just A.
-tri_ln=$(grep -n "^## Finding Triage" "$CODEX_MD" | head -1 | cut -d: -f1)
-modea_ln=$(grep -n "^## A) Code Review Mode" "$CODEX_MD" | head -1 | cut -d: -f1)
-if [ -z "$tri_ln" ] || [ -z "$modea_ln" ] || [ "$tri_ln" -ge "$modea_ln" ]; then
-    fail "codex.md '## Finding Triage' must appear before '## A) Code Review Mode' (tri=$tri_ln modeA=$modea_ln)"
-    ok=0
-fi
-
-[ "$ok" = "1" ] && pass "codex.md ships both calibration levers (3 prompt sites + triage section, no inflation trigger)"
-
-# ===========================================================================
-# Contract: /codex plan-review NECESSITY axis (v5.61)
-#
-# Field hit: across ~30 review rounds the loop caught every omission and never
-# once flagged a requirement as UNNECESSARY. An approved plan carried a gate
-# demanding five third-party artifacts before authoring could start; it survived
-# the whole loop, and when a human finally challenged it Codex conceded at once
-# ("no reachable correctness failure uniquely prevented"). The capability was
-# present; only the trigger was missing.
-#
-# Root cause is a delegation dead-end, not a missing concept. Plan review stopped
-# asking "Is there a simpler approach?" (new-feature.md / fix-bug.md) and delegated
-# it to the Approach Comparison + Contrarian Gate; a Contrarian VALIDATE skips
-# council entirely (peer-review-protocol.md), so the Simplifier who asks "Does this
-# need to exist at all?" (advisors.md) may never run; and Codex is separately told
-# not to revisit a council-validated strategic choice. On a VALIDATE plan, NOBODY
-# asks it. The generic gold-plating sentence inside the CALIBRATION paragraph did
-# not activate, so this ships as a TOP-LEVEL numbered agenda axis instead — that
-# placement is the whole reason it should be obeyed, hence pinned below.
-#
-# Deliberately narrow (v5.61 review): scoped to prerequisites/gates/artifacts that
-# materially delay work or add external coordination, NOT every requirement, and
-# severity is gated on concrete cost. An unscoped "name what each requirement
-# uniquely prevents, else it is deletable" rule was rejected — it audits everything,
-# rejects defense-in-depth, treats missing reviewer context as proof of
-# non-necessity, and rebuilds the auto-P2-for-over-engineering churn that v5.59
-# already threw out (see docs/CHANGELOG.md 5.59). Those rejected phrasings are
-# pinned ABSENT so the narrowing can't silently regress.
-# ---------------------------------------------------------------------------
-start_test "/codex plan review carries the NECESSITY axis (scoped, cost-gated, agenda-level)"
-CODEX_MD="$REPO_ROOT/commands/codex.md"
-ok=1
-
-# Exactly one site: the Design Review producer prompt. NOT duplicated into the two
-# Code Review calibration blocks — code review already has Codex over-engineering
-# guidance, a code-simplifier reviewer, and a separate /simplify phase. Widening
-# this without field evidence is how prompt bloat starts.
-nec_sites=$(grep -cF "6. NECESSITY:" "$CODEX_MD")
-if [ "$nec_sites" -ne 1 ]; then
-    fail "codex.md has $nec_sites '6. NECESSITY:' sites, expected exactly 1 (design-review prompt only)"
-    ok=0
-fi
-
-# Load-bearing stems. Each encodes a specific rejected alternative:
-#   scope gate  -> targets the observed class, not an exhaustive requirement audit
-#   prevent/reduce -> permits layered + jointly-sufficient controls
-#   cost-gated severity -> blocks on delivery cost, never on taste
-for stem in \
-    "materially delays work or adds external coordination" \
-    "prevent or reduce" \
-    "P2 for material delivery/coordination cost and P3 for mere redundancy"; do
-    if ! grep -qF "$stem" "$CODEX_MD"; then
-        fail "codex.md NECESSITY axis missing load-bearing stem: '$stem'"
-        ok=0
-    fi
-done
-
-# The overcorrections that were rejected must stay out.
-for banned in \
-    "uniquely prevents" \
-    "mark it deletable"; do
-    if grep -qF "$banned" "$CODEX_MD"; then
-        fail "codex.md reintroduced a rejected absolutist NECESSITY phrasing: '$banned'"
-        ok=0
-    fi
-done
-
-# Placement is the mechanism: the axis must sit inside the Design Review numbered
-# list — after '## B)', before '## C)', and BEFORE that prompt's CALIBRATION block.
-# Demoting it into the ~310-word calibration paragraph is exactly the burial that
-# made the existing gold-plating clause inert.
-nec_ln=$(grep -nF "6. NECESSITY:" "$CODEX_MD" | head -1 | cut -d: -f1)
-b_ln=$(grep -n "^## B) Design Review Mode" "$CODEX_MD" | head -1 | cut -d: -f1)
-c_ln=$(grep -n "^## C) General Mode" "$CODEX_MD" | head -1 | cut -d: -f1)
-flag_ln=$(grep -nF "Flag any concerns that should be addressed BEFORE" "$CODEX_MD" | head -1 | cut -d: -f1)
-cal_ln=$(awk -v s="$b_ln" 'NR>s && /CALIBRATION — read before flagging/ {print NR; exit}' "$CODEX_MD")
-if [ -z "$nec_ln" ] || [ -z "$b_ln" ] || [ -z "$c_ln" ] || [ -z "$flag_ln" ] || [ -z "$cal_ln" ]; then
-    fail "codex.md NECESSITY placement markers missing (nec=$nec_ln b=$b_ln c=$c_ln flag=$flag_ln cal=$cal_ln)"
-    ok=0
-elif [ "$nec_ln" -le "$b_ln" ] || [ "$nec_ln" -ge "$c_ln" ]; then
-    fail "codex.md NECESSITY axis outside Design Review Mode (nec=$nec_ln, B=$b_ln, C=$c_ln)"
-    ok=0
-elif [ "$nec_ln" -ge "$flag_ln" ] || [ "$nec_ln" -ge "$cal_ln" ]; then
-    fail "codex.md NECESSITY axis must precede the 'Flag any concerns' line and the CALIBRATION block (nec=$nec_ln flag=$flag_ln cal=$cal_ln)"
-    ok=0
-fi
-
-[ "$ok" = "1" ] && pass "codex.md NECESSITY axis is a single agenda-level item, scoped and cost-gated"
 
 # ===========================================================================
 # convergence-breaker (v5.54, ADR 0009)
@@ -2351,11 +2286,19 @@ start_test "convergence-breaker: /goal council carve-out + convergence-breaker p
 # reminder DO-bullet) — `never substitute /council` must appear >= 2 per command.
 for f in commands/new-feature.md commands/fix-bug.md; do
     bn=$(basename "$f")
-    CNT=$(grep -c "never substitute /council" "$REPO_ROOT/$f" || true)
-    if [ "$CNT" -ge 2 ]; then
-        pass "$bn carries the breaker carve-out at both /goal sites ($CNT)"
+    if [ "$HOST_NEUTRAL_WORKFLOWS" = "1" ]; then
+        if grep -qF 'only a human may adjudicate a tripped breaker' "$REPO_ROOT/$f"; then
+            pass "$bn keeps breaker adjudication human-only"
+        else
+            fail "$bn does not keep breaker adjudication human-only"
+        fi
     else
-        fail "$bn breaker carve-out missing from a /goal site (found $CNT, need >=2)"
+        CNT=$(grep -c "never substitute /council" "$REPO_ROOT/$f" || true)
+        if [ "$CNT" -ge 2 ]; then
+            pass "$bn carries the breaker carve-out at both /goal sites ($CNT)"
+        else
+            fail "$bn breaker carve-out missing from a /goal site (found $CNT, need >=2)"
+        fi
     fi
 done
 for f in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
@@ -2444,58 +2387,17 @@ check9_parity "redirect form (>/>>/N>)"     '[12]?>>?'
 check9_parity "single-token target stops at ;&|" '|&;'
 
 # ---------------------------------------------------------------------------
-# Contract: commands/codex.md Investigate mode is prompt-free by construction.
-# No command surface may contain an inline .claude/ READER (incl. $(cat …)) or
-# WRITER; Step 1 (Write CONTEXT.md) must precede the Step 2 codex launch.
+# Contract: transitional shim stays policy-free while /opinion owns investigation.
 # ---------------------------------------------------------------------------
-start_test "codex.md Investigate mode has no inline .claude/ reader or writer"
-CODEX_MD="$REPO_ROOT/commands/codex.md"
-codex_cmds=$(awk '/^```bash/{f=1;next} /^```/{f=0} f{print} /^\| (Investigate|Review|General)/{print}' "$CODEX_MD" \
-    | grep -v '^[[:space:]]*#' \
-    | awk 'BEGIN{p=""} /\\$/{p=p substr($0,1,length($0)-1) " "; next} {print p $0; p=""}')
-cv=""
-# Detectors mirror the (lean) runtime check #9 shape. Target is any `.claude/`
-# here (codex.md surfaces must have NO inline .claude/ op at all — stricter than
-# the runtime's .claude/local scope, and the reader list is broader since a read
-# of the brief file would also prompt).
-# ⚠ KEEP IN SYNC with check #9 in hooks/check-bash-safety.{sh,ps1}: these regexes
-# duplicate the hook's shape (no shared lib — hooks ship inline per the
-# no-runtime-deps model). If a hook write-primitive/redirect form changes, update
-# these too, or this codex.md scanner silently drifts.
-RE_READER='(^|[^A-Za-z0-9_])(/[^[:space:]]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[[:space:]][^|&;]*\.claude/'
-RE_WRITER='(^|[[:space:]])(mkdir|touch|cp|mv|tee|rm)[[:space:]][^|&;]*\.claude/'
-RE_REDIR='(^|[[:space:]])[12]?>>?[[:space:]]*[^[:space:]|&;]*\.claude/'
-if echo "$codex_cmds" | grep -qE "$RE_READER"; then
-    cv="inline .claude/ reader (cat/sed/… incl. \$(cat …))"
-elif echo "$codex_cmds" | grep -qE "$RE_WRITER"; then
-    cv="write-primitive into .claude/"
-elif echo "$codex_cmds" | grep -qE "$RE_REDIR"; then
-    cv="redirect into .claude/"
-fi
-[ -z "$cv" ] && pass "codex.md command surfaces have no inline .claude/ reader/writer" || fail "codex.md Investigate surface has a prompt-tripping .claude/ op: $cv"
-
-# Self-tests: the detectors catch every spelling (guards regex rot). Reader via
-# command substitution + writers with abspath / separator / pipe / attached-redirect.
-if echo 'foo="$(cat .claude/local/investigate/CONTEXT.md)"' | grep -qE "$RE_READER"; then
-    pass "reader detector catches \$(cat .claude/…) command substitution"
+start_test "transitional codex shim has no direct investigation or model invocation"
+if [ "$WORKFLOW_STAGE" = "complete" ]; then
+    assert_file_missing "$REPO_ROOT/commands/codex.md" "completed cutover leaves no transitional shim"
 else
-    fail "reader detector MISSES \$(cat .claude/…) — boundary regex broken"
+    assert_not_contains "$REPO_ROOT/commands/codex.md" "## D) Investigate Mode" "codex shim has no duplicate investigation policy"
+    assert_not_contains "$REPO_ROOT/commands/codex.md" "--output-last-message" "codex shim has no direct model argv"
 fi
-_wf=0
-for w in 'mkdir .claude/local/x' 'touch .claude/local/x' 'echo hi > .claude/local/x' ': > .claude/local/x'; do
-    if echo "$w" | grep -qE "$RE_WRITER" || echo "$w" | grep -qE "$RE_REDIR"; then :; else fail "writer detector MISSES: $w"; _wf=1; fi
-done
-[ "$_wf" = 0 ] && pass "writer detector catches the common create/redirect writers"
-
-# Step 1 (Write CONTEXT.md) precedes Step 2 (codex launch), scoped to the D) section.
-inv=$(awk '/^## D\) Investigate Mode/{f=1;print;next} /^## /{if(f)exit} f{print}' "$CODEX_MD")
-ctx_rel=$(printf '%s\n' "$inv" | grep -n 'CONTEXT\.md' | head -1 | cut -d: -f1)
-launch_rel=$(printf '%s\n' "$inv" | grep -n 'codex-pty\.sh exec' | head -1 | cut -d: -f1)
-if [ -n "$ctx_rel" ] && [ -n "$launch_rel" ] && [ "$ctx_rel" -lt "$launch_rel" ]; then
-    pass "codex.md Step 1 (CONTEXT.md) precedes Step 2 (codex launch) within ## D)"
-else
-    fail "codex.md Step 1/Step 2 ordering wrong or markers missing (ctx=$ctx_rel launch=$launch_rel)"
-fi
+assert_contains "$REPO_ROOT/commands/opinion.md" "disposable candidate" "opinion workflow owns bounded investigation"
+assert_contains "$REPO_ROOT/commands/opinion.md" "independent control" "opinion workflow requires independent reproduction control"
 
 # ---------------------------------------------------------------------------
 # Contract: post-tool-format must NOT run prettier on Markdown (v5.56).
@@ -2531,4 +2433,352 @@ fi
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
+start_test "Task 4 host-neutral review repairs have Bash and PowerShell parity"
+for hook in build-evidence check-state-updated check-workflow-gates; do
+    assert_contains "$REPO_ROOT/hooks/$hook.sh" 'FORGE_STATE_INVALID' \
+        "$hook.sh preserves invalid canonical-state failures"
+    assert_contains "$REPO_ROOT/hooks/$hook.ps1" 'FORGE_STATE_INVALID' \
+        "$hook.ps1 preserves invalid canonical-state failures"
+done
+assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" 'if (-not $StateIsV6) { return $result }' \
+    "PowerShell plan-review evidence is v6-only"
+assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" 'if (-not $StateIsV6) { return $result }' \
+    "PowerShell PR authorization evidence is v6-only"
+assert_contains "$REPO_ROOT/hooks/check-subagent-review.sh" "'.agent_type'" \
+    "Bash subagent evaluator uses the native agent_type field"
+assert_not_contains "$REPO_ROOT/hooks/check-subagent-review.sh" "'.producer'" \
+    "Bash subagent evaluator no longer depends on fabricated producer input"
+assert_contains "$REPO_ROOT/hooks/check-subagent-review.ps1" '$data.agent_type' \
+    "PowerShell subagent evaluator uses the native agent_type field"
+assert_not_contains "$REPO_ROOT/hooks/check-subagent-review.ps1" '$data.producer' \
+    "PowerShell subagent evaluator no longer depends on fabricated producer input"
+assert_contains "$REPO_ROOT/hooks/post-tool-format.sh" '.tool_input.command // .tool_input.patch' \
+    "Bash formatter reads documented Codex apply_patch command text first"
+assert_contains "$REPO_ROOT/hooks/post-tool-format.ps1" 'tool_input.command' \
+    "PowerShell formatter reads documented Codex apply_patch command text"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'forge-goal-authorize.ps1.sha256' \
+    "PowerShell goal hook verifies the installed writer seal"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'ReparsePoint' \
+    "PowerShell goal hook rejects reparse-point ancestors"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'CreateNew' \
+    "PowerShell checkpoint and marker publication uses no-clobber writes"
+
+start_test "Task 5 dispatcher surfaces are installed and every canonical workflow reference resolves"
+MANAGED_V6="$REPO_ROOT/manifests/managed-v6.tsv"
+for source in commands/opinion.md agents/independent-reviewer.md agents/forge-v6-producer.md \
+  hooks/lib/agent-dispatch.sh hooks/lib/agent-dispatch.ps1 \
+  hooks/lib/host-context.sh hooks/lib/host-context.ps1 \
+  hooks/lib/authorized-action.sh hooks/lib/authorized-action.ps1 \
+  hooks/lib/candidate-fingerprint.sh hooks/lib/candidate-fingerprint.ps1 \
+  hooks/check-external-mutation-auth.sh hooks/check-external-mutation-auth.ps1 \
+  scripts/render-dispatch-config.sh scripts/render-dispatch-config.ps1; do
+    if awk -F '\t' -v s="$source" '$2==s {found=1} END {exit found?0:1}' "$MANAGED_V6"; then
+        pass "$source has an installed v6 destination"
+    else
+        fail "$source is missing from managed-v6.tsv"
+    fi
+done
+
+start_test "portable opinion invocation and strict producer type are explicit"
+assert_contains "$REPO_ROOT/manifests/workflow-capabilities.tsv" $'forge-workflow\treview\tclaude:/opinion;codex:$opinion' \
+    "capability map records each host-native opinion invocation"
+assert_contains "$REPO_ROOT/commands/opinion.md" 'Forge opinion workflow' \
+    "canonical opinion workflow does not claim slash-command portability"
+for workflow in new-feature fix-bug; do
+    assert_contains "$REPO_ROOT/commands/$workflow.md" '`forge-v6-producer`' \
+        "$workflow invokes the exact receipt-producing agent type"
+done
+assert_contains "$REPO_ROOT/FORGE.template.md" 'Claude Code uses `/opinion`; Codex uses `$opinion`' \
+    "canonical root explains host-native opinion invocation"
+
+references=$(rg -o --no-filename '\.forge/workflows/[A-Za-z0-9_./-]+\.md' \
+  "$REPO_ROOT/commands" "$REPO_ROOT/rules" "$REPO_ROOT/skills" "$REPO_ROOT/agents" \
+  | LC_ALL=C sort -u || true)
+while IFS= read -r reference; do
+    [ -n "$reference" ] || continue
+    if awk -F '\t' -v d="$reference" '$3==d {found=1} END {exit found?0:1}' "$MANAGED_V6"; then
+        pass "canonical workflow reference resolves: $reference"
+    else
+        fail "dangling canonical workflow reference: $reference"
+    fi
+done <<EOF
+$references
+EOF
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-agent-dispatch.sh' \
+    "deterministic dispatcher suite is registered"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-council-dispatch.sh' \
+    "council topology suite is registered"
+assert_contains "$REPO_ROOT/hooks/lib/council-dispatch.sh" 'same-engine-fallback' \
+    "council dispatcher records whole-topology fallback"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-authorized-action.sh' \
+    "human-action boundary suite is registered"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-skill-pressure-schema.sh' \
+    "deterministic skill-pressure schema suite is registered without a model invocation"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-resource-discipline.sh' \
+    "resource-discipline contract is registered"
+assert_contains "$REPO_ROOT/templates/review-result.template.txt" 'review_mode=broad|closure' \
+    "review result schema records broad versus closure scope"
+assert_contains "$REPO_ROOT/scripts/qualify-skill-pressure.sh" '--validate-fixture' \
+    "Bash skill-pressure runner separates deterministic fixture checks from live qualification"
+assert_contains "$REPO_ROOT/scripts/qualify-skill-pressure.ps1" 'ValidateFixture' \
+    "PowerShell skill-pressure runner mirrors deterministic fixture qualification"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Invoke-IndependentReproduction' \
+    "PowerShell dispatcher owns independent primary/control reproduction"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Reserve-OwnedReviewPath' \
+    "PowerShell dispatcher confines no-clobber outputs"
+assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" 'receipt_hash=' \
+    "PowerShell host launcher uses a protected current-session receipt"
+
+# ---------------------------------------------------------------------------
+# Contract: v6 public documentation describes the active dual-host surface.
+# Historical CHANGELOG and superseded ADRs are intentionally outside this
+# contract: they preserve the terminology of the releases they describe.
+# ---------------------------------------------------------------------------
+start_test "v6 public docs expose one canonical dual-host contract"
+README="$REPO_ROOT/README.md"
+GETTING_STARTED="$REPO_ROOT/docs/getting-started.md"
+UPGRADING="$REPO_ROOT/docs/guides/upgrading.md"
+PARALLEL="$REPO_ROOT/docs/guides/parallel-sessions.md"
+WORKFLOW_DOC="$REPO_ROOT/docs/explanation/workflow.md"
+GOAL_DOC="$REPO_ROOT/docs/explanation/autonomous-goal.md"
+INVESTIGATE_DOC="$REPO_ROOT/docs/explanation/codex-investigate.md"
+COUNCIL_DOC="$REPO_ROOT/docs/explanation/engineering-council.md"
+MEMORY_DOC="$REPO_ROOT/docs/explanation/memory-architecture.md"
+COMMANDS_DOC="$REPO_ROOT/docs/reference/commands.md"
+STRUCTURE_DOC="$REPO_ROOT/docs/reference/file-structure.md"
+HOOKS_DOC="$REPO_ROOT/docs/reference/hooks.md"
+CHEATSHEET_DOC="$REPO_ROOT/docs/reference/cheatsheet.md"
+TROUBLESHOOTING_DOC="$REPO_ROOT/docs/troubleshooting.md"
+ADR_0010="$REPO_ROOT/docs/adr/0010-dual-engine-canonical-harness.md"
+
+assert_contains "$README" 'Claude Code uses `/opinion`; Codex uses `$opinion`' \
+    "README gives both host-native opinion invocations"
+assert_contains "$COMMANDS_DOC" 'Claude Code: `/opinion investigate`' \
+    "commands reference gives Claude investigation invocation"
+assert_contains "$COMMANDS_DOC" 'Codex: `$opinion investigate`' \
+    "commands reference gives Codex investigation invocation"
+assert_contains "$COMMANDS_DOC" '`review` is reserved by both supported hosts' \
+    "commands reference explains why Forge uses opinion instead of review"
+assert_contains "$README" './setup.sh -F' \
+    "README leads legacy installs to authoritative Unix full refresh"
+assert_contains "$README" './setup.ps1 -FullRefresh' \
+    "README leads legacy installs to authoritative Windows full refresh"
+assert_contains "$UPGRADING" 'PRESERVED_COMPAT_BLOCKED' \
+    "upgrade guide explains compatibility blockers"
+assert_contains "$UPGRADING" 'scripts/recover-full-refresh.sh' \
+    "upgrade guide explains explicit recovery"
+
+assert_contains "$GETTING_STARTED" '| Claude Code | `2.1.237`' \
+    "compatibility table records the qualified Claude baseline"
+assert_contains "$GETTING_STARTED" '| Codex CLI | `0.144.1`' \
+    "compatibility table records the qualified Codex baseline"
+assert_contains "$GETTING_STARTED" 'MATERIALIZED' \
+    "getting started distinguishes installed files"
+assert_contains "$GETTING_STARTED" 'RUNTIME_READY' \
+    "getting started distinguishes host readiness"
+
+start_test "README sells the v6 engineering harness and explains the operating model"
+assert_contains "$README" '## Why Forge instead of vanilla Claude Code or Codex?' \
+    "README leads with the adoption case beyond vanilla agent sessions"
+assert_contains "$README" 'engineering discipline' \
+    "README explains the discipline value proposition"
+assert_contains "$README" '## How the dual-engine harness works' \
+    "README explains the canonical dual-engine architecture"
+assert_contains "$README" '## What setup installs' \
+    "README shows the installed project surfaces"
+assert_contains "$README" 'MATERIALIZED' \
+    "README distinguishes installed files from runtime readiness"
+assert_contains "$README" 'RUNTIME_READY' \
+    "README explains authenticated runtime readiness"
+assert_contains "$README" 'one broad review, one repair pass, and one closure review' \
+    "README makes bounded resource discipline part of the product promise"
+assert_contains "$README" 'real worktree' \
+    "README explains full-agent investigation honestly"
+
+start_test "live setup and investigation docs match the v6 implementation"
+assert_not_contains "$GETTING_STARTED" 'confined to the disposable investigator' \
+    "getting started no longer describes full investigation as disposable"
+assert_contains "$GETTING_STARTED" 'real worktree' \
+    "getting started describes the full-agent investigation boundary"
+assert_not_contains "$COMMANDS_DOC" 'declared live-data query channel' \
+    "commands reference does not require the removed declared-channel handoff"
+assert_not_contains "$COMMANDS_DOC" 'controls which `rules/*.md` get installed' \
+    "commands reference does not claim that -t prunes the canonical ruleset"
+assert_contains "$COMMANDS_DOC" 'does not prune the canonical v6 rules or skills' \
+    "commands reference documents the actual v6 -t behavior"
+
+start_test "both installer summaries name the real v6 commit surfaces"
+for installer in "$REPO_ROOT/setup.sh" "$REPO_ROOT/setup.ps1"; do
+    assert_contains "$installer" '.forge/' "$(basename "$installer") summary names canonical .forge"
+    assert_contains "$installer" '.codex/' "$(basename "$installer") summary names Codex configuration"
+    assert_contains "$installer" '.agents/' "$(basename "$installer") summary names Codex skill adapters"
+    assert_contains "$installer" 'AGENTS.md' "$(basename "$installer") summary names the Codex root adapter"
+    assert_contains "$installer" 'git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/' \
+        "$(basename "$installer") gives complete v6 commit guidance"
+done
+
+assert_contains "$STRUCTURE_DOC" '.forge/instructions.md' \
+    "file structure names the canonical instructions"
+assert_contains "$MEMORY_DOC" '.forge/local/state.md' \
+    "memory guide names the canonical shared state"
+assert_contains "$HOOKS_DOC" '.forge/local/reviews/' \
+    "hook guide names artifact-bound receipt storage"
+assert_contains "$PARALLEL" 'Do not edit the same worktree from both hosts simultaneously' \
+    "parallel guide warns against simultaneous same-worktree edits"
+assert_contains "$HOOKS_DOC" 'primary checkout' \
+    "hook guide explains Codex linked-worktree routing"
+assert_contains "$TROUBLESHOOTING_DOC" 'CODEX_HOOKS: BLOCKED' \
+    "troubleshooting covers blocked Codex hook registration"
+
+assert_contains "$WORKFLOW_DOC" 'one broad review' \
+    "workflow documents the bounded review shape"
+assert_contains "$WORKFLOW_DOC" 'P3' \
+    "workflow documents non-blocking low-confidence findings"
+assert_contains "$WORKFLOW_DOC" 'P0/P1' \
+    "workflow preserves reachable high-severity blockers"
+assert_contains "$CHEATSHEET_DOC" 'one repair and one closure' \
+    "cheatsheet states the default review-loop bound"
+assert_contains "$GOAL_DOC" 'same native `/goal`' \
+    "goal guide explains host-native composition"
+assert_contains "$INVESTIGATE_DOC" 'explicit authorization' \
+    "investigation guide requires explicit capability authorization"
+assert_contains "$COUNCIL_DOC" 'three advisors use the current host' \
+    "council guide documents the healthy topology"
+assert_contains "$COUNCIL_DOC" 'whole council' \
+    "council guide documents whole-topology fallback"
+
+assert_file_exists "$ADR_0010" "dual-engine architecture decision exists"
+assert_contains "$ADR_0010" '### Canonical Harness and Host Adapters' \
+    "ADR records the canonical/adapters facet"
+assert_contains "$ADR_0010" '### Fresh-Run Review Independence' \
+    "ADR records reviewer independence"
+assert_contains "$ADR_0010" '### Manifest-Driven Full Refresh' \
+    "ADR records authoritative migration"
+
+start_test "v6 active docs do not regress to one-host commands or ownership"
+ACTIVE_V6_DOCS=(
+    "$GETTING_STARTED" "$REPO_ROOT/docs/guides/setup-scenarios.md"
+    "$UPGRADING" "$PARALLEL" "$WORKFLOW_DOC" "$GOAL_DOC" "$INVESTIGATE_DOC"
+    "$COUNCIL_DOC" "$MEMORY_DOC" "$COMMANDS_DOC" "$STRUCTURE_DOC" "$HOOKS_DOC"
+    "$REPO_ROOT/docs/reference/permissions.md" "$CHEATSHEET_DOC" "$TROUBLESHOOTING_DOC"
+    "$REPO_ROOT/docs/explanation/harness-philosophy.md"
+    "$REPO_ROOT/docs/guides/customize-project.md"
+    "$REPO_ROOT/docs/guides/multi-project-isolation.md"
+)
+for active_doc in "${ACTIVE_V6_DOCS[@]}"; do
+    assert_not_contains "$active_doc" '`/codex`' \
+        "$(basename "$active_doc") has no retired /codex command"
+done
+README_ACTIVE=$(awk '/^## Version history/{exit} {print}' "$README")
+if printf '%s\n' "$README_ACTIVE" | grep -qF '`/codex`'; then
+    fail "README live sections contain the retired /codex command"
+else
+    pass "README live sections have no retired /codex command (historical rows preserved)"
+fi
+STALE_SETUP=$(grep -nHE 'setup\.sh (-f|--upgrade)|setup\.ps1[^[:cntrl:]]*-(Force|Upgrade)' \
+    "${ACTIVE_V6_DOCS[@]}" 2>/dev/null || true)
+if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh (-f|--upgrade)|setup\.ps1[^[:cntrl:]]*-(Force|Upgrade)'; then
+    STALE_SETUP="README live sections contain an obsolete incremental/force-upgrade instruction${STALE_SETUP:+$'\n'$STALE_SETUP}"
+fi
+if [ -z "$STALE_SETUP" ]; then
+    pass "active v6 docs use authoritative full refresh rather than old force/upgrade commands"
+else
+    fail "active v6 docs contain obsolete force/upgrade commands: $STALE_SETUP"
+fi
+assert_not_contains "$README" 'Per-developer Workflow / Done / Now / Next state lives in gitignored `.claude/local/state.md`' \
+    "README no longer assigns shared state ownership to .claude"
+for canonical_state_doc in "$GETTING_STARTED" "$REPO_ROOT/docs/guides/setup-scenarios.md" \
+    "$UPGRADING" "$PARALLEL" "$WORKFLOW_DOC" "$GOAL_DOC" "$INVESTIGATE_DOC" \
+    "$COUNCIL_DOC" "$MEMORY_DOC" "$COMMANDS_DOC" "$STRUCTURE_DOC" "$HOOKS_DOC" \
+    "$REPO_ROOT/docs/reference/permissions.md" "$CHEATSHEET_DOC" \
+    "$REPO_ROOT/docs/explanation/harness-philosophy.md" \
+    "$REPO_ROOT/docs/guides/customize-project.md" \
+    "$REPO_ROOT/docs/guides/multi-project-isolation.md"; do
+    assert_not_contains "$canonical_state_doc" '.claude/local/state.md' \
+        "$(basename "$canonical_state_doc") does not assign active state to the legacy host path"
+done
+assert_not_contains "$WORKFLOW_DOC" 'Codex is always the reviewer' \
+    "workflow does not hardcode Codex as reviewer"
+assert_not_contains "$REPO_ROOT/state.template.md" 'Codex is mandatory in this repo' \
+    "state template does not hardcode Codex as the required reviewer"
+assert_contains "$REPO_ROOT/state.template.md" 'fresh same-engine reviewer' \
+    "state template documents visible same-engine reviewer fallback"
+
+start_test "6.0 release and ADR index are published without rewriting history"
+assert_contains "$REPO_ROOT/docs/adr/README.md" '0010-dual-engine-canonical-harness.md' \
+    "ADR index includes the dual-engine decision"
+FIRST_CHANGELOG_VERSION=$(grep -m1 '^## [0-9]' "$REPO_ROOT/docs/CHANGELOG.md")
+assert_equals "$FIRST_CHANGELOG_VERSION" '## 6.0 — 2026-08-27' \
+    "6.0 is the top changelog release"
+
+start_test "Forge source repository uses one contributor guide with thin host adapters"
+assert_file_exists "$REPO_ROOT/CONTRIBUTING.md" \
+    "canonical contributor guide exists"
+assert_file_exists "$REPO_ROOT/AGENTS.md" \
+    "Codex-native source-repository adapter exists"
+assert_contains "$REPO_ROOT/CLAUDE.md" '@CONTRIBUTING.md' \
+    "Claude adapter imports the canonical contributor guide"
+assert_contains "$REPO_ROOT/CLAUDE.md" '@FORGE.template.md' \
+    "Claude adapter imports the installed-policy source"
+assert_contains "$REPO_ROOT/AGENTS.md" 'Read `CONTRIBUTING.md` and `FORGE.template.md`' \
+    "Codex adapter points to the same two canonical sources"
+for adapter in "$REPO_ROOT/CLAUDE.md" "$REPO_ROOT/AGENTS.md"; do
+    if [ -f "$adapter" ]; then
+        adapter_lines=$(wc -l < "$adapter" | tr -d ' ')
+        if [ "$adapter_lines" -le 15 ]; then
+            pass "$(basename "$adapter") stays a thin discovery adapter"
+        else
+            fail "$(basename "$adapter") duplicates policy ($adapter_lines lines; expected at most 15)"
+        fi
+    fi
+done
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`FORGE.template.md` is the canonical policy installed into downstream projects' \
+    "contributor guide distinguishes source-repository guidance from installed policy"
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`manifests/managed-v6.tsv`' \
+    "contributor guide names the installation ownership manifest"
+assert_contains "$REPO_ROOT/CLAUDE.template.md" 'v5 compatibility' \
+    "legacy Claude template is explicitly labeled as a compatibility surface"
+assert_contains "$REPO_ROOT/CLAUDE.template.md" 'templates/adapters/CLAUDE.block.template.md' \
+    "legacy Claude template points maintainers to the v6 adapter source"
+
+SOURCE_PRIVATE_POLICY=""
+while IFS= read -r source_private_path; do
+    if [ -e "$REPO_ROOT/$source_private_path" ] || [ -L "$REPO_ROOT/$source_private_path" ]; then
+        SOURCE_PRIVATE_POLICY="${SOURCE_PRIVATE_POLICY}${SOURCE_PRIVATE_POLICY:+, }${source_private_path}"
+    fi
+done < <(git -C "$REPO_ROOT" ls-files '.claude/**' '.codex/**' '.agents/**')
+if [ -z "$SOURCE_PRIVATE_POLICY" ]; then
+    pass "Forge source mode carries no tracked host-private policy copies"
+else
+    fail "Forge source mode contains tracked generated or host-private policy: $SOURCE_PRIVATE_POLICY"
+fi
+
+start_test "README presents a readable workflow and one-source instruction mapping"
+assert_contains "$README" 'flowchart TB' \
+    "engineering workflow uses a vertical Mermaid layout"
+assert_not_contains "$README" 'flowchart LR' \
+    "engineering workflow is not compressed into one horizontal strip"
+for phase in DEFINE BUILD CERTIFY SHIP; do
+    assert_contains "$README" "$phase</b>" \
+        "engineering workflow names the $phase phase"
+done
+assert_contains "$README" '### One source of truth, two native adapters' \
+    "README explains the native-adapter architecture"
+assert_contains "$README" '`FORGE.template.md` | `.forge/instructions.md`' \
+    "README maps canonical policy into downstream projects"
+assert_contains "$README" '`templates/adapters/CLAUDE.block.template.md` | Forge-owned block in `CLAUDE.md`' \
+    "README maps the Claude adapter source"
+assert_contains "$README" '`templates/adapters/AGENTS.block.template.md` | Forge-owned block in `AGENTS.md`' \
+    "README maps the Codex adapter source"
+assert_contains "$README" 'Do not copy shared policy between `CLAUDE.md` and `AGENTS.md`' \
+    "README tells users not to maintain duplicated host instructions"
+assert_not_contains "$README" 'edit `.forge/instructions.md` in the installed project' \
+    "README does not tell users to edit setup-managed canonical policy"
+assert_contains "$README" '`docs/agent-context.md`' \
+    "README recommends one team-owned project context file"
+assert_not_contains "$REPO_ROOT/docs/guides/customize-project.md" 'mirror' \
+    "customization guide does not recommend duplicated project guidance"
+assert_contains "$REPO_ROOT/docs/guides/customize-project.md" '`docs/agent-context.md`' \
+    "customization guide uses the same neutral project context convention"
+
 report "test-contracts.sh"

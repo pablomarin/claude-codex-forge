@@ -1,7 +1,5 @@
 {
   "enabledPlugins": {
-    "superpowers@claude-plugins-official": true,
-    "pr-review-toolkit@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true
   },
   "permissions": {
@@ -9,8 +7,8 @@
       "Read",
       "Edit",
       "Write",
-      "Edit(./.claude/local/**)",
-      "Edit(**/.claude/local/**)",
+      "Edit(./.forge/local/**)",
+      "Edit(**/.forge/local/**)",
       "Bash",
       "Bash(codex:*)",
       "Bash(rm -rf .mypy_cache)",
@@ -32,7 +30,23 @@
       "Bash(dd:*)",
       "Bash(mkfs:*)",
       "Bash(Remove-Item -Recurse -Force C:\\:*)",
-      "Bash(Remove-Item -Recurse -Force $env:USERPROFILE:*)"
+      "Bash(Remove-Item -Recurse -Force $env:USERPROFILE:*)",
+      "Write(~/.forge/bin/**)",
+      "Edit(~/.forge/bin/**)",
+      "Bash(*.forge/bin*:*)",
+      "Read(~/.forge/goal-captures/**)",
+      "Write(~/.forge/goal-captures/**)",
+      "Edit(~/.forge/goal-captures/**)",
+      "Write(~/.forge/goal-authorizations/**)",
+      "Edit(~/.forge/goal-authorizations/**)",
+      "Bash(*.forge/goal-captures*:*)",
+      "Bash(*.forge/goal-authorizations*:*)",
+      "Bash(*forge-goal-authorize*:*)",
+      "Bash(*forge-goal-capture*:*)",
+      "Read(~/.forge/host-contexts/**)",
+      "Write(~/.forge/host-contexts/**)",
+      "Edit(~/.forge/host-contexts/**)",
+      "Bash(*.forge/host-contexts*:*)"
     ],
     "ask": [
       "Bash(gh pr create:*)",
@@ -43,6 +57,15 @@
       "Bash(Remove-Item -Recurse:*)"
     ]
   },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": ["~/.forge/goal-captures"],
+      "denyWrite": ["~/.forge/bin", "~/.forge/goal-captures", "~/.forge/goal-authorizations", "~/.forge/host-contexts"]
+    }
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -50,7 +73,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.ps1\""
+            "forgeManagedId": "host-context",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/lib/host-context.ps1\" -Mode hook -Host claude"
+          },
+          {
+            "type": "command",
+            "forgeManagedId": "session-start",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/session-start.ps1\""
           }
         ]
       }
@@ -61,23 +90,25 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/build-evidence.ps1\""
+            "forgeManagedId": "build-evidence",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/build-evidence.ps1\""
           },
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-state-updated.ps1\""
+            "forgeManagedId": "state-updated",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/check-state-updated.ps1\""
           }
         ]
       }
     ],
     "SubagentStop": [
       {
-        "matcher": "",
+        "matcher": "^forge-v6-producer$",
         "hooks": [
           {
-            "type": "prompt",
-            "model": "sonnet",
-            "prompt": "Evaluate the subagent's output quality. Consider:\n1. Did the subagent complete its assigned task?\n2. Is the output useful and actionable?\n3. Were there any errors or issues?\n\nYou MUST respond with ONLY a JSON object in one of these formats:\n{\"ok\": true} - if the subagent completed successfully\n{\"ok\": false, \"reason\": \"explanation of what went wrong\"} - if issues were found\n\nRespond with ONLY the JSON object, no other text."
+            "type": "command",
+            "forgeManagedId": "subagent-review-receipt",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/check-subagent-review.ps1\""
           }
         ]
       }
@@ -88,12 +119,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -Command \"Write-Error 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).'; exit 0\"",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact-memory.ps1\""
+            "forgeManagedId": "precompact-memory",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/pre-compact-memory.ps1\""
           }
         ]
       }
@@ -104,7 +131,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-config-change.ps1\""
+            "forgeManagedId": "config-change",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/check-config-change.ps1\""
           }
         ]
       }
@@ -115,11 +143,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-bash-safety.ps1\""
+            "forgeManagedId": "bash-safety",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/check-bash-safety.ps1\""
           },
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-workflow-gates.ps1\""
+            "forgeManagedId": "workflow-gates",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/check-workflow-gates.ps1\""
+          },
+          {
+            "type": "command",
+            "forgeManagedId": "external-mutation-auth",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/check-external-mutation-auth.ps1\""
           }
         ]
       }
@@ -130,7 +165,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-local-writes.ps1\""
+            "forgeManagedId": "auto-approve-local",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/auto-approve-local-writes.ps1\""
           }
         ]
       }
@@ -141,7 +177,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-tool-format.ps1\""
+            "forgeManagedId": "post-format",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/post-tool-format.ps1\""
           }
         ]
       }

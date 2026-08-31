@@ -1,4 +1,4 @@
-# hooks/build-evidence.ps1 — emit FORGE_GOAL_EVIDENCE JSON.
+﻿# hooks/build-evidence.ps1 — emit FORGE_GOAL_EVIDENCE JSON.
 # Mirrors hooks/build-evidence.sh. See that file for design notes.
 #
 # Read-only. Parses .claude/local/state.md plus git/gh/E2E state and emits a
@@ -54,7 +54,34 @@ if ($hookCwd -and (Test-Path -LiteralPath $hookCwd -PathType Container)) {
     }
 }
 
-$StateMd = ".claude/local/state.md"
+$hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$stateHelper = Join-Path $hookDir "lib\state-path.ps1"
+if (-not (Test-Path -LiteralPath $stateHelper)) {
+    $stateHelper = Join-Path (Get-Location) "hooks\lib\state-path.ps1"
+}
+$StateMd = ""
+if (Test-Path -LiteralPath $stateHelper) {
+    try {
+        . $stateHelper
+        $StateMd = Get-ForgeStatePath -Root (Get-Location).Path -Mode Read
+    } catch {
+        $canonicalSurface = $false
+        foreach ($surface in @(".forge\version", ".forge\local", ".forge\local\state.md")) {
+            if (Get-Item -LiteralPath (Join-Path (Get-Location).Path $surface) -Force -ErrorAction SilentlyContinue) { $canonicalSurface = $true; break }
+        }
+        $forgeRootItem = Get-Item -LiteralPath (Join-Path (Get-Location).Path ".forge") -Force -ErrorAction SilentlyContinue
+        if ($forgeRootItem -and ($forgeRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $canonicalSurface = $true }
+        if ($canonicalSurface) {
+            [Console]::Error.WriteLine([string]$_.Exception.Message)
+            [Console]::Error.WriteLine("FORGE_STATE_INVALID: canonical v6 state could not be resolved")
+            exit 2
+        }
+        $StateMd = ""
+    }
+}
+$StateIsV6 = (-not [string]::IsNullOrEmpty($StateMd)) -and (($StateMd -replace '\\', '/') -match '/\.forge/local/state\.md$')
+$StateLocalDir = ".forge/local"
+if (($StateMd -replace '\\', '/') -match '/\.claude/local/state\.md$') { $StateLocalDir = ".claude/local" }
 
 # ---------------------------------------------------------------------------
 # Convergence-breaker helper (ADR 0009): resolve it the SAME way the gate does —
@@ -64,7 +91,10 @@ $StateMd = ".claude/local/state.md"
 # (the repo ships against powershell.exe 5.1 per the default-branch.ps1 contract).
 # Helper absence → fail-open (0/"ok"/$true; see Compute-BreakerFields).
 # ---------------------------------------------------------------------------
-$ReviewBreakerPs1 = Join-Path (Get-Location) ".claude\hooks\lib\review-breaker.ps1"
+$ReviewBreakerPs1 = Join-Path (Get-Location) ".forge\hooks\lib\review-breaker.ps1"
+if (-not (Test-Path -LiteralPath $ReviewBreakerPs1)) {
+    $ReviewBreakerPs1 = Join-Path (Get-Location) ".claude\hooks\lib\review-breaker.ps1"
+}
 if (-not (Test-Path -LiteralPath $ReviewBreakerPs1)) {
     $ReviewBreakerPs1 = Join-Path (Get-Location) "hooks\lib\review-breaker.ps1"
 }
@@ -72,6 +102,14 @@ $ReviewBreakerAvailable = $false
 if (Test-Path -LiteralPath $ReviewBreakerPs1) {
     . $ReviewBreakerPs1
     $ReviewBreakerAvailable = $true
+}
+
+$VerificationReceiptPs1 = Join-Path (Get-Location) ".forge\hooks\lib\verification-receipt.ps1"
+if (-not (Test-Path -LiteralPath $VerificationReceiptPs1)) {
+    $VerificationReceiptPs1 = Join-Path (Get-Location) ".claude\hooks\lib\verification-receipt.ps1"
+}
+if (-not (Test-Path -LiteralPath $VerificationReceiptPs1)) {
+    $VerificationReceiptPs1 = Join-Path (Get-Location) "hooks\lib\verification-receipt.ps1"
 }
 
 # ---------------------------------------------------------------------------
@@ -106,12 +144,26 @@ function Read-StateMdLines {
     return ($raw -replace "`r", "") -split "`n"
 }
 
+function Get-ReceiptStateValue {
+    param([string]$Field)
+    $values = @()
+    foreach ($line in Read-StateMdLines) {
+        $parts = $line -split '\|'
+        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq $Field) {
+            $values += $parts[2].Trim()
+        }
+    }
+    if ($values.Count -eq 1) { return [string]$values[0] }
+    return ""
+}
+
 # ---------------------------------------------------------------------------
 # Parse-GoalSession: returns @{nonce=""; workflow_command=""}
 # Scoped to ## /goal session Markdown table.
 # ---------------------------------------------------------------------------
 function Parse-GoalSession {
     $result = @{ nonce = ""; workflow_command = "" }
+    if (-not $StateIsV6) { return $result }
     $lines = Read-StateMdLines
     $inSection = $false
     foreach ($line in $lines) {
@@ -176,6 +228,7 @@ function Parse-Workflow {
 function Compute-ReviewerGate {
     param([string]$HeadSha)
     $result = @{ clean = $false; matched_iteration = ""; matched_head = "" }
+    if (-not $StateIsV6) { return $result }
     if ([string]::IsNullOrEmpty($HeadSha)) { return $result }
     if (-not (Test-Path $StateMd)) { return $result }
 
@@ -235,7 +288,7 @@ function Compute-ReviewerGate {
 # ---------------------------------------------------------------------------
 function Compute-BreakerFields {
     $result = @{ rounds = 0; breaker = 'ok'; breaker_ok = $true }
-    if (-not $ReviewBreakerAvailable) { return $result }
+    if (-not $StateIsV6 -or -not $ReviewBreakerAvailable) { return $result }
     if (-not (Test-Path $StateMd)) { return $result }
     $rsOut = Invoke-ReviewBreaker $StateMd
     $brk = 'ok'; $adj = 'no'
@@ -262,6 +315,7 @@ function Compute-BreakerFields {
 # ---------------------------------------------------------------------------
 function Compute-PlanReviewGate {
     $result = @{ clean = $false; matched_iteration = ""; matched_plan_sha = "" }
+    if (-not $StateIsV6) { return $result }
     if (-not (Test-Path $StateMd)) { return $result }
 
     $lines = Read-StateMdLines
@@ -320,6 +374,7 @@ function Compute-PlanReviewGate {
 function Parse-PRAuthorization {
     param([string]$HeadSha, [string]$GoalNonce)
     $result = @{ authorized = $false; authorized_at = ""; head_sha_at_auth = ""; nonce_at_auth = "" }
+    if (-not $StateIsV6) { return $result }
     if (-not (Test-Path $StateMd)) { return $result }
     if ([string]::IsNullOrEmpty($HeadSha)) { return $result }
     if ([string]::IsNullOrEmpty($GoalNonce)) { return $result }
@@ -496,6 +551,37 @@ $RgClean = if ($rg.clean) { "true" } else { "false" }
 $RgIter = $rg.matched_iteration
 $RgHead = $rg.matched_head
 
+# An explicit Candidate receipt activates receipt-v2. Genuine unconverted
+# workflows retain the legacy checklist reader; migrated evidence cannot use it
+# because migration removes those rows and receipt linkages.
+$CandidateClean = "false"
+$VerifyAppClean = "false"
+$E2eReceiptClean = "false"
+$ShipReceiptsClean = "false"
+$ReceiptGateOk = $true
+$CandidateId = ""
+$receiptCandidate = Get-ReceiptStateValue "Candidate receipt"
+if (-not [string]::IsNullOrEmpty($receiptCandidate) -and -not $receiptCandidate.Contains('<')) {
+    $ReceiptGateOk = $false
+    if ($StateIsV6 -and (Test-Path -LiteralPath $VerificationReceiptPs1)) {
+        . $VerificationReceiptPs1
+        $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateMd
+        $vrOut = @($vrResponse.Lines)
+        foreach ($line in $vrOut) {
+            if ($line -eq 'CANDIDATE_VALID:true') { $CandidateClean = "true" }
+            elseif ($line -eq 'REVIEWS_VALID:true') { $RgClean = "true" }
+            elseif ($line -match '^REVIEWS_VALID:') { $RgClean = "false" }
+            elseif ($line -eq 'VERIFY_APP_VALID:true') { $VerifyAppClean = "true" }
+            elseif ($line -eq 'E2E_VALID:true') { $E2eReceiptClean = "true" }
+            elseif ($line -eq 'SHIP_READY:true') { $ShipReceiptsClean = "true"; $ReceiptGateOk = $true }
+            elseif ($line -match '^REVIEW_ITERATION:(.*)$') { $RgIter = $matches[1] }
+            elseif ($line -match '^CANDIDATE_ID:(.*)$') { $CandidateId = $matches[1] }
+        }
+        if ($CandidateClean -eq "true") { $RgHead = $HeadSha } else { $RgHead = "" }
+        $E2eFresh = $E2eReceiptClean
+    }
+}
+
 # Convergence breaker fields (full-state helper run).
 $brkFields = Compute-BreakerFields
 $PostCertRounds = $brkFields.rounds
@@ -526,7 +612,7 @@ if ((-not [string]::IsNullOrEmpty($HeadSha)) -and ($PrHeadOid -eq $HeadSha)) {
 }
 
 $PrReady = "false"
-if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $RgClean -eq "true" -and $E2eFresh -eq "true" -and $PaAuth -eq "true" -and $BreakerOk) {
+if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $RgClean -eq "true" -and $E2eFresh -eq "true" -and $PaAuth -eq "true" -and $BreakerOk -and $ReceiptGateOk) {
     $PrReady = "true"
 }
 
@@ -587,15 +673,17 @@ $hashBytes = $sha256.ComputeHash($fpBytes)
 $sha256.Dispose()
 $ProgressFp = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
 
-# Side-channel: write fingerprint to .claude/local/forge-goal-last-fingerprint so
+# Side-channel: atomically publish a complete fingerprint for concurrent Stop hooks.
 # the stuck-detection logic in check-state-updated.ps1 can read it without
 # re-running build-evidence or parsing STDERR. One line — just the SHA256 value.
 # Best-effort: failure must not abort the evidence emission.
 if (-not [string]::IsNullOrEmpty($ProgressFp)) {
-    $sidechannel = ".claude/local/forge-goal-last-fingerprint"
+    $sidechannel = Join-Path $StateLocalDir "forge-goal-last-fingerprint"
     try {
-        $null = New-Item -ItemType Directory -Path ".claude/local" -Force -ErrorAction SilentlyContinue
-        [System.IO.File]::WriteAllText($sidechannel, $ProgressFp + "`n")
+        $null = New-Item -ItemType Directory -Path $StateLocalDir -Force -ErrorAction SilentlyContinue
+        $tempSidechannel = "$sidechannel.tmp.$PID"
+        [System.IO.File]::WriteAllText($tempSidechannel, $ProgressFp + "`n", (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $tempSidechannel -Destination $sidechannel -Force
     } catch {
         # Non-blocking: ignore write failures
     }
@@ -625,6 +713,7 @@ $PrHeadOidJson    = Build-JsonStringField "head_oid" $PrHeadOid
 $PrBaseRefJson    = Build-JsonStringField "base_ref" $PrBaseRef
 $PrHeadRefJson    = Build-JsonStringField "head_ref" $PrHeadRef
 $E2ePathJson      = Build-JsonStringField "path" $E2ePath
+$CandidateIdJson  = Build-JsonStringField "candidate_id" $CandidateId
 
 # pr_state block
 if ($PrExists -eq "true") {
@@ -652,6 +741,8 @@ $json = '{' +
     $WorkflowCmdJson + ',' +
     '"state":{' + $PhaseJson + ',' + $NextStepJson + ',"checklist_total":' + $TotalCount + ',"checklist_done":' + $DoneCount + '},' +
     '"reviewer_gate":{"clean_same_iteration":' + $RgClean + ',' + $RgIterJson + ',' + $RgHeadJson + ',"post_cert_rounds":' + $PostCertRounds + ',"breaker":"' + $Breaker + '"},' +
+    '"candidate_gate":{"staged_clean":' + $CandidateClean + ',' + $CandidateIdJson + ',"all_receipts_same_candidate":' + $ShipReceiptsClean + '},' +
+    '"verification_gate":{"verify_app":' + $VerifyAppClean + ',"e2e":' + $E2eReceiptClean + '},' +
     '"plan_review_gate":{"clean_same_iteration":' + $PrgClean + ',' + $PrgIterJson + ',' + $PrgShaJson + '},' +
     $BranchJson + ',' +
     $HeadShaJson + ',' +
@@ -672,4 +763,5 @@ $json = '{' +
 [Console]::Error.WriteLine($json)
 [Console]::Error.WriteLine("FORGE_GOAL_EVIDENCE_END")
 
+if ($parsed.host -eq "codex") { Write-Output "{}" }
 exit 0

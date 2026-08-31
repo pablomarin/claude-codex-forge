@@ -279,4 +279,148 @@ else
     fail "order-only persistence check failed: $(cat "$S6/.assert")"
 fi
 
+# ---------------------------------------------------------------------------
+# Task 2: Codex TOML is marker-owned and validated as a complete staged file.
+# ---------------------------------------------------------------------------
+start_test "Codex config renderer preserves arbitrary TOML outside one Forge marker"
+S7=$(scratch_dir codex-config-render)
+cat > "$S7/user.toml" <<'EOF'
+# user prefix
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+
+[custom."quoted.key"]
+inline = { enabled = true, values = [1, 2, 3] }
+multiline = """
+leave these bytes alone
+"""
+EOF
+cp "$S7/user.toml" "$S7/original.toml"
+cat > "$S7/validator" <<'EOF'
+#!/bin/sh
+test -f "$1" && exit 0
+exit 1
+EOF
+chmod +x "$S7/validator"
+python3 "$REPO_ROOT/scripts/render-codex-config.py" \
+    --template "$REPO_ROOT/settings/codex-config.template.toml" \
+    --existing "$S7/user.toml" --output "$S7/rendered.toml" \
+    --validator "$S7/validator" > "$S7/render.log" 2>&1
+assert_equals "$?" "0" "Codex config renderer accepts a disjoint valid config"
+python3 - "$S7/original.toml" "$S7/rendered.toml" <<'PY' > "$S7/preserve.out" 2>&1
+import pathlib, sys
+original = pathlib.Path(sys.argv[1]).read_bytes()
+rendered = pathlib.Path(sys.argv[2]).read_bytes()
+assert rendered.startswith(original), "bytes outside marker changed"
+assert rendered.count(b"# forge:begin v6") == 1
+assert rendered.count(b"# forge:end v6") == 1
+print("ok")
+PY
+assert_equals "$(cat "$S7/preserve.out")" "ok" "existing TOML bytes are a byte-identical prefix"
+
+start_test "Codex config renderer refuses malformed or duplicate Forge ownership"
+cat > "$S7/bad.toml" <<'EOF'
+# forge:begin v6
+[forge]
+version = 5
+# forge:begin v6
+# forge:end v6
+EOF
+printf 'DO-NOT-REPLACE\n' > "$S7/protected.out"
+protected_hash=$(hash_file "$S7/protected.out")
+python3 "$REPO_ROOT/scripts/render-codex-config.py" \
+    --template "$REPO_ROOT/settings/codex-config.template.toml" \
+    --existing "$S7/bad.toml" --output "$S7/protected.out" \
+    --validator "$S7/validator" > "$S7/bad.log" 2>&1
+rc=$?
+[ "$rc" -ne 0 ] && pass "duplicate/malformed Forge marker exits nonzero" || fail "duplicate/malformed Forge marker succeeded"
+assert_hash_equals "$S7/protected.out" "$protected_hash" "rejected staged config leaves output untouched"
+
+start_test "managed JSON merge preserves unknown values and refreshes Forge-owned hook entries"
+S8=$(scratch_dir merge-v6-managed)
+cat > "$S8/template.json" <<'EOF'
+{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"$CLAUDE_PROJECT_DIR/.forge/hooks/check-state-updated.sh","forgeManagedId":"stop-state"}]}]}}
+EOF
+cat > "$S8/user.json" <<'EOF'
+{"theme":"user-dark","hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"custom-command"}]}]}}
+EOF
+python3 "$MERGE" "$S8/template.json" "$S8/user.json" > "$S8/out" 2>&1
+python3 - "$S8/user.json" <<'PY' > "$S8/assert" 2>&1
+import json, pathlib, sys
+s=json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert s["theme"] == "user-dark"
+cmds=[h["command"] for b in s["hooks"]["Stop"] for h in b["hooks"]]
+assert cmds == ["$CLAUDE_PROJECT_DIR/.forge/hooks/check-state-updated.sh", "custom-command"], cmds
+print("ok")
+PY
+assert_equals "$(cat "$S8/assert")" "ok" "unknown JSON value survives and managed hook is ordered first"
+
+start_test "managed JSON merge refreshes stale Forge-owned entry without touching user fields"
+cat > "$S8/stale-user.json" <<'EOF'
+{"theme":"keep","hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"old-path","forgeManagedId":"stop-state","userAnnotation":"keep-me"}]}]}}
+EOF
+python3 "$MERGE" "$S8/template.json" "$S8/stale-user.json" > "$S8/stale.out" 2>&1
+python3 - "$S8/stale-user.json" <<'PY' > "$S8/stale.assert" 2>&1
+import json, pathlib, sys
+s=json.loads(pathlib.Path(sys.argv[1]).read_text())
+h=s["hooks"]["Stop"][0]["hooks"][0]
+assert h["command"] == "$CLAUDE_PROJECT_DIR/.forge/hooks/check-state-updated.sh", h
+assert h["userAnnotation"] == "keep-me", h
+assert s["theme"] == "keep"
+print("ok")
+PY
+assert_equals "$(cat "$S8/stale.assert")" "ok" "stale managed command refreshes and unknown values survive"
+
+start_test "Codex doctor validates the staged file from an isolated CODEX_HOME"
+cat > "$S7/fake-codex" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = doctor ] && [ "${2:-}" = --help ]; then
+    echo '--json'
+    exit 0
+fi
+test -n "${CODEX_HOME:-}" || exit 20
+test -f "$CODEX_HOME/config.toml" || exit 21
+cmp "$CODEX_HOME/config.toml" "$FORGE_EXPECTED_CONFIG" || exit 22
+printf '%s\n' '{"checks":{"config.load":{"status":"ok","summary":"config loaded"}}}'
+printf '%s\n' seen > "$FORGE_VALIDATOR_MARKER"
+exit 1
+EOF
+chmod +x "$S7/fake-codex"
+FORGE_EXPECTED_CONFIG="$S7/rendered.toml" FORGE_VALIDATOR_MARKER="$S7/validator-seen" \
+    python3 "$REPO_ROOT/scripts/render-codex-config.py" \
+    --template "$REPO_ROOT/settings/codex-config.template.toml" \
+    --existing "$S7/user.toml" --output "$S7/doctor-rendered.toml" \
+    --codex-validator "$S7/fake-codex" > "$S7/doctor.log" 2>&1
+assert_equals "$?" "0" "Codex doctor accepts config.load even when unrelated doctor checks fail"
+assert_file_exists "$S7/validator-seen" "validator received the complete staged file through isolated CODEX_HOME"
+
+start_test "MCP translation copies only safe command/args/env-reference transports"
+cat > "$S7/mcp.json" <<'EOF'
+{
+  "mcpServers": {
+    "safe_stdio": {
+      "type": "stdio",
+      "command": "safe-server",
+      "args": ["--mode", "test"],
+      "env": {"TOKEN": "${SAFE_TOKEN}"}
+    },
+    "literal_secret": {
+      "type": "stdio",
+      "command": "unsafe-server",
+      "env": {"TOKEN": "literal-secret-value"}
+    }
+  }
+}
+EOF
+python3 "$REPO_ROOT/scripts/render-codex-config.py" \
+    --template "$REPO_ROOT/settings/codex-config.template.toml" \
+    --existing "$S7/empty.toml" --output "$S7/mcp-rendered.toml" \
+    --mcp-json "$S7/mcp.json" --validator "$S7/validator" > "$S7/mcp.log" 2>&1
+assert_equals "$?" "0" "safe MCP transport renders without making setup fail"
+assert_contains "$S7/mcp-rendered.toml" '[mcp_servers.safe_stdio]' "safe MCP server is translated"
+assert_contains "$S7/mcp-rendered.toml" '"TOKEN" = "${SAFE_TOKEN}"' "environment reference is translated"
+assert_not_contains "$S7/mcp-rendered.toml" 'literal-secret-value' "literal secret never enters Codex config"
+assert_contains "$S7/mcp.log" 'CODEX_MCP_PARITY: BLOCKED: literal_secret' "unsafe MCP server remains explicit readiness gap"
+
 report "test-merge-settings.sh"

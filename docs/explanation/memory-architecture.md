@@ -1,111 +1,54 @@
 # How Memory Works
 
-Claude Code has **two layers of memory** that this template configures. Together, they ensure Claude never "wakes up with amnesia."
+Forge has two host-neutral project memory layers with different ownership. Claude Code and Codex
+may also keep native private memory, but Forge does not copy or synchronize those stores.
 
 ## Memory Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                    GLOBAL (all projects)                         │
-│  ~/.claude/CLAUDE.md          ← Your personal instructions       │
-│  ~/.claude/settings.json      ← Global hooks (PreCompact, Stop)  │
-│  ~/.claude/hooks/             ← Global hook scripts              │
-│  ~/.claude/rules/             ← Personal rules (all projects)    │
-└──────────────────────────────────────────────────────────────────┘
-         │ loaded every session
-         ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                PROJECT-LEVEL (per project)                       │
-│  CLAUDE.md                    ← Project description (slim, yours)│
-│  .claude/rules/               ← Coding standards + workflow rules│
-│  .claude/local/state.md       ← Task state (gitignored)          │
-│  docs/adr/NNNN-*.md           ← Architecture decisions           │
-│  .claude/settings.json        ← Project hooks + permissions      │
-│  .mcp.json                    ← MCP servers (Playwright, Context7)│
-│  docs/solutions/              ← Compounded knowledge base        │
-└──────────────────────────────────────────────────────────────────┘
-         │ loaded every session
-         ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                AUTO MEMORY (Claude writes this)                  │
-│  ~/.claude/projects/<project>/memory/                            │
-│    MEMORY.md                  ← Index (first 200 lines loaded)   │
-│    debugging.md               ← Debugging patterns               │
-│    patterns.md                ← Code patterns discovered         │
-│    preferences.md             ← Your preferences learned         │
-└──────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                 CANONICAL PROJECT HARNESS                   │
+│  .forge/instructions.md  ← engine-neutral policy         │
+│  .forge/rules/           ← workflow and coding rules      │
+│  .forge/local/state.md   ← shared workflow checkpoint     │
+└────────────────────────────────────────────────────────────┘
+                             │
+             ┌───────────────┴──────────────┐
+             ▼                             ▼
+┌────────────────────────────┐   ┌────────────────────────────┐
+│ VOLATILE, DEVELOPER-LOCAL │   │ DURABLE, PROJECT-OWNED    │
+│ .forge/local/memory/      │   │ .forge/memory/            │
+│ Gitignored; per-worktree  │   │ Git-tracked and reviewed   │
+└────────────────────────────┘   └────────────────────────────┘
 ```
 
-### The three-artifact model for project state
+## Ownership and Lifecycle
 
-Project state spans three genres of content with different ownership and lifecycle. The harness keeps them in separate artifacts:
+| Layer | Who writes it | What it contains | Sharing |
+| --- | --- | --- | --- |
+| `.forge/local/state.md` | Current host | Workflow, goal nonce, next step, receipts | Same developer/worktree; host-neutral |
+| `.forge/local/memory/` | Current host | Volatile drafts and working context | Same developer/worktree only |
+| `.forge/memory/` | Project contributors | Vetted, durable learnings | Git-tracked; all hosts/worktrees |
+| Native private memory | Claude Code or Codex | Optional host-specific context | Not synchronized or accepted as Forge evidence |
+| `docs/adr/` | Project contributors | Architecture decisions, append-only | Git-tracked; read on demand |
+| `docs/solutions/` | Project contributors | Bug fixes and reusable patterns | Git-tracked; read on demand |
 
-- **Durable team-shared facts** (project goal, tech stack, key commands) live in `CLAUDE.md`. Tracked in git, reviewed in PRs, auto-loaded into every session.
-- **Architecture decisions** live in `docs/adr/NNNN-*.md` — one file per decision, append-only history. Tracked in git, but not auto-loaded; Claude reads them on demand.
-- **Volatile per-developer state** (Workflow checklist, Done/Now/Next, Blockers, Open Questions) lives in `.claude/local/state.md`. Gitignored, NOT auto-loaded. Hooks read it on demand via shell.
+Session progress belongs in `.forge/local/state.md`, not either memory layer. A host switch resumes
+the objective, nonce, checklist, and exact next step from that file; it does not transfer a native
+Claude Code or Codex session.
 
-Keeping volatile state out of the auto-loaded path is the design point: stale per-developer status from yesterday's session never silently re-enters today's context. Hooks (`check-state-updated.sh`, `check-workflow-gates.sh`) parse `.claude/local/state.md` directly when they need the current Workflow row.
+Volatile memory never satisfies another worktree's gates. Promote a learning to `.forge/memory/`
+only after vetting it as an ordinary reviewed Git change. Setup never manages, deletes, or
+overwrites project-owned durable memory.
 
-## What Each Layer Does
+## What to Preserve
 
-| Layer                        | Who writes it | What it contains                                 | When it loads                         |
-| ---------------------------- | ------------- | ------------------------------------------------ | ------------------------------------- |
-| **Global CLAUDE.md**         | You (once)    | Memory instructions, personal preferences        | Every session, all projects           |
-| **Project CLAUDE.md**        | You           | Project description, tech stack, commands (slim) | Every session, this project           |
-| **`.claude/rules/`**         | Template      | Workflow, principles, coding standards           | Every session, this project           |
-| **`.claude/local/state.md`** | Claude        | Task state: Workflow/Done/Now/Next/Blockers      | NOT auto-loaded; hooks read on demand |
-| **`docs/adr/`**              | You + Claude  | Architecture decisions, append-only              | Not auto-loaded; read on demand       |
-| **Auto Memory**              | Claude        | Learned patterns, solutions, preferences         | MEMORY.md first 200 lines auto-loaded |
-| **docs/solutions/**          | Claude        | Bug fixes, error solutions, patterns             | On-demand when relevant               |
+- Project patterns: build commands, test conventions, and code style
+- Bug solutions: verified root causes and owning checks
+- Stable preferences: tool and workflow choices
+- Architecture notes: key files, boundaries, and relationships
+- Debugging insights: reproducible causes and constraints
 
-## How Memory Persists
-
-Three hooks work together to prevent memory loss:
-
-```
-Session Start                    During Session                Before Compaction
-     │                               │                              │
-     ▼                               ▼                              ▼
-┌──────────┐                  ┌──────────────┐              ┌──────────────┐
-│SessionStart│                │  Stop Hook   │              │PreCompact Hook│
-│  Hook     │                │  (global)    │              │  (global +   │
-│           │                │              │              │   project)   │
-│ Injects:  │                │ Reminds:     │              │ Saves:       │
-│ • Branch  │                │ "Save any    │              │ All session  │
-│   (silent │                │  learnings   │              │ learnings to │
-│   context)│                │  to memory"  │              │ auto memory  │
-│           │                │              │              │ before       │
-│ Via JSON  │                │ (lightweight │              │ compression  │
-│ additiona-│                │  - no block) │              │              │
-│ lContext  │                │              │              │              │
-└──────────┘                  └──────────────┘              └──────────────┘
-```
-
-## What Claude Remembers
-
-Over time, Claude's auto memory accumulates:
-
-- **Project patterns**: Build commands, test conventions, code style
-- **Bug solutions**: Root causes and fixes (also in `docs/solutions/`)
-- **Your preferences**: Tool choices, workflow habits, communication style
-- **Architecture notes**: Key files, module relationships, abstractions
-- **Debugging insights**: Common error causes, tricky edge cases
-
-## Managing Memory
-
-```bash
-# View/edit memory files in Claude Code
-/memory
-
-# Tell Claude to remember something explicitly
-"Remember that we use pnpm, not npm"
-"Save to memory that the API tests require a local Redis instance"
-
-# Tell Claude to forget something
-"Forget the Redis requirement, we switched to in-memory cache"
-
-# Force enable/disable auto memory (if needed)
-# Auto memory is ON by default — no env var needed
-# export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1  # Force off
-# export CLAUDE_CODE_DISABLE_AUTO_MEMORY=0  # Force on
-```
+Do not save secrets, speculative conclusions, candidate receipts, or goal authorization as memory.
+Pre-compact hooks remind either host to save useful drafts under `.forge/local/memory/`; promotion to
+`.forge/memory/` remains deliberate.

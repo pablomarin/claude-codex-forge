@@ -17,6 +17,37 @@ fi
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 CONTEXT="Current branch: $BRANCH"
 
+# Codex has no ConfigChange event. Both hosts validate the Forge-managed hook
+# fingerprint at SessionStart; the event is advisory, while ship gates block.
+PROJECT_ROOT=""
+if command -v jq >/dev/null 2>&1; then PROJECT_ROOT=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null || true); fi
+[ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-.}"
+TOP=$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel 2>/dev/null || true)
+[ -n "$TOP" ] && PROJECT_ROOT="$TOP"
+CONFIG_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/check-config-change.sh"
+if [ -f "$CONFIG_CHECK" ]; then
+    if ! printf '{}' | bash "$CONFIG_CHECK" --verify-boundary "$PROJECT_ROOT" >/dev/null 2>&1; then
+        CONTEXT="$CONTEXT (FORGE_CONFIG_TAMPERED: managed config changed; run setup -F and inspect the diff before shipping)"
+    fi
+fi
+
+# State resume is engine-neutral: both host adapters point at the same canonical
+# state. A v5 fallback is accepted only before migration by state-path.sh.
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+STATE_HELPER="$HOOK_DIR/lib/state-path.sh"
+[ -f "$STATE_HELPER" ] || STATE_HELPER="hooks/lib/state-path.sh"
+if [ -f "$STATE_HELPER" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_HELPER"
+    STATE_MD=$(forge_state_path "$PROJECT_ROOT" read 2>/dev/null || true)
+    if [ -f "$STATE_MD" ]; then
+        WORKFLOW_BLOCK=$(tr -d '\r' < "$STATE_MD" | awk '/^## Workflow$/{f=1;next} f && /^## /{f=0} f')
+        RESUME_CMD=$(printf '%s\n' "$WORKFLOW_BLOCK" | grep -iE '\|[[:space:]]*Command[[:space:]]*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
+        RESUME_PHASE=$(printf '%s\n' "$WORKFLOW_BLOCK" | grep -iE '\|[[:space:]]*Phase[[:space:]]*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
+        case "$RESUME_CMD" in ""|none|-|—) ;; *) CONTEXT="$CONTEXT (Forge resume: $RESUME_CMD; phase: $RESUME_PHASE)" ;; esac
+    fi
+fi
+
 # Fetch + drift check ONLY on startup or resume (not clear/compact).
 if [[ "$SOURCE" == "startup" || "$SOURCE" == "resume" ]]; then
     HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"

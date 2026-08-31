@@ -1,4 +1,4 @@
-# .claude/hooks/check-bash-safety.ps1
+﻿# .claude/hooks/check-bash-safety.ps1
 # PreToolUse hook for Bash: audit logging + dangerous pattern blocking.
 #
 # Fires BEFORE every Bash command. Logs all commands to ~/.claude/audit.log.
@@ -12,13 +12,14 @@ $ErrorActionPreference = "SilentlyContinue"
 
 $RawInput = $input | Out-String
 $Data = $RawInput | ConvertFrom-Json -ErrorAction SilentlyContinue
+function Exit-ForgeAllow { if ($Data.host -eq "codex") { Write-Output "{}" }; exit 0 }
 
 $Command = if ($Data.tool_input.command) { $Data.tool_input.command } else { "" }
 $SessionId = if ($Data.session_id) { $Data.session_id } else { "unknown" }
 $Cwd = if ($Data.cwd) { $Data.cwd } else { "unknown" }
 
 # Skip empty commands
-if (-not $Command) { exit 0 }
+if (-not $Command) { Exit-ForgeAllow }
 
 # --- Audit log ---
 $AuditLog = Join-Path $env:USERPROFILE ".claude" "audit.log"
@@ -105,6 +106,9 @@ elseif ($Command -match '(^|\s)pip3?\s+install\s+[^-]' -and $Command -notmatch '
 #    must be on the SAME line — sanctioned flows that read via a shell variable
 #    are structurally exempt. [/\\] handles Windows separators; the trailing
 #    class is a filename terminator so state.md.bak does not match.
+elseif ($Command -match '(?m)(^|[ \t])(/[^ \t]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[ \t][^\r\n]*\.forge[/\\]local[/\\]state\.md([^A-Za-z0-9._-]|$)') {
+    $Reason = "Reading .forge/local/state.md via Bash — use the host read tool instead during autonomous /goal runs"
+}
 elseif ($Command -match '(?m)(^|[ \t])(/[^ \t]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[ \t][^\r\n]*\.claude[/\\]local[/\\]state\.md([^A-Za-z0-9._-]|$)') {
     $Reason = "Reading .claude/local/state.md via Bash — use the Read tool instead (Bash reads of this sensitive file stall autonomous /goal runs on a permission prompt)"
 }
@@ -117,8 +121,14 @@ elseif ($Command -match '(?m)(^|[ \t])(/[^ \t]*/)?(cat|sed|grep|egrep|fgrep|rg|a
 #    it line-scoped; [ \t]/[/\\] handle whitespace + Windows separators (no POSIX
 #    bracket space-class — invalid .NET). Redirect target scoped to its single
 #    token so `> /tmp/log .claude/local/x` (real target /tmp) does not false-match.
+elseif ($Command -match '(?m)(^|[ \t])(mkdir|touch|cp|mv|tee|rm)[ \t][^\r\n|&;]*\.forge[/\\]local[/\\]') {
+    $Reason = "Writing under .forge/local/ via Bash — use the host Write/Edit tool instead"
+}
 elseif ($Command -match '(?m)(^|[ \t])(mkdir|touch|cp|mv|tee|rm)[ \t][^\r\n|&;]*\.claude[/\\]local[/\\]') {
     $Reason = "Writing under .claude/local/ via Bash — use the Write/Edit tool instead (Bash writes under .claude/ are never auto-approved and stall autonomous /goal runs on a permission prompt; the Write tool auto-creates parent dirs — see ADR 0006)"
+}
+elseif ($Command -match '(?m)(^|[ \t])[12]?>>?[ \t]*[^\r\n \t|&;]*\.forge[/\\]local[/\\]') {
+    $Reason = "Writing under .forge/local/ via Bash (redirect) — use the host Write/Edit tool instead"
 }
 elseif ($Command -match '(?m)(^|[ \t])[12]?>>?[ \t]*[^\r\n \t|&;]*\.claude[/\\]local[/\\]') {
     $Reason = "Writing under .claude/local/ via Bash (redirect) — use the Write/Edit tool instead (Bash writes under .claude/ stall autonomous /goal runs on a permission prompt; see ADR 0006)"
@@ -131,4 +141,4 @@ if ($Reason) {
     exit 2
 }
 
-exit 0
+Exit-ForgeAllow

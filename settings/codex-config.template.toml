@@ -1,0 +1,17 @@
+# forge:begin v6
+# Forge owns only this bounded block. Existing TOML outside it is preserved byte-for-byte.
+
+[mcp_servers.forge_context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp@latest"]
+
+[mcp_servers.forge_playwright]
+command = "npx"
+args = ["@playwright/mcp@latest"]
+
+[sandbox_workspace_write]
+writable_roots = [".forge/local"]
+network_access = false
+
+# Goal authorization deliberately remains outside project workspace-write roots.
+# forge:end v6

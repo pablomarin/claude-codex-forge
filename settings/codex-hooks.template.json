@@ -1,0 +1,57 @@
+{
+  "forgeManagedVersion": 6,
+  "hooks": {
+    "session_start": [
+      {
+        "forgeManagedId": "host-context",
+        "command": [".forge/hooks/lib/host-context.sh", "hook", "--host", "codex"]
+      },
+      {
+        "forgeManagedId": "session-start",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "session-start.sh"]
+      }
+    ],
+    "pre_tool_use": [
+      {
+        "forgeManagedId": "bash-safety",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "check-bash-safety.sh"]
+      },
+      {
+        "forgeManagedId": "workflow-gates",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "check-workflow-gates.sh"]
+      },
+      {
+        "forgeManagedId": "external-mutation-auth",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "check-external-mutation-auth.sh"]
+      }
+    ],
+    "post_tool_use": [
+      {
+        "forgeManagedId": "format",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "post-tool-format.sh"]
+      }
+    ],
+    "subagent_stop": [
+      {
+        "forgeManagedId": "subagent-review-receipt",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "check-subagent-review.sh"]
+      }
+    ],
+    "pre_compact": [
+      {
+        "forgeManagedId": "precompact-memory",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "pre-compact-memory.sh"]
+      }
+    ],
+    "stop": [
+      {
+        "forgeManagedId": "build-evidence",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "build-evidence.sh"]
+      },
+      {
+        "forgeManagedId": "state-updated",
+        "command": [".forge/hooks/lib/codex-worktree-dispatch.sh", "check-state-updated.sh"]
+      }
+    ]
+  }
+}

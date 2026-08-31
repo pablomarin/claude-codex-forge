@@ -29,6 +29,10 @@
 # Requirements: jq (recommended, grep fallback)
 
 INPUT=$(cat)
+forge_allow() {
+    printf '%s' "$INPUT" | grep -qE '"host"[[:space:]]*:[[:space:]]*"codex"' && printf '{}\n'
+    exit 0
+}
 
 # --- Parse command ---
 if command -v jq &> /dev/null; then
@@ -37,7 +41,7 @@ else
     COMMAND=$(echo "$INPUT" | grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//;s/"$//')
 fi
 
-[ -z "$COMMAND" ] && exit 0
+[ -z "$COMMAND" ] && forge_allow
 
 # --- Only gate ship actions ---
 # Ship-verb detection tolerant of two common, fully-legitimate invocation forms
@@ -76,7 +80,7 @@ echo "$COMMAND_NORM" | grep -qE "^[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
 echo "$COMMAND_NORM" | grep -qE "[&|;]+[[:space:]]*${_SHIP_VERB}" && IS_SHIP=true
 
 # Not a ship action — allow immediately
-$IS_SHIP || exit 0
+$IS_SHIP || forge_allow
 
 # --- Block compound ship commands ---
 # A compound like `git commit -m x && git push` validates evidence against the
@@ -135,15 +139,44 @@ fi
 _TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null || true)
 [ -n "$_TOPLEVEL" ] && [ -d "$_TOPLEVEL" ] && cd "$_TOPLEVEL" 2>/dev/null || true
 
-# --- Check for active workflow (post PR #2: state file is .claude/local/state.md) ---
-STATE_FILE=".claude/local/state.md"
+# Codex lacks ConfigChange and host switches can skip an immediate Claude event.
+# Revalidate the shared managed fingerprint at every ship boundary.
+HOOK_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)
+CONFIG_CHECK="$HOOK_DIR/check-config-change.sh"
+FORGE_VERSION=$(head -1 .forge/version 2>/dev/null | tr -d '[:space:]')
+if [ "$FORGE_VERSION" = 6 ] && [ -f "$CONFIG_CHECK" ]; then
+    if ! printf '{}' | bash "$CONFIG_CHECK" --verify-boundary "$(pwd)" >/dev/null 2>&1; then
+        echo "FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -F and inspect the diff before shipping." >&2
+        exit 2
+    fi
+fi
+
+# --- Resolve canonical v6 state, with pre-migration v5 read compatibility. ---
+STATE_HELPER="$HOOK_DIR/lib/state-path.sh"
+[ -f "$STATE_HELPER" ] || STATE_HELPER="hooks/lib/state-path.sh"
+STATE_FILE=""
+if [ -f "$STATE_HELPER" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_HELPER"
+    if ! STATE_FILE=$(forge_state_path "$(pwd)" read); then
+        if [ -e .forge/version ] || [ -L .forge/version ] \
+            || [ -e .forge/local/state.md ] || [ -L .forge/local/state.md ] \
+            || [ -e .forge/local ] || [ -L .forge/local ] || [ -L .forge ]; then
+            echo "FORGE_STATE_INVALID: canonical v6 state could not be resolved" >&2
+            exit 2
+        fi
+        STATE_FILE=""
+    fi
+fi
+STATE_IS_V6=false
+case "$STATE_FILE" in */.forge/local/state.md) STATE_IS_V6=true ;; esac
 
 if [ ! -f "$STATE_FILE" ]; then
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Emit friendly breadcrumb on stderr, exit 0 (don't gate — nothing to enforce).
-    echo "ℹ check-workflow-gates: $STATE_FILE not found." >&2
-    echo "  If you have a legacy CONTINUITY.md and just upgraded, run setup --migrate" >&2
-    exit 0
+    echo "ℹ check-workflow-gates: Forge state.md not found." >&2
+    echo "  If you have a legacy CONTINUITY.md, run setup --migrate before setup -F." >&2
+    forge_allow
 fi
 
 # Scope extraction to ONLY the `## Workflow` section. Migrated content (e.g.,
@@ -161,10 +194,17 @@ WORKFLOW_BLOCK=$(tr -d '\r' < "$STATE_FILE" 2>/dev/null \
 # Use flexible whitespace matching — formatters may pad table cells
 WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -iE '\|\s*Command\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
 # No active workflow — allow
-[ -z "$WORKFLOW_CMD" ] && exit 0
-[ "$WORKFLOW_CMD" = "none" ] && exit 0
-[ "$WORKFLOW_CMD" = "—" ] && exit 0
-[ "$WORKFLOW_CMD" = "-" ] && exit 0
+[ -z "$WORKFLOW_CMD" ] && forge_allow
+[ "$WORKFLOW_CMD" = "none" ] && forge_allow
+[ "$WORKFLOW_CMD" = "—" ] && forge_allow
+[ "$WORKFLOW_CMD" = "-" ] && forge_allow
+
+# Legacy workflow prose remains readable for migration context, but v5 review,
+# goal, and authorization lines can never certify a v6 ship action.
+if [ "$STATE_IS_V6" != true ]; then
+    echo "WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup --migrate, then setup -F." >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------------------------
 # Layer 2 — /forge-goal PR-create authorization guard
@@ -264,8 +304,12 @@ fi
 # ADJUDICATED is the helper's own head-bound detection of the human adjudication
 # line (single-sourced parser). For non-workflow repos / uncertified branches the
 # helper emits BREAKER:ok, so this block is inert.
-RS="$_TOPLEVEL/.claude/hooks/lib/review-breaker.sh"
-[ ! -f "$RS" ] && RS="$_TOPLEVEL/hooks/lib/review-breaker.sh"
+if [ "$STATE_IS_V6" = true ]; then
+    RS="$HOOK_DIR/lib/review-breaker.sh"
+else
+    RS="$_TOPLEVEL/.claude/hooks/lib/review-breaker.sh"
+    [ ! -f "$RS" ] && RS="$_TOPLEVEL/hooks/lib/review-breaker.sh"
+fi
 BRK_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 if [ -n "$BRK_HEAD" ] && [ -f "$RS" ] && [ -f "$STATE_FILE" ]; then
     RS_OUT2=$(bash "$RS" "$STATE_FILE" 2>/dev/null)
@@ -280,6 +324,25 @@ if [ -n "$BRK_HEAD" ] && [ -f "$RS" ] && [ -f "$STATE_FILE" ]; then
         exit 2
     fi
 fi
+
+# Receipt-v2 compatibility switch. An explicit Candidate receipt linkage means
+# this workflow has migrated its final gates: all review/verify/E2E receipts
+# must validate against the same current staged-clean candidate. Workflows not
+# yet converted by Task 9 continue through the legacy checklist evidence below.
+RECEIPT_V2_ACTIVE=false
+RECEIPT_CANDIDATE=$(tr -d '\r' < "$STATE_FILE" | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
+case "$RECEIPT_CANDIDATE" in ''|*'<'*) ;; *)
+    RECEIPT_V2_ACTIVE=true
+    VR="$HOOK_DIR/lib/verification-receipt.sh"
+    [ -f "$VR" ] || VR="$_TOPLEVEL/hooks/lib/verification-receipt.sh"
+    if [ ! -f "$VR" ] || ! VR_OUT=$(bash "$VR" check --state "$STATE_FILE" 2>&1); then
+        echo "WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean." >&2
+        printf '%s\n' "${VR_OUT:-verification-receipt helper unavailable}" >&2
+        echo "Freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E." >&2
+        exit 2
+    fi
+    ;;
+esac
 
 # ---------------------------------------------------------------------------
 # No-code carve-out (git commit only) — closes the integrity hole
@@ -356,7 +419,7 @@ if echo "$COMMAND" | grep -qE "^[[:space:]]*${_ENVP}git${_GITOPT}[[:space:]]+com
 $STAGED_PATHS
 EOF
         if [ "$_ALL_DOCS" = "1" ]; then
-            exit 0  # docs-only commit — skip code-quality gates, NO state mutation
+            forge_allow  # docs-only commit — skip code-quality gates, NO state mutation
         fi
     fi
     # Empty staged diff → can't prove docs-only → fall through and enforce (fail-safe).
@@ -403,7 +466,7 @@ if [ -n "$UNCHECKED" ]; then
     echo "$MISSING" >&2
     echo "" >&2
     echo "How to clear each gate:" >&2
-    echo "  - Code review loop:  run /codex review + /pr-review-toolkit:review-pr, fix findings" >&2
+    echo "  - Code review loop:  run /opinion for code-spec and code-quality, fix findings" >&2
     echo "  - Simplified:        run /simplify" >&2
     echo "  - Verified (tests):  run the verify-app agent" >&2
     echo "  - E2E verified:      run the verify-e2e agent AND persist its report, OR mark N/A:" >&2
@@ -431,7 +494,7 @@ fi
 # ---------------------------------------------------------------------------
 E2E_CHECKED_LINE=$(echo "$CHECKLIST" | grep -E '^\s*- \[x\]\s+E2E verified' | head -1)
 
-if [ -n "$E2E_CHECKED_LINE" ] && ! echo "$E2E_CHECKED_LINE" | grep -qE 'N/A:'; then
+if [ "$RECEIPT_V2_ACTIVE" != true ] && [ -n "$E2E_CHECKED_LINE" ] && ! echo "$E2E_CHECKED_LINE" | grep -qE 'N/A:'; then
     # [x] E2E verified checked without N/A → require a fresh report file.
 
     # Find the branch-off commit (try main, fall back to master, else skip).
@@ -696,7 +759,7 @@ elif [ -n "$CODE_CHECKED_ANY" ]; then
     exit 2
 fi
 
-if [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
+if [ "$RECEIPT_V2_ACTIVE" != true ] && [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
     CODE_N=$(echo "$CODE_PASS_LINE" | sed -E 's/.*Code review loop \(([0-9]+) iterations\).*/\1/')
 
     # Validate codex side (last-line semantics — defensive against stale duplicates)
@@ -754,4 +817,4 @@ if [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
     done
 fi
 
-exit 0
+forge_allow

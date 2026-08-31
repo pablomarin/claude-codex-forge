@@ -1,91 +1,67 @@
-# Parallel Development (Multiple Sessions)
+# Parallel and Cross-Host Sessions
 
-Run multiple Claude Code sessions simultaneously on the same project — each working on a different feature without conflicts.
+Use one worktree per active feature. Claude Code and Codex can each lead different worktrees, and a
+developer may resume one worktree in the other host after stopping the first session.
 
-> **Working across multiple projects with different Python/Node versions?** Worktree isolation only covers one project. For per-project interpreter isolation see [Multi-Project Isolation](multi-project-isolation.md).
+## Isolated Features
 
-## How It Works
-
-When you run `/new-feature` or `/fix-bug` from the `main` branch, the workflow automatically:
-
-1. **Creates an isolated worktree** at `.worktrees/<feature-name>/`
-2. **Copies environment files** (`.env*`) to the worktree
-3. **Installs dependencies** (Node.js/Python)
-4. **cd's into the worktree** — all subsequent commands run there
-
-Each session works in its own isolated directory with its own branch. No conflicts, no shared state files.
-
-## Example: 3 Parallel Sessions
+`/new-feature` and `/fix-bug` create `.worktrees/<name>/` when started from the primary branch. Each
+worktree has its own branch, candidate, `.forge/local/state.md`, and local evidence.
 
 ```bash
 # Terminal 1
 cd /project && claude
-> /new-feature auth        # Creates .worktrees/auth/, cd's into it
-
-# Terminal 2
-cd /project && claude
-> /new-feature api         # Creates .worktrees/api/, cd's into it
-
-# Terminal 3
-cd /project && claude
-> /fix-bug login-error     # Creates .worktrees/login-error/, cd's into it
-```
-
-## Critical: Always Run Claude from Project Root
-
-> **WARNING**: Always start `claude` from the **main project directory**, NOT from inside a worktree.
-
-```bash
-# Correct - run from project root
-cd /project && claude
 > /new-feature auth
 
-# Wrong - don't cd into worktree then run claude
-cd /project/.worktrees/auth && claude  # Hooks won't work!
+# Terminal 2
+cd /project && codex
+# invoke the installed workflow-new-feature skill for api
 ```
 
-**Why?** The `.claude/` folder (with hooks, settings, agents) lives in the main repo. Running Claude from inside a worktree means it won't find these configurations.
+Receipts are bound to both candidate identity and worktree identity. Copying a clean receipt to
+another worktree does not satisfy its gates.
 
-## Important Notes
+## Switch Hosts Mid-Feature
 
-- **Worktrees are created automatically** when starting from `main`
-- **No nested worktrees** — if already in a worktree or feature branch, the workflow uses the current directory
-- **Hooks run in current directory** — after Claude cd's into a worktree, hooks check files there
-- **File paths are relative** — use `src/main.py`, not `.worktrees/auth/src/main.py`
-- **`.worktrees/` is gitignored** automatically
-- **Dependencies are installed** automatically
-- **Quick-fix does NOT create worktrees** — use `/new-feature` or `/fix-bug` for parallel work
-- **Cleanup is safe** — each session is fully isolated, no shared state between sessions
-- **Memory is per-worktree** — git worktrees get separate auto memory directories, so each session tracks its own learnings independently
-
-## Cleanup
-
-The `/finish-branch` command handles merge and cleanup (with user confirmation). It will:
-
-1. Merge the PR to main (if not already merged) via `gh pr merge --squash --delete-branch`
-2. Delete the remote branch
-3. Delete the local branch and remove the worktree
-4. Prune stale references
-5. Switch to main and pull latest
-6. Restart development servers from main
-
-**Note:** `/finish-branch` does NOT commit, push, or create PRs — those steps happen before calling this command.
-
-**Manual cleanup** (if needed):
+Stop the current host, then open the same worktree in the other host:
 
 ```bash
-# Go back to main repo (from inside worktree)
-cd "$(git rev-parse --git-common-dir)/.."
-
-# Remove a specific worktree (after merging its branch)
-git worktree remove ".worktrees/auth"
-
-# Clean up stale worktree metadata
-git worktree prune
-
-# Delete the merged branch
-git branch -d feat/auth
-git push origin --delete feat/auth
+cd /project/.worktrees/auth
+codex # after the Claude Code session has stopped
 ```
 
-**Tip:** Use `/finish-branch` to automate cleanup and avoid forgetting steps.
+The new host reads `.forge/local/state.md`, continues at the next incomplete checkpoint, and keeps
+still-valid artifact-bound evidence. It does not repeat planning merely because the host changed.
+The current host is main for the next action; reviewer selection is recomputed for that action.
+
+> **Warning:** Do not edit the same worktree from both hosts simultaneously. Forge intentionally
+> adds no locks or ownership daemon. Concurrent writes can invalidate the frozen candidate and all
+> review/verification receipts; ordinary Git recovery remains the escape hatch.
+
+## Codex Hooks in Linked Worktrees
+
+Claude project hooks live in each adapter surface. Codex uses one protected registry/router in the
+primary checkout because linked worktrees share the Git common directory. Initial setup from a
+linked worktree therefore prints the exact command to run in the primary checkout and does not
+mutate its sibling.
+
+After primary registration and project trust, the stable router validates the common directory and
+dispatches each event to the event worktree's own `.forge/hooks/` and `.forge/local/state.md`. A
+missing/stale registration or wrong-common-directory event keeps Codex `RUNTIME_READY: BLOCKED`.
+
+## Practical Rules
+
+- Start a new feature from the primary checkout; the workflow moves into its worktree.
+- Do not create nested worktrees.
+- Use paths relative to the active worktree.
+- `quick-fix` uses the current branch and does not create a worktree.
+- State and volatile evidence are per worktree; ADRs, changelog, and committed memory remain shared.
+- Run `/finish-branch` only after the PR has merged; it folds eligible state back and cleans up.
+
+Manual cleanup remains standard Git:
+
+```bash
+git worktree remove .worktrees/auth
+git worktree prune
+git branch -d feat/auth
+```

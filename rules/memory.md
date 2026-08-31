@@ -1,9 +1,14 @@
-# Memory & Learning
+# Forge Memory
 
-**You have persistent memory.** Your auto memory directory survives across sessions. Use it.
+Forge has two host-neutral layers with explicit ownership:
 
-- **Save learnings**: When you solve a tricky bug, discover a project pattern, or learn a preference, write it to your auto memory (`MEMORY.md` or topic files)
-- **Save solutions twice**: Bug fixes go to both `docs/solutions/` (project knowledge base) AND your auto memory (personal recall)
-- **Before stopping**: Ask yourself "Did I learn anything worth remembering?" — if yes, save it
-- **Before compaction**: The PreCompact hook will remind you. Save any session learnings before they're compressed
-- **Keep it concise**: `MEMORY.md` loads every session (first 200 lines). Move details to topic files
+- `.forge/local/memory/` is volatile, per-developer, per-worktree memory. Pre-compact
+  reminders may create drafts here. It is gitignored and never satisfies another
+  worktree's gates.
+- `.forge/memory/` is durable, project-owned memory. Promote only a vetted learning as
+  an ordinary reviewed Git change. Setup never manages, deletes, or overwrites it.
+
+Claude and Codex native private memories are optional host context. Forge never copies
+or synchronizes them automatically, and neither private store is cross-host evidence.
+Session progress belongs in `.forge/local/state.md`, not either memory layer. Update an
+existing learning when it evolves and keep durable entries concise and evidence-bound.

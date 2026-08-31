@@ -69,26 +69,23 @@ After choosing a mode, check `references/industry-design-guide.md` for industry-
 
 ---
 
-## Step 2: Search 21st.dev Before Building
+## Step 2: Reuse Approved Primitives Before Building
 
-**Before building any standard component from scratch**, search [21st.dev](https://21st.dev) for existing implementations. 1,400+ community-built shadcn/ui React components.
+Before building a standard component from scratch, inspect the project's existing
+design system and its approved component sources. Reuse a compatible primitive only
+when its license, maintenance status, accessibility behavior, and styling can be
+verified. Never import a component's business or regulated workflow logic blindly.
 
-Use a Playwright subagent to browse, search, and either:
-
-- **Copy the prompt** — a pre-written implementation spec
-- **Direct install** — `npx shadcn@latest add "https://21st.dev/r/{author}/{component}/default"`
-
-See `references/21st-dev-components.md` for the full Playwright workflow.
+If the active environment can browse an approved source, use it to compare options;
+otherwise ask the user for a component link or build the smallest project-native
+primitive. See `references/21st-dev-components.md` for a source-neutral evaluation
+checklist.
 
 **Mode-specific guidance:**
 
-- **Marketing**: Search heroes, CTAs, pricing, testimonials, shaders — great for impressive blocks
-- **Product UI**: Search tables, forms, sidebars, tabs, inputs — great for functional primitives
-- **Trust-First**: Search forms, alerts, dialogs — but **never reuse regulated workflow logic** without review. Only use primitives.
-
-Skip only for highly custom, brand-specific components.
-
-**Fallback (no Playwright):** If Playwright MCP is not available, ask the user to browse [21st.dev](https://21st.dev) manually and paste either the component URL (for `npx shadcn` install) or the copied prompt text. The skill works with or without Playwright — it just automates the browsing step.
+- **Marketing**: Evaluate heroes, CTAs, pricing, testimonials, and visual effects.
+- **Product UI**: Evaluate tables, forms, sidebars, tabs, and inputs.
+- **Trust-First**: Evaluate forms, alerts, and dialogs, but reuse only presentation primitives.
 
 ---
 
@@ -208,8 +205,8 @@ Never ship placeholder images, fake data, or gray rectangles. Use real assets du
 
 ### Marketing / Expressive
 
-- **Stock photography** → Pexels/Unsplash MCP for contextual photos matching your aesthetic
-- **AI-generated imagery** → `/generate-image` skill for custom hero images and illustrations
+- **Stock photography** → an approved stock-photo source for contextual photos matching your aesthetic
+- **AI-generated imagery** → activate the Forge generate-image skill when it is available, for custom hero images and illustrations
 - **Optimize everything** → WebP/AVIF, explicit dimensions, lazy-load below fold
 
 ### Product UI
@@ -232,7 +229,7 @@ See `references/media-assets.md` for sizes, formats, platform references, and op
 
 Consult these references for detailed implementation:
 
-- **Component search** → `references/21st-dev-components.md` — 21st.dev Playwright workflow
+- **Component evaluation** → `references/21st-dev-components.md` — source-neutral reuse checklist
 - **Industry context** → `references/industry-design-guide.md` — product-type → palette, font, motion, anti-patterns
 - **Landing pages** → `references/landing-patterns.md` — conversion patterns and CTA hierarchy _(Marketing mode)_
 - **Product UI** → `references/product-ui-patterns.md` — app shells, tables, dashboards, workflows _(Product mode)_

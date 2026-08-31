@@ -2,6 +2,49 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.0 — 2026-08-27
+
+**Breaking harness release: Claude Code and Codex are now equal hosts over one canonical Forge.**
+There is no installed "main" setting: the host running the current action leads, and review prefers
+the other qualified engine before visibly falling back to a fresh same-engine process. Claude Code
+invokes the opinion workflow as `/opinion`; Codex invokes it as `$opinion`. The healthy Council keeps
+five advisors plus an independent chairman (three current-host advisors, two other-engine advisors,
+other-engine chair); an absent/failing other engine causes a fresh whole-topology all-current-host
+rerun rather than certifying a partial mixed attempt.
+
+Shared instructions, rules, workflows, skills, agents, hooks, state, memory pointers, and
+candidate-bound receipts now have one owner under `.forge/`. `.claude/`, `.codex/`, `.agents/`,
+`CLAUDE.md`, and `AGENTS.md` expose thin native adapters instead of duplicate policy trees. A
+developer can stop one host and resume the same worktree in the other at the next incomplete
+checkpoint. Forge deliberately adds no concurrent-edit lock; simultaneous same-worktree sessions
+remain unsafe.
+
+`./setup.sh -F` and `./setup.ps1 -FullRefresh` (`-R`) are the authoritative v5-to-v6 migration.
+The manifest-driven transaction proves legacy ownership, preserves user regions/state/custom
+configuration, backs up rewritten bytes, publishes the v6 stamp last, and rolls back or requires an
+explicit recovery journal on uncertainty. Reports distinguish `CREATED`, `REWRITTEN`, `DELETED`,
+`PRESERVED`, `PRESERVED_COMPAT`, `PRESERVED_COMPAT_BLOCKED`, and `BLOCKED`. `MATERIALIZED` is no
+longer presented as runtime readiness: capability probes, authentication, discovery, Codex primary-
+checkout hook registration, and project trust determine each host's `RUNTIME_READY` status.
+
+Review and verification evidence is now bound to an immutable staged candidate, worktree identity,
+workflow base, iteration, and result payload. Ordinary review is fresh and read-only; investigative
+opinion launches a fresh full-capability engine in the real worktree with normal host/project state,
+memory, tools, MCP, and network, then requires independent primary/control reproduction. Both hosts compose their native `/goal` over the same persistent
+objective, nonce, resume, evidence, budget, and human-only PR authorization contract.
+
+Review loops now default to one broad review, one repair, and one closure. P3 or speculative notes do
+not keep a loop open; reachable P0/P1 security, correctness, or data-loss risks still block. The v6
+capability matrix records tested baselines Claude Code `2.1.237` and Codex CLI `0.144.1`; required
+capabilities, not version strings alone, govern role eligibility. Grok Build remains a future
+adapter boundary, not a v1 support claim.
+
+The v6 onboarding and reference documentation now leads with Forge's adoption value, diagrams the
+dual-engine architecture and engineering lifecycle, shows the exact installed tree, distinguishes
+`MATERIALIZED` from `RUNTIME_READY`, and documents full-agent real-worktree investigation. Installer
+summaries name the complete v6 commit surface, and project-first setup no longer prevents the first
+global installation when the only existing machine artifact is Forge's advisory version stamp.
+
 ## 5.61 — 2026-07-27 · `/codex` plan review gains a NECESSITY axis — the loop can now argue for _less_
 
 **Found by dogfooding v5.59/v5.60 in a downstream project.** Across roughly 30 review rounds the loop caught every omission and **not once** flagged anything as unnecessary. Concretely: an approved plan carried a pre-authoring gate demanding five third-party artifacts (model source, resolved manifest node/config, tool + adapter versions, a custom strategy macro, and one more) before the team was allowed to start authoring. It survived the entire loop. When a human finally challenged it, Codex conceded immediately and cleanly — _"there is no reachable correctness failure uniquely prevented by collecting all five artifacts"_ — and reduced the ask to a single coordination question. The capability was present; only the trigger was missing.

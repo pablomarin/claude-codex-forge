@@ -14,6 +14,9 @@ Set-StrictMode -Version Latest
 $ScriptDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path -replace '\\', '/'
 
 $LegacyFile = "CONTINUITY.md"
+$StateFile = ".forge/local/state.md"
+$LegacyStateFile = ".claude/local/state.md"
+$ReceiptFile = ".forge/local/migration-evidence/continuity-state-v5-v6.json"
 $SentinelPrefix = "<!-- forge:migrated"
 $SentinelToday = "<!-- forge:migrated $(Get-Date -Format 'yyyy-MM-dd') -->"
 
@@ -34,7 +37,24 @@ function Write-Utf8NoBom {
     [System.IO.File]::WriteAllText($abs, $Content, $script:Utf8NoBom)
 }
 
+function Write-TranslationReceipt {
+    if (-not (Test-Path -LiteralPath $LegacyStateFile -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $StateFile -PathType Leaf)) { return }
+    $python = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
+    if (-not $python) { throw "Python 3 is required to bind continuity migration evidence." }
+    & $python.Source (Join-Path $ScriptDir "scripts/merge-settings.py") write-continuity-receipt `
+        --source $LegacyStateFile --destination $StateFile --receipt $ReceiptFile
+    if ($LASTEXITCODE -ne 0) { throw "continuity translation receipt creation failed" }
+}
+
+if (-not (Test-Path $StateFile) -and (Test-Path ".claude/local/state.md")) {
+    & (Join-Path $PSScriptRoot "migrate-state-v5-v6.ps1") -Source ".claude/local/state.md" -Destination $StateFile
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 if (-not (Test-Path $LegacyFile)) {
+    Write-TranslationReceipt
     Write-Output "!  No CONTINUITY.md found in this directory. Nothing to migrate."
     exit 0
 }
@@ -42,13 +62,14 @@ if (-not (Test-Path $LegacyFile)) {
 # --- Idempotency check ---
 function Test-AlreadyMigrated {
     if ((Test-Path "CLAUDE.md") -and (Select-String -Path "CLAUDE.md" -SimpleMatch $SentinelPrefix -Quiet -ErrorAction SilentlyContinue)) { return $true }
-    if ((Test-Path ".claude/local/state.md") -and (Select-String -Path ".claude/local/state.md" -SimpleMatch $SentinelPrefix -Quiet -ErrorAction SilentlyContinue)) { return $true }
+    if ((Test-Path $StateFile) -and (Select-String -Path $StateFile -SimpleMatch $SentinelPrefix -Quiet -ErrorAction SilentlyContinue)) { return $true }
     return $false
 }
 
 if (Test-AlreadyMigrated) {
+    Write-TranslationReceipt
     $existing = ""
-    foreach ($f in @("CLAUDE.md", ".claude/local/state.md")) {
+    foreach ($f in @("CLAUDE.md", $StateFile)) {
         if (Test-Path $f) {
             $found = Select-String -Path $f -Pattern '<!-- forge:migrated [^>]*-->' -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($found) { $existing = $found.Matches[0].Value; break }
@@ -61,7 +82,7 @@ if (Test-AlreadyMigrated) {
     } else {
         Write-Output "Already migrated."
     }
-    Write-Output "  Sentinel marker detected in CLAUDE.md or .claude/local/state.md."
+    Write-Output "  Sentinel marker detected in CLAUDE.md or .forge/local/state.md."
     Write-Output "  No content was modified. To force a fresh migration, remove the marker line(s) and rerun."
     exit 0
 }
@@ -70,16 +91,22 @@ if (Test-AlreadyMigrated) {
 # Validate state.md presence FIRST (Codex iter-3 P1: bail before printing "Migrating...").
 # P3 fix: don't pre-create .claude/local/ -- on the failure path it leaves an empty
 # .claude/local/ behind in the user's repo. Skip the dir if state.md isn't present.
-if (-not (Test-Path ".claude/local/state.md")) {
+if (-not (Test-Path $StateFile)) {
     # Byte-equivalent to bash variant for AC-4 parity.
-    [Console]::Error.WriteLine("x .claude/local/state.md not found.")
-    [Console]::Error.WriteLine("  Run setup -f first to install the state template, then rerun --migrate.")
+    [Console]::Error.WriteLine("x .forge/local/state.md not found.")
+    [Console]::Error.WriteLine("  Run setup -R first to install/translate the canonical state, then rerun -Migrate.")
     exit 1
 }
-# Prepend sentinel to state.md (line 1).
-$stateContent = Get-Content ".claude/local/state.md" -Raw
+# Keep the v6 schema marker on line 1; insert the continuity sentinel on line 2.
+$stateContent = Get-Content $StateFile -Raw
 if ($null -eq $stateContent) { $stateContent = "" }
-Write-Utf8NoBom ".claude/local/state.md" "$SentinelToday`n$stateContent"
+if (-not $stateContent.StartsWith("<!-- forge:state-schema v6 -->`n")) {
+    [Console]::Error.WriteLine("x canonical state schema marker missing.")
+    exit 1
+}
+$schemaLine = "<!-- forge:state-schema v6 -->"
+$stateRest = $stateContent.Substring($schemaLine.Length + 1)
+Write-Utf8NoBom $StateFile "$schemaLine`n$SentinelToday`n$stateRest"
 
 # Prepend sentinel to CLAUDE.md (line 1) -- matches state.md treatment + AC-10
 # amendment. Forge dogfood result confirmed line-1 placement is the desired
@@ -240,7 +267,7 @@ $doneTail = if ($doneLines.Count -gt 3) {
 }
 
 if ($doneTail.Count -gt 0) {
-    $stateLines = Get-Content ".claude/local/state.md"
+    $stateLines = Get-Content $StateFile
     $newState = New-Object System.Collections.ArrayList
     $inDoneState = $false
     foreach ($line in $stateLines) {
@@ -255,8 +282,8 @@ if ($doneTail.Count -gt 0) {
         if ($inDoneState -and $line -match '^### ') { $inDoneState = $false }
         if (-not $inDoneState) { [void]$newState.Add($line) }
     }
-    Write-Utf8NoBom ".claude/local/state.md" (($newState -join "`n") + "`n")
-    [void]$movedSections.Add("Done (last 3 entries) -> .claude/local/state.md")
+    Write-Utf8NoBom $StateFile (($newState -join "`n") + "`n")
+    [void]$movedSections.Add("Done (last 3 entries) -> .forge/local/state.md")
 }
 
 # Now/Next: replace placeholder content with migrated content.
@@ -270,7 +297,7 @@ foreach ($section in @("Now", "Next")) {
     }
 
     if ($sectionLines.Count -gt 0) {
-        $stateLines = Get-Content ".claude/local/state.md"
+        $stateLines = Get-Content $StateFile
         $newState = New-Object System.Collections.ArrayList
         $inSectionState = $false
         foreach ($line in $stateLines) {
@@ -288,8 +315,8 @@ foreach ($section in @("Now", "Next")) {
             }
             if (-not $inSectionState) { [void]$newState.Add($line) }
         }
-        Write-Utf8NoBom ".claude/local/state.md" (($newState -join "`n") + "`n")
-        [void]$movedSections.Add("$section -> .claude/local/state.md")
+        Write-Utf8NoBom $StateFile (($newState -join "`n") + "`n")
+        [void]$movedSections.Add("$section -> .forge/local/state.md")
     }
 }
 
@@ -314,7 +341,7 @@ if ((Test-Path "CLAUDE.md") -and (Select-String -Path "CLAUDE.md" -Pattern '^@CO
         "        - Comments or labels that reference CONTINUITY.md as a location`n" +
         "`n" +
         "      CONTINUITY.md no longer exists -- its content moved to CLAUDE.md`n" +
-        "      (durable), docs/adr/ (decisions), and .claude/local/state.md`n" +
+        "      (durable), docs/adr/ (decisions), and .forge/local/state.md`n" +
         "      (volatile). Remove these references; the 'preserve project-specific`n" +
         "      content' rule does NOT apply to CONTINUITY pointers -- they are`n" +
         "      stale infrastructure references.`n" +
@@ -322,6 +349,10 @@ if ((Test-Path "CLAUDE.md") -and (Select-String -Path "CLAUDE.md" -Pattern '^@CO
         "    (Not in Claude Code? See docs/guides/upgrading.md `"Manual fallback`".)"
     [void]$warnings.Add($reconcilePrompt)
 }
+
+# Bind the exact surviving v5 source to the final canonical state after all
+# sentinel and continuity edits. Full refresh never trusts path coincidence.
+Write-TranslationReceipt
 
 # --- (e) Print summary (byte-equivalent strings to bash) ---
 Write-Output "Migration complete."

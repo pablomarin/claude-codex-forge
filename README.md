@@ -10,10 +10,10 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
-  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-5.61-blue?style=flat-square"></a>
+  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-6.0-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
-  <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-required-orange?style=flat-square"></a>
+  <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-supported-orange?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -32,129 +32,310 @@
 
 ---
 
-Claude Codex Forge combines **Claude Code** and **OpenAI's Codex** into a single workflow. Two agents beat one: Claude designs, Codex independently reviews, and the Engineering Council adjudicates when they disagree. What started as a set of workflow templates has grown — through continuous iteration — into a full engineering harness.
+Claude Codex Forge installs one canonical engineering harness for **Claude Code** and **OpenAI
+Codex**. It turns capable but session-local coding agents into a repeatable software-engineering
+system with shared workflows, fresh independent review, persistent state, memory, and evidence-bound
+quality gates.
+
+There is no permanent main agent. Open Claude Code and Claude leads that session; open Codex and
+Codex leads. The other engine is preferred for review, with a visible fresh same-engine fallback
+when it is unavailable.
+
+Claude Code uses `/opinion`; Codex uses `$opinion` for the same canonical opinion workflow.
+
+## Why Forge instead of vanilla Claude Code or Codex?
+
+Vanilla coding agents are excellent at producing code. The difficult part is making the whole
+engineering lifecycle reliable across long features, context compression, interrupted sessions,
+multiple developers, and the natural blind spots of one model reviewing its own work.
+
+Without a harness, good practice remains optional: research can be skipped, plans can drift from the
+approved requirement, tests can validate an old candidate, review can become an endless perfection
+loop, and a successful command can be mistaken for a verified result. A new session may know the
+repository but not the exact next step or why a decision was made.
+
+Forge makes engineering discipline structural:
+
+- **One lifecycle, not a bag of prompts** — PRD → current research → plan → TDD → user-journey E2E
+  → simplification → independent review → verification → exact-tree promotion → authorized PR.
+- **A genuinely fresh second opinion** — the preferred reviewer is the other engine, running with
+  fresh context against an exact candidate. If it cannot run, Forge says why and tries a fresh
+  same-engine reviewer instead of silently dropping the gate.
+- **Evidence, not confidence** — review, verification, and E2E receipts are bound to the candidate
+  fingerprint. Mutation invalidates affected evidence; process exit alone never means “verified.”
+- **Continuity across hosts and sessions** — `.forge/local/state.md` records the immutable workflow
+  base, checklist, evidence, and exact next step. Claude and Codex can resume the same worktree
+  without pretending their native conversation histories transferred.
+- **Useful memory without stale task leakage** — local worktree memory stays gitignored; verified
+  project knowledge, ADRs, and solutions can travel with the repository.
+- **Guardrails at the moment they matter** — hooks intercept dangerous shell operations,
+  unauthorized external mutation, incomplete ship gates, stale state, and malformed subagent
+  results before they become release claims.
+- **Practical resource discipline** — review defaults to one broad review, one repair pass, and one closure review.
+  Speculative edge cases, cosmetic perfection, and unchanged-candidate re-review do
+  not consume the project indefinitely; reachable correctness, security, and data-integrity defects
+  still block.
+
+The result is not “more agent.” It is a small, inspectable operating system for doing disciplined
+engineering with either agent.
 
 ## What you get
 
-- **Dual-agent review** — `/codex review` (independent second opinion) + `/council` (5-advisor panel with Codex chairman, see [explainer](docs/explanation/engineering-council.md)) catch issues one agent alone would miss; two separately-trained models flag different concerns — disagreement is the signal. And Codex isn't limited to reading code: **[Investigate mode](docs/explanation/codex-investigate.md)** gives it real, sandboxed hands on your live systems (query a DB, hit a cloud API, reproduce a bug) when a question can't be answered from source alone — repo-confined, read-only, every finding cross-verified.
-- **Autonomous goal mode** — write a sharp PRD, then paste one `/goal` command and the agent drives the entire feature — plan → review → implement → review → verify → E2E → PR — on its own, escalating hard calls to the Council instead of stopping to ask. Optional and PRD-gated; you watch and steer any time by typing in the prompt, and PR creation is the one gate that always waits for your yes. See [explainer](docs/explanation/autonomous-goal.md).
-- **Discipline by construction** — workflow commands bake in TDD, research-before-design, and E2E testing. Hooks block dangerous Bash, enforce state updates, and gate commit/push/PR on explicit quality markers.
-- **Continuous memory** — auto-memory persists locally across sessions and compaction (rescued by the `PreCompact` hook); `docs/adr/`, `docs/CHANGELOG.md`, and `docs/solutions/` travel with the repo so every architecture decision, root cause, and pattern compounds across weeks and teammates via git. Per-developer Workflow / Done / Now / Next state lives in gitignored `.claude/local/state.md` — read by hooks on demand, kept out of Claude's auto-loaded context.
-- **Team-scale by default** — one GitHub repo becomes the hub. Multiple developers run parallel Claude sessions via auto-created git worktrees, each isolated but with full project context.
+- Claude Code and Codex can each lead a complete feature or bug-fix workflow.
+- Fresh general, plan, code-spec, and code-quality opinions are hermetic and read-only.
+- Investigation runs as a fresh full agent in the real worktree with normal project/user config,
+  skills, MCP, network, databases, APIs, state, and memory.
+- A five-advisor Engineering Council adds model and perspective diversity for expensive decisions.
+- Native `/goal` remains host-owned and composes over Forge’s persistent objective, budget,
+  evidence, resume, and human-authorization contract.
+- Git worktrees isolate simultaneous features while each worktree keeps its own local state.
+- Bash and Windows PowerShell implementations ship together.
+
+## How the dual-engine harness works
+
+```mermaid
+flowchart TB
+    Developer[Developer] --> Claude[Claude Code]
+    Developer --> Codex[Codex CLI]
+
+    Claude --> ClaudeAdapters[CLAUDE.md + .claude adapters]
+    Codex --> CodexAdapters[AGENTS.md + .codex/.agents adapters]
+
+    ClaudeAdapters --> Forge[Canonical .forge harness]
+    CodexAdapters --> Forge
+
+    Forge --> Workflows[Workflows]
+    Forge --> Rules[Rules]
+    Forge --> Hooks[Hooks and evidence gates]
+    Forge --> Roles[Agents and skills]
+    Forge --> State[Per-worktree state and memory]
+```
+
+`.forge/` is the source of truth. `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.codex/`, and `.agents/`
+are thin native discovery adapters. They do not contain independent copies of Forge policy to keep
+in sync.
+
+### Main and reviewer selection
+
+| Current host | Main for this session | Preferred fresh reviewer | If preferred reviewer cannot launch |
+| --- | --- | --- | --- |
+| Claude Code | Claude | Codex | Fresh Claude reviewer, visibly labeled fallback |
+| Codex | Codex | Claude | Fresh Codex reviewer, visibly labeled fallback |
+
+Setup never asks for a permanent main or reviewer. An explicit Claude or Codex opinion is also
+supported. A review that returns findings succeeded; findings do not trigger engine fallback.
+Artifact, authorization, or invariant failures block instead of trying another engine.
+
+### Review, investigation, and council are different boundaries
+
+| Mode | Boundary | Intended use |
+| --- | --- | --- |
+| General, plan, code | Fresh hermetic process, read-only, candidate-bound | Independent analysis and certification |
+| Investigation | Fresh full agent in the real worktree with normal tools and configuration | Current docs, execution, databases, APIs, and operational fact finding |
+| Investigation reproduction | Isolated primary check plus independent control | Convert a hypothesis into `REPRODUCED` evidence |
+| Council | Five anonymous advisors, peer review, and a chairman | Consequential architecture and trade-off decisions |
+
+The healthy council topology uses three current-host advisors, two other-engine advisors, and an
+other-engine chairman. If the other engine is unavailable or the mixed topology fails, Forge
+discards that attempt and reruns the whole council on the current host.
+
+## The engineering workflow
+
+```mermaid
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 40, "rankSpacing": 64}}}%%
+flowchart TB
+    Define["<b>1 · DEFINE</b><br/>Approve the PRD<br/>Research current APIs and dependencies<br/>Compare approaches and approve the plan"]
+    Build["<b>2 · BUILD</b><br/>Run a fresh plan review<br/>Implement RED → GREEN → refactor<br/>Exercise the preliminary user journey"]
+    Certify["<b>3 · CERTIFY</b><br/>Document and simplify<br/>Freeze the exact candidate<br/>Run code-spec + code-quality review<br/>Run verify-app + full E2E"]
+    Ship["<b>4 · SHIP</b><br/>Promote the exact verified tree<br/>Human authorizes the external mutation<br/>Push the branch and open the PR"]
+
+    Define ==> Build ==> Certify ==> Ship
+```
+
+The main workflows are:
+
+| Purpose | Claude Code | Codex |
+| --- | --- | --- |
+| New feature | `/new-feature <name>` | `$workflow-new-feature <name>` |
+| Bug fix | `/fix-bug <name>` | `$workflow-fix-bug <name>` |
+| Quick fix | `/quick-fix <name>` | `$workflow-quick-fix <name>` |
+| Fresh opinion | `/opinion <request>` | `$opinion <request>` |
+| Full investigation | `/opinion investigate <request>` | `$opinion investigate <request>` |
+| Engineering Council | `/council <question>` | `$council <question>` |
+| Autonomous execution | Native `/goal` | Native `/goal` |
+
+Forge never shadows either host’s native `/goal`. It supplies the shared composition contract in
+`.forge/workflows/goal.md`; native session history stays host-specific while the Forge objective,
+nonce, persistent turn count, evidence, and next step survive a host switch.
 
 ## Quick start
 
-**Prerequisites:** [Claude Code](https://code.claude.com/docs) · [Node.js 22+](https://nodejs.org) · Git 2.23+ · a [ChatGPT Plus/Pro/Business plan or OpenAI API key](https://developers.openai.com/codex/) for Codex CLI.
+Prerequisites: Git 2.23+ and at least one authenticated supported host. Both adapters are installed
+even if only one CLI is currently available.
+
+### macOS and Linux
 
 ```bash
-# 1. Clone this harness repo (once per machine)
 git clone https://github.com/pablomarin/claude-codex-forge.git ~/claude-codex-forge
 chmod +x ~/claude-codex-forge/setup.sh
 
-# 2. Global setup once per machine (installs the memory system)
+# Once per machine
 ~/claude-codex-forge/setup.sh --global
 
-# 3. Install Codex CLI + authenticate (required for dual-agent review)
-npm install -g @openai/codex   # or: brew install --cask codex
-codex login
-
-# 4. Per-project setup
+# Once per fresh project
 cd /path/to/your/project
 ~/claude-codex-forge/setup.sh -p "My Project"
 
-# 5. Start Claude Code, install the Superpowers plugin, restart
-claude
-> /plugin install superpowers@claude-plugins-official
+# Confirm installed discovery and trust surfaces
+~/claude-codex-forge/scripts/verify-runtime.sh discovery --project-root "$(pwd -P)"
 
-# 6. Restart Claude Code, then kick off your first workflow
-> /new-feature my-feature
+# Work in either host
+claude
+# or
+codex
 ```
 
-Full walkthrough with platform-specific (Windows/macOS/Linux) instructions, the "no Codex" fallback, and troubleshooting: **[Getting Started →](docs/getting-started.md)**
+### Windows PowerShell
 
-Windows users: [PowerShell instructions](docs/getting-started.md#windows).
+```powershell
+git clone https://github.com/pablomarin/claude-codex-forge.git $HOME\claude-codex-forge
 
-### Running setup later
+# Once per machine
+& $HOME\claude-codex-forge\setup.ps1 -Global
 
-`setup.sh` is safe to re-run. Three modes:
+# Once per fresh project
+Set-Location C:\path\to\your-project
+& $HOME\claude-codex-forge\setup.ps1 -Project "My Project"
 
-| Command                         | Use case                                                                                                                                                                                                                                                                           |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `setup.sh -p "Name"` (no flags) | **First install** on a new project. Also safe to re-run later to fill in missing template files without disturbing anything that already exists.                                                                                                                                   |
-| `setup.sh --upgrade`            | **Routine template updates** on an existing project. Refreshes hooks, commands, rules, and agents. **Merges** `.claude/settings.json` and `.mcp.json` so your customizations (permissions, plugins, extra MCP servers) are preserved. Creates a timestamped `.bak` before merging. |
-| `setup.sh -f`                   | **Reset to template verbatim.** Overwrites `.claude/settings.json` and `.mcp.json` — wipes your customizations. No backup. Use only if your setup is corrupted or you've never customized anything.                                                                                |
+# Confirm installed discovery and trust surfaces
+& $HOME\claude-codex-forge\scripts\verify-runtime.ps1 discovery -ProjectRoot (Get-Location).Path
+```
 
-`CLAUDE.md`, `.claude/local/state.md`, and `docs/CHANGELOG.md` are always preserved — the template initializes them on first install and never touches them afterward, regardless of flags. If you upgrade from a pre-5.15 install, your legacy state file is preserved too; run `setup.sh --migrate` when ready to split it into the three new artifacts.
+See [Getting Started](docs/getting-started.md) for authentication, trust prompts, one-engine use,
+and runtime qualification.
 
-Full flag reference: **[Upgrading guide →](docs/guides/upgrading.md)**
+## What setup installs
 
-### Team upgrades (avoiding `.claude/` merge conflicts)
+```text
+your-project/
+├── CLAUDE.md                       # User text + bounded Claude adapter
+├── AGENTS.md                       # User text + bounded Codex adapter
+├── .mcp.json                       # Merged Context7 and Playwright servers
+├── .forge/                         # Canonical, engine-neutral harness
+│   ├── instructions.md
+│   ├── workflows/                  # Feature, bug, opinion, goal, PRD, finish
+│   ├── rules/                      # Testing, security, memory, styles, workflow
+│   ├── agents/                     # Producer, reviewer, research, verify roles
+│   ├── skills/                     # Council, release, UI, image generation
+│   ├── hooks/                      # Shared Bash + PowerShell enforcement
+│   ├── bin/                        # Runtime qualification helpers
+│   ├── local/                      # Gitignored state, reviews, evidence, memory
+│   └── memory/                     # Durable project-owned memory
+├── .claude/                        # Claude commands, agents, skills, settings
+├── .codex/                         # Codex agents, hooks, config
+├── .agents/skills/                 # Codex workflow and skill adapters
+├── docs/                           # ADRs, plans, PRDs, research, solutions
+└── tests/e2e/                      # Use cases and local reports
+```
 
-The Forge commits `.claude/` so your whole team shares the same workflow, rules, and gates. The catch: `setup.sh --upgrade`/`-f` **regenerates** that committed machinery, so if two developers run different Forge versions you get merge conflicts on those files every push. Keep it simple:
+Global setup adds canonical policy and trusted native-goal helpers under `~/.forge/`, plus bounded
+global adapters at `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
 
-> **One Forge version per project. One designated upgrader. Upgrades land as their own PR.**
+### One source of truth, two native adapters
 
-Everyone else just uses what's committed and never runs `--upgrade` in that repo. When it's time to move up, the designated upgrader runs `setup.sh --upgrade` and opens a dedicated `chore: forge X.YZ` PR; once it merges, everyone pulls.
+Forge does **not** ask teams to keep two copies of the same instructions synchronized. Both hosts
+discover the filename they support natively, and each root file points into one shared policy:
 
-To keep that convention from drifting silently, the Forge stamps the project's version into a committed **`.claude/.forge-version`** file and warns you (advisory only — it never blocks):
+| Forge source | Installed destination | Role |
+| --- | --- | --- |
+| `FORGE.template.md` | `.forge/instructions.md` | Canonical shared policy for both engines |
+| `templates/adapters/CLAUDE.block.template.md` | Forge-owned block in `CLAUDE.md` | Claude Code discovery and host-specific composition |
+| `templates/adapters/AGENTS.block.template.md` | Forge-owned block in `AGENTS.md` | Codex discovery and host-specific composition |
+| `CLAUDE.template.md` | No new v6 destination | Retained only to reconcile proven v5 installations |
 
-- **At `setup.sh` time:** running `-f`/`--upgrade` when your Forge version differs from the project's pin prints a heads-up that you're about to up/downgrade it.
-- **At session start:** if your installed Forge differs from the project's pin, Claude is told once — just the facts, your call (e.g. _"this project pins Forge 5.50; you're on 5.40 — the project is on a newer Forge, so you may want to upgrade yours to match"_).
+`.forge/instructions.md` is setup-managed; change `FORGE.template.md` when developing the harness,
+not the installed copy. In a downstream project, keep team-owned facts and commands in one neutral
+tracked file such as `docs/agent-context.md`. Add a one-time `@docs/agent-context.md` import outside
+the Forge block in `CLAUDE.md` and a one-time `Read docs/agent-context.md` instruction outside the
+Forge block in `AGENTS.md`. After that, edit only the neutral document.
 
-Both are fail-open and purely informational. (If you'd rather the Forge be a personal tool than a team standard, the alternative is to gitignore `.claude/` and install locally — but that gives up the shared, committed workflow discipline that's the point of committing it.)
+For a genuinely Claude-only instruction, use the user-owned part of `CLAUDE.md`; for a genuinely
+Codex-only instruction, use the user-owned part of `AGENTS.md`.
+Do not copy shared policy between `CLAUDE.md` and `AGENTS.md`. Setup refreshes only the Forge-owned
+blocks and preserves user-authored text outside them.
 
-### Upgrading from a pre-5.15 install?
+Setup preserves user content according to explicit ownership:
+
+- Canonical Forge files are refreshed.
+- Root instructions change only inside bounded Forge markers.
+- Existing settings, TOML, and `.mcp.json` keep unrelated entries.
+- `.forge/local/`, `.forge/memory/`, secrets, and custom native-goal surfaces are protected.
+- A legacy file is removed only when a released fingerprint or marker proves Forge ownership.
+
+### `MATERIALIZED` is not `RUNTIME_READY`
+
+Setup always installs both host surfaces. `MATERIALIZED` means those files exist. `RUNTIME_READY`
+means the installed host is authenticated, trusted, and exposes the required runtime capabilities.
+If one host is not ready, ordinary reviewer selection visibly falls back rather than pretending the
+preferred engine ran.
+
+## Setup, refresh, and team upgrades
+
+| Task | macOS/Linux | Windows PowerShell |
+| --- | --- | --- |
+| Fresh project | `setup.sh -p "My Project"` | `setup.ps1 -Project "My Project"` |
+| Global install | `setup.sh --global` | `setup.ps1 -Global` |
+| v5 → v6 project refresh | `./setup.sh -F` | `./setup.ps1 -FullRefresh` or `-R` |
+| Global authoritative refresh | `./setup.sh --global -F` | `./setup.ps1 -Global -FullRefresh` |
+| Legacy continuity migration only | `setup.sh --migrate` | `setup.ps1 -Migrate` |
+| Playwright scaffold | `setup.sh -t fullstack --with-playwright` | `setup.ps1 -Tech fullstack -WithPlaywright` |
+
+Full refresh is transactional. It proves released ownership, stages replacements, preserves user
+regions and custom configuration, translates state, writes `.forge/version` last, and rolls back on
+failure. An ambiguity reports `PRESERVED_COMPAT_BLOCKED` instead of guessing.
+
+Commit the harness as one versioned project change:
 
 ```bash
-./setup.sh --upgrade   # picks up new files; preserves your existing CONTINUITY.md byte-for-byte
-./setup.sh --migrate   # splits CONTINUITY.md into CLAUDE.md durable + docs/adr/ decisions + .claude/local/state.md volatile
+git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/
+git commit -m "chore: add Forge engineering harness"
 ```
 
-See [`docs/guides/upgrading.md`](docs/guides/upgrading.md) for the full walkthrough including verifying the migration and removing the legacy `@CONTINUITY.md` import.
+`.forge/local/` remains gitignored. Teams should use one designated upgrader and land harness
+refreshes as dedicated PRs; everyone else pulls that committed version.
 
-## How it works
+See [Upgrading](docs/guides/upgrading.md) for ownership reports and transaction recovery, and
+[Setup Scenarios](docs/guides/setup-scenarios.md) for common installations.
 
-One feature goes from idea to merged PR across 14 enforced phases — from PRD through research, dual-reviewer design loops, TDD execution, parallel code review, simplify + verify + E2E, compound learnings, and PR reviewer handling.
+## State, memory, and switching hosts
 
-See **[the full workflow diagram](docs/explanation/workflow.md)** for the complete view, or jump straight to:
+- `.forge/local/state.md` is the per-worktree durable checkpoint: command, phase, immutable base,
+  checklist, evidence, blockers, and exact next step.
+- `.forge/local/memory/` contains volatile worktree-local drafts.
+- `.forge/memory/`, `docs/adr/`, and `docs/solutions/` contain verified project knowledge that can
+  be committed.
+- Global memory stores stable cross-project patterns, never current-task progress or secrets.
 
-- **[Why a harness, not a template](docs/explanation/harness-philosophy.md)** — the two-agent design, discipline by construction, continuous memory
-- **[Autonomous goal mode](docs/explanation/autonomous-goal.md)** — paste one `/goal`, the agent drives PRD→PR; you watch and steer
-- **[Codex Investigate mode](docs/explanation/codex-investigate.md)** — give Codex real hands on live systems, safely
-- **[Commands reference](docs/reference/commands.md)** — every slash command and subagent
-- **[Hooks reference](docs/reference/hooks.md)** — seven hook events that keep discipline structural
+You may plan in Claude, close it, and continue implementation in Codex—or the reverse. The new host
+resumes the same Git branch and Forge checkpoint. Forge warns against editing one worktree from both
+hosts simultaneously but intentionally adds no lock manager.
 
 ## Documentation
 
-| Topic                                                               | What's inside                                                               |
-| ------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| **[Getting Started](docs/getting-started.md)**                      | Prerequisites, 6-step install, verify setup                                 |
-| **[Setup Scenarios](docs/guides/setup-scenarios.md)**               | New project · existing project · upgrade                                    |
-| **[Customize Your Project](docs/guides/customize-project.md)**      | CLAUDE.md · `.claude/local/state.md` · optional MCPs · automated PR reviews |
-| **[Upgrading](docs/guides/upgrading.md)**                           | `--upgrade` mode, merge behavior, fresh-install alternative                 |
-| **[Parallel Development](docs/guides/parallel-sessions.md)**        | Multiple sessions via git worktrees                                         |
-| **[Playwright CI Bridge](docs/guides/playwright-ci-bridge.md)**     | `--with-playwright` scaffold for deterministic E2E in CI                    |
-| **[Commands Reference](docs/reference/commands.md)**                | All slash commands and subagents                                            |
-| **[Hooks Reference](docs/reference/hooks.md)**                      | Seven hook events + how they interact                                       |
-| **[Permissions & Security](docs/reference/permissions.md)**         | Deny / ask / skip rules                                                     |
-| **[File Structure](docs/reference/file-structure.md)**              | What setup creates and where                                                |
-| **[Creating Skills](docs/reference/creating-skills.md)**            | Author your own slash commands                                              |
-| **[Cheatsheet](docs/reference/cheatsheet.md)**                      | Copy-paste daily-workflow card                                              |
-| **[Workflow (full)](docs/explanation/workflow.md)**                 | 14-phase diagram with rationale                                             |
-| **[Autonomous Goal Mode](docs/explanation/autonomous-goal.md)**     | `/goal` PRD→PR autonomy — optional, PRD-gated, watch-and-steer              |
-| **[Codex Investigate Mode](docs/explanation/codex-investigate.md)** | Give Codex live-system access (DB/cloud/API) safely; works inside `/goal`   |
-| **[Harness Philosophy](docs/explanation/harness-philosophy.md)**    | Why dual-agent, why discipline, why continuous memory                       |
-| **[Memory Architecture](docs/explanation/memory-architecture.md)**  | Global + project + auto-memory layers                                       |
-| **[Troubleshooting](docs/troubleshooting.md)**                      | Memory · hooks · permissions · MCP · plugins · Codex                        |
-
-## Concrete guarantees
-
-The pillars above cash out in specific, repo-verifiable behavior:
-
-- **Compaction rescue** — `PreCompact` hook flushes session learnings to auto-memory _before_ context compression, so nothing is dropped silently
-- **Review ordering enforced** — `/codex review` runs _first_ as an independent pass, then `/pr-review-toolkit:review-pr` (6 deep agents), then `/simplify`, then post-PR `/review-pr-comments`. Commits are blocked until quality markers are present.
-- **Worktree isolation** — `/new-feature` and `/fix-bug` auto-create git worktrees so parallel Claude sessions never share filesystem state
-- **E2E for user-facing changes** — `verify-e2e` subagent replays `tests/e2e/use-cases/*.md` as a growing regression suite; optional `--with-playwright` scaffolds deterministic `.spec.ts` for contributor PRs in CI
+| Topic | What it explains |
+| --- | --- |
+| [Getting Started](docs/getting-started.md) | Prerequisites, installation, trust, and runtime readiness |
+| [Commands](docs/reference/commands.md) | Claude and Codex native invocation map |
+| [Workflow](docs/explanation/workflow.md) | Full feature and bug-fix lifecycle |
+| [Harness Philosophy](docs/explanation/harness-philosophy.md) | Why discipline, dual review, state, and memory matter |
+| [Investigation](docs/explanation/codex-investigate.md) | Full-agent investigation versus certifying reproduction |
+| [Engineering Council](docs/explanation/engineering-council.md) | Seats, peer review, chairman, and topology fallback |
+| [Autonomous Goal](docs/explanation/autonomous-goal.md) | Native `/goal` composition and authorization boundaries |
+| [File Structure](docs/reference/file-structure.md) | Every installed canonical and adapter surface |
+| [Hooks](docs/reference/hooks.md) | Automatic enforcement and worktree routing |
+| [Permissions](docs/reference/permissions.md) | Human, host, reviewer, and mutation boundaries |
+| [Upgrading](docs/guides/upgrading.md) | Transactional v5→v6 refresh and recovery |
+| [Troubleshooting](docs/troubleshooting.md) | Authentication, trust, hooks, MCP, and runtime diagnostics |
 
 ## Version history
 
@@ -162,6 +343,7 @@ Recent releases:
 
 | Version | Date       | Highlights                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6.0     | 2026-08-27 | **One canonical dual-engine harness.** Claude Code or Codex can lead any action; the other engine is preferred for fresh review and council diversity, with visible fresh same-engine fallback. An ownership-aware `-F` / `-FullRefresh` transaction replaces proven v5 machinery while preserving user content, state, and compatible configuration. Shared policy and evidence now live under `.forge/`; host directories contain thin native adapters. |
 | 5.61    | 2026-07-27 | **`/codex` plan review gains a NECESSITY axis — the loop can now argue for _less_.** Found by dogfooding v5.59/v5.60 in a downstream project: across ~30 review rounds the loop caught every omission and **never once** flagged anything as unnecessary. An approved plan carried a gate demanding five third-party artifacts before authoring could begin; it survived the whole loop, and when a human finally challenged it Codex conceded at once — _"no reachable correctness failure uniquely prevented by collecting all five artifacts"_ — reducing the ask to one question. Root cause is a delegation dead-end, not a missing concept: plan review stopped asking _"Is there a simpler approach?"_ (`new-feature.md:732`, `fix-bug.md:560`) and delegated it to the Contrarian Gate; a Contrarian `VALIDATE` **skips council entirely** (`peer-review-protocol.md:164`), so the Simplifier who asks _"Does this need to exist at all?"_ (`advisors.md:16`) may never run; and Codex is told not to revisit a council-validated choice (`codex.md:140`). On a `VALIDATE` plan, nobody asks. The existing gold-plating clause didn't compensate — buried in a ~310-word CALIBRATION paragraph, written in code vocabulary, and scored by maintenance/correctness/operational cost, none of which an unnecessary _information-gathering_ gate has. Fix: one top-level item **6. NECESSITY** in Design Review Mode asking the inverse counterfactual — for any prerequisite, gate, or requested artifact that materially delays work or adds external coordination, what concrete reachable failure does it prevent or reduce? If none, flag removal or narrowing. **P2** for material delivery/coordination cost, **P3** for mere redundancy; agenda-level placement ahead of CALIBRATION is the mechanism. Deliberately narrow — an unscoped "name what each requirement _uniquely prevents_, else it's deletable" draft was rejected in review for auditing everything, rejecting defense-in-depth, treating missing reviewer context as proof of non-necessity, and rebuilding the auto-P2 churn v5.59 already discarded. Not extended to code review (already covered by `code-simplifier` + `/simplify`). New contract pins one site, 3 stems, both rejected phrasings **absent**, and the placement invariant — proven discriminating against 5 mutations. `rules/workflow.md` untouched; no new blocking gate. Reaches installs via `setup.sh --upgrade`. |
 | 5.60    | 2026-07-24 | **`check-bash-safety` check #6 no longer blocks read-only inspection of `.claude/settings.json`.** Found by dogfooding v5.59 in this repo: right after `setup.sh --upgrade`, the freshly installed hook rejected a command that merely printed a heading and then ran a read-only `grep` over `.claude/settings.json` — flagged as config tampering though it writes nothing. Cause: check #6's pattern `(sed|awk|echo|tee|printf).*` + config-path let `.*` span the whole command, so an unrelated heading-print poisoned a later read; inconsistently, a plain `cat` of `.claude/settings.json` passed, since cat is not in the writer list. Same class as v5.56/v5.57 — an over-broad guardrail firing on a read, which silently stalls a `/goal` loop with no human to clear the prompt. Fix: `[^;\|&]*` in both twins (`.sh:75`, `.ps1:83`) so the writer and the target must share the same command segment, mirroring check #9's redirect-target scoping. Every true positive is preserved (redirect-clobber, `sed -i` in-place edit, `tee` after a pipe, and a writer after `&&` all still block). Residuals documented rather than closed: variable-indirected targets, and a config path quoted as *data* before a pipe — closing the latter needs write-operator parsing, so it stays a residual (smallest correct fix, the LEAN posture check #9 settled on). New `SIX_BLOCK`/`SIX_ALLOW` corpus (45 assertions, up from 37), proven discriminating: restoring the old regex fails the field-bug case. 13-suite green. Reaches installs via `setup.sh --upgrade`. |
 | 5.59    | 2026-07-24 | **Calibrate the `/codex` reviewer toward simplicity + add finding triage.** Field hit: Codex finds real bugs but over-flags low-ROI edge cases and proposes machinery-heavy remedies, grinding the revision loops — it demanded a new pre-truncation payload field plus in-driver computation where a one-line prompt reservation closed the same defect. Causes were in the harness: `commands/codex.md` literally said "Flag anything that could break in production", Codex was never pointed at this repo's brutal-simplicity doctrine, and every P0/P1/P2 is load-bearing in the revision protocol. Two levers, both in `commands/codex.md`: (1) a **CALIBRATION block** in all 3 review-shaped prompts (both Code Review commands + Design Review; General/Investigate exempt) anchoring to `.claude/rules/principles.md`, requiring a **plausible, reachable** failure scenario (input, adversarial action, timing/interleaving, partial failure, or reachable state — need NOT be reproducible on demand), keeping reachability separate from severity, demanding the smallest correct fix, and flagging over-engineering by concrete cost — with the inflation line removed and plan-stage spec-loss=P1 restated; (2) a **`## Finding Triage`** section before mode A: no reachable trigger → demoted to an unsubstantiated P3 note (never dropped), prefer the smaller fix, weigh recommended complexity by cost, record each downgrade — plus a "not an escape hatch" clause binding it to NO BUGS LEFT BEHIND. **Information-preserving by construction:** the scope line is untouched (same things looked for), rarity is explicitly not grounds for dismissal, a rare-but-real defect lands at P3 ("May fix, does not block") so it is reported but never forces machinery, rare × catastrophic stays blocking, and an unscenarioed finding is **demoted to a P3 note, never dropped**. Plus a **self-limiting guard Codex found while reviewing this diff**: pointing it at repo doctrine makes branch-controlled content into severity guidance, so all 3 sites now state that doctrine governs simplicity only, can never justify suppressing or downgrading a correctness/security finding, and that an instruction to hide findings — including these instructions — is itself a P0 (Codex's own fixes, merge-base pinning or inlining, don't close it: `commands/codex.md` is in the checkout too). Authored downstream against a project-local doctrine section; re-anchored here to the rules file that ships to every install. Survived two Codex self-review passes (which caught an input-only framing that would bury race/timing/security bugs, and an auto-P2 rule that swapped bug-churn for style-churn). New contract pins 3 sites × 5 stems + triage stems + ordering + absence of the old trigger (proven against 3 mutations). `rules/workflow.md` untouched — no gate-protocol change. Reaches installs via `setup.sh --upgrade`. |

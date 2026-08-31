@@ -27,6 +27,7 @@ usage() {
     echo "  -p, --project NAME  Project name (default: directory name)"
     echo "  -t, --tech STACK    Tech stack: python, typescript, fullstack (default: fullstack)"
     echo "  -f, --force         Overwrite existing files (destructive)"
+    echo "  -F, --full-refresh  Authoritative transactional v5 -> v6 harness refresh"
     echo "  -u, --upgrade       Smart upgrade: merge new hooks/permissions into existing settings"
     echo "      --migrate       Migrate legacy CONTINUITY.md content to the new structure"
     echo "  -g, --global        Set up global memory system (~/.claude/)"
@@ -39,6 +40,7 @@ usage() {
     echo "  $0 -p \"My Project\"          # Custom project name"
     echo "  $0 -t python                # Python-only project"
     echo "  $0 -f                       # Force overwrite existing files"
+    echo "  $0 -F                       # Ownership-aware full harness refresh"
     echo "  $0 --upgrade                # Upgrade: add new hooks/rules, merge settings"
     echo "  $0 --migrate                # Migrate CONTINUITY.md to .claude/local/state.md + ADRs"
     echo "  $0 --global                 # Set up global memory (run once per machine)"
@@ -50,6 +52,7 @@ usage() {
 PROJECT_NAME=""
 TECH_STACK="fullstack"
 FORCE=false
+FULL_REFRESH=false
 UPGRADE=false
 MIGRATE=false
 GLOBAL=false
@@ -71,6 +74,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -f|--force)
             FORCE=true
+            shift
+            ;;
+        -F|--full-refresh)
+            FULL_REFRESH=true
             shift
             ;;
         -u|--upgrade)
@@ -102,6 +109,35 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [ "$FULL_REFRESH" = true ] && { [ "$FORCE" = true ] || [ "$UPGRADE" = true ] || [ "$MIGRATE" = true ] || [ "$WITH_PLAYWRIGHT" = true ]; }; then
+    echo -e "${RED}ERROR: --full-refresh cannot be combined with --force, --upgrade, --migrate, or --with-playwright.${NC}" >&2
+    exit 1
+fi
+
+report_native_goal_collisions() {
+    local root="$1"
+    if [ -e "$root/.claude/commands/goal.md" ]; then
+        echo "RUNTIME_READY=BLOCKED host=claude custom native goal collision; rename .claude/commands/goal.md and rerun setup"
+    fi
+    if [ -e "$root/.agents/skills/goal" ]; then
+        echo "RUNTIME_READY=BLOCKED host=codex custom native goal collision; rename .agents/skills/goal/ and rerun setup"
+    fi
+}
+
+# Full refresh is a separate transaction. It exits before ordinary setup can
+# stamp, merge, or create any host surface.
+if [ "$FULL_REFRESH" = true ]; then
+    refresh_helper="$SCRIPT_DIR/scripts/full-refresh.sh"
+    [ -f "$refresh_helper" ] || { echo "BLOCKED: full-refresh helper not found: $refresh_helper" >&2; exit 1; }
+    if [ "$GLOBAL" = true ]; then
+        bash "$refresh_helper" --target "${HOME:?HOME is required for global full refresh}" --scope global
+    else
+        bash "$refresh_helper" --target "$(pwd -P)" --scope project
+        report_native_goal_collisions "$(pwd -P)"
+    fi
+    exit $?
+fi
+
 # --- Migration dispatch (PR #2 / continuity-split) -------------------------
 # Migration runs as a SEPARATE script for review hygiene. The logic lives at
 # $SCRIPT_DIR/scripts/migrate-continuity.sh — not embedded here.
@@ -113,6 +149,87 @@ if [ "$MIGRATE" = "true" ]; then
     fi
     bash "$SCRIPT_DIR/scripts/migrate-continuity.sh"
     exit $?
+fi
+
+# Task 2 checkpoint safety: do not create a v6 discovery surface beside a
+# recognizable or ambiguous v5 harness. Task 3 replaces this interim block
+# with the transactional full-refresh implementation and executable command.
+v6_preflight_no_legacy() {
+    local root="$1" scope="$2" manifest="$SCRIPT_DIR/manifests/legacy-v5.tsv"
+    local kind source destination row_scope platform host ownership selector proof extra family mixed_path
+    if [ -f "$root/.forge/version" ]; then
+        [ "$(cat "$root/.forge/version" 2>/dev/null)" = "6" ] || {
+            echo "BLOCKED: unsupported Forge layout version at $root/.forge/version" >&2
+            return 1
+        }
+        return 0
+    fi
+    [ -f "$manifest" ] || { echo "BLOCKED: legacy v5 inventory is unavailable" >&2; return 1; }
+    # Inventory-derived discovery families deliberately fail closed for a lone
+    # exact or ambiguous v5 surface. Shared docs and .mcp.json are not startup
+    # policy and are handled by their content-preserving v6 merge paths.
+    while IFS=$'\t' read -r kind source destination row_scope platform host ownership selector proof extra; do
+        case "$kind" in ""|'#'*) continue ;; esac
+        [ -z "$extra" ] || { echo "BLOCKED: malformed legacy v5 inventory" >&2; return 1; }
+        [ "$row_scope" = "$scope" ] || continue
+        case "$platform" in all|unix) ;; *) continue ;; esac
+        case "$destination" in
+            CLAUDE.md|.claude/CLAUDE.md)
+                [ "$ownership" = mixed-regions ] || continue
+                mixed_path="$root/$destination"
+                [ -f "$mixed_path" ] || continue
+                if [ "$scope" = project ]; then
+                    grep -Eq '^# CLAUDE\.md - |^## Project Overview$|^### Research Enforcement$|^## Detailed Rules$|\.claude/(commands|rules|hooks|skills|agents)/' "$mixed_path" || continue
+                else
+                    grep -Eq '^# Global Claude Code Instructions$|^## Ground Your Claims$|^## Memory Management$' "$mixed_path" || continue
+                fi
+                ;;
+            .claude/*)
+                family=${destination#'.claude/'}
+                family=${family%%/*}
+                family=".claude/$family"
+                [ -e "$root/$family" ] || continue
+                # Project setup records an advisory machine-version stamp before
+                # global setup may have run. A lone regular stamp is not a v5
+                # global harness; allow the documented project-first recovery
+                # path to materialize the real global v6 surfaces.
+                if [ "$scope" = global ] && [ "$destination" = ".claude/.forge-version" ] \
+                    && [ -d "$root/.claude" ] && [ ! -L "$root/.claude" ] \
+                    && [ -f "$root/.claude/.forge-version" ] && [ ! -L "$root/.claude/.forge-version" ] \
+                    && [ "$(find "$root/.claude" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = "1" ]; then
+                    continue
+                fi
+                # A lone custom native goal is not a legacy Forge harness. Let
+                # setup preserve it and report the explicit goal collision.
+                if [ "$scope" = project ] && [ "$family" = ".claude/commands" ] \
+                    && [ -f "$root/.claude/commands/goal.md" ] \
+                    && [ "$(find "$root/.claude/commands" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = "1" ]; then
+                    continue
+                fi
+                ;;
+            *) continue ;;
+        esac
+        if [ "$UPGRADE" = true ]; then
+            if [ "$scope" = global ]; then
+                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Run: '$SCRIPT_DIR/setup.sh' --global -F" >&2
+            else
+                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Run: '$SCRIPT_DIR/setup.sh' -F" >&2
+            fi
+        else
+            if [ "$scope" = global ]; then
+                echo "BLOCKED: legacy Forge harness detected. Run the explicit authoritative refresh: '$SCRIPT_DIR/setup.sh' --global -F" >&2
+            else
+                echo "BLOCKED: legacy Forge harness detected. Run the explicit authoritative refresh: '$SCRIPT_DIR/setup.sh' -F" >&2
+            fi
+        fi
+        return 1
+    done < "$manifest"
+}
+
+if [ "$GLOBAL" = true ]; then
+    v6_preflight_no_legacy "${HOME:?HOME is required for global setup}" global || exit 1
+else
+    v6_preflight_no_legacy "$(pwd)" project || exit 1
 fi
 
 # --- Forge version stamp (advisory drift detection) ------------------------
@@ -182,6 +299,15 @@ copy_file() {
 # GLOBAL SETUP (--global flag)
 # ============================================================================
 if [[ "$GLOBAL" == true ]]; then
+    bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
+        --repo-root "$SCRIPT_DIR" --target "$HOME" --scope global --platform unix
+    echo "INSTALLATION: MATERIALIZED"
+    echo "claude RUNTIME_READY: BLOCKED pending authenticated scripts/verify-runtime.sh sentinel"
+    echo "codex RUNTIME_READY: BLOCKED pending authenticated scripts/verify-runtime.sh sentinel"
+    echo "GOAL_OVERLAY: BLOCKED until scripts/qualify-goal-feasibility.sh records both native hosts"
+    echo "Global Forge v6 materialized for Claude Code and Codex. No permanent main agent was selected."
+    exit 0
+
     echo -e "${BLUE}============================================${NC}"
     echo -e "${BLUE}  Claude Code Global Setup${NC}"
     echo -e "${BLUE}============================================${NC}"
@@ -616,53 +742,17 @@ if [[ "$had_continuity_md" == true ]] && [[ -f CLAUDE.md ]] && grep -qF '<!-- fo
 fi
 
 if [[ "$had_claude_md" == true ]]; then
-    echo -e "  ${BLUE}○${NC} CLAUDE.md already exists (never overwritten — user content)"
-else
-    copy_file "$SCRIPT_DIR/CLAUDE.template.md" "CLAUDE.md" "CLAUDE.md"
+    echo -e "  ${BLUE}○${NC} CLAUDE.md user text will be preserved outside the Forge block"
 fi
-# Install state template (stable path under .claude/ — used by /new-feature
-# Pre-Flight reuse and migration helper). Always refresh this — it's the
-# canonical template, not user content.
-mkdir -p .claude
-copy_file "$SCRIPT_DIR/state.template.md" ".claude/state.template.md" ".claude/state.template.md (template, stable path)"
+bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
+    --repo-root "$SCRIPT_DIR" --target "$(pwd)" --scope project --platform unix
+report_native_goal_collisions "$(pwd -P)"
 
-# Volatile per-developer state (gitignored, never overwritten).
-if [ ! -f ".claude/local/state.md" ]; then
-    mkdir -p .claude/local
-    copy_file "$SCRIPT_DIR/state.template.md" ".claude/local/state.md" ".claude/local/state.md (volatile per-developer state)"
-fi
-
-# Settings — merge on upgrade, copy otherwise
-if [[ "$UPGRADE" == true ]] && [[ -f ".claude/settings.json" ]]; then
-    echo -e "  ${YELLOW}↑${NC} Merging .claude/settings.json (upgrade mode)"
-    python3 "$SCRIPT_DIR/scripts/merge-settings.py" "$SCRIPT_DIR/settings/settings.template.json" ".claude/settings.json"
-else
-    copy_file "$SCRIPT_DIR/settings/settings.template.json" ".claude/settings.json" ".claude/settings.json"
-fi
-
-# MCP servers — merge on upgrade, copy otherwise
-if [[ "$UPGRADE" == true ]] && [[ -f ".mcp.json" ]]; then
-    echo -e "  ${YELLOW}↑${NC} Merging .mcp.json (upgrade mode)"
-    python3 "$SCRIPT_DIR/scripts/merge-settings.py" "$SCRIPT_DIR/mcp.template.json" ".mcp.json"
-else
-    copy_file "$SCRIPT_DIR/mcp.template.json" ".mcp.json" ".mcp.json (MCP servers: Playwright + Context7)"
-fi
-
-# Hooks
-copy_file "$SCRIPT_DIR/hooks/session-start.sh" ".claude/hooks/session-start.sh" ".claude/hooks/session-start.sh"
-copy_file "$SCRIPT_DIR/hooks/check-state-updated.sh" ".claude/hooks/check-state-updated.sh" ".claude/hooks/check-state-updated.sh"
-copy_file "$SCRIPT_DIR/hooks/post-tool-format.sh" ".claude/hooks/post-tool-format.sh" ".claude/hooks/post-tool-format.sh"
-copy_file "$SCRIPT_DIR/hooks/pre-compact-memory.sh" ".claude/hooks/pre-compact-memory.sh" ".claude/hooks/pre-compact-memory.sh"
-copy_file "$SCRIPT_DIR/hooks/check-config-change.sh" ".claude/hooks/check-config-change.sh" ".claude/hooks/check-config-change.sh"
-copy_file "$SCRIPT_DIR/hooks/check-bash-safety.sh" ".claude/hooks/check-bash-safety.sh" ".claude/hooks/check-bash-safety.sh"
-copy_file "$SCRIPT_DIR/hooks/check-workflow-gates.sh" ".claude/hooks/check-workflow-gates.sh" ".claude/hooks/check-workflow-gates.sh"
-copy_file "$SCRIPT_DIR/hooks/auto-approve-local-writes.sh" ".claude/hooks/auto-approve-local-writes.sh" ".claude/hooks/auto-approve-local-writes.sh"
-# build-evidence.sh — read-only evidence emitter for the /forge-goal autonomous loop
-copy_file "$SCRIPT_DIR/hooks/build-evidence.sh" ".claude/hooks/build-evidence.sh" ".claude/hooks/build-evidence.sh"
-chmod +x ".claude/hooks/build-evidence.sh" 2>/dev/null || true
-
-# Hook lib helpers (shared across hooks and command Pre-Flight blocks)
-mkdir -p .claude/hooks/lib
+# Transitional v5 workflow bodies still reference these three helper paths;
+# Task 9 removes the compatibility copies when those workflows are converted.
+mkdir -p .claude/hooks/lib .claude/local
+[ -f .claude/local/state.md ] || cp "$SCRIPT_DIR/state.template.md" .claude/local/state.md
+cp "$SCRIPT_DIR/state.template.md" .claude/state.template.md
 copy_file "$SCRIPT_DIR/hooks/lib/default-branch.sh" ".claude/hooks/lib/default-branch.sh" ".claude/hooks/lib/default-branch.sh (default-branch detection helper)"
 chmod +x .claude/hooks/lib/default-branch.sh 2>/dev/null || true
 copy_file "$SCRIPT_DIR/hooks/lib/default-branch.ps1" ".claude/hooks/lib/default-branch.ps1" ".claude/hooks/lib/default-branch.ps1 (PowerShell mirror)"
@@ -678,16 +768,6 @@ copy_file "$SCRIPT_DIR/hooks/lib/codex-pty-helper.py" ".claude/hooks/lib/codex-p
 chmod +x .claude/hooks/lib/codex-pty-helper.py 2>/dev/null || true
 copy_file "$SCRIPT_DIR/hooks/lib/codex-pty.ps1" ".claude/hooks/lib/codex-pty.ps1" ".claude/hooks/lib/codex-pty.ps1 (Windows PowerShell shim)"
 
-chmod +x .claude/hooks/session-start.sh 2>/dev/null || true
-chmod +x .claude/hooks/check-state-updated.sh 2>/dev/null || true
-chmod +x .claude/hooks/post-tool-format.sh 2>/dev/null || true
-chmod +x .claude/hooks/pre-compact-memory.sh 2>/dev/null || true
-chmod +x .claude/hooks/check-config-change.sh 2>/dev/null || true
-chmod +x .claude/hooks/check-bash-safety.sh 2>/dev/null || true
-chmod +x .claude/hooks/check-workflow-gates.sh 2>/dev/null || true
-chmod +x .claude/hooks/auto-approve-local-writes.sh 2>/dev/null || true
-chmod +x .claude/hooks/build-evidence.sh 2>/dev/null || true
-
 # ADRs — ship template + README + seed ADRs (existing-file-skip semantics).
 mkdir -p docs/adr
 copy_file "$SCRIPT_DIR/docs/adr/template.md" "docs/adr/template.md" "docs/adr/template.md"
@@ -696,7 +776,8 @@ for adr in 0001-volatile-state-not-auto-loaded 0002-bash-and-powershell-dual-pla
     copy_file "$SCRIPT_DIR/docs/adr/${adr}.md" "docs/adr/${adr}.md" "docs/adr/${adr}.md"
 done
 
-# Step 5: Append .claude/local/ to root .gitignore if not already present (idempotent).
+# Keep both the v6 canonical local state and the transitional v5-compatible
+# state path private and idempotently ignored.
 if [ -f ".gitignore" ]; then
     if ! grep -qxF ".claude/local/" .gitignore; then
         echo "" >> .gitignore
@@ -704,14 +785,19 @@ if [ -f ".gitignore" ]; then
         echo ".claude/local/" >> .gitignore
         echo -e "  ${GREEN}+${NC} Added .claude/local/ to .gitignore"
     fi
+    if ! grep -qxF ".forge/local/" .gitignore; then echo ".forge/local/" >> .gitignore; fi
 else
     cat > .gitignore <<'EOF'
 # Volatile per-developer workflow state (PR #2 / continuity-split)
 .claude/local/
+.forge/local/
 EOF
     echo -e "  ${GREEN}+${NC} Created .gitignore with .claude/local/"
 fi
 
+# The manifest materializer above owns all v6 adapters. The unreachable legacy
+# block remains temporarily for the v5 contract strings Task 3 consumes.
+if false; then
 # Agents
 copy_file "$SCRIPT_DIR/agents/verify-app.md" ".claude/agents/verify-app.md" ".claude/agents/verify-app.md"
 copy_file "$SCRIPT_DIR/agents/verify-e2e.md" ".claude/agents/verify-e2e.md" ".claude/agents/verify-e2e.md"
@@ -732,7 +818,6 @@ copy_file "$SCRIPT_DIR/commands/new-feature.md" ".claude/commands/new-feature.md
 copy_file "$SCRIPT_DIR/commands/fix-bug.md" ".claude/commands/fix-bug.md" ".claude/commands/fix-bug.md"
 copy_file "$SCRIPT_DIR/commands/quick-fix.md" ".claude/commands/quick-fix.md" ".claude/commands/quick-fix.md"
 copy_file "$SCRIPT_DIR/commands/finish-branch.md" ".claude/commands/finish-branch.md" ".claude/commands/finish-branch.md"
-copy_file "$SCRIPT_DIR/commands/codex.md" ".claude/commands/codex.md" ".claude/commands/codex.md"
 copy_file "$SCRIPT_DIR/commands/review-pr-comments.md" ".claude/commands/review-pr-comments.md" ".claude/commands/review-pr-comments.md"
 
 # Commands - PRD
@@ -794,6 +879,7 @@ case $TECH_STACK in
         copy_file "$SCRIPT_DIR/skills/generate-image/SKILL.template.md" ".claude/skills/generate-image/SKILL.md" ".claude/skills/generate-image/SKILL.md"
         ;;
 esac
+fi
 
 # Playwright framework templates (opt-in via --with-playwright)
 if [[ "$WITH_PLAYWRIGHT" == true ]]; then
@@ -971,15 +1057,8 @@ else
     echo -e "  ${BLUE}○${NC} docs/CHANGELOG.md already exists"
 fi
 
-# Update CLAUDE.md with project name
-if [[ -f "CLAUDE.md" ]]; then
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/\[Project Name\]/$PROJECT_NAME/g" CLAUDE.md
-    else
-        sed -i "s/\[Project Name\]/$PROJECT_NAME/g" CLAUDE.md
-    fi
-    echo -e "  ${GREEN}✓${NC} Updated CLAUDE.md with project name"
-fi
+# The v6 marker materializer owns only the bounded Forge block. Text outside
+# that block is user-owned bytes and is never subject to project-name rewriting.
 
 # Forge version pin (project) — WRITE LATE, after all .claude/ copies have succeeded,
 # so a mid-copy abort under `set -e` never leaves the pin ahead of the actual files.
@@ -1013,13 +1092,12 @@ if [[ "$UPGRADE" == true ]]; then
     fi
     echo -e "${YELLOW}What was updated:${NC}"
     echo ""
-    echo "  .claude/commands/        Workflow commands (refreshed)"
-    echo "  .claude/hooks/           Hook scripts (refreshed)"
-    echo "  .claude/rules/           Coding standards (refreshed)"
-    echo "  .claude/agents/          Subagent definitions (refreshed)"
-    echo "  .claude/skills/          Skills (release, council, ui-design if typescript/fullstack)"
-    echo "  .claude/settings.json    Hooks and permissions (merged — your customizations kept)"
-    echo "  .mcp.json                MCP servers (merged — your customizations kept)"
+    echo "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and state template"
+    echo "  CLAUDE.md / AGENTS.md    Bounded host adapters; personal text outside Forge markers preserved"
+    echo "  .claude/                 Claude Code commands, agents, skills, hooks, and merged settings"
+    echo "  .codex/                  Codex agents, hooks, and merged configuration"
+    echo "  .agents/                 Codex workflow and skill adapters"
+    echo "  .mcp.json                Shared MCP servers (merged — your customizations kept)"
     echo ""
     # Drive "Not touched" from pre-copy booleans so we don't falsely claim a
     # file was preserved when this run actually recreated it from template.
@@ -1039,12 +1117,12 @@ if [[ "$UPGRADE" == true ]]; then
     echo -e "1. ${BLUE}Verify everything works${NC}:"
     echo ""
     echo "   /hooks       → Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    echo "   /help        → Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*"
+    echo "   /help        → Should show Forge workflows for both installed hosts"
     echo ""
     echo -e "2. ${BLUE}Commit and push${NC}:"
     echo ""
-    echo "   git add .claude/ .mcp.json"
-    echo "   git commit -m \"chore: upgrade Claude Code automation templates\""
+    echo "   git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/"
+    echo "   git commit -m \"chore: upgrade Forge harness\""
     echo "   git push"
     echo ""
     # 5.16: dropped the consolidated cry-wolf drift preamble that fired on
@@ -1063,7 +1141,7 @@ if [[ "$UPGRADE" == true ]]; then
     if [[ "$had_continuity_md" == true ]] && [[ "$continuity_migrated" == true ]]; then
         echo -e "${GREEN}✓ CONTINUITY.md already migrated${continuity_migrated_paren}.${NC}"
         echo "  Its content was migrated to CLAUDE.md (durable), docs/adr/ (decisions),"
-        echo "  and .claude/local/state.md (volatile). Once you've confirmed that content"
+        echo "  and .forge/local/state.md (volatile). Once you've confirmed that content"
         echo "  landed (and nothing references the file), CONTINUITY.md can be removed:"
         echo ""
         echo "    rm CONTINUITY.md"
@@ -1126,7 +1204,7 @@ if [[ "$UPGRADE" == true ]]; then
         echo "     - Comments or labels that reference CONTINUITY.md as a location"
         echo ""
         echo "   CONTINUITY.md no longer exists -- its content moved to CLAUDE.md"
-        echo "   (durable), docs/adr/ (decisions), and .claude/local/state.md"
+        echo "   (durable), docs/adr/ (decisions), and .forge/local/state.md"
         echo "   (volatile). Remove these references; the 'preserve project-specific"
         echo "   content' rule does NOT apply to CONTINUITY pointers -- they are"
         echo "   stale infrastructure references.\""
@@ -1141,32 +1219,27 @@ else
     echo ""
     echo -e "${YELLOW}What was created:${NC}"
     echo ""
-    echo "  CLAUDE.md                Your project description (edit this!)"
-    echo "  .claude/local/state.md   Volatile per-developer workflow state (gitignored)"
-    echo "  .claude/state.template.md Canonical state template (always-refresh)"
-    echo "  .claude/settings.json    Hooks and permissions"
-    echo "  .mcp.json                MCP servers (Playwright + Context7)"
-    echo "  .claude/commands/        Workflow commands: /new-feature, /fix-bug, /quick-fix"
-    echo "  .claude/hooks/           Auto-run scripts (format, verify, memory)"
-    echo "  .claude/agents/          Subagent definitions (verify-app, verify-e2e)"
-    echo "  .claude/skills/           Skills (release, council, ui-design if typescript/fullstack)"
-    echo "  .claude/rules/           Coding standards + workflow rules (safe to update)"
-    echo "  docs/                    Changelog, ADRs (docs/adr/), PRDs, solutions knowledge base"
+    echo "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and local state"
+    echo "  .forge/local/state.md    Per-worktree workflow checkpoint (gitignored)"
+    echo "  CLAUDE.md / AGENTS.md    Thin Claude Code and Codex root adapters"
+    echo "  .claude/                 Claude Code commands, agents, skills, hooks, and settings"
+    echo "  .codex/                  Codex agents, hooks, and configuration"
+    echo "  .agents/                 Codex workflow and skill adapters"
+    echo "  .mcp.json                Shared MCP servers (Playwright + Context7)"
+    echo "  docs/adr/                Architecture decisions and index"
+    echo "  docs/                    Changelog, plans, PRDs, research, and solutions"
     echo ""
-    echo -e "${YELLOW}Plugins pre-enabled in .claude/settings.json:${NC}"
+    echo -e "${YELLOW}Optional host integration enabled in .claude/settings.json:${NC}"
     echo ""
-    echo "  - superpowers              (requires install — see step 3 below)"
-    echo "  - pr-review-toolkit        (built-in, no install needed)"
-    echo "  - frontend-design          (built-in, no install needed)"
+    echo "  - frontend-design          (optional Claude Code UI integration)"
     echo ""
     if [[ ! -f "$HOME/.claude/CLAUDE.md" ]]; then
         echo -e "${RED}┌──────────────────────────────────────────────────────────────┐${NC}"
-        echo -e "${RED}│  ⚠ IMPORTANT: Global memory not set up yet!                 │${NC}"
+        echo -e "${RED}│  ⚠ IMPORTANT: Global Forge policy is not set up yet!        │${NC}"
         echo -e "${RED}│                                                              │${NC}"
         echo -e "${RED}│  Without global setup:                                       │${NC}"
-        echo -e "${RED}│  • Claude won't save learnings before context compression    │${NC}"
-        echo -e "${RED}│  • /memory won't show your auto memory directory             │${NC}"
-        echo -e "${RED}│  • Session knowledge will be lost on compaction              │${NC}"
+        echo -e "${RED}│  • Shared global grounding is not installed for either host  │${NC}"
+        echo -e "${RED}│  • Trusted native-goal authorization helpers are unavailable │${NC}"
         echo -e "${RED}│                                                              │${NC}"
         echo -e "${RED}│  Run: ${GREEN}$SCRIPT_DIR/setup.sh --global${RED}           │${NC}"
         echo -e "${RED}└──────────────────────────────────────────────────────────────┘${NC}"
@@ -1174,34 +1247,18 @@ else
     fi
     echo -e "${YELLOW}Next steps:${NC}"
     echo ""
-    echo -e "1. ${BLUE}Edit CLAUDE.md${NC} — Fill in your project description, tech stack, and commands"
-    echo "   (It's intentionally short — all rules live in .claude/rules/)"
-    echo ""
-    echo -e "2. ${BLUE}Set your project goal${NC} — In CLAUDE.md, add one sentence under '### Goal'"
-    echo "   (Volatile state lives in .claude/local/state.md — gitignored, populated by /new-feature)"
-    echo ""
-    echo -e "3. ${BLUE}Install the Superpowers plugin${NC} (one time):"
-    echo ""
-    echo "   claude"
-    echo "   /plugin install superpowers@claude-plugins-official"
-    echo ""
-    echo "   Then restart Claude Code."
-    echo ""
-    echo "   Note: pr-review-toolkit and frontend-design are built-in Claude Code plugins —"
-    echo "   no install needed. /simplify is a built-in command. They're already"
-    echo "   enabled in .claude/settings.json."
-    echo ""
-    echo -e "4. ${BLUE}Verify everything works${NC}:"
+    echo -e "1. ${BLUE}Verify both installed host surfaces${NC}:"
     echo ""
     echo "   /hooks       → Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    echo "   /help        → Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*"
-    echo "   /memory      → Should show your auto memory directory"
+    echo "   /help        → Claude should show Forge commands; Codex should show the matching \$workflow-* skills"
+    echo "   scripts/verify-runtime.sh discovery --project-root \"$(pwd -P)\""
     echo ""
-    echo -e "5. ${BLUE}Commit and push${NC}:"
+    echo -e "2. ${BLUE}Commit the shared harness${NC} (.forge/local/ remains gitignored):"
     echo ""
-    echo "   git add .claude/ .mcp.json CLAUDE.md docs/"
-    echo "   git commit -m \"chore: add Claude Code automation setup\""
+    echo "   git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/"
+    echo "   git commit -m \"chore: add Forge engineering harness\""
     echo "   git push"
     echo ""
-    echo -e "${GREEN}You're ready! Run /new-feature <name> to start your first guided workflow.${NC}"
+    echo -e "${GREEN}Harness materialized for Claude Code and Codex.${NC}"
+    echo -e "${YELLOW}Runtime readiness remains BLOCKED until the printed verify/qualify commands pass.${NC}"
 fi

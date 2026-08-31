@@ -1,0 +1,42 @@
+name: Windows PowerShell parity
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  powershell-51:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Windows PowerShell 5.1 is required; observed $($PSVersionTable.PSVersion)"
+          }
+      - name: Run deterministic PowerShell 5.1 suites
+        shell: powershell
+        run: |
+          $artifacts = Join-Path $env:RUNNER_TEMP 'forge-windows-powershell51'
+          New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
+          $previousErrorActionPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\template\run-all.ps1 2>&1 |
+            Tee-Object -FilePath (Join-Path $artifacts 'windows-powershell-51.log')
+          $suiteExitCode = $LASTEXITCODE
+          $ErrorActionPreference = $previousErrorActionPreference
+          if ($suiteExitCode -ne 0) { exit $suiteExitCode }
+          .\scripts\qualify-runtime-final.ps1 -WriteWindowsAttestation -ProjectRoot . `
+            -Output (Join-Path $artifacts 'windows-powershell-51.receipt')
+      - name: Upload deterministic PowerShell result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-powershell-51
+          path: ${{ runner.temp }}/forge-windows-powershell51/
+          if-no-files-found: error

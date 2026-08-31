@@ -1,3 +1,4 @@
+<!-- forge:state-schema v6 -->
 # Project State (per-developer, gitignored)
 
 > This file holds your active workflow state. It is NOT shared with the team.
@@ -5,6 +6,20 @@
 >
 > If you started a workflow with `/new-feature` or `/fix-bug`, the Workflow section below tracks your progress.
 > The Done / Now / Next sections capture your current focus across sessions.
+
+## Identity
+
+| Field                | Value |
+| -------------------- | ----- |
+| Worktree root        |       |
+| Git common directory |       |
+| Last active host     |       |
+| Workflow base ref    |       |
+| Workflow base SHA    |       |
+
+The worktree root and Git common directory are resolved physical paths. The workflow
+base ref and SHA remain immutable for one workflow. Switching between Claude and Codex
+changes only `Last active host`; it never restarts completed gates.
 
 ## Workflow
 
@@ -30,8 +45,12 @@ Format when active:
 | Field            | Value                                  |
 | ---------------- | -------------------------------------- |
 | nonce            | <uuid-v4-lowercase>                    |
+| objective_hash   | <externally-authorized-objective-hash> |
 | workflow_command | /new-feature <name> OR /fix-bug <name> |
 | issued_at        | <ISO-8601-UTC-timestamp>               |
+| turn_count       | <derived-from-hook-owned-records>       |
+| turn_ceiling     | <derived-from-external-authorization>   |
+| evidence_path    | .forge/local/evidence/latest.json       |
 
 **REPLACE semantics:** the entire `## /goal session` block (heading + table) is
 replaced atomically on each new autonomous-loop kickoff. A stale session from a
@@ -65,6 +84,22 @@ surface to user.
 
 ---
 
+## Receipts
+
+| Field                  | Value |
+| ---------------------- | ----- |
+| Review iteration       | <integer> |
+| Candidate receipt      | .forge/local/evidence/<task-id>/candidate.receipt |
+| Spec review receipt    | .forge/local/reviews/<task-id>/spec.receipt |
+| Quality review receipt | .forge/local/reviews/<task-id>/quality.receipt |
+| Verify app receipt     | .forge/local/evidence/<task-id>/verify-app.receipt |
+| E2E receipt            | .forge/local/evidence/<task-id>/e2e.receipt |
+| Promotion receipt      | .forge/local/evidence/<task-id>/promotion.receipt |
+| Council receipt        | .forge/local/council/<council-id>/receipt.json |
+
+Each action receipt records `host=<claude|codex>`. Receipt paths are worktree-local;
+they cannot satisfy gates in a sibling worktree.
+
 ## State
 
 ### Done (recent 2-3 only)
@@ -97,7 +132,8 @@ surface to user.
 
 ## Update Rules
 
-You (Claude) are responsible for updating this file. The Stop hook reminds you of the active workflow; the PreToolUse hook gates commit/push/PR on the checklist.
+The currently active host is responsible for updating this file. The Stop hook reminds
+Claude or Codex of the active workflow; the ship hook gates commit/push/PR on the checklist.
 
 **On task completion:**
 
@@ -112,12 +148,13 @@ You (Claude) are responsible for updating this file. The Stop hook reminds you o
 
 **On code-review iteration completion (during a `/forge-goal`-driven run):**
 
-1. Append a checklist line to `### Checklist` capturing the iteration number, tool, and HEAD SHA:
-   - `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``
-   - `- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``
-2. Both `codex clean` AND `pr-toolkit clean` must be present for the SAME iteration AND at the SAME current HEAD for the `reviewer_gate.clean_same_iteration` evidence to be true.
-3. If a fix changes HEAD, re-run reviewers and append a NEW iteration row; do NOT mutate existing rows.
-4. **Convergence breaker (v5.54):** after the first both-engines-clean iteration (certification), more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
+1. Freeze one staged-clean `git:working-tree` candidate and set `Candidate receipt`.
+2. Record distinct `code-spec` and `code-quality` review receipts for the same review iteration and candidate. Engine choice is neutral: same-engine reviews and a visible fallback are valid when each receipt records requested engine, actual engine, and fallback reason.
+3. Persist candidate-bound `verify-app` and `e2e` receipts only after their reports are written under `.forge/local/evidence/` and hashed by `verification-receipt`.
+4. Any staged, unstaged, or in-scope untracked mutation invalidates the complete final receipt set. Freeze the new candidate and rerun both review lenses plus both verifiers; never relabel an old receipt.
+5. Genuine unmigrated v5 fixtures retain the legacy checklist reader during dual-read. Once receipt-v2 linkage is present, legacy clean rows cannot certify the workflow.
+6. Exact-tree promotion revalidates the receipt set before hook execution and compare-and-swap, then records `Promotion receipt`; the real branch is not advanced early.
+7. **Convergence breaker (v5.54):** after the first receipt-certified iteration, more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
    - `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\``
    The line is head-bound; the agent never writes it on its own initiative. If the loop line carries an iteration count, an N/A escape must KEEP it (`- [x] Code review loop (<N> iterations) — N/A: <reason>`) — a count-less `Code review loop — N/A:` after certification reads as counter erasure and trips the breaker.
 
@@ -128,7 +165,7 @@ You (Claude) are responsible for updating this file. The Stop hook reminds you o
 2. Compute `plan_sha` with `shasum -a 256 <path>` (macOS), `sha256sum <path>` (Linux), or `(Get-FileHash -Algorithm SHA256 <path>).Hash` (PowerShell).
 3. When checking the loop-complete checkbox `- [x] Plan review loop (<N> iterations) — PASS`, the per-iter clean line for iteration N must be present AND its `plan_sha` must match the current plan file content. The PreToolUse `check-workflow-gates` hook enforces this on ship actions.
 4. If a fix changes the plan, re-run reviewers and append a NEW iteration row; do NOT mutate existing rows.
-5. Escape (the ONLY one — Codex is mandatory in this repo): `- [x] Plan review loop — N/A: <reason>`. An N/A line skips the per-iter evidence check on ship actions and is caught by human reviewers at PR time. It does NOT set the evidence gate clean — a `/goal` autonomous run cannot self-complete on N/A; it halts for a human if Codex is genuinely unavailable.
+5. Reviewer selection is not an escape: prefer the other engine, then visibly dispatch a fresh same-engine reviewer when that engine is missing or lacks the required capability. Do not halt solely because the preferred engine is unavailable. A justified `- [x] Plan review loop — N/A: <reason>` still does NOT set the evidence gate clean; `/goal` can complete only from a real current-artifact receipt, and blocks only if the fallback also fails.
 
 **On PR creation authorization (during a `/forge-goal`-driven run):**
 
@@ -143,7 +180,7 @@ You (Claude) are responsible for updating this file. The Stop hook reminds you o
 The continuity narrative **round-trips** through main so it survives worktree teardown (it is otherwise gitignored and dies with the worktree). The **foldable** sections are `### Done` / `### Next` / `### Deferred` (under `## State`), plus `## Open Questions` and `## Blockers`. The **gate** sections (`## Workflow`, `## /goal session`, `## PR authorization`) NEVER travel — they stay worktree-local with their REPLACE/singleton semantics.
 
 1. A fresh worktree's foldable narrative is copied **verbatim** from main's `state.md`, with `### Now` cleared (a new feature has no active "Now").
-2. A narrative-only **seed snapshot** is written to `.claude/local/.state-seed-snapshot.md` (gitignored, worktree-local) — a record of main's foldable narrative at seed time, used by `/finish-branch` to detect divergence.
+2. A narrative-only **seed snapshot** is written to `.forge/local/.state-seed-snapshot.md` (gitignored, worktree-local) — a record of main's foldable narrative at seed time, used by `/finish-branch` to detect divergence.
 
 **On `/finish-branch` (round-trip fold-back, BEFORE the worktree is removed):**
 

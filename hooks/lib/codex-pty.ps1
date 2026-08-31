@@ -1,4 +1,4 @@
-# hooks/lib/codex-pty.ps1 — work around openai/codex#19945 (Windows side).
+﻿# hooks/lib/codex-pty.ps1 — work around openai/codex#19945 (Windows side).
 #
 # Mirrors hooks/lib/codex-pty.sh. See that file's header for the bug and the
 # unified contract; the docs below cover only Windows-specific concerns.

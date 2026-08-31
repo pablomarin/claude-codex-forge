@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # Claude Code Project Setup Script (PowerShell)
 # Company-wide template for consistent AI-assisted development workflow
 # ============================================================================
@@ -17,6 +17,8 @@ param(
     [Alias("f")]
     [switch]$Force,
 
+    [Alias("R")][switch]$FullRefresh,
+
     [Alias("u")]
     [switch]$Upgrade,
 
@@ -31,11 +33,26 @@ param(
     [string]$PlaywrightDir
 )
 
-# Upgrade implies force for hooks/commands/rules
-if ($Upgrade) { $Force = $true }
-
 # Script directory (where templates live)
 $ScriptDir = $PSScriptRoot
+
+if ($FullRefresh -and ($Force -or $Upgrade -or $Migrate -or $WithPlaywright)) {
+    [Console]::Error.WriteLine("ERROR: FullRefresh and Force/Upgrade/Migrate/WithPlaywright cannot be combined.")
+    exit 1
+}
+
+function Write-NativeGoalCollisions {
+    param([string]$Root)
+    if (Test-Path -LiteralPath (Join-Path $Root ".claude\commands\goal.md")) {
+        Write-Host "RUNTIME_READY=BLOCKED host=claude custom native goal collision; rename .claude/commands/goal.md and rerun setup"
+    }
+    if (Test-Path -LiteralPath (Join-Path $Root ".agents\skills\goal")) {
+        Write-Host "RUNTIME_READY=BLOCKED host=codex custom native goal collision; rename .agents/skills/goal/ and rerun setup"
+    }
+}
+
+# Upgrade implies force for hooks/commands/rules
+if ($Upgrade) { $Force = $true }
 
 # Colors function
 function Write-Color {
@@ -57,6 +74,7 @@ function Show-Usage {
     Write-Host "  -p, -Project NAME   Project name (default: directory name)"
     Write-Host "  -t, -Tech STACK     Tech stack: python, typescript, fullstack (default: fullstack)"
     Write-Host "  -f, -Force          Overwrite existing files"
+    Write-Host "  -R, -FullRefresh    Authoritative transactional v5 -> v6 harness refresh"
     Write-Host "  -Migrate            Migrate legacy CONTINUITY.md content to the new structure"
     Write-Host "  -g, -Global         Set up global memory system (~/.claude/)"
     Write-Host "  -w, -WithPlaywright Install Playwright framework templates (requires -Tech fullstack or typescript)"
@@ -66,6 +84,7 @@ function Show-Usage {
     Write-Host "  .\setup.ps1 -p `"My Project`"          # Custom project name"
     Write-Host "  .\setup.ps1 -t python                # Python-only project"
     Write-Host "  .\setup.ps1 -f                       # Force overwrite existing files"
+    Write-Host "  .\setup.ps1 -R                       # Ownership-aware full harness refresh"
     Write-Host "  .\setup.ps1 -Migrate                 # Migrate CONTINUITY.md to .claude/local/state.md + ADRs"
     Write-Host "  .\setup.ps1 -Global                  # Set up global memory (run once per machine)"
     Write-Host "  .\setup.ps1 -Global -f               # Force overwrite global settings"
@@ -76,6 +95,20 @@ function Show-Usage {
 if ($Help) {
     Show-Usage
     exit 0
+}
+
+if ($FullRefresh) {
+    $refreshHelper = Join-Path (Join-Path $ScriptDir "scripts") "full-refresh.ps1"
+    if (-not (Test-Path -LiteralPath $refreshHelper -PathType Leaf)) {
+        [Console]::Error.WriteLine("BLOCKED: full-refresh helper not found: $refreshHelper")
+        exit 1
+    }
+    if ($Global) { & $refreshHelper -Target $HOME -Scope global }
+    else {
+        & $refreshHelper -Target (Get-Location).Path -Scope project
+        if ($LASTEXITCODE -eq 0) { Write-NativeGoalCollisions (Get-Location).Path }
+    }
+    exit $LASTEXITCODE
 }
 
 # --- Migration dispatch (PR #2 / continuity-split) -------------------------
@@ -90,6 +123,76 @@ if ($Migrate) {
     }
     & $migrateHelper
     exit $LASTEXITCODE
+}
+
+function Test-V6PreflightNoLegacy {
+    param([string]$Root, [ValidateSet("project", "global")][string]$Scope)
+    $version = Join-Path $Root ".forge\version"
+    if (Test-Path $version) {
+        if (((Get-Content -Raw $version).Trim()) -ne "6") { throw "BLOCKED: unsupported Forge layout version at $version" }
+        return
+    }
+    $manifest = Join-Path $ScriptDir "manifests\legacy-v5.tsv"
+    if (-not (Test-Path $manifest)) { throw "BLOCKED: legacy v5 inventory is unavailable" }
+    foreach ($raw in [IO.File]::ReadAllLines($manifest)) {
+        if (-not $raw.Trim() -or $raw.StartsWith("#")) { continue }
+        $fields = $raw.Split("`t")
+        if ($fields.Count -ne 9) { throw "BLOCKED: malformed legacy v5 inventory" }
+        $destination = $fields[2]; $rowScope = $fields[3]; $platform = $fields[4]; $ownership = $fields[6]
+        if ($rowScope -ne $Scope -or @("all", "windows") -notcontains $platform) { continue }
+        if ($destination -eq "CLAUDE.md" -or $destination -eq ".claude/CLAUDE.md") {
+            if ($ownership -ne "mixed-regions") { continue }
+            $mixed = Join-Path $Root ($destination -replace '/', '\')
+            if (-not (Test-Path $mixed -PathType Leaf)) { continue }
+            $text = [IO.File]::ReadAllText($mixed)
+            $recognizable = if ($Scope -eq "project") {
+                $text -match '(?m)^# CLAUDE\.md - |^## Project Overview$|^### Research Enforcement$|^## Detailed Rules$|\.claude/(commands|rules|hooks|skills|agents)/'
+            } else {
+                $text -match '(?m)^# Global Claude Code Instructions$|^## Ground Your Claims$|^## Memory Management$'
+            }
+            if (-not $recognizable) { continue }
+        } elseif ($destination.StartsWith(".claude/")) {
+            $tail = $destination.Substring(8)
+            $family = $tail.Split('/')[0]
+            $familyPath = Join-Path $Root ".claude\$family"
+            if (-not (Test-Path $familyPath)) { continue }
+            # Project setup may create only the advisory machine stamp before
+            # global setup runs. That lone regular file is not a v5 global
+            # harness and must not block the documented project-first path.
+            if ($Scope -eq "global" -and $destination -eq ".claude/.forge-version") {
+                $claudeRoot = Join-Path $Root ".claude"
+                $claudeRootItem = Get-Item -LiteralPath $claudeRoot -Force -ErrorAction SilentlyContinue
+                $members = @(Get-ChildItem -Force $claudeRoot)
+                $stamp = Join-Path $claudeRoot ".forge-version"
+                $stampItem = Get-Item -LiteralPath $stamp -Force -ErrorAction SilentlyContinue
+                if ($claudeRootItem -and -not ($claudeRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+                    $members.Count -eq 1 -and $members[0].Name -eq ".forge-version" -and
+                    $stampItem -and -not $stampItem.PSIsContainer -and
+                    -not ($stampItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+            }
+            # A lone custom native goal is not a legacy Forge harness. Let
+            # setup preserve it and report the explicit goal collision.
+            if ($Scope -eq "project" -and $family -eq "commands") {
+                $members = @(Get-ChildItem -Force $familyPath)
+                $goalPath = Join-Path $familyPath "goal.md"
+                if ((Test-Path $goalPath -PathType Leaf) -and $members.Count -eq 1 -and $members[0].Name -eq "goal.md") { continue }
+            }
+        } else { continue }
+        if ($Upgrade) {
+            if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness requires authoritative refresh. Run: & '$ScriptDir\setup.ps1' -Global -R" }
+            throw "BLOCKED: legacy Forge harness requires authoritative refresh. Run: & '$ScriptDir\setup.ps1' -R"
+        }
+        if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness detected. Run: & '$ScriptDir\setup.ps1' -Global -R" }
+        throw "BLOCKED: legacy Forge harness detected. Run: & '$ScriptDir\setup.ps1' -R"
+    }
+}
+
+try {
+    if ($Global) { Test-V6PreflightNoLegacy $HOME "global" }
+    else { Test-V6PreflightNoLegacy (Get-Location).Path "project" }
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
 }
 
 # --- Forge version stamp (advisory drift detection) ------------------------
@@ -197,6 +300,12 @@ function Copy-TemplateFile {
 # GLOBAL SETUP (-Global flag)
 # ============================================================================
 if ($Global) {
+    & (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target $HOME -Scope global -Platform windows
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "GOAL_OVERLAY: BLOCKED until qualify-goal-feasibility.ps1 records both native hosts"
+    Write-Host "Global Forge v6 materialized for Claude Code and Codex. No permanent main agent was selected."
+    exit 0
+
     Write-Color "============================================" "Blue"
     Write-Color "  Claude Code Global Setup" "Blue"
     Write-Color "============================================" "Blue"
@@ -642,6 +751,13 @@ if ($hadContinuity -and (Test-Path "CLAUDE.md")) {
     }
 }
 
+& (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows
+Write-NativeGoalCollisions (Get-Location).Path
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Retain the v5 implementation text for Task 3 ownership recognition, but do
+# not execute it beside the v6 materialized layout.
+if ($false) {
 if ($hadClaude) {
     Write-Host "  " -NoNewline; Write-Color "o" "Blue"; Write-Host " CLAUDE.md already exists (never overwritten - user content)"
 } else {
@@ -742,8 +858,19 @@ Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "r
 # exec runs without a controlling TTY). Both .ps1 + .sh + helper.py ship for
 # cross-platform parity (ADR 0005).
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.ps1") "$libDir\codex-pty.ps1" "$libDir\codex-pty.ps1 (codex PTY shim, openai/codex#19945)"
-Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.sh") "$libDir\codex-pty.sh" "$libDir\codex-pty.sh (codex PTY shim, bash — used by commands/codex.md callsites)"
+Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty.sh") "$libDir\codex-pty.sh" "$libDir\codex-pty.sh (Codex PTY shim, bash)"
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty-helper.py") "$libDir\codex-pty-helper.py" "$libDir\codex-pty-helper.py (Python pty.fork helper for the shim)"
+}
+
+# Transitional workflow bodies still reference these helpers until Task 9.
+$libDir = ".claude\hooks\lib"
+New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+New-Item -ItemType Directory -Path ".claude\local" -Force | Out-Null
+if (-not (Test-Path ".claude\local\state.md")) { Copy-Item (Join-Path $ScriptDir "state.template.md") ".claude\local\state.md" }
+Copy-Item (Join-Path $ScriptDir "state.template.md") ".claude\state.template.md" -Force
+foreach ($helper in @("default-branch.ps1", "default-branch.sh", "review-breaker.ps1", "review-breaker.sh", "codex-pty.ps1", "codex-pty.sh", "codex-pty-helper.py")) {
+    Copy-Item (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") $helper) (Join-Path $libDir $helper) -Force
+}
 
 # ADRs -- ship template + README + seed ADRs (existing-file-skip semantics).
 if (-not (Test-Path "docs\adr")) { New-Item -ItemType Directory -Path "docs\adr" -Force | Out-Null }
@@ -762,14 +889,17 @@ if (Test-Path ".gitignore") {
         Add-Content -Path ".gitignore" -Value ".claude/local/"
         Write-Host "  " -NoNewline; Write-Color "+" "Green"; Write-Host " Added .claude/local/ to .gitignore"
     }
+    if (-not ($gitignoreContent -contains ".forge/local/")) { Add-Content -Path ".gitignore" -Value ".forge/local/" }
 } else {
     @"
 # Volatile per-developer workflow state (PR #2 / continuity-split)
 .claude/local/
+.forge/local/
 "@ | Set-Content ".gitignore"
     Write-Host "  " -NoNewline; Write-Color "+" "Green"; Write-Host " Created .gitignore with .claude/local/"
 }
 
+if ($false) {
 # Agents
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "agents") "verify-app.md") ".claude\agents\verify-app.md" ".claude\agents\verify-app.md"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "agents") "verify-e2e.md") ".claude\agents\verify-e2e.md" ".claude\agents\verify-e2e.md"
@@ -793,7 +923,6 @@ Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "new-feature.md")
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "fix-bug.md") ".claude\commands\fix-bug.md" ".claude\commands\fix-bug.md"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "quick-fix.md") ".claude\commands\quick-fix.md" ".claude\commands\quick-fix.md"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "finish-branch.md") ".claude\commands\finish-branch.md" ".claude\commands\finish-branch.md"
-Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "codex.md") ".claude\commands\codex.md" ".claude\commands\codex.md"
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "commands") "review-pr-comments.md") ".claude\commands\review-pr-comments.md" ".claude\commands\review-pr-comments.md"
 
 # Commands - PRD
@@ -861,6 +990,7 @@ switch ($Tech) {
         $genImgDir = Join-Path (Join-Path (Join-Path $ScriptDir "skills") "generate-image")
         Copy-TemplateFile (Join-Path $genImgDir "SKILL.template.md") ".claude\skills\generate-image\SKILL.md" ".claude\skills\generate-image\SKILL.md"
     }
+}
 }
 
 # Playwright framework templates (opt-in via -WithPlaywright)
@@ -1077,17 +1207,8 @@ else {
     Write-Host " docs\CHANGELOG.md already exists"
 }
 
-# Update CLAUDE.md with project name
-if (Test-Path "CLAUDE.md") {
-    # Read with UTF8 encoding to preserve Unicode characters (arrows, box chars)
-    $content = [System.IO.File]::ReadAllText((Resolve-Path "CLAUDE.md"), [System.Text.Encoding]::UTF8)
-    $content = $content -replace '\[Project Name\]', $Project
-    # Write back with UTF8 without BOM to preserve Unicode
-    [System.IO.File]::WriteAllText((Resolve-Path "CLAUDE.md"), $content, (New-Object System.Text.UTF8Encoding $false))
-    Write-Host "  " -NoNewline
-    Write-Color "+" "Green"
-    Write-Host " Updated CLAUDE.md with project name"
-}
+# The v6 marker materializer owns only the bounded Forge block. Text outside
+# that block is user-owned bytes and is never subject to project-name rewriting.
 
 # Forge version pin (project) — WRITE LATE, after all .claude/ copies succeeded, and
 # only when machinery was actually (re)written this run (-Force / -Upgrade, or no
@@ -1118,13 +1239,12 @@ if ($Upgrade) {
     }
     Write-Color "What was updated:" "Yellow"
     Write-Host ""
-    Write-Host "  .claude\commands\        Workflow commands (refreshed)"
-    Write-Host "  .claude\hooks\           Hook scripts (refreshed)"
-    Write-Host "  .claude\rules\           Coding standards (refreshed)"
-    Write-Host "  .claude\agents\          Subagent definitions (refreshed)"
-    Write-Host "  .claude\skills\          Skills (release, council, ui-design if typescript/fullstack)"
-    Write-Host "  .claude\settings.json    Hooks and permissions (merged - your customizations kept)"
-    Write-Host "  .mcp.json                MCP servers (merged - your customizations kept)"
+    Write-Host "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and state template"
+    Write-Host "  CLAUDE.md / AGENTS.md    Bounded host adapters; personal text outside Forge markers preserved"
+    Write-Host "  .claude/                 Claude Code commands, agents, skills, hooks, and merged settings"
+    Write-Host "  .codex/                  Codex agents, hooks, and merged configuration"
+    Write-Host "  .agents/                 Codex workflow and skill adapters"
+    Write-Host "  .mcp.json                Shared MCP servers (merged - your customizations kept)"
     Write-Host ""
     # Drive "Not touched" from pre-copy booleans so we don't falsely claim a
     # file was preserved when this run actually recreated it from template.
@@ -1146,14 +1266,14 @@ if ($Upgrade) {
     Write-Host ":"
     Write-Host ""
     Write-Host "   /hooks       -> Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    Write-Host "   /help        -> Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*"
+    Write-Host "   /help        -> Should show Forge workflows for both installed hosts"
     Write-Host ""
     Write-Host "2. " -NoNewline
     Write-Color "Commit and push" "Blue"
     Write-Host ":"
     Write-Host ""
-    Write-Host "   git add .claude/ .mcp.json"
-    Write-Host "   git commit -m `"chore: upgrade Claude Code automation templates`""
+    Write-Host "   git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/"
+    Write-Host "   git commit -m `"chore: upgrade Forge harness`""
     Write-Host "   git push"
     Write-Host ""
     # 5.16: dropped the consolidated cry-wolf drift preamble that fired on
@@ -1172,7 +1292,7 @@ if ($Upgrade) {
     if ($hadContinuity -and $continuityMigrated) {
         Write-Color "+ CONTINUITY.md already migrated$continuityMigratedParen." "Green"
         Write-Host "  Its content was migrated to CLAUDE.md (durable), docs/adr/ (decisions),"
-        Write-Host "  and .claude/local/state.md (volatile). Once you've confirmed that content"
+        Write-Host "  and .forge/local/state.md (volatile). Once you've confirmed that content"
         Write-Host "  landed (and nothing references the file), CONTINUITY.md can be removed:"
         Write-Host ""
         Write-Host "    Remove-Item CONTINUITY.md"
@@ -1236,7 +1356,7 @@ if ($Upgrade) {
         Write-Host "     - Comments or labels that reference CONTINUITY.md as a location"
         Write-Host ""
         Write-Host "   CONTINUITY.md no longer exists -- its content moved to CLAUDE.md"
-        Write-Host "   (durable), docs/adr/ (decisions), and .claude/local/state.md"
+        Write-Host "   (durable), docs/adr/ (decisions), and .forge/local/state.md"
         Write-Host "   (volatile). Remove these references; the 'preserve project-specific"
         Write-Host "   content' rule does NOT apply to CONTINUITY pointers -- they are"
         Write-Host "   stale infrastructure references.`""
@@ -1251,34 +1371,29 @@ if ($Upgrade) {
     Write-Host ""
     Write-Color "What was created:" "Yellow"
     Write-Host ""
-    Write-Host "  CLAUDE.md                Your project description (edit this!)"
-    Write-Host "  .claude\local\state.md   Volatile per-developer workflow state (gitignored)"
-    Write-Host "  .claude\state.template.md Canonical state template (always-refresh)"
-    Write-Host "  .claude\settings.json    Hooks and permissions"
-    Write-Host "  .mcp.json                MCP servers (Playwright + Context7)"
-    Write-Host "  .claude\commands\        Workflow commands: /new-feature, /fix-bug, /quick-fix"
-    Write-Host "  .claude\hooks\           Auto-run scripts (format, verify, memory)"
-    Write-Host "  .claude\agents\          Subagent definitions (verify-app, verify-e2e)"
-    Write-Host "  .claude\rules\           Coding standards + workflow rules (safe to update)"
-    Write-Host "  .claude\skills\           Skills (release, council, ui-design if typescript/fullstack)"
-    Write-Host "  docs\                    Changelog, ADRs (docs\adr\), PRDs, solutions knowledge base"
+    Write-Host "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and local state"
+    Write-Host "  .forge/local/state.md    Per-worktree workflow checkpoint (gitignored)"
+    Write-Host "  CLAUDE.md / AGENTS.md    Thin Claude Code and Codex root adapters"
+    Write-Host "  .claude/                 Claude Code commands, agents, skills, hooks, and settings"
+    Write-Host "  .codex/                  Codex agents, hooks, and configuration"
+    Write-Host "  .agents/                 Codex workflow and skill adapters"
+    Write-Host "  .mcp.json                Shared MCP servers (Playwright + Context7)"
+    Write-Host "  docs/adr/                Architecture decisions and index"
+    Write-Host "  docs/                    Changelog, plans, PRDs, research, and solutions"
     Write-Host ""
-    Write-Color "Plugins pre-enabled in .claude\settings.json:" "Yellow"
+    Write-Color "Optional host integration enabled in .claude\settings.json:" "Yellow"
     Write-Host ""
-    Write-Host "  - superpowers              (requires install - see step 3 below)"
-    Write-Host "  - pr-review-toolkit        (built-in, no install needed)"
-    Write-Host "  - frontend-design          (built-in, no install needed)"
+    Write-Host "  - frontend-design          (optional Claude Code UI integration)"
     Write-Host ""
     # Check if global setup needed
     $globalClaude = Join-Path (Join-Path $HOME ".claude") "CLAUDE.md"
     if (-not (Test-Path $globalClaude)) {
         Write-Color "+--------------------------------------------------------------+" "Red"
-        Write-Color "|  WARNING: Global memory not set up yet!                       |" "Red"
+        Write-Color "|  WARNING: Global Forge policy is not set up yet!              |" "Red"
         Write-Color "|                                                               |" "Red"
         Write-Color "|  Without global setup:                                        |" "Red"
-        Write-Color "|  - Claude won't save learnings before context compression     |" "Red"
-        Write-Color "|  - /memory won't show your auto memory directory              |" "Red"
-        Write-Color "|  - Session knowledge will be lost on compaction               |" "Red"
+        Write-Color "|  - Shared global grounding is not installed for either host   |" "Red"
+        Write-Color "|  - Trusted native-goal authorization helpers are unavailable  |" "Red"
         Write-Color "|                                                               |" "Red"
         Write-Host  "|  Run: " -NoNewline -ForegroundColor Red
         Write-Host  "& $ScriptDir\setup.ps1 -Global" -NoNewline -ForegroundColor Green
@@ -1289,43 +1404,21 @@ if ($Upgrade) {
     Write-Color "Next steps:" "Yellow"
     Write-Host ""
     Write-Host "1. " -NoNewline
-    Write-Color "Edit CLAUDE.md" "Blue"
-    Write-Host " - Fill in your project description, tech stack, and commands"
-    Write-Host "   (It's intentionally short - all rules live in .claude\rules\)"
-    Write-Host ""
-    Write-Host "2. " -NoNewline
-    Write-Color "Set your project goal" "Blue"
-    Write-Host " - In CLAUDE.md, add one sentence under '### Goal'"
-    Write-Host "   (Volatile state lives in .claude\local\state.md - gitignored, populated by /new-feature)"
-    Write-Host ""
-    Write-Host "3. " -NoNewline
-    Write-Color "Install the Superpowers plugin" "Blue"
-    Write-Host " (one time):"
-    Write-Host ""
-    Write-Host "   claude"
-    Write-Host "   /plugin install superpowers@claude-plugins-official"
-    Write-Host ""
-    Write-Host "   Then restart Claude Code."
-    Write-Host ""
-    Write-Host "   Note: pr-review-toolkit and frontend-design are built-in Claude Code plugins -"
-    Write-Host "   no install needed. /simplify is a built-in command. They're already"
-    Write-Host "   enabled in .claude\settings.json."
-    Write-Host ""
-    Write-Host "4. " -NoNewline
-    Write-Color "Verify everything works" "Blue"
+    Write-Color "Verify both installed host surfaces" "Blue"
     Write-Host ":"
     Write-Host ""
     Write-Host "   /hooks       -> Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    Write-Host "   /help        -> Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*"
-    Write-Host "   /memory      -> Should show your auto memory directory"
+    Write-Host "   /help        -> Claude should show Forge commands; Codex should show the matching `$workflow-* skills"
+    Write-Host "   & '$ScriptDir\scripts\verify-runtime.ps1' discovery -ProjectRoot (Get-Location).Path"
     Write-Host ""
-    Write-Host "5. " -NoNewline
-    Write-Color "Commit and push" "Blue"
+    Write-Host "2. " -NoNewline
+    Write-Color "Commit the shared harness (.forge/local/ remains gitignored)" "Blue"
     Write-Host ":"
     Write-Host ""
-    Write-Host "   git add .claude/ .mcp.json CLAUDE.md docs/"
-    Write-Host "   git commit -m `"chore: add Claude Code automation setup`""
+    Write-Host "   git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/"
+    Write-Host "   git commit -m `"chore: add Forge engineering harness`""
     Write-Host "   git push"
     Write-Host ""
-    Write-Color "You're ready! Run /new-feature <name> to start your first guided workflow." "Green"
+    Write-Color "Harness materialized for Claude Code and Codex." "Green"
+    Write-Color "Runtime readiness remains BLOCKED until the printed verify/qualify commands pass." "Yellow"
 }

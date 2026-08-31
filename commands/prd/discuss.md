@@ -26,7 +26,7 @@ User stories are often incomplete. This command ensures we understand requiremen
 
    **Status:** In Progress
    **Started:** {date}
-   **Participants:** User, Claude
+   **Participants:** User, current Forge host
 
    ## Original User Stories
 
@@ -151,7 +151,7 @@ Here are my user stories:
 - As an admin, I want to import MCP servers from a URL
 - As an admin, I want to see import progress
 
-Claude: I've logged these stories to docs/prds/mcp-import-discussion.md.
+Forge host: I've logged these stories to docs/prds/mcp-import-discussion.md.
 
 Before we write a PRD, let me understand these better:
 

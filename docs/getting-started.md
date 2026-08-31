@@ -1,177 +1,126 @@
 # Getting Started
 
-> **Two setup steps:** global (once per machine) and project (once per project). Global setup MUST come first — it installs the memory system all projects share.
+Install once, open either supported host, and work. Forge installs one canonical `.forge/` harness
+plus native Claude Code and Codex adapters; it does not ask you to choose a permanent main agent.
+The host you are using leads the current action.
 
-## Prerequisites
+## Compatibility
 
-### macOS / Linux
+Forge probes capabilities, not just version strings. These are the v6 tested baselines; newer
+versions remain usable when they expose the required capabilities.
 
-- **Claude Code** installed and working (`claude --version`)
-- **Node.js 22+** (for Codex CLI, npx commands, and Playwright MCP)
-- **Git 2.23+** initialized in your project
-- **jq** (recommended, not required): `brew install jq` (macOS) or `apt install jq` (Linux). Used for JSON merging during global setup (falls back to Python if unavailable). Hooks work without it.
-- **Codex CLI** (**required** for the full workflow): `npm i -g @openai/codex` or `brew install --cask codex` (macOS). Powers the first-pass code review (`/codex review`), design review, and 3 of the 5 Engineering Council roles (chairman + 2 advisors). Without it, those steps degrade to manual user review. See [Step 5](#step-5-install-codex-cli-required) for full instructions.
-- **Python 3.12+** with `uv` (if Python project)
-- **pnpm** or **npm** (if JavaScript/TypeScript project)
+| Host | Tested baseline | Required v1 capabilities | If present but unsupported |
+| ---- | --------------- | ------------------------ | -------------------------- |
+| Claude Code | `2.1.237` | Project instructions/rules, commands, hooks, fresh non-persistent CLI runs, workspace sandbox, native `/goal` | Adapters are `MATERIALIZED`, but the affected role is not `RUNTIME_READY`; Forge prints the missing capability and uses a fresh Codex or Claude fallback when possible. |
+| Codex CLI | `0.144.1` | Project instructions/rules, skills, hooks, `exec --ephemeral`, sandbox and output capture, native `/goal` | Adapters are `MATERIALIZED`, but the affected role is not `RUNTIME_READY`; Forge prints the missing flag/trust requirement and falls back without stopping when another qualified path exists. |
 
-### Windows
+Also required: Git 2.23+ and one authenticated host. Python 3 is required for authoritative full
+refresh. Windows uses PowerShell 5.1+; WSL2 remains the recommended Codex environment.
 
-- **Claude Code** installed and working (`claude --version`)
-- **WSL2** (recommended for Codex CLI): `wsl --install` from elevated PowerShell
-- **PowerShell 5.1+** (included with Windows 10/11)
-- **Node.js 22+** (for Codex CLI, npx commands, and Playwright MCP)
-- **Git 2.23+** initialized in your project
-- **Codex CLI** (**required** for the full workflow): `npm i -g @openai/codex` inside WSL. Powers the first-pass code review, design review, and 3 of the 5 Engineering Council roles. Without it, those steps degrade to manual user review. See [Step 5](#step-5-install-codex-cli-required) for full instructions.
-- **Python 3.12+** with `uv` (if Python project)
-- **pnpm** or **npm** (if JavaScript/TypeScript project)
+`MATERIALIZED` means files were installed. `RUNTIME_READY` means that host's discovery, trust, and
+required runtime capabilities were actually qualified. Never treat the first status as the second.
 
-> **Note:** Windows does NOT require `jq` — PowerShell has native JSON support via `ConvertFrom-Json`.
->
-> **Note:** Codex CLI works best via WSL2 on Windows. Native Windows support is experimental. See [OpenAI's Windows guide](https://developers.openai.com/codex/windows/).
+## 1. Clone Forge
 
----
-
-## Step 1: Clone this repo (once per machine)
-
-**macOS / Linux:**
+macOS / Linux:
 
 ```bash
 git clone https://github.com/pablomarin/claude-codex-forge.git ~/claude-codex-forge
 chmod +x ~/claude-codex-forge/setup.sh
 ```
 
-**Windows (PowerShell):**
+Windows PowerShell:
 
 ```powershell
 git clone https://github.com/pablomarin/claude-codex-forge.git $HOME\claude-codex-forge
 ```
 
-## Step 2: Global setup (once per machine)
-
-This installs Claude's memory system so it remembers things across ALL your projects.
-
-**macOS / Linux:**
+## 2. Install the global harness
 
 ```bash
 ~/claude-codex-forge/setup.sh --global
 ```
 
-**Windows (PowerShell):**
-
 ```powershell
 & $HOME\claude-codex-forge\setup.ps1 -Global
 ```
 
-## Step 3: Project setup (once per project)
+Global and project scopes are separate. Installing global first is the clearest path, but a project
+install may come first; a later `--global` / `-Global` recognizes the advisory machine stamp and
+materializes the global harness normally. A project refresh never rewrites global policy.
+
+## 3. Install a fresh project
+
+From the Git repository root:
 
 ```bash
-cd /path/to/your/project
 ~/claude-codex-forge/setup.sh -p "My Project"
 ```
 
-For tech-specific scenarios (new project, existing project with/without Claude Code, upgrading) see [Setup Scenarios](guides/setup-scenarios.md).
+```powershell
+& $HOME\claude-codex-forge\setup.ps1 -Project "My Project"
+```
 
-## Step 4: Install the Superpowers plugin (once per machine)
+Both adapters are installed even when only one CLI is available. If this repository already has a
+v5 harness, use the [authoritative full-refresh path](guides/upgrading.md) instead.
 
-Start Claude Code and install Superpowers from Anthropic's official marketplace:
+## 4. Open either host
 
 ```bash
 claude
+# or
+codex
 ```
 
-Then inside Claude Code:
+Claude Code uses `/opinion`; Codex uses `$opinion`. With both engines ready, review defaults to the
+other engine. If it is absent, unauthenticated, too old, or missing a role capability, Forge reports
+the reason and tries a fresh same-engine reviewer. Council fallback reruns the whole topology on the
+current host so a discarded mixed attempt is never certified.
 
-```
-/plugin install superpowers@claude-plugins-official
-```
+For investigation, Claude Code uses `/opinion investigate`; Codex uses `$opinion investigate`.
+Forge starts a fresh full agent in the real worktree with the selected host's normal configuration,
+state, memory, tools, MCP, network, database/API access, and write capability. Investigation adds no
+special Forge sandbox or allowlist; destructive and protected external mutations still use the
+same host prompts and explicit human authority as ordinary engineering work.
 
-Restart Claude Code.
+## 5. Verify installation and trust
 
-> **Note:** `pr-review-toolkit` and `frontend-design` are built-in Claude Code plugins pre-enabled in `.claude/settings.json`. `/simplify` is a built-in Claude Code command (no plugin needed). `superpowers` requires a separate install (step above).
->
-> **Why the official marketplace?** Same plugin, but `superpowers@claude-plugins-official` (Anthropic-curated since 2026-01-15) installs in one step with no `marketplace add` prerequisite. The community `superpowers@superpowers-marketplace` works too, but [obra/superpowers-marketplace#11](https://github.com/obra/superpowers-marketplace/issues/11) documents an upstream Claude Code plugin-name-conflict bug that surfaces when both identities exist on the same machine.
-
-## Step 5: Install Codex CLI (required)
-
-Codex CLI is **required for the full workflow**. It powers three core phases:
-
-- **Design review** — independent validation of your plan before any code is written
-- **First-pass code review** (`/codex review`) — runs before the deep `/pr-review-toolkit:review-pr` pass
-- **Engineering Council** — Codex is the chairman plus 2 of the 5 advisor roles (3 total)
-
-Without Codex, those phases degrade to manual user review. The workflow still runs, but you lose the independent second opinion that catches issues Claude missed.
-
-**macOS / Linux:**
+Run the deterministic discovery check from the project root:
 
 ```bash
-# Option A: npm (requires Node.js 22+)
-npm install -g @openai/codex
-
-# Option B: Homebrew (macOS only — no Node.js dependency)
-brew install --cask codex
+~/claude-codex-forge/scripts/verify-runtime.sh discovery --project-root "$(pwd -P)"
 ```
 
-**Windows (via WSL2 — recommended):**
+```powershell
+& $HOME\claude-codex-forge\scripts\verify-runtime.ps1 discovery -ProjectRoot (Get-Location).Path
+```
+
+Then open each installed host and accept its normal project-trust prompt. Codex hook registration
+belongs to the primary checkout; a linked worktree prints the exact primary-checkout setup command
+instead of mutating shared Git metadata from the side. Until authenticated discovery and the hook
+sentinel are observed, setup truthfully reports `RUNTIME_READY: BLOCKED`.
+
+## Existing project
+
+Pull the Forge clone and run the breaking v6 refresh:
 
 ```bash
-# Inside WSL:
-npm install -g @openai/codex
+git -C ~/claude-codex-forge pull
+cd /path/to/project
+~/claude-codex-forge/setup.sh -F
 ```
 
-> **Windows note:** Native Windows support is experimental. OpenAI recommends WSL2 for the best experience. See [Codex Windows guide](https://developers.openai.com/codex/windows/) for details.
-
-**Authenticate (all platforms):**
-
-```bash
-codex          # Opens browser to sign in (requires ChatGPT Plus/Pro/Business/Enterprise)
+```powershell
+git -C $HOME\claude-codex-forge pull
+Set-Location C:\path\to\project
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh # -R is equivalent
 ```
 
-Or with an API key:
-
-```bash
-codex login --with-api-key
-```
-
-**Verify:**
-
-```bash
-codex --version   # Should show version 0.101.0+
-```
-
-> **No Codex available?** The workflow still runs — Claude presents design plans to you for manual review, and the `/codex review` and Engineering Council steps fall back to user-led review. You lose the independent second opinion but nothing is blocked.
-
-## Step 6: Verify setup
-
-Inside Claude Code, run:
-
-```
-/hooks       → Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange
-/help        → Should show: /superpowers:*, /new-feature, /fix-bug, /prd:*
-/memory      → Should show your auto memory directory
-```
-
-**Done!** Now use `/new-feature my-feature` to start your first guided workflow. See [Workflow Overview](explanation/workflow.md) for the full process and [Commands Reference](reference/commands.md) for all available commands.
-
----
-
-## Upgrading (existing projects)
-
-Already have the templates installed? Pull the latest and upgrade:
-
-```bash
-cd ~/claude-codex-forge && git pull
-cd /path/to/your/project
-~/claude-codex-forge/setup.sh --upgrade
-```
-
-This updates all hooks, commands, and rules while safely merging new settings into your existing `settings.json` and `.mcp.json`. Your customizations are preserved. See [Upgrading](guides/upgrading.md) for details.
-
----
+See [Upgrading](guides/upgrading.md) before resolving any `BLOCKED` report.
 
 ## Next
 
-- [Setup scenarios](guides/setup-scenarios.md) — New project, existing project, or upgrading
-- [Customize your project](guides/customize-project.md) — CLAUDE.md, `.claude/local/state.md`, optional MCP add-ons
-- [Parallel development](guides/parallel-sessions.md) — Multiple sessions via git worktrees
-- [Multi-project isolation](guides/multi-project-isolation.md) — How `uv` / `pnpm` / worktrees keep projects separate, and why `setup.sh` does a warn-only interpreter preflight
-- [Troubleshooting](troubleshooting.md) — If something's not working
+- [Setup scenarios](guides/setup-scenarios.md)
+- [Parallel and cross-host sessions](guides/parallel-sessions.md)
+- [Commands](reference/commands.md)
+- [Troubleshooting](troubleshooting.md)

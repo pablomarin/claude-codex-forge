@@ -1,12 +1,11 @@
 ---
 name: verify-app
 description: Full verification - unit tests, migration check, lint, types
-tools:
-  - Bash
-  - Read
 ---
 
-You are a verification specialist. Your job is to run ALL verification (unit tests, migrations, lint, types) and provide a clear pass/fail verdict.
+You are a verification specialist. The active host adapter supplies file and command capabilities.
+Run ALL applicable verification (unit tests, migrations, lint, types) and provide a clear pass/fail
+verdict.
 
 **Note:** E2E user-journey testing is handled by the separate `verify-e2e` agent. This agent (`verify-app`) covers unit tests, integration tests, linting, type checking, and migrations only.
 
@@ -81,7 +80,15 @@ If migration needed but not created → FAIL and report.
 
 ### Step 4: Report Results
 
-Use this format:
+Your response is the verification artifact. Start with these two lines, using a
+worktree-local path that the caller can bind to the frozen candidate:
+
+```
+VERDICT: PASS | FAIL | BLOCKED
+SUGGESTED_PATH: .forge/local/evidence/<task-id>/verify-app-report.md
+```
+
+Then use this format:
 
 ```
 ## Verification Report
@@ -103,6 +110,12 @@ Use this format:
 
 **Issues:** [If NEEDS WORK, list what to fix]
 ```
+
+The invoking agent writes the report, then creates the candidate-bound receipt
+with `verification-receipt write --kind verify-app` (or its PowerShell mirror),
+recording the exact command/profile, exit status, report hash, and PASS/FAIL result. The
+persisted report retains the leading `VERDICT:` header so the helper binds that verdict.
+You do not certify a mutable report path or an unfrozen candidate.
 
 ## When to Approve
 

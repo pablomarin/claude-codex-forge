@@ -1,109 +1,66 @@
 #!/bin/bash
-# .claude/hooks/post-tool-format.sh
-# This hook runs after Edit or Write tool is used.
-# It automatically formats the modified file based on its type.
-#
-# Optional: jq (recommended for robust JSON parsing, falls back to grep)
-# Optional: ruff (for Python), prettier (for JS/TS/JSON/MD)
-#
-# Security: Follows Anthropic best practices
-# - Validates and sanitizes inputs
-# - Blocks path traversal attacks
-# - Skips sensitive files
-# - Uses quoted variables
+# PostToolUse formatter for Claude Write/Edit and Codex apply_patch payloads.
+# Patch bodies are parsed as inert text; they are never evaluated by a shell.
+set -u
+INPUT=$(cat 2>/dev/null)
+command -v jq >/dev/null 2>&1 || { printf '{}\n'; exit 0; }
+TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // .tool // ""' 2>/dev/null || true)
+CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null || true)
+[ -n "$CWD" ] || CWD="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)
+[ -n "$ROOT" ] || ROOT="$CWD"
+ROOT=$(cd "$ROOT" 2>/dev/null && pwd -P) || { printf '{}\n'; exit 0; }
 
-set -e
-
-# Read and parse input
-INPUT=$(cat)
-
-# Parse file_path (jq preferred, grep fallback)
-if command -v jq &> /dev/null; then
-    FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-else
-    FILE_PATH=$(echo "$INPUT" | grep -o '"file_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"file_path"[[:space:]]*:[[:space:]]*"//;s/"$//')
-fi
-
-# Exit if no file path
-[ -z "$FILE_PATH" ] && exit 0
-
-# Security: Block path traversal
-if echo "$FILE_PATH" | grep -q '\.\.'; then
-    echo "Security: Path traversal blocked" >&2
-    exit 0
-fi
-
-# Security: Skip sensitive files
-BASENAME=$(basename "$FILE_PATH")
-case "$BASENAME" in
-    .env*|*.key|*.pem|*.secret|*credential*|*password*|*.p12|*.pfx)
-        exit 0
+case "$TOOL" in
+    Write|Edit)
+        PATHS=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null || true)
         ;;
+    apply_patch)
+        # Recognize only patch file headers. Semicolons, substitutions, and other
+        # body text remain data and can never become a command.
+        PATHS=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // .tool_input.patch // .input // ""' 2>/dev/null \
+            | sed -nE 's/^\*\*\* (Add|Update) File: //p' | awk '!seen[$0]++')
+        ;;
+    *) printf '{}\n'; exit 0 ;;
 esac
 
-# Skip files in sensitive directories
-case "$FILE_PATH" in
-    *.git/*|*node_modules/*|*.ssh/*|*secrets/*)
-        exit 0
-        ;;
-esac
-
-# Get file extension
-EXTENSION="${FILE_PATH##*.}"
-
-# Format based on file type
-case "$EXTENSION" in
-    py)
-        # Python files — format with ruff, using the nearest pyproject.toml as config.
-        # Walks up from the edited file to find the project root (works for
-        # monorepo layouts like backend/src/ or apps/api/, not just flat repos).
-        # Runs `ruff check --fix` and `ruff format` independently so a lint
-        # failure does not skip formatting.
-
-        # Normalize to absolute path (so dir walking works regardless of cwd)
-        ABS_PATH="$FILE_PATH"
-        case "$ABS_PATH" in
-            /*) ;;
-            *) ABS_PATH="${CLAUDE_PROJECT_DIR:-$(pwd)}/$FILE_PATH" ;;
-        esac
-
-        # Walk up from the file's directory looking for pyproject.toml
-        SEARCH_DIR="$(dirname "$ABS_PATH")"
-        RUFF_ROOT=""
-        while [ "$SEARCH_DIR" != "/" ] && [ -n "$SEARCH_DIR" ]; do
-            if [ -f "$SEARCH_DIR/pyproject.toml" ]; then
-                RUFF_ROOT="$SEARCH_DIR"
-                break
+format_one() {
+    local file_path="$1" abs base ext search root parent physical
+    [ -n "$file_path" ] || return 0
+    case "/$file_path/" in *'/../'*) return 0 ;; esac
+    case "$file_path" in /*) abs="$file_path" ;; *) abs="$ROOT/$file_path" ;; esac
+    # Lexical containment is checked before any formatter sees the path.
+    case "$abs" in "$ROOT"/*) ;; *) return 0 ;; esac
+    # Resolve the parent physically so an in-repository symlink cannot redirect
+    # a formatter write outside the worktree. Reject a symlinked file as well.
+    [ ! -L "$abs" ] || return 0
+    parent=$(cd "$(dirname "$abs")" 2>/dev/null && pwd -P) || return 0
+    physical="$parent/$(basename "$abs")"
+    case "$physical" in "$ROOT"/*) ;; *) return 0 ;; esac
+    abs="$physical"
+    base=$(basename "$abs")
+    case "$base" in .env*|*.key|*.pem|*.secret|*credential*|*password*|*.p12|*.pfx) return 0 ;; esac
+    case "$abs" in */.git/*|*/node_modules/*|*/.ssh/*|*/secrets/*) return 0 ;; esac
+    ext="${base##*.}"
+    case "$ext" in
+        py)
+            search=$(dirname "$abs"); root=""
+            while [ "$search" != / ] && [ -n "$search" ]; do
+                if [ -f "$search/pyproject.toml" ]; then root="$search"; break; fi
+                search=$(dirname "$search")
+            done
+            if [ -n "$root" ]; then
+                (cd "$root" && uv run ruff check --fix "$abs" 2>/dev/null) || true
+                (cd "$root" && uv run ruff format "$abs" 2>/dev/null) || true
             fi
-            SEARCH_DIR="$(dirname "$SEARCH_DIR")"
-        done
-
-        if [ -n "$RUFF_ROOT" ]; then
-            # Run from the project root so ruff picks up [tool.ruff] config
-            (cd "$RUFF_ROOT" && uv run ruff check --fix "$ABS_PATH" 2>/dev/null) || true
-            (cd "$RUFF_ROOT" && uv run ruff format "$ABS_PATH" 2>/dev/null) || true
-        fi
-        # If no pyproject.toml found anywhere above: skip silently.
-        ;;
-    ts|tsx|js|jsx)
-        # TypeScript/JavaScript files - format with prettier
-        npx prettier --write "$FILE_PATH" 2>/dev/null || true
-        ;;
-    json)
-        # JSON files - format with prettier (skip package-lock.json)
-        [ "$BASENAME" = "package-lock.json" ] && exit 0
-        npx prettier --write "$FILE_PATH" 2>/dev/null || true
-        ;;
-    md)
-        # Markdown is intentionally NOT auto-formatted (v5.56). The harness ships
-        # hand-authored markdown (rules/, commands/, skills/, agents/, docs/) that
-        # uses an escaped-backtick convention (\`...\`) and sentinel/byte-pinned
-        # blocks enforced by tests/template/test-contracts.sh. prettier 3.x corrupts
-        # that markdown — it merges escaped-backtick continuation lines and strips
-        # the spaces around inline code — which both garbles the prose and breaks
-        # the byte-identical contracts. Skipping is strictly safer than reformatting.
-        :
-        ;;
-esac
-
+            ;;
+        ts|tsx|js|jsx) npx prettier --write "$abs" 2>/dev/null || true ;;
+        json) [ "$base" = package-lock.json ] || npx prettier --write "$abs" 2>/dev/null || true ;;
+        md) : ;;
+    esac
+}
+while IFS= read -r path; do format_one "$path"; done <<EOF
+$PATHS
+EOF
+printf '{}\n'
 exit 0

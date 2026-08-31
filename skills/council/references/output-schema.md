@@ -45,7 +45,7 @@ The Codex chairman MUST produce this structure:
 ### Blocking Objections
 [Any unresolved objections from any advisor — CANNOT be omitted even if chairman disagrees]
 
-### Minority Report
+### Minority Report (MANDATORY)
 [MANDATORY. At least one named dissenting view whenever any advisor OBJECTed
 or raised a plausible blocking concern.
 - WHO objected (advisor name)

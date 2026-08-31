@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -u
+log="${FAKE_CLAUDE_LOG:-}"
+[ -z "$log" ] || printf 'cwd=%s home=%s user=%s logname=%s argv=%s\n' \
+  "$(pwd -P)" "${HOME:-}" "${USER:-}" "${LOGNAME:-}" "$*" >> "$log"
+clean_json() {
+  printf '{"result":"schema_version=1\\nverdict=CLEAN\\nmax_severity=NONE\\nblocked_class=none\\nforge_canary_hash=%s\\nforge_config_hash=%s\\nforge_qualification_revision=%s","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"firstParty"}}}\n' \
+    "${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}"
+}
+qualified_json() {
+  body=$(printf '%s\n' "$@" "forge_canary_hash=${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "forge_config_hash=${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "forge_qualification_revision=${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}" | awk '{gsub(/\\/,"\\\\"); gsub(/\"/,"\\\""); printf "%s%s", separator, $0; separator="\\n"}')
+  printf '{"result":"%s","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"firstParty"}}}\n' "$body"
+}
+case "${FAKE_CLAUDE_BEHAVIOR:-clean}" in
+  clean) clean_json ;;
+  findings) qualified_json 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|reachable defect' ;;
+  blocked-artifact) qualified_json 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=artifact' ;;
+  blocked-engine) qualified_json 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=engine' ;;
+  contradictory) qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|contradiction' ;;
+  malformed) printf '%s\n' 'This is prose, not an envelope.' ;;
+  identity-mismatch) printf '%s\n' '{"result":"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none","modelUsage":{"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"unexpectedProvider"}}}' ;;
+  identity-missing) printf '%s\n' '{"result":"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none"}' ;;
+  canary-missing) printf '%s\n' '{"result":"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"firstParty"}}}' ;;
+  duplicate-canary) qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' "forge_canary_hash=${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "forge_config_hash=${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "forge_qualification_revision=${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}" ;;
+  conflicting-canary) qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'forge_canary_hash=WRONG' ;;
+  empty) : ;;
+  exit) exit 23 ;;
+  timeout) sleep 30 ;;
+  delayed-clean) sleep 1; clean_json ;;
+  investigate)
+    mkdir -p "$FORGE_CANDIDATE_ROOT/tests/reproductions"
+    printf 'bounded reproduction\n' > "$FORGE_CANDIDATE_ROOT/tests/reproductions/claimed.txt"
+    qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'replay_path=tests/reproductions/claimed.txt' ;;
+  full-investigation)
+    real_root=$(cd "${FAKE_REAL_ROOT:?}" && pwd -P)
+    [ "$(pwd -P)" = "$real_root" ] || exit 71
+    [ "${FORGE_FULL_AGENT_PROBE:-}" = visible ] || exit 72
+    grep -q 'shared durable memory' "$real_root/.forge/memory/shared.md" || exit 73
+    grep -q 'shared local memory' "$real_root/.forge/local/memory/session.md" || exit 74
+    mkdir -p "$real_root/.forge/local/investigation-artifacts"
+    printf 'claude full agent\n' > "$real_root/.forge/local/investigation-artifacts/claude.txt"
+    clean_json ;;
+  repro)
+    [ -z "${FORGE_REPRO_RUNNER:-}" ] || "$FORGE_REPRO_RUNNER"
+    qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'hypothesis_hash=hypothesis-literal' 'primary_check_hash=primary-literal' 'control_hash=control-literal' 'primary_status=EXPECTED' 'control_status=EXPECTED' 'repro_status=REPRODUCED' ;;
+  repro-no-control)
+    qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'hypothesis_hash=hypothesis-literal' 'primary_check_hash=primary-literal' 'control_hash=MISSING' 'primary_status=EXPECTED' 'control_status=MISSING' 'repro_status=REPRODUCED' ;;
+  repro-boundary)
+    case "$*" in *'--safe-mode'*) ;; *) exit 69 ;; esac
+    [ -n "${FORGE_REPRO_RUNNER:-}" ] && [ -x "$FORGE_REPRO_RUNNER" ] || exit 70
+    FORGE_REPRO_NO_NETWORK=1 "$FORGE_REPRO_RUNNER"
+    clean_json ;;
+  assert-isolated)
+    [ "$(pwd -P)" != "${FAKE_REAL_ROOT:-}" ] || { printf 'ambient real cwd discovered\n'; exit 65; }
+    [ ! -e "$(pwd -P)/.claude/CLAUDE.md" ] || { printf 'ambient instruction discovered\n'; exit 66; }
+    [ -z "${FAKE_CLAUDE_CWD_FILE:-}" ] || pwd -P > "$FAKE_CLAUDE_CWD_FILE"
+    clean_json ;;
+  reject-dirty-candidate)
+    [ ! -e "${FORGE_CANDIDATE_ROOT:-}/fallback-dirty" ] || { printf 'dirty fallback candidate reused\n'; exit 67; }
+    clean_json ;;
+  *) exit 64 ;;
+esac
+[ -z "${FAKE_MUTATE_REAL:-}" ] || printf 'raced\n' >> "$FAKE_MUTATE_REAL"

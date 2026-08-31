@@ -1,124 +1,104 @@
-# Upgrading an Existing Project
+# Upgrading to Forge 6
 
-You already have `.claude/settings.json` or `CLAUDE.md` from a previous setup and want to get the latest hooks, commands, rules, and security fixes.
-
-## Recommended: `--upgrade` (safe, preserves your customizations)
-
-```bash
-cd /path/to/your/project
-~/claude-codex-forge/setup.sh --upgrade
-```
-
-### What `--upgrade` does
-
-| File type                                         | What happens                                                               |
-| ------------------------------------------------- | -------------------------------------------------------------------------- |
-| `CLAUDE.md`                                       | **Never touched** — your content is safe                                   |
-| `.claude/local/state.md`                          | **Never touched** — gitignored per-developer state                         |
-| Legacy `CONTINUITY.md` (if present from pre-5.15) | **Never touched** — preserved for `--migrate`; see migration section below |
-| `.claude/settings.json`                           | **Merged** — adds new hooks/permissions/plugins, keeps your custom ones    |
-| `.mcp.json`                                       | **Merged** — adds new MCP servers, keeps your custom ones                  |
-| `.claude/hooks/*`                                 | **Updated** — gets latest hook script fixes                                |
-| `.claude/rules/*`                                 | **Updated** — gets latest coding standards                                 |
-| `.claude/commands/*`                              | **Updated** — gets latest workflow commands                                |
-| `.claude/agents/*`                                | **Updated** — gets latest agent definitions                                |
-
-A timestamped backup (`.bak`) is created before any merge. You'll see a summary of what changed:
-
-```
-  ↑ Merging .claude/settings.json (upgrade mode)
-  Upgraded settings.json (backup: settings.bak.20260301212339):
-    Added hook events: ConfigChange, PreToolUse
-    Added permissions.deny: Bash(sudo:*), Bash(su:*)
-    Added plugins: pr-review-toolkit@claude-plugins-official
-  ↑ Merging .mcp.json (upgrade mode)
-  .mcp.json: already up to date
-  ✓ Created .claude/hooks/check-bash-safety.sh
-  ✓ Created .claude/hooks/check-config-change.sh
-```
-
-## Alternative: Fresh install (destructive)
-
-If you want to start completely fresh with the latest templates:
+Forge 6 changes harness ownership. Upgrade an installed repository with an authoritative full
+refresh, not a sequence of force copies:
 
 ```bash
-# 1. Backup your current setup
-cp -r .claude .claude-backup
-cp CLAUDE.md CLAUDE.md.backup
-
-# 2. Force overwrite everything (except CLAUDE.md, .claude/local/state.md, and any legacy CONTINUITY.md)
-~/claude-codex-forge/setup.sh -f
-
-# 3. Merge back any project-specific settings from backup
-# Compare: diff .claude-backup/settings.json .claude/settings.json
+git -C ~/claude-codex-forge pull
+cd /path/to/project
+~/claude-codex-forge/setup.sh -F
 ```
 
-> **When to use `-f` instead of `--upgrade`:** Only if your settings are corrupted, you want a clean slate, or you haven't customized anything yet.
+```powershell
+git -C $HOME\claude-codex-forge pull
+Set-Location C:\path\to\project
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh # -R is the short alias
+```
 
-## Migrating from CONTINUITY.md (5.14 → 5.15)
+The command must run at the canonical repository root. Unix full refresh requires Python 3.
 
-Forge 5.15 splits the legacy single-file `CONTINUITY.md` into three artifacts with appropriate ownership:
+## What the Transaction Does
 
-| Genre                                              | New home                              | Tracked in git?        |
-| -------------------------------------------------- | ------------------------------------- | ---------------------- |
-| Project goal + tech stack + key commands (durable) | `CLAUDE.md`                           | Yes                    |
-| Architecture decisions (append-only history)       | `docs/adr/NNNN-*.md`                  | Yes                    |
-| Workflow checklist + Done/Now/Next (volatile)      | `.claude/local/state.md`              | **No** (gitignored)    |
-| Original `CONTINUITY.md` (your existing file)      | Preserved at the repo root, untouched | Yes (until you delete) |
+The checked-in manifests identify canonical v6 files, generated adapters, protected paths, and
+version-specific v5 ownership evidence. The transaction stages the entire result, validates it,
+backs up replaced bytes under `.forge/local/migration-backups/`, commits by bounded renames, and
+writes `.forge/version` last. A failed transaction rolls back instead of leaving mixed discovery
+trees.
 
-The rationale is recorded in [`docs/adr/0001-volatile-state-not-auto-loaded.md`](../adr/0001-volatile-state-not-auto-loaded.md): keeping volatile per-developer state out of Claude Code's auto-loaded path means stale status from yesterday's session never silently re-enters today's context.
+It creates one canonical `.forge/` harness and thin native adapters under `.claude/`, `.codex/`, and
+`.agents/`. Active v5 state is translated to `.forge/local/state.md`; legacy review, goal, and
+authorization evidence is invalidated because it cannot certify the new contract.
 
-### How to migrate
+## Protected Content
 
-After running `setup.sh --upgrade` (or `-f`), you'll have the new files installed alongside any legacy `CONTINUITY.md`. To migrate the content:
+Full refresh preserves:
+
+- user text outside Forge marker blocks in root/global instruction files;
+- `.forge/local/state.md`, local memory, and project-owned `.forge/memory/`;
+- unknown/custom settings and MCP entries unless they collide with required Forge behavior;
+- custom native goal content, reported as a host readiness collision rather than overwritten;
+- legacy files whose ownership cannot be proved.
+
+Only entries proven Forge-owned by a generated marker, released fingerprint, or versioned mixed-file
+region may be rewritten or removed. An ambiguity blocks before the first live v6 write.
+
+## Read the Report
+
+Every action is classified:
+
+| Category | Meaning |
+| -------- | ------- |
+| `CREATED` | New canonical or adapter file |
+| `REWRITTEN` | Proven Forge-owned content replaced or translated |
+| `DELETED` | Proven obsolete managed file removed after backup |
+| `PRESERVED` | Protected developer/project content retained |
+| `PRESERVED_COMPAT` | Unknown or historical content retained without duplicating its behavior |
+| `PRESERVED_COMPAT_BLOCKED` | Retained content overlaps Forge behavior; the named host stays not ready pending qualification or developer resolution |
+| `BLOCKED` | Transaction could not prove a safe result; follow the printed recovery guidance |
+
+`INSTALLATION: MATERIALIZED` confirms filesystem installation only. Per-host `RUNTIME_READY`
+diagnostics cover binary availability, capabilities, discovery, authenticated trust, goal
+collisions, and Codex hook registration.
+
+## Project and Global Scopes
+
+A project refresh never changes home-directory configuration. Refresh the global harness
+separately when setup reports it stale:
 
 ```bash
-cd /path/to/your/project
-~/claude-codex-forge/setup.sh --migrate
+~/claude-codex-forge/setup.sh --global -F
 ```
 
-The migration assistant is **deterministic, idempotent, and non-destructive**:
+```powershell
+& $HOME\claude-codex-forge\setup.ps1 -Global -FullRefresh # or -Global -R
+```
 
-- Extracts the `## Goal` section into `CLAUDE.md` under the `## Project Overview` → `### Goal` subsection (only if `CLAUDE.md` doesn't already have a populated Goal).
-- Extracts each row of the `## Key Decisions` table into a new `docs/adr/NNNN-*.md` file, auto-numbered after the seed ADRs (0001–0005). Existing ADRs are not overwritten.
-- Extracts `### Done` (trimmed to the most recent 2–3 entries), `### Now`, `### Next`, `## Open Questions`, and `## Blockers` into `.claude/local/state.md`. If `state.md` already has content, the migrate command preserves it and re-runs are no-ops.
-- The original `CONTINUITY.md` is **preserved byte-for-byte**. The script never modifies or deletes it. Once you've reviewed the migrated outputs, you can delete the legacy file yourself.
-- A sentinel marker is written into each migrated destination so re-running `--migrate` is safe — the assistant detects already-migrated content and skips it.
+Do not combine full refresh with force, incremental upgrade, continuity migration, or Playwright
+scaffolding flags.
 
-If your `CLAUDE.md` still contains a `@CONTINUITY.md` import line (the pre-5.15 default), the migration assistant **flags it and prints a prompt you can paste into Claude Code**. The prompt asks Claude to reconcile your `CLAUDE.md` against the latest `CLAUDE.template.md` (porting any new template sections you're missing while preserving project-specific content) AND to remove the dangling `@CONTINUITY.md` line in the same operation. Claude Code's `@`-imports fail silently when the target is missing, so the dangling import won't crash anything — but it's clutter that's worth a one-shot reconcile pass.
+## Recover a Blocked Full Refresh
 
-### Verifying the migration
+Most failures roll back automatically and print `ROLLED_BACK`; fix the cause and rerun full refresh.
+If the report names a `recovery_required` journal, do not delete the journal or either preserved
+version. Resolve any concurrent edit, then run the exact journal path reported:
 
 ```bash
-# Goal moved into CLAUDE.md
-grep -A1 "^### Goal" CLAUDE.md
-
-# Decisions promoted to per-file ADRs
-ls docs/adr/
-
-# Volatile state in the gitignored path
-cat .claude/local/state.md
-
-# Legacy file preserved
-ls -la CONTINUITY.md
+~/claude-codex-forge/scripts/recover-full-refresh.sh \
+  --journal /absolute/project/.forge/local/migration-journals/<transaction>.json \
+  --target /absolute/project
 ```
 
-If any of those four checks fails, see the [troubleshooting guide](../troubleshooting.md#migration-and-the-volatile-state-file) for recovery steps.
-
-### Manual fallback (no Claude Code at hand)
-
-If you're upgrading over SSH, in a CI pipeline, or in any context where you can't paste prompts into Claude Code, the migration's "ask Claude to reconcile" recommendation can be done manually:
-
-```bash
-# Remove the dangling @CONTINUITY.md import
-sed -i.bak '/^@CONTINUITY\.md$/d' CLAUDE.md && rm CLAUDE.md.bak
-
-# Diff your CLAUDE.md against the latest template
-git diff --no-index -- ~/Code/claude-codex-forge/CLAUDE.template.md CLAUDE.md
-
-# Manually merge any template sections you want, preserving project-specific content
+```powershell
+& $HOME\claude-codex-forge\scripts\recover-full-refresh.ps1 `
+  -Journal C:\absolute\project\.forge\local\migration-journals\<transaction>.json `
+  -Target C:\absolute\project
 ```
 
-(Substitute your actual Forge clone path if different.)
+Recovery validates the journal, transaction root, repository identity, and recorded hashes before
+changing anything. After recovery, rerun full refresh and then repeat host trust/readiness checks.
 
-The Claude-mediated path is recommended because Claude can judge what counts as "project-specific" vs "stale template scaffolding"; the manual diff requires you to make those calls yourself.
+## Legacy `CONTINUITY.md`
+
+Full refresh preserves the original file. The versioned migration recognizes supported v5 state and
+root-instruction regions; if it cannot prove where custom legacy content belongs, it reports
+`BLOCKED` for manual reconciliation rather than deleting or guessing.

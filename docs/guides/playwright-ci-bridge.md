@@ -1,6 +1,6 @@
 # Playwright CI Bridge (optional)
 
-**Monday, 9 AM.** A first-time contributor opens a PR touching `/api/auth/login`. No Claude session, so your `verify-e2e` agent doesn't run. Their PR goes green, merges, and breaks login for a thousand users by Wednesday.
+**Monday, 9 AM.** A first-time contributor opens a PR touching `/api/auth/login`. No Forge agent session runs, so `verify-e2e` does not explore the journey. Their PR goes green, merges, and breaks login for a thousand users by Wednesday.
 
 The bridge fixes that. Every passing use case the agent explores becomes a deterministic `.spec.ts` file that CI replays in ~90 seconds, on every PR, zero LLM cost.
 
@@ -64,4 +64,4 @@ The `verify-e2e` agent stays read-only. Only the main agent writes specs. This i
 - **`tests/e2e/use-cases/*.md`** — intent, lives with your plan
 - **`tests/e2e/specs/*.spec.ts`** — deterministic replay, runs everywhere (local, CI, cron, contributor PRs)
 
-See `.claude/rules/testing.md` for the full model.
+See `.forge/rules/testing.md` for the full model.

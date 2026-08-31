@@ -19,8 +19,188 @@ source "$REPO_ROOT/tests/template/lib.sh"
 
 init_counters
 
+start_test "v6 state template carries host-neutral identity and receipt fields"
+assert_contains "$REPO_ROOT/state.template.md" '<!-- forge:state-schema v6 -->' \
+    "state schema is explicitly v6"
+assert_contains "$REPO_ROOT/state.template.md" '| Worktree root' \
+    "state binds the canonical worktree root"
+assert_contains "$REPO_ROOT/state.template.md" '| Git common directory' \
+    "state distinguishes linked worktrees with Git identity"
+assert_contains "$REPO_ROOT/state.template.md" '| Last active host' \
+    "state records the host that last advanced the workflow"
+assert_contains "$REPO_ROOT/state.template.md" '| Workflow base ref' \
+    "state freezes the workflow base ref"
+assert_contains "$REPO_ROOT/state.template.md" '| Workflow base SHA' \
+    "state freezes the resolved workflow base SHA"
+assert_contains "$REPO_ROOT/state.template.md" '| objective_hash' \
+    "goal state mirrors the externally authorized objective hash"
+assert_contains "$REPO_ROOT/state.template.md" '| evidence_path' \
+    "goal state points at canonical evidence"
+assert_contains "$REPO_ROOT/state.template.md" '| Spec review receipt' \
+    "state names the per-task spec-review receipt"
+assert_contains "$REPO_ROOT/state.template.md" '| Quality review receipt' \
+    "state names the per-task quality-review receipt"
+assert_contains "$REPO_ROOT/state.template.md" '| Review iteration' \
+    "state binds the receipt pair to one iteration"
+assert_contains "$REPO_ROOT/state.template.md" '| Candidate receipt' \
+    "state links the immutable staged-clean candidate"
+assert_contains "$REPO_ROOT/state.template.md" '| Verify app receipt' \
+    "state links candidate-bound application verification"
+assert_contains "$REPO_ROOT/state.template.md" '| E2E receipt' \
+    "state links candidate-bound E2E verification"
+assert_contains "$REPO_ROOT/state.template.md" '| Promotion receipt' \
+    "state links exact-tree promotion evidence"
+assert_contains "$REPO_ROOT/state.template.md" '| Council receipt' \
+    "state names the council receipt"
+
+start_test "Forge memory has isolated local and reviewable durable layers"
+MEM="$(scratch_dir forge-memory)"
+mkdir -p "$MEM/.forge/hooks" "$MEM/.forge/local/memory" "$MEM/.forge/memory"
+cp "$REPO_ROOT/hooks/pre-compact-memory.sh" "$MEM/.forge/hooks/pre-compact-memory.sh"
+printf '%s\n' 'local-only-learning' > "$MEM/.forge/local/memory/session.md"
+printf '%s\n' 'durable-team-learning' > "$MEM/.forge/memory/project.md"
+printf '{"trigger":"manual","cwd":"%s"}' "$MEM" \
+    | (cd "$MEM" && CLAUDE_PROJECT_DIR="$MEM" bash .forge/hooks/pre-compact-memory.sh) \
+    > "$MEM/precompact.out" 2>&1
+assert_contains "$MEM/precompact.out" '.forge/local/memory' \
+    "pre-compact reminder owns only volatile local memory"
+assert_not_contains "$MEM/precompact.out" 'auto memory' \
+    "pre-compact never redirects Forge continuity into private host memory"
+assert_contains "$REPO_ROOT/rules/memory.md" '.forge/memory/' \
+    "durable project memory is documented as an ordinary reviewed change"
+assert_contains "$REPO_ROOT/rules/memory.md" '.forge/local/memory/' \
+    "volatile developer memory is documented separately"
+
+start_test "linked worktrees isolate local continuity while Git propagates durable memory"
+MW_BASE=$(scratch_dir forge-memory-worktrees)
+MW_MAIN="$MW_BASE/main"
+MW_PEER="$MW_BASE/peer"
+mkdir -p "$MW_MAIN/.forge/memory"
+(cd "$MW_MAIN" && git init -q --initial-branch=main && git config user.email t@t && git config user.name t)
+printf '%s\n' 'durable-v1' > "$MW_MAIN/.forge/memory/project.md"
+(cd "$MW_MAIN" && git add .forge/memory/project.md && git commit -q -m durable-v1 && git worktree add -q -b peer "$MW_PEER")
+mkdir -p "$MW_MAIN/.forge/local/memory" "$MW_PEER/.forge/local/memory"
+printf '%s\n' 'claude-local' > "$MW_MAIN/.forge/local/memory/session.md"
+printf '%s\n' 'codex-local' > "$MW_PEER/.forge/local/memory/session.md"
+cat > "$MW_MAIN/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field | Value |
+| Command | /new-feature local-isolation |
+| Phase | 5 — Quality |
+| Next step | ship |
+### Checklist
+- [x] Code review loop — N/A: isolation fixture
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: isolation fixture
+EOF
+cat > "$MW_PEER/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field | Value |
+| Command | /new-feature local-isolation |
+| Phase | 5 — Quality |
+| Next step | review |
+### Checklist
+- [ ] Code review loop
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: isolation fixture
+EOF
+printf '{"cwd":"%s","tool_input":{"command":"git push"}}' "$MW_MAIN" \
+    | (cd "$MW_MAIN" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$MW_MAIN/gate.out" 2>&1
+assert_equals "$?" "0" "main worktree can satisfy only its own local gate state"
+printf '{"cwd":"%s","tool_input":{"command":"git push"}}' "$MW_PEER" \
+    | (cd "$MW_PEER" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$MW_PEER/gate.out" 2>&1
+assert_equals "$?" "2" "peer worktree cannot borrow the main worktree local gate state"
+assert_equals "$(cat "$MW_MAIN/.forge/local/memory/session.md")" "claude-local" \
+    "main local memory remains per-worktree"
+assert_equals "$(cat "$MW_PEER/.forge/local/memory/session.md")" "codex-local" \
+    "peer local memory remains per-worktree"
+assert_contains "$MW_PEER/.forge/memory/project.md" 'durable-v1' \
+    "committed durable memory is visible in the linked worktree"
+printf '%s\n' 'durable-v2' >> "$MW_MAIN/.forge/memory/project.md"
+(cd "$MW_MAIN" && git add .forge/memory/project.md && git commit -q -m durable-v2)
+(cd "$MW_PEER" && git merge -q --ff-only main)
+assert_contains "$MW_PEER/.forge/memory/project.md" 'durable-v2' \
+    "ordinary Git propagation shares reviewed durable memory"
+
+start_test "v5 state translator writes canonical v6 state and invalidates receipts"
+SM="$(scratch_dir state-migration)"
+mkdir -p "$SM/.claude/local"
+write_state_source="$SM/.claude/local/state.md"
+{
+    printf '# Project State\n\n## Workflow\n\nCHECKPOINT_SURVIVES\n\n### Checklist\n\n'
+    printf '%s\n' '- [x] Code review iteration 2 — codex clean — head=`abcdef0123456789abcdef0123456789abcdef01`'
+    printf '%s\n\n' '- Narrative review iteration remains developer context.'
+    printf '## /goal session\n\nDeveloper narrative about a prior goal must survive.\n\n'
+    printf '| Field | Value |\n| --- | --- |\n'
+    printf '| nonce | 00000000-0000-4000-8000-000000000001 |\n'
+    printf '| workflow_command | /new-feature receipt-test |\n'
+    printf '| issued_at | 2026-08-27T00:00:00Z |\n\n'
+    printf '## PR authorization\n\n'
+    printf '%s\n' '- [x] PR creation authorized — `2026-08-27T00:00:00Z` — nonce=`00000000-0000-4000-8000-000000000001` — head=`abcdef0123456789abcdef0123456789abcdef01`'
+    printf '%s\n\n' '- Narrative PR authorization wording is not a receipt.'
+    printf '## State\n\n### Now\n\n'
+    printf '%s\n\n' '- Preserve the code review loop and plan review iteration phrases in narrative.'
+    printf '## Update Rules\n\n'
+    printf '%s\n' '- `- [x] Code review iteration <N> — codex clean — head=`<sha>`` is documentation.'
+} > "$write_state_source"
+(cd "$SM" && "$REPO_ROOT/scripts/migrate-state-v5-v6.sh") > "$SM/migrate.log" 2>&1
+assert_equals "$?" "0" "state migration helper succeeds"
+assert_contains "$SM/.forge/local/state.md" '<!-- forge:state-schema v6 -->' \
+    "canonical state is schema-versioned"
+assert_contains "$SM/.forge/local/state.md" 'CHECKPOINT_SURVIVES' \
+    "checkpoint narrative survives state translation"
+assert_not_contains "$SM/.forge/local/state.md" 'old-goal' \
+    "legacy goal receipt is invalidated"
+assert_not_contains "$SM/.forge/local/state.md" '[x] PR creation authorized' \
+    "legacy authorization receipt is invalidated"
+assert_not_contains "$SM/.forge/local/state.md" '00000000-0000-4000-8000-000000000001' \
+    "structurally valid legacy goal receipt rows are invalidated"
+assert_not_contains "$SM/.forge/local/state.md" 'Code review iteration 2 — codex clean' \
+    "structurally valid checklist review receipt is invalidated"
+assert_contains "$SM/.forge/local/state.md" 'Narrative review iteration remains developer context.' \
+    "review-like checklist narrative is preserved verbatim"
+assert_contains "$SM/.forge/local/state.md" 'Developer narrative about a prior goal must survive.' \
+    "goal-section narrative is preserved verbatim"
+assert_contains "$SM/.forge/local/state.md" 'Narrative PR authorization wording is not a receipt.' \
+    "authorization-section narrative is preserved verbatim"
+assert_contains "$SM/.forge/local/state.md" 'Preserve the code review loop and plan review iteration phrases in narrative.' \
+    "state narrative containing review phrases is preserved verbatim"
+assert_contains "$SM/.forge/local/state.md" 'Code review iteration <N>' \
+    "instructional review examples outside the checklist survive translation"
+
 NF="$REPO_ROOT/commands/new-feature.md"
 FBR="$REPO_ROOT/commands/finish-branch.md"
+WORKFLOW_STAGE=$(sed -n 's/^# conversion-stage:[[:space:]]*//p' \
+    "$REPO_ROOT/manifests/workflow-capabilities.tsv" | head -1)
+
+if [ "$WORKFLOW_STAGE" = "complete" ]; then
+    start_test "host-neutral workflows preserve seed-snapshot round-trip semantics"
+    for workflow in new-feature fix-bug; do
+        surface="$REPO_ROOT/commands/$workflow.md"
+        assert_contains "$surface" '.forge/local/.state-seed-snapshot.md' \
+            "$workflow persists the primary narrative baseline"
+        assert_contains "$surface" '### Now` cleared' \
+            "$workflow clears volatile Now content when seeding"
+        assert_contains "$surface" 'Never seed workflow, goal, authorization, or receipt' \
+            "$workflow excludes gate and authority sections"
+        assert_contains "$surface" 'explicit reconciliation baseline' \
+            "$workflow refuses to guess a missing adopted-worktree baseline"
+    done
+    assert_contains "$FBR" '.forge/local/.state-seed-snapshot.md' \
+        "finish-branch reads the persisted seed baseline"
+    assert_contains "$FBR" 'FOLD_SAFE_STOP' \
+        "finish-branch stops on a missing or malformed baseline"
+    assert_contains "$FBR" 'FOLD_DIVERGED' \
+        "finish-branch stops when primary narrative changed"
+    assert_contains "$FBR" 'Do not touch `## Workflow`, `## /goal session`, `## PR authorization`' \
+        "finish-branch preserves gate and authority sections"
+    report "test-state-roundtrip.sh"
+    exit 0
+fi
 
 # --- Load the REAL extract_foldable from the shipped new-feature.md (between markers) ---
 EF_SRC="$(sed -n '/# EXTRACT-FOLDABLE-BEGIN/,/# EXTRACT-FOLDABLE-END/p' "$NF")"

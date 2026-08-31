@@ -78,7 +78,9 @@ run_migrate() {
     local scratch="$1"
     # Pre-install state.template.md so the helper has somewhere to write Now/Next.
     mkdir -p "$scratch/.claude/local"
-    [ ! -f "$scratch/.claude/local/state.md" ] && cp "$REPO_ROOT/state.template.md" "$scratch/.claude/local/state.md"
+    if [ ! -f "$scratch/.claude/local/state.md" ]; then
+        tail -n +2 "$REPO_ROOT/state.template.md" > "$scratch/.claude/local/state.md"
+    fi
     ( cd "$scratch" && bash "$REPO_ROOT/scripts/migrate-continuity.sh" 2>&1 )
 }
 
@@ -107,18 +109,18 @@ scratch=$(mktemp -d)
 make_legacy_continuity_for_migration "$scratch"
 run_migrate "$scratch" >/dev/null
 # Extract ONLY the ### Done block from state.md, then count bullets — not all bullets in the file.
-done_count=$(awk '/^### Done/{f=1;next} f && /^### /{f=0} f && /^- /{n++} END{print n+0}' "$scratch/.claude/local/state.md")
+done_count=$(awk '/^### Done/{f=1;next} f && /^### /{f=0} f && /^- /{n++} END{print n+0}' "$scratch/.forge/local/state.md")
 if [ "$done_count" -le 3 ]; then pass "Done block has $done_count entries (≤ 3)"; else fail "Done has $done_count entries, expected ≤ 3"; fi
 # Verify it kept the LAST entries, not the first (Codex P1: tail vs head).
 # Fixture has 4 dated entries; tail -3 should keep 02, 03, 04 and drop 01.
-if grep -qF "2026-04-01: oldest entry" "$scratch/.claude/local/state.md"; then
+if grep -qF "2026-04-01: oldest entry" "$scratch/.forge/local/state.md"; then
     fail "Done kept the OLDEST entry — should have used tail, not head"
 else
     pass "Done dropped the oldest entry (correct tail behavior)"
 fi
 # And the most-recent entry MUST be present (regression guard for P1-1:
 # multi-line awk silently dropped Done content, leaving the placeholder).
-if grep -qF "2026-04-04: shipped feature Z" "$scratch/.claude/local/state.md"; then
+if grep -qF "2026-04-04: shipped feature Z" "$scratch/.forge/local/state.md"; then
     pass "Done kept the most-recent entry (real content, not placeholder)"
 else
     fail "Done is missing the most-recent entry (P1-1 regression: awk dropped content?)"
@@ -134,13 +136,32 @@ after=$(hash_file "$scratch/CONTINUITY.md")
 assert_equals "$before" "$after" "CONTINUITY.md byte-preserved through --migrate"
 rm -rf "$scratch"
 
+start_test "test_migrate_writes_state_translation_receipt_bound_to_source_and_target"
+scratch=$(mktemp -d)
+make_legacy_continuity_for_migration "$scratch"
+run_migrate "$scratch" >/dev/null
+receipt="$scratch/.forge/local/migration-evidence/continuity-state-v5-v6.json"
+assert_file_exists "$receipt" "continuity migration writes protected canonical evidence"
+if [ -f "$receipt" ]; then
+    receipt_schema=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["schema"])' "$receipt")
+    receipt_source=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_hash"])' "$receipt")
+    receipt_target=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_hash"])' "$receipt")
+    assert_equals "$receipt_schema" "forge-continuity-state-translation-v1" \
+        "continuity receipt declares its versioned schema"
+    assert_equals "$receipt_source" "$(hash_file "$scratch/.claude/local/state.md")" \
+        "continuity receipt binds the exact surviving legacy source"
+    assert_equals "$receipt_target" "$(hash_file "$scratch/.forge/local/state.md")" \
+        "continuity receipt binds the final canonical target after migration edits"
+fi
+rm -rf "$scratch"
+
 start_test "test_migrate_idempotent_state_md"
 scratch=$(mktemp -d)
 make_legacy_continuity_for_migration "$scratch"
 run_migrate "$scratch" >/dev/null
-before_state=$(hash_file "$scratch/.claude/local/state.md")
+before_state=$(hash_file "$scratch/.forge/local/state.md")
 run_migrate "$scratch" >/dev/null  # second run — should detect sentinel and no-op
-after_state=$(hash_file "$scratch/.claude/local/state.md")
+after_state=$(hash_file "$scratch/.forge/local/state.md")
 assert_equals "$before_state" "$after_state" "state.md unchanged on second run (sentinel detected)"
 rm -rf "$scratch"
 
@@ -229,24 +250,24 @@ scratch=$(mktemp -d)
 make_legacy_continuity_with_complex_done "$scratch"
 out=$(run_migrate "$scratch" 2>&1)
 # state.md must contain the actual content, NOT the placeholder.
-if grep -qF "(your most recent completed work)" "$scratch/.claude/local/state.md"; then
+if grep -qF "(your most recent completed work)" "$scratch/.forge/local/state.md"; then
     fail "Done section still has placeholder — multi-line content was DROPPED (P1-1 bug)"
 else
     pass "Done placeholder replaced by real content"
 fi
 # The 3 fixture entries are all real Done entries; tail -3 keeps all of them.
 # Each must appear in state.md with full content (em-dash + parens + PR ref).
-if grep -qF "ARRANGE rule text fixes (PR #512" "$scratch/.claude/local/state.md"; then
+if grep -qF "ARRANGE rule text fixes (PR #512" "$scratch/.forge/local/state.md"; then
     pass "Done preserved entry with parens + em-dash + PR ref (PR #512)"
 else
     fail "Done lost entry with parens / em-dash / PR ref (PR #512)"
 fi
-if grep -qF "Phase 4 task-DAG dispatch" "$scratch/.claude/local/state.md"; then
+if grep -qF "Phase 4 task-DAG dispatch" "$scratch/.forge/local/state.md"; then
     pass "Done preserved entry with backticks + PR ref (PR #524)"
 else
     fail "Done lost entry (PR #524)"
 fi
-if grep -qF "Template-drift notice" "$scratch/.claude/local/state.md"; then
+if grep -qF "Template-drift notice" "$scratch/.forge/local/state.md"; then
     pass "Done preserved most-recent entry (PR #523)"
 else
     fail "Done lost most-recent entry (PR #523)"
@@ -275,14 +296,16 @@ case "$first_line" in
         fail "CLAUDE.md sentinel NOT on line 1 (got: $first_line)"
         ;;
 esac
-# state.md sentinel also on line 1 (regression guard).
-state_first=$(head -1 "$scratch/.claude/local/state.md")
-case "$state_first" in
-    "<!-- forge:migrated "*"-->")
-        pass "state.md sentinel on line 1"
+# Canonical state keeps its schema marker on line 1 and the migration sentinel
+# on line 2 so every host can validate it before parsing receipts.
+state_first=$(head -1 "$scratch/.forge/local/state.md")
+state_second=$(sed -n '2p' "$scratch/.forge/local/state.md")
+case "$state_first:$state_second" in
+    "<!-- forge:state-schema v6 -->:<!-- forge:migrated "*"-->")
+        pass "state.md schema remains line 1 and migration sentinel is line 2"
         ;;
     *)
-        fail "state.md sentinel NOT on line 1 (got: $state_first)"
+        fail "state.md schema/sentinel ordering invalid (got: $state_first / $state_second)"
         ;;
 esac
 rm -rf "$scratch"

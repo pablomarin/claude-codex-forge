@@ -1,0 +1,36 @@
+# v5 external behavior to v6 Forge-owned replacement. Tab-separated.
+# provider	behavior	v5-surface	owner	canonical-path	replacement-kind	hosts
+# conversion-stage: complete
+forge-workflow	prd-discuss	/prd:discuss	forge	.forge/workflows/prd/discuss.md	workflow	claude,codex
+forge-workflow	prd-create	/prd:create	forge	.forge/workflows/prd/create.md	workflow	claude,codex
+forge-workflow	new-feature	/new-feature	forge	.forge/workflows/new-feature.md	workflow	claude,codex
+forge-workflow	fix-bug	/fix-bug	forge	.forge/workflows/fix-bug.md	workflow	claude,codex
+forge-workflow	quick-fix	/quick-fix	forge	.forge/workflows/quick-fix.md	workflow	claude,codex
+forge-workflow	review	claude:/opinion;codex:$opinion	forge	.forge/workflows/opinion.md	workflow	claude,codex
+forge-workflow	investigation	claude:/opinion investigate;codex:$opinion investigate	forge	.forge/workflows/opinion.md	workflow-profile	claude,codex
+forge-workflow	council	/council	forge	.forge/skills/council/SKILL.template.md	canonical-skill	claude,codex
+forge-workflow	goal-composition	native-/goal	forge	.forge/workflows/goal.md	root-composition	claude,codex
+forge-workflow	review-pr-comments	/review-pr-comments	forge	.forge/workflows/review-pr-comments.md	workflow	claude,codex
+forge-workflow	finish-branch	/finish-branch	forge	.forge/workflows/finish-branch.md	workflow	claude,codex
+forge-workflow	release	/release	forge	.forge/skills/release/SKILL.template.md	canonical-skill	claude,codex
+forge-workflow	state-memory	state-and-memory	forge	.forge/local/state.md	durable-contract	claude,codex
+forge-workflow	verify-app	verify-app-agent	forge	.forge/agents/verify-app.md	canonical-agent	claude,codex
+forge-workflow	verify-e2e	verify-e2e-agent	forge	.forge/agents/verify-e2e.md	canonical-agent	claude,codex
+superpowers	brainstorming	/superpowers:brainstorming	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+superpowers	writing-plans	/superpowers:writing-plans	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+superpowers	subagent-driven-development	/superpowers:subagent-driven-development	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+superpowers	executing-plans	/superpowers:executing-plans	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+superpowers	systematic-debugging	/superpowers:systematic-debugging	forge	.forge/workflows/fix-bug.md	workflow-phase	claude,codex
+superpowers	requesting-code-review	/superpowers:requesting-code-review	forge	.forge/workflows/opinion.md	reviewer-dispatch	claude,codex
+superpowers	receiving-code-review	/superpowers:receiving-code-review	forge	.forge/workflows/review-pr-comments.md	workflow-phase	claude,codex
+superpowers	verification-before-completion	/superpowers:verification-before-completion	forge	.forge/workflows/new-feature.md	workflow-gates	claude,codex
+pr-review-toolkit	code-simplifier	code-simplifier-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+pr-review-toolkit	code-reviewer	code-reviewer-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+pr-review-toolkit	silent-failure-hunter	silent-failure-hunter-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+pr-review-toolkit	pr-test-analyzer	pr-test-analyzer-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+pr-review-toolkit	comment-analyzer	comment-analyzer-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+pr-review-toolkit	type-design-analyzer	type-design-analyzer-agent	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+pr-review-toolkit	review-pr	/pr-review-toolkit:review-pr	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+claude-core	simplify	/simplify	forge	.forge/workflows/new-feature.md	workflow-phase	claude,codex
+frontend-design	frontend-design	frontend-design-skill	forge	.forge/skills/ui-design/SKILL.template.md	canonical-skill	claude,codex
+forge	subagent-review-receipt	forge-v6-producer	forge	.forge/local/reviews/<task-id>/{spec,quality}.receipt	forge-subagent-review-v1	claude,codex

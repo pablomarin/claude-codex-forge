@@ -57,12 +57,36 @@ elif TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$TOPLEVEL" ]
     cd "$TOPLEVEL" 2>/dev/null || true
 fi
 
-STATE_MD=".claude/local/state.md"
+HOOK_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)
+STATE_HELPER="$HOOK_DIR/lib/state-path.sh"
+[ -f "$STATE_HELPER" ] || STATE_HELPER="hooks/lib/state-path.sh"
+STATE_MD=""
+if [ -f "$STATE_HELPER" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_HELPER"
+    if ! STATE_MD=$(forge_state_path "$(pwd)" read); then
+        if [ -e .forge/version ] || [ -L .forge/version ] \
+            || [ -e .forge/local/state.md ] || [ -L .forge/local/state.md ] \
+            || [ -e .forge/local ] || [ -L .forge/local ] || [ -L .forge ]; then
+            echo "FORGE_STATE_INVALID: canonical v6 state could not be resolved" >&2
+            exit 2
+        fi
+        STATE_MD=""
+    fi
+fi
+STATE_IS_V6=false
+case "$STATE_MD" in */.forge/local/state.md) STATE_IS_V6=true ;; esac
+STATE_LOCAL_DIR=".forge/local"
+case "$STATE_MD" in */.claude/local/state.md) STATE_LOCAL_DIR=".claude/local" ;; esac
 
 # Convergence-breaker helper (ADR 0009) — dual-path: installed location first,
 # Forge-internal source fallback. Absence is fail-open (see compute_breaker_fields).
-RS=".claude/hooks/lib/review-breaker.sh"
+RS=".forge/hooks/lib/review-breaker.sh"
+[ -f "$RS" ] || RS=".claude/hooks/lib/review-breaker.sh"
 [ -f "$RS" ] || RS="hooks/lib/review-breaker.sh"
+VR="$HOOK_DIR/lib/verification-receipt.sh"
+[ -f "$VR" ] || VR=".forge/hooks/lib/verification-receipt.sh"
+[ -f "$VR" ] || VR="hooks/lib/verification-receipt.sh"
 
 # ---------------------------------------------------------------------------
 # Git state queries (read-only, best-effort — failures produce empty strings)
@@ -157,7 +181,7 @@ fi
 parse_goal_session() {
     # Echo "nonce|workflow_command" or empty if section missing.
     # Section format: Markdown table under `## /goal session` heading.
-    [ -f "$STATE_MD" ] || return 0
+    [ "$STATE_IS_V6" = true ] && [ -f "$STATE_MD" ] || return 0
 
     # CRLF normalize FIRST, then awk-scope (Codex P1.7 fix from plan-review).
     local block
@@ -210,7 +234,7 @@ compute_reviewer_gate() {
     # Args: $1 = current HEAD sha
     # Output: "clean_same_iteration|matched_iteration|matched_head"
     local head_sha="$1"
-    [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
+    [ "$STATE_IS_V6" = true ] && [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
     [ -z "$head_sha" ] && { echo "false||"; return 0; }
 
     # Single awk pass: scope to ## Workflow / ### Checklist, extract reviewer rows
@@ -266,7 +290,7 @@ compute_breaker_fields() {
     POST_CERT_ROUNDS=0
     BREAKER="ok"
     BREAKER_OK="true"
-    [ -f "$RS" ] && [ -f "$STATE_MD" ] || return 0
+    [ "$STATE_IS_V6" = true ] && [ -f "$RS" ] && [ -f "$STATE_MD" ] || return 0
     local rs_out rounds brk adj
     rs_out=$(bash "$RS" "$STATE_MD" 2>/dev/null || echo "")
     rounds=$(echo "$rs_out" | sed -n 's/^POST_CERT_ROUNDS://p' | tail -1)
@@ -290,7 +314,7 @@ compute_plan_review_gate() {
     # Scope extraction to ## Workflow / ### Checklist (mirror compute_reviewer_gate
     # scoping above). A whole-file grep would pick up stray "Plan review iteration"
     # lines in migrated content or in docs/CHANGELOG.md excerpts pasted into state.md.
-    [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
+    [ "$STATE_IS_V6" = true ] && [ -f "$STATE_MD" ] || { echo "false||"; return 0; }
 
     local checklist
     checklist=$(tr -d '\r' < "$STATE_MD" | awk '
@@ -360,7 +384,7 @@ parse_pr_authorization() {
     # Return authorized=true ONLY if extracted nonce matches GOAL_NONCE AND
     # extracted head matches HEAD_SHA. Otherwise authorized=false (but emit values for debugging).
 
-    [ -f "$STATE_MD" ] || { echo "false|||"; return 0; }
+    [ "$STATE_IS_V6" = true ] && [ -f "$STATE_MD" ] || { echo "false|||"; return 0; }
     [ -z "$HEAD_SHA" ] && { echo "false|||"; return 0; }
     [ -z "$GOAL_NONCE" ] && { echo "false|||"; return 0; }
 
@@ -432,6 +456,35 @@ RG_REST="${RG_RESULT#*|}"
 RG_ITER="${RG_REST%%|*}"
 RG_HEAD="${RG_REST##*|}"
 
+# Receipt-v2 is activated by an explicit Candidate receipt state linkage. Until
+# Task 9 converts a workflow producer, the existing checklist reader remains the
+# compatibility path. Migrated v5 evidence cannot enter it because translation
+# removes legacy clean rows and receipt state.
+CANDIDATE_CLEAN=false
+VERIFY_APP_CLEAN=false
+E2E_RECEIPT_CLEAN=false
+SHIP_RECEIPTS_CLEAN=false
+RECEIPT_GATE_OK=true
+CANDIDATE_ID=""
+RECEIPT_CANDIDATE=$(tr -d '\r' < "$STATE_MD" 2>/dev/null | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
+case "$RECEIPT_CANDIDATE" in ''|*'<'*) ;; *)
+    RECEIPT_GATE_OK=false
+    if [ "$STATE_IS_V6" = true ] && [ -f "$VR" ]; then
+        VR_OUT=$(bash "$VR" check --state "$STATE_MD" 2>/dev/null || true)
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^CANDIDATE_VALID://p' | tail -1)" = true ] && CANDIDATE_CLEAN=true
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^REVIEWS_VALID://p' | tail -1)" = true ] && RG_CLEAN=true || RG_CLEAN=false
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^VERIFY_APP_VALID://p' | tail -1)" = true ] && VERIFY_APP_CLEAN=true
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^E2E_VALID://p' | tail -1)" = true ] && E2E_RECEIPT_CLEAN=true
+        [ "$(printf '%s\n' "$VR_OUT" | sed -n 's/^SHIP_READY://p' | tail -1)" = true ] && SHIP_RECEIPTS_CLEAN=true
+        [ "$SHIP_RECEIPTS_CLEAN" = true ] && RECEIPT_GATE_OK=true
+        RG_ITER=$(printf '%s\n' "$VR_OUT" | sed -n 's/^REVIEW_ITERATION://p' | tail -1)
+        CANDIDATE_ID=$(printf '%s\n' "$VR_OUT" | sed -n 's/^CANDIDATE_ID://p' | tail -1)
+        [ "$CANDIDATE_CLEAN" = true ] && RG_HEAD="$HEAD_SHA" || RG_HEAD=""
+        E2E_FRESH="$E2E_RECEIPT_CLEAN"
+    fi
+    ;;
+esac
+
 # Convergence breaker fields (full-state helper run). Sets POST_CERT_ROUNDS,
 # BREAKER, BREAKER_OK (false only when tripped AND unadjudicated).
 compute_breaker_fields
@@ -478,7 +531,8 @@ PR_HEAD_MATCH="false"
 PR_READY="false"
 if [ "$PR_OPEN" = "true" ] && [ "$PR_HEAD_MATCH" = "true" ] && \
    [ "$RG_CLEAN" = "true" ] && [ "$E2E_FRESH" = "true" ] && \
-   [ "$PA_AUTH" = "true" ] && [ "$BREAKER_OK" = "true" ]; then
+   [ "$PA_AUTH" = "true" ] && [ "$BREAKER_OK" = "true" ] && \
+   [ "$RECEIPT_GATE_OK" = "true" ]; then
     PR_READY="true"
 fi
 
@@ -530,14 +584,17 @@ else
 fi
 rm -f "$FP_TMP"
 
-# Side-channel: write fingerprint to .claude/local/forge-goal-last-fingerprint so
+# Side-channel: atomically publish a complete fingerprint for concurrent Stop hooks.
 # the stuck-detection logic in check-state-updated.sh can read it without
 # re-running build-evidence or parsing STDERR. One line — just the SHA256 value.
 # Best-effort: failure here must not abort the evidence emission.
-FINGERPRINT_SIDECHANNEL=".claude/local/forge-goal-last-fingerprint"
+FINGERPRINT_SIDECHANNEL="$STATE_LOCAL_DIR/forge-goal-last-fingerprint"
 if [ -n "$PROGRESS_FP" ]; then
-    mkdir -p ".claude/local" 2>/dev/null || true
-    printf '%s\n' "$PROGRESS_FP" > "$FINGERPRINT_SIDECHANNEL" 2>/dev/null || true
+    mkdir -p "$STATE_LOCAL_DIR" 2>/dev/null || true
+    FP_SIDE_TMP="$FINGERPRINT_SIDECHANNEL.tmp.$$"
+    if printf '%s\n' "$PROGRESS_FP" > "$FP_SIDE_TMP" 2>/dev/null; then
+        mv "$FP_SIDE_TMP" "$FINGERPRINT_SIDECHANNEL" 2>/dev/null || rm -f "$FP_SIDE_TMP"
+    fi
 fi
 
 # Task 5: git + PR + E2E field strings
@@ -551,6 +608,7 @@ PR_HEAD_OID_JSON=$(json_str_field "head_oid" "$PR_HEAD_OID")
 PR_BASE_REF_JSON=$(json_str_field "base_ref" "$PR_BASE_REF")
 PR_HEAD_REF_JSON=$(json_str_field "head_ref" "$PR_HEAD_REF")
 E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
+CANDIDATE_ID_JSON=$(json_str_field "candidate_id" "$CANDIDATE_ID")
 
 # Emit evidence JSON.
 {
@@ -565,6 +623,9 @@ E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
         "$PHASE_JSON" "$NEXT_STEP_JSON" "$TOTAL_COUNT" "$DONE_COUNT"
     printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s,"post_cert_rounds":%d,"breaker":"%s"},' \
         "$RG_CLEAN" "$RG_ITER_JSON" "$RG_HEAD_JSON" "$POST_CERT_ROUNDS" "$BREAKER"
+    printf '"candidate_gate":{"staged_clean":%s,%s,"all_receipts_same_candidate":%s},' \
+        "$CANDIDATE_CLEAN" "$CANDIDATE_ID_JSON" "$SHIP_RECEIPTS_CLEAN"
+    printf '"verification_gate":{"verify_app":%s,"e2e":%s},' "$VERIFY_APP_CLEAN" "$E2E_RECEIPT_CLEAN"
     printf '"plan_review_gate":{"clean_same_iteration":%s,%s,%s},' \
         "$PRG_CLEAN" "$PRG_ITER_JSON" "$PRG_SHA_JSON"
     printf '%s,' "$BRANCH_JSON"
@@ -596,4 +657,5 @@ E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
     echo "FORGE_GOAL_EVIDENCE_END"
 } >&2
 
+printf '%s' "$INPUT" | grep -qE '"host"[[:space:]]*:[[:space:]]*"codex"' && printf '{}\n'
 exit 0

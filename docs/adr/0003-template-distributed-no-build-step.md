@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (2026-04-28)
+Amended by [ADR 0010](0010-dual-engine-canonical-harness.md) (2026-08-27). Forge still has no build
+step; v6 installs one manifest-owned `.forge/` harness plus native host adapters and uses full
+refresh rather than the legacy force/upgrade path.
 
 ## Context
 

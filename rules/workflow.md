@@ -1,124 +1,120 @@
-# Workflow
+# Workflow Rules
 
-**Use workflow commands.** They contain the full process - follow them exactly.
+## Choose the Smallest Matching Workflow
 
-## Decision Matrix
+| Need | Canonical workflow |
+|---|---|
+| New capability | `/new-feature <name>` |
+| Reproduce and fix a defect | `/fix-bug <name>` |
+| Trivial, low-risk change under the quick-fix limits | `/quick-fix <name>` |
+| Fresh second opinion or code review | Claude: `/opinion <request>`; Codex: `$opinion <request>` |
+| Investigation with disposable write/network capability | Claude: `/opinion investigate <request>`; Codex: `$opinion investigate <request>` |
+| Resolve engineering ambiguity | `/council <question>` |
+| Process PR feedback | `/review-pr-comments` |
+| Merge and clean up after approval | `/finish-branch` |
 
-| Scenario                   | Action                                              |
-| -------------------------- | --------------------------------------------------- |
-| Starting new feature       | Run `/new-feature <name>` (creates worktree)        |
-| Fixing a bug               | Run `/fix-bug <name>` (creates worktree)            |
-| Trivial change (< 3 files) | Run `/quick-fix <name>` (no worktree)               |
-| Want a second opinion      | Run `/codex <instruction>` (code review or general) |
-| Multi-perspective analysis | Run `/council <question>` (5 advisors + chairman)   |
-| Creating PR to main        | **Ask**                                             |
-| Merging PR to main         | **Ask**                                             |
-| Skipping tests             | **Never**                                           |
+The current host is the main agent for the session. Resolve it through the installed host adapter;
+never persist a permanent main-engine preference. Reviewer `auto` selects the other installed
+engine and automatically falls back to a fresh same-engine reviewer when launch/capability failure
+occurs. A finding is a review result, not a fallback reason.
 
-## Workflow Tracking
+## Resource Discipline
 
-**When a workflow is active** (`## Workflow` in .claude/local/state.md has Command != `none`):
+Optimize for the smallest correct solution; developer time, session length, tokens, and money are
+finite engineering resources. Do not pursue perfection, cosmetic polish, speculative hardening, or
+edge cases without a concrete supported trigger, stated acceptance criterion, material likelihood,
+security impact, or data-integrity impact.
 
-1. **Before each action**: Read `## Workflow` in .claude/local/state.md — check current Phase and Next step
-2. **Execute only** the `Next step` listed
-3. **After completing a step**: Check the box in the Checklist and advance `Next step` to the next unchecked item
-4. **On phase transition**: Update the `Phase` field
+For each artifact revision, allow one broad review, one repair pass, and one closure review. Closure
+checks only the named findings and direct regressions; a reviewer may not start a second broad scan.
+One still-open reachable P0/P1 may receive one surgical repair plus a surgical verification of only
+that finding, then Forge surfaces the blocker to the developer instead of iterating indefinitely.
 
-The Stop hook reminds you of the current phase on every response. The PreToolUse hook blocks commit/push/PR if quality gates are incomplete. This rule is re-injected every turn — it survives context compaction.
+P3, naming, cosmetic, purely theoretical, and unchanged candidate concerns never keep a loop open.
+P2 means a concrete material maintainability, reliability, performance, or test risk, not a merely
+imaginable rare case. Rare but catastrophic security or data loss triggers remain P0/P1. Resource
+discipline never excuses reachable security failure, data loss, incorrect supported behavior, or an
+explicit acceptance criterion.
 
-## Council During `/forge-goal` Autonomous Run
+During repair, run focused owning checks. Run one complete aggregate after the final bytes freeze;
+do not mechanically restart unrelated verification. A mutation invalidates only evidence whose
+boundary it can affect, while exact-candidate receipts still require the same final fingerprint.
+Environment-only Windows, authenticated, and manual gates remain honest final gates; they do not
+trigger implementation loops or authorize fake evidence.
 
-When a `/forge-goal`-driven `/goal` is active (`## /goal session` is populated in `.claude/local/state.md` with a non-empty nonce), the agent's pause-for-user discipline changes:
+## Durable State and Host Switching
 
-**Before asking the user any question during the autonomous run, ask yourself:**
+Read `.forge/local/state.md` before every workflow action. Record the current phase, next unchecked
+step, last active host, intended base ref, and immutable resolved base SHA. A host switch resumes
+that exact next step in the same branch/worktree. Warn that simultaneous editing can overwrite work;
+do not introduce locks, leases, or a permanent session owner.
 
-> _Is this a PR creation authorization?_
+Developer state, review receipts, verification receipts, and local memories live under
+`.forge/local/`; project-owned durable memory lives under `.forge/memory/`. Use the active host's
+file capabilities for local evidence. Never infer a clean gate from a successful process exit.
 
-- **If YES:** call `AskUserQuestion` with the PR-create modal. The user's answer is the only human-authority signal in the loop.
-- **If NO:** invoke `/council` with the question. Apply the chairman's verdict. Continue the loop.
+## Plan, Review, and Evidence
 
-**Triggers for council** (the agent invokes council at its discretion when):
+- Research current documentation before design when a library, API, or provider is involved.
+- Compare viable approaches and send genuine ambiguity to `/council`.
+- Freeze the exact staged-clean candidate before final review or verification.
+- Dispatch fresh independent `plan`, `code-spec`, and `code-quality` roles through the installed
+  structured dispatcher. Automatic fallback is visible in its receipt.
+- Code review requires distinct clean `code-spec` and `code-quality` receipts for the same candidate.
+- `verify-app` and `verify-e2e` each write a candidate-bound verification receipt. Missing execution
+  or access is `BLOCKED`/`UNVERIFIED`, never PASS.
+- Any candidate mutation invalidates affected receipts and restarts from staging/freeze.
 
-- An ambiguous product or technical choice would otherwise prompt the user
-- A reviewer recommends plan revision (not just code patch)
-- A high-impact implementation fork has multiple defensible approaches
-- A retried tool/subagent has also failed
-- Council/reviewer output is unrecognizable and needs interpretation
+The compatibility reader may consume genuine unmigrated v5 state. Once a workflow is migrated,
+new evidence uses the current structured receipts; legacy prose never certifies a migrated gate.
 
-**Explicit NON-triggers:**
+## Autonomous Goal Composition
 
-- Normal plan-review-loop iterations (Claude + Codex back-and-forth on the plan) — these stay as today's reviewer iteration flow
-- Normal code-review-loop iterations (Codex + PR-toolkit + Claude fix cycles)
-- A convergence-breaker (non-convergence) halt — human-only by design: write the Blockers line and stop; council may be invoked BY the human afterward, never as the autonomous risk-acceptor.
-- Any moment that doesn't actually require human-level judgment
+Forge composes the active host's native `/goal`; it does not install or shadow a native goal
+command/skill and does not claim native sessions transfer. `.forge/local/state.md` is authoritative
+for the objective, nonce, persistent budget ceiling, consumed durable turns, checklist, next step,
+candidate, evidence, authorization, and terminal status. Native counters may reset; Forge counters
+may not.
 
-**Council failure handling:** If `/council` itself fails (network, advisor timeout, missing chairman verdict), the autonomous loop pauses and writes a blocker line to `.claude/local/state.md` (`## Blockers`). The user takes over.
+The council resolves non-destructive workflow judgment without pausing. Stop autonomy for:
 
-**Audit:** Each council invocation during an autonomous run is durable in the conversation transcript — the agent's response naming the council outcome and the applied action is the record. No separate audit log file.
+- explicit user input or authorization/cancellation;
+- PR creation or any other new external mutation requiring human authority;
+- a security-sensitive or irreversible action;
+- a broken invariant, exhausted persistent budget, or unresolved convergence blocker.
 
-**Ask-tier commands stall autonomous runs.** Any `rm -rf` / `rm -r` is ask-tier in Forge settings (`Bash(rm -rf:*)` / `Bash(rm -r:*)`) — a `/goal` loop and its subagents CANNOT self-approve the permission prompt, so the run silently hangs until a human notices. Never construct an ask-tier command when a prompt-free alternative exists: tool cache flags (`mypy --no-incremental`, `pytest --cache-clear`, `ruff check --no-cache` — see `rules/python-style.md`), `: >` truncate instead of `rm` for temp files. If a recursive delete is genuinely unavoidable, say so explicitly before running it so the pause is expected, not silent.
+PR creation requires a human-created authorization record bound to the active nonce and candidate.
+Ordinary reviewer/council engine failure uses automatic same-engine fallback and does not stop the
+workflow. If the active host cannot compose every Must goal behavior, mark runtime readiness
+`BLOCKED` rather than silently reducing the contract.
 
-**Never Bash-read or Bash-write `.claude/local/`.** Read `.claude/local/` files with the **Read tool** and create/update them with **Edit/Write** (auto-approved by `auto-approve-local-writes`; the Write tool auto-creates parent dirs — ADR 0006). Two Bash forms trip Claude Code's sensitive-file prompt — Bash is not a read-only tool — and in a `/goal` loop with no human that silently stalls the run: (1) **reads** via a read-utility (`cat`/`sed`/`grep`/`awk`/`head`/`tail`/`rg`/…), and (2) **writes** via a shell primitive or redirect (`mkdir`/`touch`/`cp`/`mv`/`tee`/`ln`/`install`/`dd`/`rmdir`/`rm`/`sed -i`/`>`/`>>`/`&>`). Never redirect output into `.claude/local/` — send it to `/tmp`, then Write the in-repo copy with the Write tool (this is exactly what `/codex` Investigate mode does; passing a `.claude/local/` path as a plain string **argument** to a tool — no shell op — is fine and does not prompt). The `check-bash-safety` hook enforces the two most common inline stall-forms: check #8 blocks a read-utility reading `.claude/local/state.md`, and check #9 blocks a write-primitive/redirect targeting `.claude/local/`. Both are **targeted guardrails for the common inline form**, not guarantees (variable-indirected reads like `sed "$STATE"` stay allowed — the sanctioned `extract_foldable` seed/fold-back blocks rely on them, reading via a shell variable so the utility token and the literal path never share a line). The hook gates the **agent's Bash tool**, not a human's terminal.
+### Council During Autonomous Goal
 
-## Severity Rubric
+Use `/council` for non-PR doubts. PR creation authorization remains human-only. Ask-tier commands stall autonomous runs, so surface the deterministic action and pause instead of hiding a prompt.
 
-| Level | Meaning                                                                | Action                     |
-| ----- | ---------------------------------------------------------------------- | -------------------------- |
-| P0    | Broken — will crash, lose data, or create security vulnerability       | Must fix before proceeding |
-| P1    | Wrong — incorrect behavior, logic error, missing edge case             | Must fix before proceeding |
-| P2    | Poor — code smell, maintainability issue, unclear intent, missing test | Must fix before proceeding |
-| P3    | Nit — style, naming, minor suggestion                                  | May fix, does not block    |
+### Severity and Convergence Compatibility
 
-## Revision Loop Protocol
+Plan-stage spec-loss is P1 when it could cause the wrong feature to be built; this does **not** relax the exit requirement of no P0/P1/P2 from all available reviewers on the same pass. That requirement
+controls certification, not iteration count: after the bounded closure or surgical P0/P1 check,
+surface any remaining blocker to the developer. In a Developer Demo, an unsupported claimed-current
+diagram edge without `file:line` evidence is P1.
 
-Two revision loops enforce quality as a discipline protocol. Both follow the same pattern:
+The v5 compatibility reader retains `POST_CERT_REVIEW_ROUND_LIMIT` and the convergence-breaker.
+Only a human may record `Post-certification tail adjudicated by human`. A compatibility N/A after a
+counted loop preserves its count as `Code review loop (<N> iterations) — N/A:`; migrated workflows
+use candidate-bound structured receipts instead.
 
-1. Run all available reviewers in parallel
-2. Collect severity-tagged findings (P0/P1/P2/P3) using the rubric above
-3. If P0/P1/P2 found → fix, increment counter in the workflow checklist, repeat
-4. If only P3 or clean → check the box with final iteration count, proceed (P3s do not block)
+## Finalization Order
 
-**Plan review loop** (Phase 3, when entered): Claude + Codex review the plan against actual code.
-Exit when: no P0/P1/P2 from all available reviewers on the same pass.
-Codex is mandatory (this repo is Claude × Codex dual-engine). If Codex is unavailable, `/goal` halts and a human takes over; the loop cannot self-complete without real Codex evidence. The only ship escape is `- [x] Plan review loop — N/A: <reason>` for degraded interactive use, caught at PR review.
-Note: `/fix-bug` skips Phase 3 for simple fixes (1-2 files) UNLESS the fix touches a high-impact surface (see canonical list in `references/peer-review-protocol.md`).
+1. Implement with TDD; update solution and changelog material.
+2. Design E2E use cases and run a preliminary feature E2E pass while fixes are allowed.
+3. Graduate committed use cases and generate/run any tracked specs.
+4. Simplify using the Forge-owned workflow phase and apply changes.
+5. Force-stage only the workflow's explicitly approved ignored artifacts, then `git add -A`.
+6. Freeze the staged-clean candidate.
+7. Run final review, `verify-app`, and the complete feature/regression E2E matrix read-only against
+   that same candidate.
+8. Commit only through candidate promotion. PR creation remains a separate human pause.
 
-**Plan-stage severity — spec-loss is P1:** at the plan stage, an omission that could cause the **wrong feature to be built** is a **P1**, not a P2. This is because implementation subagents build FROM the plan's task list + test stubs, so a gap propagates and Gate 2 (code review) can only see code that is internally consistent with the _incomplete_ plan — plan-level spec-loss is invisible downstream. Classify as P1: missing required behavior, missing edge-case handling, a missing acceptance criterion needed to disambiguate implementation, or a missing test stub for a known-important behavior. Pure wording, organization, or maintainability smell stays P2. This sharpens classification only — it does **not** relax the exit; the loop still exits only on no P0/P1/P2.
-
-**Approach comparison** (Phase 3, after brainstorming): Claude fills comparison table with fixed axes (Complexity, Blast Radius, Reversibility, Time to Validate, User/Correctness Risk). Contrarian/Codex validates the "default wins" claim. Council fires on OBJECT + high-impact surface. Spike first if cheapest falsifying test < 30 min.
-If Codex unavailable: user validates skip.
-
-**Code review loop** (Phase 5): Codex + PR Review Toolkit review the implementation.
-Exit when: no P0/P1/P2 from all available reviewers on the same pass.
-Codex is mandatory (this repo is Claude × Codex dual-engine). If Codex is unavailable, `/goal` halts and a human takes over; the loop cannot self-complete without real Codex evidence. The only ship escape is `- [x] Code review loop — N/A: <reason>` for degraded interactive use, caught at PR review.
-Developer Demo honesty: when the PR body is a Developer Demo, an unsupported or wrong **diagram edge** — one that doesn't trace to a real `file:line` in the Evidence table (Gate 2 / claimed-current-behavior) — is a P1 finding. Gate-1 plan Briefing edges labeled `planned`/`inferred` are exempt.
-
-**Convergence breaker (v5.54).** The code-review loop gets a hard stopping rule so it can never grind unbounded after a clean result:
-
-1. **Certification** = the first iteration where BOTH engines record clean evidence at the same head.
-2. **Round counting** = the `Code review loop (N iterations)` counter line is authoritative (rounds with findings write no clean rows but DO bump the counter). Rounds past certification = `N − certification iteration`.
-3. **Trip condition** = more than `POST_CERT_REVIEW_ROUND_LIMIT` (= 3, canonical in `hooks/lib/review-breaker.sh`) rounds past certification. The `check-workflow-gates` hook then blocks `git commit` / `git push` / `gh pr create` — the breaker check runs on EVERY gated ship action, before the docs-only commit carve-out, so neither an N/A escape nor a docs-only commit bypasses it.
-4. **Release** = ONLY a human records, in `### Checklist`:
-   `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\``
-   The line is head-bound (a new commit invalidates it) and the agent NEVER writes it on its own initiative. In a `/goal` run the breaker halts for the human — never substitute `/council`.
-5. **N/A is count-preserving after certification:** if the loop line carries an iteration count, an N/A escape must keep it — `- [x] Code review loop (<N> iterations) — N/A: <reason>`. A count-less `Code review loop — N/A:` line after certification reads as counter erasure and trips the breaker (fail-closed).
-
-**Recovery / diagnosis:** to see why the breaker tripped, run the helper directly — `bash .claude/hooks/lib/review-breaker.sh .claude/local/state.md` — it prints `CERTIFIED / POST_CERT_ROUNDS / BREAKER / ADJUDICATED`. To release a legitimate block, surface the open findings to the human and let THEM write the adjudication line above. There is nothing else to configure or disable: an untripped breaker is inert, and an uncertified branch can never trip it.
-
-Never check a loop box until all available reviewers pass clean on the same iteration.
-
-**Per-iteration clean evidence (enforced by `check-workflow-gates` hook on ship actions):**
-
-For each loop, the agent MUST append a per-iteration clean line to `### Checklist` in `.claude/local/state.md`:
-
-- **Plan review:** `- [x] Plan review iteration <N> — codex clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\``
-- **Code review:** `- [x] Code review iteration <N> — codex clean — head=\`<sha>\``AND`- [x] Code review iteration <N> — pr-toolkit clean — head=\`<sha>\``
-
-The `[x] Plan review loop (N iterations) — PASS` / `[x] Code review loop (N iterations) — PASS` checkbox is checked ONLY AFTER all available reviewers report clean AND the per-iter line(s) are written. The hook blocks `git commit`, `git push`, and `gh pr create` if the loop checkbox is PASS without matching per-iter evidence.
-
-**The only escape is N/A.** Codex is mandatory — there is no "codex unavailable" escape. For degraded interactive use only, the loop may be marked N/A:
-
-- `- [x] Plan review loop — N/A: <reason>`
-- `- [x] Code review loop — N/A: <reason>`
-
-An N/A line skips the per-iter evidence check on ship actions (mirrors the `E2E verified — N/A:` gate) and is caught by human reviewers at PR time. An N/A escape does NOT set the evidence gate clean in `build-evidence` — so a `/forge-goal`-driven `/goal` cannot self-complete on N/A; it halts for a human if Codex is genuinely unavailable.
+Human-readable reports and receipts remain local under `.forge/local/`; do not mutate tracked source
+after the final gates. A mutation returns to step 5 and repeats all affected final gates.

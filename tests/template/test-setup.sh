@@ -828,11 +828,11 @@ test_fresh_install_banner_no_continuity_ref() {
     else
         pass "fresh-install banner does not mention CONTINUITY.md"
     fi
-    # Positive: mentions state.md and docs/adr/ (the new artifacts).
-    if echo "$block" | grep -qF ".claude/local/state.md"; then
-        pass "banner mentions .claude/local/state.md (new artifact)"
+    # Positive: mentions canonical v6 state and ADR paths.
+    if echo "$block" | grep -qF ".forge/local/state.md"; then
+        pass "banner mentions .forge/local/state.md (canonical v6 artifact)"
     else
-        fail "banner does not mention .claude/local/state.md (got: $block)"
+        fail "banner does not mention .forge/local/state.md (got: $block)"
     fi
     if echo "$block" | grep -qF "docs/adr/"; then
         pass "banner mentions docs/adr/ (new artifact)"
@@ -1088,12 +1088,12 @@ test_global_preserves_existing_claudemd() {
     mkdir -p "$fakehome/.claude"
     # Developer's customized global CLAUDE.md.
     printf '# Global Claude Code Instructions\n\n## Personal Preferences\n\nMY GLOBAL PREFS SENTINEL - uv, pnpm, Next.js stack. DO NOT CLOBBER.\n' > "$fakehome/.claude/CLAUDE.md"
-    local before; before=$(hash_file "$fakehome/.claude/CLAUDE.md")
+    local before_line; before_line=$(sed -n '1p' "$fakehome/.claude/CLAUDE.md")
     # --global --upgrade sets FORCE=true; the existing global CLAUDE.md must survive.
     ( cd "$scratch" && HOME="$fakehome" bash "$REPO_ROOT/setup.sh" --global --upgrade >/dev/null 2>&1 )
     if [ -f "$fakehome/.claude/CLAUDE.md" ]; then
-        local after; after=$(hash_file "$fakehome/.claude/CLAUDE.md")
-        assert_equals "$before" "$after" "existing ~/.claude/CLAUDE.md byte-preserved through --global --upgrade"
+        local after_line; after_line=$(sed -n '1p' "$fakehome/.claude/CLAUDE.md")
+        assert_equals "$before_line" "$after_line" "existing personal text stays byte-preserved outside the global Forge block"
         assert_contains "$fakehome/.claude/CLAUDE.md" "MY GLOBAL PREFS SENTINEL" "global CLAUDE.md user content survives --global --upgrade"
     else
         fail "~/.claude/CLAUDE.md was deleted by --global --upgrade"
@@ -1105,6 +1105,313 @@ test_global_preserves_existing_claudemd() {
     assert_file_exists "$fh2/.claude/CLAUDE.md" "fresh --global still creates ~/.claude/CLAUDE.md"
 }
 test_global_preserves_existing_claudemd
+
+# ===========================================================================
+# v6 dual-host materialization contracts (Task 2)
+# ===========================================================================
+make_fake_engine_path() {
+    local dir="$1" claude_state="$2" codex_state="$3"
+    mkdir -p "$dir"
+    if [ "$claude_state" = present ]; then
+        cat > "$dir/claude" <<'EOF'
+#!/bin/sh
+case "${1:-}" in
+  --version) echo '2.1.237 (Claude Code)' ;;
+  --help) echo '--safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence' ;;
+  *) exit 64 ;;
+esac
+EOF
+        chmod +x "$dir/claude"
+    fi
+    if [ "$codex_state" = present ]; then
+        cat > "$dir/codex" <<'EOF'
+#!/bin/sh
+case "${1:-}" in
+  --version) echo 'codex-cli 0.144.1' ;;
+  --help) echo '--ignore-user-config --ignore-rules --ephemeral --sandbox --add-dir --json' ;;
+  *) exit 64 ;;
+esac
+EOF
+        chmod +x "$dir/codex"
+    fi
+}
+
+v6_inventory() {
+    local root="$1"
+    (
+        cd "$root" || exit 1
+        find .forge .claude .agents .codex -type f -print 2>/dev/null
+        [ -f CLAUDE.md ] && printf '%s\n' CLAUDE.md
+        [ -f AGENTS.md ] && printf '%s\n' AGENTS.md
+    ) | LC_ALL=C sort
+}
+
+assert_manifest_materialized() {
+    local root="$1" missing=0 kind source destination platform host scope ownership canonical revision
+    while IFS=$'\t' read -r kind source destination platform host scope ownership canonical revision; do
+        case "$kind" in ''|'#'*) continue ;; esac
+        [ "$scope" = project ] || continue
+        case "$platform" in all|unix) ;; *) continue ;; esac
+        case "$kind" in canonical|adapter)
+            if [ ! -f "$root/$destination" ]; then
+                fail "managed project artifact missing: $destination"
+                missing=1
+            fi
+            ;;
+        marker)
+            [ -f "$root/$destination" ] || { fail "managed project marker file missing: $destination"; missing=1; }
+            ;;
+        esac
+    done < "$REPO_ROOT/manifests/managed-v6.tsv"
+    [ "$missing" -eq 0 ] && pass "every Unix project canonical/adapter/marker manifest record materialized"
+}
+
+start_test "v6 clean install inventory is engine-independent and idempotent"
+V6_BASE=$(scratch_dir v6-engine-matrix)
+BASELINE=""
+for combo in both claude-only codex-only neither; do
+    project="$V6_BASE/$combo/project with spaces"
+    fake="$V6_BASE/$combo/bin"
+    mkdir -p "$project"
+    (cd "$project" && git init -q)
+    case "$combo" in
+        both) make_fake_engine_path "$fake" present present ;;
+        claude-only) make_fake_engine_path "$fake" present absent ;;
+        codex-only) make_fake_engine_path "$fake" absent present ;;
+        neither) make_fake_engine_path "$fake" absent absent ;;
+    esac
+    mkdir -p "$project/.fakehome"
+    (cd "$project" && PATH="$fake:/usr/bin:/bin" HOME="$project/.fakehome" \
+        "$REPO_ROOT/setup.sh" -p "Matrix $combo" -t fullstack >"$project/setup.log" 2>&1)
+    assert_equals "$?" "0" "$combo clean setup exits zero"
+    assert_contains "$project/setup.log" "INSTALLATION: MATERIALIZED" "$combo reports materialization separately"
+    assert_contains "$project/setup.log" "claude RUNTIME_READY:" "$combo reports Claude readiness"
+    assert_contains "$project/setup.log" "codex RUNTIME_READY:" "$combo reports Codex readiness"
+    v6_inventory "$project" > "$project/inventory"
+    if [ -z "$BASELINE" ]; then
+        BASELINE="$project/inventory"
+        assert_manifest_materialized "$project"
+    elif diff -u "$BASELINE" "$project/inventory" >/dev/null 2>&1; then
+        pass "$combo installs the same dual-host inventory"
+    else
+        fail "$combo inventory differs from the both-engines install"
+    fi
+
+    find "$project/.forge" "$project/.claude" "$project/.agents" "$project/.codex" -type f \
+        ! -path '*/local/*' -exec shasum -a 256 {} \; 2>/dev/null | LC_ALL=C sort > "$project/before.hashes"
+    (cd "$project" && PATH="$fake:/usr/bin:/bin" HOME="$project/.fakehome" \
+        "$REPO_ROOT/setup.sh" -p "Matrix $combo" -t fullstack >"$project/setup-2.log" 2>&1)
+    find "$project/.forge" "$project/.claude" "$project/.agents" "$project/.codex" -type f \
+        ! -path '*/local/*' -exec shasum -a 256 {} \; 2>/dev/null | LC_ALL=C sort > "$project/after.hashes"
+    if diff -u "$project/before.hashes" "$project/after.hashes" >/dev/null 2>&1; then
+        pass "$combo second setup is byte-idempotent"
+    else
+        fail "$combo second setup changed managed bytes"
+    fi
+done
+
+start_test "v6 root adapters preserve project text and expose canonical rules once"
+ROOT_CASE="$V6_BASE/both/project with spaces"
+assert_contains "$ROOT_CASE/CLAUDE.md" '<!-- forge:begin v6 -->' "Claude root has bounded Forge block"
+assert_contains "$ROOT_CASE/AGENTS.md" '<!-- forge:begin v6 -->' "Codex root has bounded Forge block"
+ROOT_CANONICAL_REVISION=$(hash_file "$ROOT_CASE/.forge/instructions.md")
+assert_contains "$ROOT_CASE/CLAUDE.md" "canonical-revision: $ROOT_CANONICAL_REVISION" "Claude root binds the canonical content revision"
+assert_contains "$ROOT_CASE/AGENTS.md" "canonical-revision: $ROOT_CANONICAL_REVISION" "Codex root binds the same canonical content revision"
+if awk -F '\t' -v revision="$ROOT_CANONICAL_REVISION" '$1 == "CLAUDE.md" && $3 == revision {found=1} END {exit found ? 0 : 1}' "$ROOT_CASE/.forge/installed-files.tsv"; then
+    pass "installed manifest records Claude root canonical revision"
+else
+    fail "installed manifest omits Claude root canonical revision"
+fi
+assert_file_exists "$ROOT_CASE/.forge/rules/critical-rules.md" "canonical rule is installed once"
+RULE_COPIES=$(find "$ROOT_CASE/.forge" "$ROOT_CASE/.claude" "$ROOT_CASE/.agents" "$ROOT_CASE/.codex" -type f -name critical-rules.md 2>/dev/null | wc -l | tr -d ' ')
+assert_equals "$RULE_COPIES" "1" "critical-rules.md has one regular-file policy copy"
+assert_contains "$ROOT_CASE/.claude/commands/new-feature.md" '.forge/workflows/new-feature.md' "Claude command reads canonical workflow"
+assert_contains "$ROOT_CASE/.agents/skills/workflow-new-feature/SKILL.md" '.forge/workflows/new-feature.md' "Codex skill reads canonical workflow"
+assert_contains "$ROOT_CASE/.gitignore" '.forge/local/' "volatile v6 state is gitignored"
+assert_not_contains "$ROOT_CASE/setup.log" 'CODEX_MCP_PARITY: BLOCKED' "unchanged built-in MCP source is covered without duplicate parity warnings"
+BUILTIN_CODEX_MCPS=$(grep -c '^\[mcp_servers\.' "$ROOT_CASE/.codex/config.toml")
+assert_equals "$BUILTIN_CODEX_MCPS" "2" "clean install config contains one Context7 and one Playwright server"
+
+start_test "Task 2 preflight blocks v5 before every project write mode"
+for mode in default force upgrade; do
+    legacy="$V6_BASE/legacy-$mode"
+    mkdir -p "$legacy/.git" "$legacy/.claude"
+    printf '{"hooks":{}}\n' > "$legacy/.claude/settings.json"
+    printf 'KEEP-V5\n' > "$legacy/.claude/commands-sentinel"
+    before=$(hash_file "$legacy/.claude/settings.json")
+    case "$mode" in
+        default) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" >setup.log 2>&1) ;;
+        force) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" -f >setup.log 2>&1) ;;
+        upgrade) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" --upgrade >setup.log 2>&1) ;;
+    esac
+    rc=$?
+    [ "$rc" -ne 0 ] && pass "$mode v5 preflight exits nonzero" || fail "$mode v5 preflight unexpectedly succeeded"
+    assert_contains "$legacy/setup.log" 'authoritative refresh' "$mode prints executable full-refresh remediation"
+    assert_contains "$legacy/setup.log" 'setup.sh' "$mode remediation identifies the Forge installer"
+    assert_contains "$legacy/setup.log" '-F' "$mode remediation uses authoritative -F"
+    assert_hash_equals "$legacy/.claude/settings.json" "$before" "$mode leaves v5 settings byte-preserved"
+    assert_file_missing "$legacy/.forge/version" "$mode writes no v6 version beside v5"
+done
+
+start_test "global setup preserves personal text and installs both global hosts"
+GLOBAL_CASE=$(scratch_dir v6-global)
+GLOBAL_HOME="$GLOBAL_CASE/home"
+mkdir -p "$GLOBAL_HOME/.claude" "$GLOBAL_HOME/.codex"
+printf 'CLAUDE PERSONAL BEFORE\n' > "$GLOBAL_HOME/.claude/CLAUDE.md"
+printf 'CODEX PERSONAL BEFORE\n' > "$GLOBAL_HOME/.codex/AGENTS.md"
+HOME="$GLOBAL_HOME" "$REPO_ROOT/setup.sh" --global > "$GLOBAL_CASE/setup.log" 2>&1
+assert_equals "$?" "0" "global v6 setup exits zero"
+assert_contains "$GLOBAL_HOME/.claude/CLAUDE.md" 'CLAUDE PERSONAL BEFORE' "global Claude personal text preserved"
+assert_contains "$GLOBAL_HOME/.claude/CLAUDE.md" '<!-- forge:begin v6 -->' "global Claude Forge block installed"
+assert_contains "$GLOBAL_HOME/.codex/AGENTS.md" 'CODEX PERSONAL BEFORE' "global Codex personal text preserved"
+assert_contains "$GLOBAL_HOME/.codex/AGENTS.md" '<!-- forge:begin v6 -->' "global Codex Forge block installed"
+assert_file_exists "$GLOBAL_HOME/.forge/instructions.md" "global canonical instructions installed"
+assert_file_exists "$GLOBAL_HOME/.forge/bin/forge-goal-authorize" "global authorization writer installed"
+assert_file_exists "$GLOBAL_HOME/.forge/bin/forge-goal-capture" "global trusted goal capture helper installed"
+assert_file_exists "$GLOBAL_HOME/.forge/bin/codex.identity" "global setup records the independently selected Codex identity"
+assert_file_exists "$GLOBAL_HOME/.forge/bin/codex.identity.sha256" "global setup seals the Codex identity record"
+HOME="$GLOBAL_HOME" "$REPO_ROOT/setup.sh" --global > "$GLOBAL_CASE/setup-2.log" 2>&1
+assert_equals "$?" "0" "second global setup exits zero"
+CLAUDE_GLOBAL_MARKERS=$(grep -cF '<!-- forge:begin v6 -->' "$GLOBAL_HOME/.claude/CLAUDE.md")
+CODEX_GLOBAL_MARKERS=$(grep -cF '<!-- forge:begin v6 -->' "$GLOBAL_HOME/.codex/AGENTS.md")
+CODEX_CONFIG_MARKERS=$(grep -cF '# forge:begin v6' "$GLOBAL_HOME/.codex/config.toml")
+assert_equals "$CLAUDE_GLOBAL_MARKERS" "1" "global Claude Forge block remains bounded and unique"
+assert_equals "$CODEX_GLOBAL_MARKERS" "1" "global Codex Forge block remains bounded and unique"
+assert_equals "$CODEX_CONFIG_MARKERS" "1" "global Codex config block remains bounded and unique"
+
+start_test "Task 2 preflight blocks global v5 before every write mode"
+for mode in default force upgrade; do
+    global_legacy="$GLOBAL_CASE/legacy-$mode"
+    mkdir -p "$global_legacy/.claude"
+    printf '{"user_setting":"KEEP-GLOBAL-V5"}\n' > "$global_legacy/.claude/settings.json"
+    global_before=$(hash_file "$global_legacy/.claude/settings.json")
+    case "$mode" in
+        default) HOME="$global_legacy" "$REPO_ROOT/setup.sh" --global > "$global_legacy/setup.log" 2>&1 ;;
+        force) HOME="$global_legacy" "$REPO_ROOT/setup.sh" --global -f > "$global_legacy/setup.log" 2>&1 ;;
+        upgrade) HOME="$global_legacy" "$REPO_ROOT/setup.sh" --global --upgrade > "$global_legacy/setup.log" 2>&1 ;;
+    esac
+    rc=$?
+    [ "$rc" -ne 0 ] && pass "$mode global v5 preflight exits nonzero" || fail "$mode global v5 preflight unexpectedly succeeded"
+    assert_contains "$global_legacy/setup.log" 'authoritative refresh' "$mode global mode prints full-refresh remediation"
+    assert_contains "$global_legacy/setup.log" '--global' "$mode global remediation preserves global scope"
+    assert_contains "$global_legacy/setup.log" '-F' "$mode global remediation uses authoritative -F"
+    assert_hash_equals "$global_legacy/.claude/settings.json" "$global_before" "$mode global mode preserves v5 settings bytes"
+    assert_file_missing "$global_legacy/.forge/version" "$mode global mode writes no v6 surface"
+done
+
+start_test "primary Codex router delegates only to the trusted current worktree"
+ROUTER_REPO=$(scratch_dir v6-router)
+mkdir -p "$ROUTER_REPO/main"
+(cd "$ROUTER_REPO/main" && git init -q && git config user.email forge@example.invalid && git config user.name Forge && printf 'base\n' > tracked && git add tracked && git commit -qm base)
+(cd "$ROUTER_REPO/main" && HOME="$ROUTER_REPO/home" "$REPO_ROOT/setup.sh" -p RouterMain > "$ROUTER_REPO/main-setup.log" 2>&1)
+ROUTER="$ROUTER_REPO/main/.forge/hooks/lib/codex-worktree-dispatch.sh"
+assert_file_exists "$ROUTER" "primary setup installs stable Codex router"
+(cd "$ROUTER_REPO/main" && git worktree add -q "$ROUTER_REPO/one" -b router-one)
+(cd "$ROUTER_REPO/main" && git worktree add -q "$ROUTER_REPO/two" -b router-two)
+for wt in one two; do
+    (cd "$ROUTER_REPO/$wt" && HOME="$ROUTER_REPO/home" "$REPO_ROOT/setup.sh" -p "Router $wt" > "$ROUTER_REPO/$wt-setup.log" 2>&1)
+    cat > "$ROUTER_REPO/$wt/.forge/hooks/test-route.sh" <<'EOF'
+#!/bin/sh
+mkdir -p .forge/local
+cat > .forge/local/routed-event
+EOF
+    chmod +x "$ROUTER_REPO/$wt/.forge/hooks/test-route.sh"
+    printf '{"cwd":"%s","candidate_id":"%s"}\n' "$ROUTER_REPO/$wt" "$wt-candidate" \
+        | bash "$ROUTER" test-route.sh > "$ROUTER_REPO/$wt-router.log" 2>&1
+    assert_equals "$?" "0" "$wt event routes successfully"
+    assert_contains "$ROUTER_REPO/$wt/.forge/local/routed-event" "$wt-candidate" "$wt receives its own candidate event"
+done
+OUTSIDE="$ROUTER_REPO/outside"
+mkdir -p "$OUTSIDE"
+(cd "$OUTSIDE" && git init -q)
+printf '{"cwd":"%s"}\n' "$OUTSIDE" | bash "$ROUTER" test-route.sh > "$ROUTER_REPO/wrong.log" 2>&1
+rc=$?
+[ "$rc" -ne 0 ] && pass "wrong-common-directory event is rejected" || fail "wrong-common-directory event was delegated"
+assert_contains "$ROUTER_REPO/one-setup.log" 'CODEX_HOOKS: BLOCKED' "linked setup reports primary registration requirement"
+ROUTER_PRIMARY_PHYSICAL=$(cd "$ROUTER_REPO/main" && pwd -P)
+assert_contains "$ROUTER_REPO/one-setup.log" "cd '$ROUTER_PRIMARY_PHYSICAL'" "linked setup names the exact physical primary checkout"
+assert_contains "$ROUTER_REPO/one-setup.log" "$REPO_ROOT/setup.sh" "linked setup names the exact Forge installer"
+
+start_test "manifest-owned v5 skills and agents block every project write mode"
+for surface in skill agent; do
+    for mode in default force upgrade; do
+        legacy="$V6_BASE/manifest-legacy-$surface-$mode"
+        mkdir -p "$legacy/.git"
+        case "$surface" in
+            skill) mkdir -p "$legacy/.claude/skills/custom"; printf 'legacy skill\n' > "$legacy/.claude/skills/custom/SKILL.md" ;;
+            agent) mkdir -p "$legacy/.claude/agents"; printf 'legacy agent\n' > "$legacy/.claude/agents/custom.md" ;;
+        esac
+        before=$(find "$legacy/.claude" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)
+        case "$mode" in
+            default) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" >setup.log 2>&1) ;;
+            force) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" -f >setup.log 2>&1) ;;
+            upgrade) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" --upgrade >setup.log 2>&1) ;;
+        esac
+        rc=$?
+        [ "$rc" -ne 0 ] && pass "$surface-only $mode preflight exits nonzero" || fail "$surface-only $mode preflight materialized v6 beside legacy policy"
+        assert_contains "$legacy/setup.log" 'authoritative refresh' "$surface-only $mode prints full-refresh remediation"
+        assert_contains "$legacy/setup.log" '-F' "$surface-only $mode remediation is executable"
+        after=$(find "$legacy/.claude" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)
+        assert_equals "$after" "$before" "$surface-only $mode preflight performs no write"
+        assert_file_missing "$legacy/.forge/version" "$surface-only $mode writes no v6 version"
+    done
+done
+
+start_test "root marker refresh byte-preserves personal prefix and suffix"
+BYTE_CASE="$V6_BASE/marker-bytes"
+mkdir -p "$BYTE_CASE/.forge" "$BYTE_CASE/home"
+(cd "$BYTE_CASE" && git init -q)
+printf '6\n' > "$BYTE_CASE/.forge/version"
+python3 - "$BYTE_CASE" <<'PY'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+prefix = b"\xef\xbb\xbf[Project Name] PERSONAL PREFIX\r\n"
+suffix = b"\r\nPERSONAL SUFFIX WITHOUT FINAL NEWLINE"
+for name in ("CLAUDE.md", "AGENTS.md"):
+    (root / name).write_bytes(prefix + b"<!-- forge:begin v6 -->\r\nold forge block\r\n<!-- forge:end v6 -->" + suffix)
+(root / "expected-prefix.bin").write_bytes(prefix)
+(root / "expected-suffix.bin").write_bytes(suffix)
+PY
+(cd "$BYTE_CASE" && HOME="$BYTE_CASE/home" "$REPO_ROOT/setup.sh" -p ChangedName >setup.log 2>&1)
+assert_equals "$?" "0" "setup refreshes existing v6 root marker files"
+python3 - "$BYTE_CASE" <<'PY' > "$BYTE_CASE/bytes.out" 2>&1
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+prefix = (root / "expected-prefix.bin").read_bytes()
+suffix = (root / "expected-suffix.bin").read_bytes()
+for name in ("CLAUDE.md", "AGENTS.md"):
+    data = (root / name).read_bytes()
+    assert data.startswith(prefix), (name, data[:len(prefix)])
+    assert data.endswith(suffix), (name, data[-len(suffix):])
+    assert data.count(b"<!-- forge:begin v6 -->") == 1
+    assert data.count(b"<!-- forge:end v6 -->") == 1
+print("preserved")
+PY
+assert_equals "$(cat "$BYTE_CASE/bytes.out")" "preserved" "BOM, CRLF prefix, suffix, placeholder text, and no-final-newline remain byte-identical"
+
+start_test "project setup followed by first global setup is a supported path"
+PROJECT_FIRST=$(scratch_dir project-first-global)
+make_project "$PROJECT_FIRST/project" flat
+mkdir -p "$PROJECT_FIRST/home"
+(cd "$PROJECT_FIRST/project" && HOME="$PROJECT_FIRST/home" "$REPO_ROOT/setup.sh" -p ProjectFirst > "$PROJECT_FIRST/project.log" 2>&1)
+assert_equals "$?" "0" "project setup succeeds before global setup"
+HOME="$PROJECT_FIRST/home" "$REPO_ROOT/setup.sh" --global > "$PROJECT_FIRST/global.log" 2>&1
+assert_equals "$?" "0" "global setup accepts the lone advisory machine stamp from project setup"
+assert_file_exists "$PROJECT_FIRST/home/.forge/version" "global setup materializes the canonical global harness"
+assert_file_exists "$PROJECT_FIRST/home/.claude/CLAUDE.md" "global setup installs the Claude global adapter"
+assert_file_exists "$PROJECT_FIRST/home/.codex/AGENTS.md" "global setup installs the Codex global adapter"
+
+start_test "fresh setup summary gives complete v6 commit guidance"
+SUMMARY_CASE=$(scratch_dir v6-summary)
+make_project "$SUMMARY_CASE" flat
+run_setup "$SUMMARY_CASE" "$SUMMARY_CASE/setup.log" -p Summary
+assert_equals "$?" "0" "summary fixture installs successfully"
+assert_contains "$SUMMARY_CASE/setup.log" '.forge/' "summary names canonical Forge files"
+assert_contains "$SUMMARY_CASE/setup.log" '.codex/' "summary names Codex configuration"
+assert_contains "$SUMMARY_CASE/setup.log" '.agents/' "summary names Codex skills"
+assert_contains "$SUMMARY_CASE/setup.log" 'AGENTS.md' "summary names the Codex root adapter"
+assert_contains "$SUMMARY_CASE/setup.log" 'git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/' \
+    "summary gives complete v6 commit command"
 
 # ===========================================================================
 # Report

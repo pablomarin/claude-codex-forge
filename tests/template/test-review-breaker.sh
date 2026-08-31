@@ -255,6 +255,10 @@ assert_contains_str "CERTIFIED:no" "$RB_OUT" "pair at different heads for the sa
 # Sets GATE_RC (exit code) and GATE_ERR (combined stdout+stderr).
 run_gate() {
     local r="$1" cmd="${2:-git commit -m wip}" esc
+    if [ -f "$r/.claude/local/state.md" ] && [ ! -f "$r/.forge/local/state.md" ]; then
+        mkdir -p "$r/.forge/local"
+        { printf '<!-- forge:state-schema v6 -->\n'; cat "$r/.claude/local/state.md"; } > "$r/.forge/local/state.md"
+    fi
     esc="$(printf '%s' "$cmd" | awk 'BEGIN{ORS=""} {gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); print}')"
     printf '{"tool_name":"Bash","cwd":"%s","tool_input":{"command":"%s"}}' "$r" "$esc" \
         > "$r/.gate-input.json"
@@ -381,6 +385,50 @@ assert_rc 0 "untripped happy path → commit allowed"
 # present, so macOS/Linux CI stays green. Runner discovered via the repo's
 # pwsh → powershell → powershell.exe fallback chain (matches test-contracts.sh).
 # ===========================================================================
+start_test "review breaker resolves canonical v6 state when no path is supplied"
+build_repo
+H="$(git -C "$R" rev-parse HEAD)"
+mkdir -p "$R/.forge/local"
+printf '6\n' > "$R/.forge/version"
+{
+  echo '<!-- forge:state-schema v6 -->'
+  echo '## Workflow'; echo
+  echo '| Field | Value |'; echo '| Command | /new-feature host-neutral |'; echo
+  echo '### Checklist'; echo
+  echo '- [x] Code review loop (1 iterations) — PASS'
+  echo "- [x] Code review iteration 1 — codex clean — head=\`${H}\`"
+  echo "- [x] Code review iteration 1 — pr-toolkit clean — head=\`${H}\`"
+} > "$R/.forge/local/state.md"
+RB_OUT="$( (cd "$R" && bash "$HELPER") 2>/dev/null )"
+assert_contains_str 'CERTIFIED:yes' "$RB_OUT" \
+    "canonical state is authoritative without a Claude-specific argv path"
+
+start_test "installed v6 gate resolves its canonical breaker before legacy fallbacks"
+mkdir -p "$R/.forge/hooks/lib"
+cp "$GATE" "$R/.forge/hooks/check-workflow-gates.sh"
+cp "$REPO_ROOT/hooks/lib/state-path.sh" "$R/.forge/hooks/lib/state-path.sh"
+cp "$HELPER" "$R/.forge/hooks/lib/review-breaker.sh"
+{
+  echo '<!-- forge:state-schema v6 -->'; echo '## Workflow'; echo
+  echo '| Field | Value |'; echo '| Command | /new-feature installed-breaker |'; echo
+  echo '### Checklist'; echo
+  echo '- [x] Code review loop (5 iterations) — PASS'
+  echo "- [x] Code review iteration 1 — codex clean — head=\`${H}\`"
+  echo "- [x] Code review iteration 1 — pr-toolkit clean — head=\`${H}\`"
+  echo "- [x] Code review iteration 5 — codex clean — head=\`${H}\`"
+  echo "- [x] Code review iteration 5 — pr-toolkit clean — head=\`${H}\`"
+  echo '- [x] Simplified'; echo '- [x] Verified (tests/lint/types)'
+  echo '- [x] E2E verified — N/A: internal harness fixture'
+} > "$R/.forge/local/state.md"
+printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' "$R" \
+  | (cd "$R" && bash .forge/hooks/check-workflow-gates.sh) > "$R/v6-installed.out" 2>&1
+assert_equals "$?" "2" "installed canonical breaker blocks a tripped unadjudicated tail"
+assert_contains "$R/v6-installed.out" 'convergence breaker' "installed gate reports canonical breaker trip"
+echo "- [x] Post-certification tail adjudicated by human — accepted tail — head=\`${H}\` — ts=\`2026-08-27T00:00:00Z\`" >> "$R/.forge/local/state.md"
+printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' "$R" \
+  | (cd "$R" && bash .forge/hooks/check-workflow-gates.sh) > "$R/v6-adjudicated.out" 2>&1
+assert_equals "$?" "0" "installed canonical breaker allows a current-head human adjudication"
+
 detect_pwsh() {
     if command -v pwsh >/dev/null 2>&1; then echo "pwsh"; return 0; fi
     if command -v powershell >/dev/null 2>&1; then echo "powershell"; return 0; fi
@@ -432,6 +480,16 @@ else
     out="$(run_helper_ps "$R")"
     assert_contains_str "ADJUDICATED:no" "$out" "ps: after head moves → no"
 fi
+
+start_test "receipt-v2 certification is engine-neutral and disables legacy fallback once linked"
+assert_contains "$HELPER" 'REVIEWS_VALID:' \
+    "Bash breaker certifies the validated code-spec/code-quality pair"
+assert_contains "$HELPER" 'V2_ACTIVE=true' \
+    "Bash breaker disables legacy rows after receipt-v2 activation"
+assert_contains "$HELPER_PS" 'REVIEWS_VALID:true' \
+    "PowerShell breaker mirrors receipt-v2 pair certification"
+assert_contains "$HELPER_PS" '$v2Active = $true' \
+    "PowerShell breaker disables legacy rows after receipt-v2 activation"
 
 # lib.sh's EXIT trap prints scratch info; emit the summary explicitly.
 report "test-review-breaker.sh"

@@ -1,0 +1,6 @@
+schema_version=1
+review_mode=broad|closure
+verdict=CLEAN|FINDINGS|BLOCKED
+max_severity=NONE|P0|P1|P2|P3
+blocked_class=none|engine|capability|artifact|authorization|invariant
+# Zero or more: finding=stable-id|P0|P1|P2|P3|concise reachable scenario and smallest fix

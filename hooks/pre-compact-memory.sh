@@ -1,48 +1,28 @@
 #!/bin/bash
-# .claude/hooks/pre-compact-memory.sh (also used globally at ~/.claude/hooks/)
-# This hook runs BEFORE context compaction.
-# It outputs a reminder for Claude to save learnings to auto memory.
-#
-# The prompt-based PreCompact hook in settings.json handles the actual
-# memory save instruction. This script provides additional context about
-# the current session state.
+# PreCompact owns only the volatile Forge memory layer. Native host memories are
+# optional context and are never copied or inspected by Forge.
+set -u
 
-set -e
-INPUT=$(cat)
-
-# Parse input fields (jq preferred, grep fallback)
-if command -v jq &> /dev/null; then
-    TRIGGER=$(echo "$INPUT" | jq -r '.trigger // "unknown"')
-    SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
-    CWD=$(echo "$INPUT" | jq -r '.cwd // "."')
-else
-    TRIGGER=$(echo "$INPUT" | grep -o '"trigger"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"trigger"[[:space:]]*:[[:space:]]*"//;s/"$//')
-    [ -z "$TRIGGER" ] && TRIGGER="unknown"
-    SESSION_ID="unknown"
-    CWD=$(echo "$INPUT" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"cwd"[[:space:]]*:[[:space:]]*"//;s/"$//')
-    [ -z "$CWD" ] && CWD="."
+INPUT=$(cat 2>/dev/null)
+forge_allow() {
+    printf '%s' "$INPUT" | grep -qE '"host"[[:space:]]*:[[:space:]]*"codex"' && printf '{}\n'
+    exit 0
+}
+TRIGGER=unknown
+CWD=""
+if command -v jq >/dev/null 2>&1; then
+    TRIGGER=$(printf '%s' "$INPUT" | jq -r '.trigger // "unknown"' 2>/dev/null || echo unknown)
+    CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null || true)
 fi
-
-# Determine the auto memory directory for this project
-# Claude Code derives this from the git repo root
-GIT_ROOT=$(cd "$CWD" && git rev-parse --show-toplevel 2>/dev/null || echo "$CWD")
-PROJECT_KEY=$(echo "$GIT_ROOT" | sed 's|/|-|g')
-MEMORY_DIR="$HOME/.claude/projects/$PROJECT_KEY/memory"
-
-# Check if MEMORY.md exists and get its size
-MEMORY_EXISTS="false"
-MEMORY_LINES=0
-if [ -f "$MEMORY_DIR/MEMORY.md" ]; then
-    MEMORY_EXISTS="true"
-    MEMORY_LINES=$(wc -l < "$MEMORY_DIR/MEMORY.md" | tr -d ' ')
-fi
-
-# Count topic files
-TOPIC_FILES=0
-if [ -d "$MEMORY_DIR" ]; then
-    TOPIC_FILES=$(find "$MEMORY_DIR" -name "*.md" ! -name "MEMORY.md" 2>/dev/null | wc -l | tr -d ' ')
-fi
-
-# Output context as additional information (shown in verbose mode)
-echo "Pre-compact memory check: trigger=$TRIGGER, memory_exists=$MEMORY_EXISTS, memory_lines=$MEMORY_LINES, topic_files=$TOPIC_FILES"
-exit 0
+ROOT="${CLAUDE_PROJECT_DIR:-$CWD}"
+[ -n "$ROOT" ] || ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+TOP=$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null || true)
+[ -n "$TOP" ] && ROOT="$TOP"
+ROOT=$(cd "$ROOT" 2>/dev/null && pwd -P) || forge_allow
+MEMORY_DIR="$ROOT/.forge/local/memory"
+case "$MEMORY_DIR" in "$ROOT"/.forge/local/memory) ;; *) forge_allow ;; esac
+mkdir -p "$MEMORY_DIR" 2>/dev/null || forge_allow
+TOPIC_FILES=$(find "$MEMORY_DIR" -maxdepth 1 -name '*.md' -type f 2>/dev/null | wc -l | tr -d ' ')
+echo "Pre-compact Forge memory: trigger=$TRIGGER, local=.forge/local/memory, topic_files=$TOPIC_FILES" >&2
+echo "Save volatile drafts only under .forge/local/memory; promote vetted learnings to .forge/memory through review." >&2
+forge_allow

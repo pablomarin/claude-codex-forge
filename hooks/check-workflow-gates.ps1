@@ -1,4 +1,4 @@
-# .claude/hooks/check-workflow-gates.ps1
+﻿# .claude/hooks/check-workflow-gates.ps1
 # PreToolUse hook for Bash: blocks commit/push/PR if quality gates aren't complete.
 #
 # Fires BEFORE Bash commands. Only activates when:
@@ -25,16 +25,17 @@
 
 # Read hook input from stdin
 $jsonInput = [Console]::In.ReadToEnd()
+function Exit-ForgeAllow { if ($data.host -eq "codex") { Write-Output "{}" }; exit 0 }
 
 # Parse JSON input
 try {
     $data = $jsonInput | ConvertFrom-Json
 } catch {
-    exit 0
+    Exit-ForgeAllow
 }
 
 $command = $data.tool_input.command
-if (-not $command) { exit 0 }
+if (-not $command) { Exit-ForgeAllow }
 
 # --- Only gate ship actions ---
 # Ship-verb detection tolerant of two common, fully-legitimate invocation forms
@@ -69,7 +70,7 @@ $isShip = $false
 if ($commandNorm -match "^\s*$shipVerb") { $isShip = $true }
 if ($commandNorm -match "[&|;]+\s*$shipVerb") { $isShip = $true }
 
-if (-not $isShip) { exit 0 }
+if (-not $isShip) { Exit-ForgeAllow }
 
 # --- Block compound ship commands ---
 # A compound like `git commit -m x && git push` validates evidence against the
@@ -121,15 +122,52 @@ if ($topLevel) {
     }
 }
 
-# --- Check for active workflow (post PR #2: state file is .claude/local/state.md) ---
-$stateFile = ".claude/local/state.md"
+# Revalidate Forge-managed config at every ship boundary on both hosts.
+$hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$configCheck = Join-Path $hookDir "check-config-change.ps1"
+$forgeVersionPath = Join-Path (Get-Location).Path ".forge\version"
+$forgeVersion = if (Test-Path -LiteralPath $forgeVersionPath -PathType Leaf) { (@(Get-Content -LiteralPath $forgeVersionPath)[0]).Trim() } else { "" }
+if ($forgeVersion -eq "6" -and (Test-Path -LiteralPath $configCheck)) {
+    $null = '{}' | & $configCheck -Mode boundary -Root (Get-Location).Path 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -F and inspect the diff before shipping.")
+        exit 2
+    }
+}
+
+# --- Resolve canonical v6 state, with pre-migration v5 read compatibility. ---
+$stateHelper = Join-Path $hookDir "lib\state-path.ps1"
+if (-not (Test-Path -LiteralPath $stateHelper)) {
+    $stateHelper = Join-Path (Get-Location) "hooks\lib\state-path.ps1"
+}
+$stateFile = ""
+if (Test-Path -LiteralPath $stateHelper) {
+    try {
+        . $stateHelper
+        $stateFile = Get-ForgeStatePath -Root (Get-Location).Path -Mode Read
+    } catch {
+        $canonicalSurface = $false
+        foreach ($surface in @(".forge\version", ".forge\local", ".forge\local\state.md")) {
+            if (Get-Item -LiteralPath (Join-Path (Get-Location).Path $surface) -Force -ErrorAction SilentlyContinue) { $canonicalSurface = $true; break }
+        }
+        $forgeRootItem = Get-Item -LiteralPath (Join-Path (Get-Location).Path ".forge") -Force -ErrorAction SilentlyContinue
+        if ($forgeRootItem -and ($forgeRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $canonicalSurface = $true }
+        if ($canonicalSurface) {
+            [Console]::Error.WriteLine([string]$_.Exception.Message)
+            [Console]::Error.WriteLine("FORGE_STATE_INVALID: canonical v6 state could not be resolved")
+            exit 2
+        }
+        $stateFile = ""
+    }
+}
+$stateIsV6 = (-not [string]::IsNullOrEmpty($stateFile)) -and (($stateFile -replace '\\', '/') -match '/\.forge/local/state\.md$')
 
 if (-not (Test-Path $stateFile)) {
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Breadcrumb wording byte-equivalent to bash variant for AC-4 parity.
-    [Console]::Error.WriteLine("ℹ check-workflow-gates: $stateFile not found.")
-    [Console]::Error.WriteLine("  If you have a legacy CONTINUITY.md and just upgraded, run setup --migrate")
-    exit 0
+    [Console]::Error.WriteLine("ℹ check-workflow-gates: Forge state.md not found.")
+    [Console]::Error.WriteLine("  If you have a legacy CONTINUITY.md, run setup --migrate before setup -R")
+    Exit-ForgeAllow
 }
 
 $content = Get-Content $stateFile -Raw -ErrorAction SilentlyContinue
@@ -153,10 +191,14 @@ foreach ($line in (($content -replace "`r", "") -split "`n")) {
 }
 
 $cmdLine = ($workflowBlockLines | Select-String '\|\s*Command\s*\|' | Select-Object -First 1)
-if (-not $cmdLine) { exit 0 }
+if (-not $cmdLine) { Exit-ForgeAllow }
 
 $cmd = ($cmdLine -split '\|')[2].Trim()
-if (-not $cmd -or $cmd -eq "none" -or $cmd -eq ([char]0x2014).ToString() -or $cmd -eq "-") { exit 0 }
+if (-not $cmd -or $cmd -eq "none" -or $cmd -eq ([char]0x2014).ToString() -or $cmd -eq "-") { Exit-ForgeAllow }
+if (-not $stateIsV6) {
+    [Console]::Error.WriteLine("WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup --migrate, then setup -R.")
+    exit 2
+}
 
 # ---------------------------------------------------------------------------
 # Layer 2 — /forge-goal PR-create authorization guard (PS parity for .sh)
@@ -260,10 +302,8 @@ if ($command -match $prCreatePattern) {
 # separate pwsh interpreter (the repo ships against powershell.exe 5.1). The
 # function RETURNS the sentinel lines (string array) and never calls `exit` when
 # dot-sourced.
-$ReviewBreakerPs1 = Join-Path $topLevel ".claude\hooks\lib\review-breaker.ps1"
-if (-not (Test-Path -LiteralPath $ReviewBreakerPs1)) {
-    $ReviewBreakerPs1 = Join-Path $topLevel "hooks\lib\review-breaker.ps1"
-}
+$ReviewBreakerPs1 = if ($stateIsV6) { Join-Path $hookDir "lib\review-breaker.ps1" } else { Join-Path $topLevel ".claude\hooks\lib\review-breaker.ps1" }
+if (-not $stateIsV6 -and -not (Test-Path -LiteralPath $ReviewBreakerPs1)) { $ReviewBreakerPs1 = Join-Path $topLevel "hooks\lib\review-breaker.ps1" }
 $brkHead = ""
 try { $brkHead = ((git rev-parse HEAD 2>$null) -join "").Trim() } catch {}
 if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $stateFile)) {
@@ -281,6 +321,43 @@ if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $st
         [Console]::Error.WriteLine("(severities + in-delta vs certified-unchanged) to the human. Ship is")
         [Console]::Error.WriteLine("blocked until the human records:")
         [Console]::Error.WriteLine("  - [x] Post-certification tail adjudicated by human — <decision> — head=``$brkHead`` — ts=``<ISO8601>``")
+        exit 2
+    }
+}
+
+# Receipt-v2 compatibility switch. An explicit Candidate receipt linkage means
+# all final evidence must bind to one current staged-clean candidate. Genuine
+# unconverted workflows continue through the legacy checklist evidence below.
+$ReceiptV2Active = $false
+$receiptCandidate = ""
+$receiptCandidateRows = @()
+foreach ($line in (($content -replace "`r", "") -split "`n")) {
+    $parts = $line -split '\|'
+    if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') {
+        $receiptCandidateRows += $parts[2].Trim()
+    }
+}
+if ($receiptCandidateRows.Count -eq 1) { $receiptCandidate = [string]$receiptCandidateRows[0] }
+if ($receiptCandidate -and -not $receiptCandidate.Contains('<')) {
+    $ReceiptV2Active = $true
+    $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
+    if (-not (Test-Path -LiteralPath $verificationReceipt)) {
+        $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1'
+    }
+    $vrOut = @()
+    $vrStatus = 2
+    if (Test-Path -LiteralPath $verificationReceipt) {
+        . $verificationReceipt
+        $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateFile
+        $vrOut = @($vrResponse.Lines)
+        if ($vrResponse.Error) { $vrOut += $vrResponse.Error }
+        $vrStatus = $vrResponse.Status
+    }
+    if ($vrStatus -ne 0) {
+        [Console]::Error.WriteLine('WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean.')
+        foreach ($line in $vrOut) { [Console]::Error.WriteLine([string]$line) }
+        if (-not $vrOut) { [Console]::Error.WriteLine('verification-receipt helper unavailable') }
+        [Console]::Error.WriteLine('Freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E.')
         exit 2
     }
 }
@@ -333,7 +410,7 @@ if ($command -match "^\s*${envp}git${gitopt}\s+commit\b" -and
         foreach ($f in $stagedPaths) {
             if (-not (Test-IsDocPath $f)) { $allDocs = $false; break }
         }
-        if ($allDocs) { exit 0 }  # docs-only commit — skip gates, NO state mutation
+        if ($allDocs) { Exit-ForgeAllow }  # docs-only commit — skip gates, NO state mutation
     }
     # Empty staged diff → can't prove docs-only → fall through and enforce (fail-safe).
 }
@@ -374,7 +451,7 @@ if ($unchecked.Count -gt 0) {
     }
     [Console]::Error.WriteLine("")
     [Console]::Error.WriteLine("How to clear each gate:")
-    [Console]::Error.WriteLine("  - Code review loop:  run /codex review + /pr-review-toolkit:review-pr, fix findings")
+    [Console]::Error.WriteLine("  - Code review loop:  run /opinion for code-spec and code-quality, fix findings")
     [Console]::Error.WriteLine("  - Simplified:        run /simplify")
     [Console]::Error.WriteLine("  - Verified (tests):  run the verify-app agent")
     [Console]::Error.WriteLine("  - E2E verified:      run the verify-e2e agent AND persist its report, OR mark N/A:")
@@ -409,7 +486,7 @@ foreach ($line in $checklistLines) {
     }
 }
 
-if ($e2eCheckedLine -and ($e2eCheckedLine -notmatch 'N/A:')) {
+if (-not $ReceiptV2Active -and $e2eCheckedLine -and ($e2eCheckedLine -notmatch 'N/A:')) {
     # Find branch-off commit (try main, fall back to master, else skip)
     $branchOff = git merge-base HEAD main 2>$null
     if (-not $branchOff) { $branchOff = git merge-base HEAD master 2>$null }
@@ -600,7 +677,7 @@ if ($codePassLine) {
     exit 2
 }
 
-if ($codePassLine -and $headShaCode) {
+if (-not $ReceiptV2Active -and $codePassLine -and $headShaCode) {
     if ($codePassLine -match 'Code review loop \((\d+) iterations\)') {
         $codeN = $matches[1]
     } else {
@@ -656,4 +733,4 @@ if ($codePassLine -and $headShaCode) {
     }
 }
 
-exit 0
+Exit-ForgeAllow

@@ -28,10 +28,10 @@ description: >
 **IMPORTANT**: Model IDs change frequently. Before writing the generation script,
 fetch the latest official documentation to confirm the current model ID and API format:
 
-```
-WebFetch: https://ai.google.dev/gemini-api/docs/image-generation
-Extract: current model IDs, API parameters, response format
-```
+Use an available documentation source to inspect
+`https://ai.google.dev/gemini-api/docs/image-generation`, or ask the user to
+provide the current provider documentation when browsing is unavailable. Record the
+model ID and response format actually verified for the run.
 
 As of the last update, the models are:
 
@@ -152,7 +152,7 @@ for part in response.candidates[0].content.parts:
 
 ## Workflow
 
-1. **Check docs** — WebFetch the official Gemini image generation page to confirm model ID
+1. **Check docs** — inspect the official Gemini image generation page to confirm model ID
 2. **Check prerequisites** — verify `GEMINI_API_KEY` is set and SDK is installed
 3. **Write the script** — create a temporary `.mjs` or `.py` file based on the template above, using the verified model ID
 4. **Run it** — execute with the user's prompt, desired output path, aspect ratio, and size
@@ -190,7 +190,7 @@ for part in response.candidates[0].content.parts:
 | Error                              | Cause                            | Fix                                         |
 | ---------------------------------- | -------------------------------- | ------------------------------------------- |
 | `GEMINI_API_KEY not set`           | Missing env var                  | `export GEMINI_API_KEY="your-key"`          |
-| `models/... is not found`          | Model ID deprecated              | Re-check docs via WebFetch, update model ID |
+| `models/... is not found`          | Model ID deprecated              | Re-check the official docs, update model ID |
 | `No image in response`             | Prompt may violate safety policy | Simplify prompt, remove sensitive content   |
 | `Cannot find module @google/genai` | SDK not installed                | `npm install @google/genai`                 |
 | `quota exceeded`                   | Rate limit hit                   | Wait or switch to a different model tier    |
