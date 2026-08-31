@@ -39,6 +39,27 @@ function Write-V5State {
     Write-Text (Join-Path $Project ".claude\local\state.md") $state
 }
 
+function Record-PriorContinuityMigration {
+    param([string]$Project)
+    $python = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $python) { $python = Get-Command python -ErrorAction Stop }
+    $merge = Join-Path $script:root "scripts\merge-settings.py"
+    $source = Join-Path $Project ".claude\local\state.md"
+    $destination = Join-Path $Project ".forge\local\state.md"
+    $receipt = Join-Path $Project ".forge\local\migration-evidence\continuity-state-v5-v6.json"
+    & $python.Source $merge migrate-state-v5-v6 --source $source --destination $destination | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "prior continuity state translation failed" }
+    Push-Location $Project
+    try {
+        & $python.Source $merge write-continuity-receipt --source $source --destination $destination --receipt $receipt | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "prior continuity receipt creation failed" }
+    } finally {
+        Pop-Location
+    }
+    $claude = Join-Path $Project "CLAUDE.md"
+    Write-Text $claude ("<!-- forge:migrated 2026-08-31 -->`n`n" + [IO.File]::ReadAllText($claude))
+}
+
 function Write-AdversarialV5State {
     param([string]$Project)
     Write-V5State $Project "WINDOWS_STATE_TRANSLATION`n`n- Narrative code review iteration remains developer context."
@@ -402,14 +423,29 @@ try {
     $modifiedResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $modifiedHook
     Assert-True ($modifiedResult.Code -ne 0 -and (Get-FileHash -Algorithm SHA256 -LiteralPath $modifiedPath).Hash -eq $modifiedHash) "modified referenced Windows hook blocks without mutation"
 
+    $retiredContinuity = New-Project "continuity-retired"
+    Write-V5State $retiredContinuity "WINDOWS_CONTINUITY_RETIRED"
+    Write-Text (Join-Path $retiredContinuity "CONTINUITY.md") "# CONTINUITY`n`n- preserve me`n"
+    $retiredBefore = Get-ProjectSnapshot $retiredContinuity
+    $retiredResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Migrate") -WorkingDirectory $retiredContinuity
+    Assert-True ($retiredResult.Code -ne 0 -and $retiredResult.Output.Contains("retired in Forge 6") -and $retiredResult.Output.Contains("-FullRefresh -DryRun") -and ((Get-ProjectSnapshot $retiredContinuity) -ceq $retiredBefore)) "retired PowerShell continuity command is inert and points to preview"
+
+    $unresolvedContinuity = New-Project "continuity-unresolved"
+    Write-V5State $unresolvedContinuity "WINDOWS_CONTINUITY_UNRESOLVED"
+    Write-Text (Join-Path $unresolvedContinuity "CONTINUITY.md") "# CONTINUITY`n`n- unresolved legacy state`n"
+    $unresolvedBefore = Get-ProjectSnapshot $unresolvedContinuity
+    $unresolvedPreview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $unresolvedContinuity
+    Assert-True ($unresolvedPreview.Code -ne 0 -and $unresolvedPreview.Output.Contains("code=LEGACY_CONTINUITY_UNRESOLVED") -and ((Get-ProjectSnapshot $unresolvedContinuity) -ceq $unresolvedBefore)) "unresolved Windows continuity file blocks preview without writes"
+    $unresolvedExecute = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $unresolvedContinuity
+    Assert-True ($unresolvedExecute.Code -ne 0 -and $unresolvedExecute.Output.Contains("code=LEGACY_CONTINUITY_UNRESOLVED") -and ((Get-ProjectSnapshot $unresolvedContinuity) -ceq $unresolvedBefore) -and -not (Test-Path -LiteralPath (Join-Path $unresolvedContinuity ".forge\version"))) "unresolved Windows continuity file blocks execution without persistent writes"
+
     $continuity = New-Project "continuity"
     Write-V5State $continuity "WINDOWS_CONTINUITY_STATE"
     Write-Text (Join-Path $continuity "CONTINUITY.md") "# CONTINUITY`n`n## State`n`n### Now`n`n- Windows continuity flow`n"
     Write-Text (Join-Path $continuity "CLAUDE.md") "# Developer instructions`n`n## Project Overview`n"
-    $migrated = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Migrate") -WorkingDirectory $continuity
-    Assert-True ($migrated.Code -eq 0) "setup.ps1 -Migrate succeeds before -R"
+    Record-PriorContinuityMigration $continuity
     $receipt = Join-Path $continuity ".forge\local\migration-evidence\continuity-state-v5-v6.json"
-    Assert-True (Test-Path -LiteralPath $receipt -PathType Leaf) "PowerShell continuity migration writes a translation receipt"
+    Assert-True (Test-Path -LiteralPath $receipt -PathType Leaf) "prior PowerShell continuity migration has a translation receipt"
     $continued = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $continuity
     Assert-True ($continued.Code -eq 0) "receipt-proven PowerShell continuity migration continues through full refresh"
 
@@ -417,7 +453,7 @@ try {
     Write-V5State $tampered "WINDOWS_CONTINUITY_TAMPER"
     Write-Text (Join-Path $tampered "CONTINUITY.md") "# CONTINUITY`n`n## State`n`n### Now`n`n- tamper`n"
     Write-Text (Join-Path $tampered "CLAUDE.md") "# Developer instructions`n`n## Project Overview`n"
-    $null = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Migrate") -WorkingDirectory $tampered
+    Record-PriorContinuityMigration $tampered
     $tamperedReceipt = Join-Path $tampered ".forge\local\migration-evidence\continuity-state-v5-v6.json"
     $receiptObject = Get-Content -LiteralPath $tamperedReceipt -Raw | ConvertFrom-Json
     $receiptObject.target_hash = "0" * 64

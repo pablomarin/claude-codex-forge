@@ -290,7 +290,6 @@ preferred engine ran.
 | Execute a ready project migration | `./setup.sh -F` | `./setup.ps1 -FullRefresh` or `-R` |
 | Preview a global migration | `./setup.sh --global -F --dry-run` | `./setup.ps1 -Global -FullRefresh -DryRun` |
 | Execute a ready global migration | `./setup.sh --global -F` | `./setup.ps1 -Global -FullRefresh` |
-| Legacy continuity migration only | `setup.sh --migrate` | `setup.ps1 -Migrate` |
 | Playwright scaffold | `setup.sh -t fullstack --with-playwright` | `setup.ps1 -Tech fullstack -WithPlaywright` |
 
 Use `-f` only to refresh an existing v6 install. Use `-F` for the ownership-aware v5 or mixed-tree

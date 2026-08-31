@@ -30,7 +30,6 @@ usage() {
     echo "  -F, --full-refresh  Authoritative transactional v5 -> v6 harness refresh"
     echo "      --dry-run       Preview full refresh without writing target files (requires -F)"
     echo "  -u, --upgrade       Smart upgrade: merge new hooks/permissions into existing settings"
-    echo "      --migrate       Migrate legacy CONTINUITY.md content to the new structure"
     echo "  -g, --global        Set up global memory system (~/.claude/)"
     echo "  -w, --with-playwright  Install Playwright framework templates (requires -t fullstack or typescript)"
     echo "  --playwright-dir DIR   Scaffold Playwright into DIR instead of repo root (monorepo layouts)"
@@ -44,7 +43,6 @@ usage() {
     echo "  $0 -F                       # Ownership-aware full harness refresh"
     echo "  $0 -F --dry-run             # Read-only full refresh preview"
     echo "  $0 --upgrade                # Upgrade: add new hooks/rules, merge settings"
-    echo "  $0 --migrate                # Migrate CONTINUITY.md to .claude/local/state.md + ADRs"
     echo "  $0 --global                 # Set up global memory (run once per machine)"
     echo "  $0 --global -f              # Force overwrite global settings"
     echo "  $0 -t fullstack --with-playwright  # Install Playwright framework templates"
@@ -57,7 +55,6 @@ FORCE=false
 FULL_REFRESH=false
 DRY_RUN=false
 UPGRADE=false
-MIGRATE=false
 GLOBAL=false
 WITH_PLAYWRIGHT=false
 
@@ -93,8 +90,8 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --migrate)
-            MIGRATE=true
-            shift
+            echo "ERROR: --migrate was retired in Forge 6; no files changed. Run $0 -F --dry-run." >&2
+            exit 1
             ;;
         -g|--global)
             GLOBAL=true
@@ -121,8 +118,8 @@ if [ "$DRY_RUN" = true ] && [ "$FULL_REFRESH" != true ]; then
     exit 1
 fi
 
-if [ "$FULL_REFRESH" = true ] && { [ "$FORCE" = true ] || [ "$UPGRADE" = true ] || [ "$MIGRATE" = true ] || [ "$WITH_PLAYWRIGHT" = true ]; }; then
-    echo -e "${RED}ERROR: --full-refresh cannot be combined with --force, --upgrade, --migrate, or --with-playwright.${NC}" >&2
+if [ "$FULL_REFRESH" = true ] && { [ "$FORCE" = true ] || [ "$UPGRADE" = true ] || [ "$WITH_PLAYWRIGHT" = true ]; }; then
+    echo -e "${RED}ERROR: --full-refresh cannot be combined with --force, --upgrade, or --with-playwright.${NC}" >&2
     exit 1
 fi
 
@@ -154,19 +151,6 @@ if [ "$FULL_REFRESH" = true ]; then
     exit $?
 fi
 
-# --- Migration dispatch (PR #2 / continuity-split) -------------------------
-# Migration runs as a SEPARATE script for review hygiene. The logic lives at
-# $SCRIPT_DIR/scripts/migrate-continuity.sh — not embedded here.
-if [ "$MIGRATE" = "true" ]; then
-    if [ ! -x "$SCRIPT_DIR/scripts/migrate-continuity.sh" ] && [ ! -f "$SCRIPT_DIR/scripts/migrate-continuity.sh" ]; then
-        echo -e "${RED}✗${NC} Migration helper not found at $SCRIPT_DIR/scripts/migrate-continuity.sh" >&2
-        echo "  Your Forge clone may be incomplete. Re-clone from https://github.com/pablomarin/claude-codex-forge" >&2
-        exit 1
-    fi
-    bash "$SCRIPT_DIR/scripts/migrate-continuity.sh"
-    exit $?
-fi
-
 # Task 2 checkpoint safety: do not create a v6 discovery surface beside a
 # recognizable or ambiguous v5 harness. Task 3 replaces this interim block
 # with the transactional full-refresh implementation and executable command.
@@ -179,6 +163,10 @@ v6_preflight_no_legacy() {
             return 1
         }
         return 0
+    fi
+    if [ "$scope" = project ] && { [ -e "$root/CONTINUITY.md" ] || [ -L "$root/CONTINUITY.md" ]; }; then
+        echo "BLOCKED: legacy CONTINUITY.md requires authoritative preview; run $SCRIPT_DIR/setup.sh -F --dry-run" >&2
+        return 1
     fi
     [ -f "$manifest" ] || { echo "BLOCKED: legacy v5 inventory is unavailable" >&2; return 1; }
     # Inventory-derived discovery families deliberately fail closed for a lone
@@ -726,37 +714,6 @@ if [[ "$FORGE_VERSION" != "unknown" ]] \
     echo -e "${YELLOW}${forge_drift_warn}${NC}"
 fi
 
-# Detect whether a prior `--migrate` already ran, so the upgrade banner can stop
-# nagging "run --migrate" — an unsatisfiable instruction once the migration helper
-# (scripts/migrate-continuity.sh) has stamped its `<!-- forge:migrated DATE -->`
-# sentinel, since re-running --migrate is then a no-op.
-#
-# Three deliberate choices, each mirrored in setup.ps1:
-#   1. Gate on the sentinel in CLAUDE.md *only* — the durable, git-committed bucket
-#      the migration's content (the Goal section etc.) lands in. A state.md-only
-#      marker does NOT count: state.md is gitignored and recreated blank on a fresh
-#      clone, so a marker there without a CLAUDE.md marker means the durable bucket
-#      was never written. When uncertain we fall through to the (idempotent) --migrate
-#      prompt, never the removal hint.
-#   2. The migrated FLAG keys on the bare prefix `<!-- forge:migrated` (grep -qF) —
-#      byte-identical to the helper's SENTINEL_PREFIX idempotency probe. The helper
-#      treats a date-less/space-less marker (e.g. `<!-- forge:migrated-->`) as already
-#      migrated, so requiring a date here would re-nag for exactly that marker.
-#   3. The DATE (display only) is extracted separately with a strict YYYY-MM-DD
-#      pattern; a malformed date stays empty so it is never spliced into the banner.
-# Case-sensitive grep mirrors the helper's lowercase marker (and setup.ps1's -CaseSensitive).
-continuity_migrated=false
-continuity_migrated_date=""
-continuity_migrated_paren=""   # " (DATE)" when a well-formed date was parsed; empty otherwise
-if [[ "$had_continuity_md" == true ]] && [[ -f CLAUDE.md ]] && grep -qF '<!-- forge:migrated' CLAUDE.md 2>/dev/null; then
-    continuity_migrated=true
-    migrated_marker=$(grep -hoE '<!-- forge:migrated [0-9]{4}-[0-9]{2}-[0-9]{2} -->' CLAUDE.md 2>/dev/null | head -1)
-    if [[ -n "$migrated_marker" ]]; then
-        continuity_migrated_date=$(printf '%s' "$migrated_marker" | sed -E 's/^<!-- forge:migrated[[:space:]]+//; s/[[:space:]]+-->$//')
-        continuity_migrated_paren=" (${continuity_migrated_date})"
-    fi
-fi
-
 if [[ "$had_claude_md" == true ]]; then
     echo -e "  ${BLUE}○${NC} CLAUDE.md user text will be preserved outside the Forge block"
 fi
@@ -1141,55 +1098,23 @@ if [[ "$UPGRADE" == true ]]; then
     echo "   git commit -m \"chore: upgrade Forge harness\""
     echo "   git push"
     echo ""
-    # 5.16: dropped the consolidated cry-wolf drift preamble that fired on
-    # every --upgrade regardless of actual drift. The migration script's
-    # Variant B "ask Claude to reconcile" message handles drift reconciliation
-    # when it actually matters (during --migrate). 5.17: also dropped the
-    # per-file inline drift hint at the same layer; replaced by the soft tip
-    # at end of upgrade summary below.
-    # PR #2 (continuity-split): legacy CONTINUITY.md migration prompt.
-    # Sentinel-aware (v5.48): once `--migrate` has run, CONTINUITY.md is preserved
-    # on disk but redundant — so we stop nagging "run --migrate" (re-running it is a
-    # no-op) and instead point at removal. We do NOT assert deletion is unconditionally
-    # safe: --migrate can stamp the sentinel yet skip content (e.g. a custom CLAUDE.md
-    # with no `## Project Overview` keeps the Goal only in CONTINUITY.md), so we tell
-    # the user to confirm the content landed before removing the file.
-    if [[ "$had_continuity_md" == true ]] && [[ "$continuity_migrated" == true ]]; then
-        echo -e "${GREEN}✓ CONTINUITY.md already migrated${continuity_migrated_paren}.${NC}"
-        echo "  Its content was migrated to CLAUDE.md (durable), docs/adr/ (decisions),"
-        echo "  and .forge/local/state.md (volatile). Once you've confirmed that content"
-        echo "  landed (and nothing references the file), CONTINUITY.md can be removed:"
-        echo ""
-        echo "    rm CONTINUITY.md"
-        echo ""
-    elif [[ "$had_continuity_md" == true ]]; then
+    if [[ "$had_continuity_md" == true ]]; then
         echo -e "${YELLOW}⚠ Legacy CONTINUITY.md detected.${NC}"
-        echo "  PR #2 (continuity-split) replaces CONTINUITY.md with three artifacts:"
-        echo "    - durable team-shared facts → CLAUDE.md"
-        echo "    - architecture decisions → docs/adr/NNNN-*.md"
-        echo "    - volatile per-developer state → .claude/local/state.md (gitignored)"
-        echo "  Run the migration assistant to move your content into the new structure:"
+        echo "  Forge 6 does not rewrite this mixed-content legacy file automatically."
+        echo "  Preview the authoritative upgrade inventory before changing anything:"
         echo ""
-        echo "    ./setup.sh --migrate"
+        echo "    ./setup.sh -F --dry-run"
         echo ""
-        echo "  The migration is idempotent (sentinel-marker-based) and preserves your CONTINUITY.md byte-for-byte."
+        echo "  Move durable facts to project instructions, decisions to docs/adr/, and"
+        echo "  active state to .forge/local/state.md; then archive or remove CONTINUITY.md."
         echo ""
     fi
-    # Replaces a pre-existing hardcoded claim that lied whenever the user had
-    # deleted one of the files before running --upgrade.
-    # Sentinel-aware (v5.48): when CONTINUITY.md has already been migrated, the banner
-    # drops the unsatisfiable "run --migrate" suffix and points at removal — gated on
-    # confirming the content landed (see the legacy-prompt note above re: skipped Goal).
-    if [[ "$had_continuity_md" == true ]] && [[ "$continuity_migrated" == true ]]; then
-        # Sentinel found in CLAUDE.md ⟹ CLAUDE.md exists ⟹ had_claude_md is true, so
-        # there is no reachable "CONTINUITY-only, no CLAUDE.md" migrated variant.
-        echo -e "${GREEN}Upgrade done! Your CLAUDE.md was preserved. CONTINUITY.md already migrated${continuity_migrated_paren} — remove it once you've confirmed its content landed in the new structure.${NC}"
-    elif [[ "$had_claude_md" == true ]] && [[ "$had_continuity_md" == true ]]; then
-        echo -e "${GREEN}Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved (run --migrate to move content to the new structure).${NC}"
+    if [[ "$had_claude_md" == true ]] && [[ "$had_continuity_md" == true ]]; then
+        echo -e "${GREEN}Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved; run -F --dry-run to reconcile legacy continuity.${NC}"
     elif [[ "$had_claude_md" == true ]]; then
         echo -e "${GREEN}Upgrade done! Your CLAUDE.md was preserved (user content).${NC}"
     elif [[ "$had_continuity_md" == true ]]; then
-        echo -e "${GREEN}Upgrade done! Your CONTINUITY.md was preserved (run --migrate to move content to the new structure).${NC}"
+        echo -e "${GREEN}Upgrade done! Your CONTINUITY.md was preserved; run -F --dry-run to reconcile legacy continuity.${NC}"
     else
         echo -e "${GREEN}Upgrade done!${NC}"
     fi

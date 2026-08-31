@@ -38,13 +38,18 @@ param(
 # Script directory (where templates live)
 $ScriptDir = $PSScriptRoot
 
+if ($Migrate) {
+    [Console]::Error.WriteLine("ERROR: -Migrate was retired in Forge 6; no files changed. Run .\setup.ps1 -FullRefresh -DryRun.")
+    exit 1
+}
+
 if ($DryRun -and -not $FullRefresh) {
     [Console]::Error.WriteLine("ERROR: DryRun requires FullRefresh.")
     exit 1
 }
 
-if ($FullRefresh -and ($Force -or $Upgrade -or $Migrate -or $WithPlaywright)) {
-    [Console]::Error.WriteLine("ERROR: FullRefresh and Force/Upgrade/Migrate/WithPlaywright cannot be combined.")
+if ($FullRefresh -and ($Force -or $Upgrade -or $WithPlaywright)) {
+    [Console]::Error.WriteLine("ERROR: FullRefresh and Force/Upgrade/WithPlaywright cannot be combined.")
     exit 1
 }
 
@@ -83,7 +88,6 @@ function Show-Usage {
     Write-Host "  -f, -Force          Overwrite existing files"
     Write-Host "  -R, -FullRefresh    Authoritative transactional v5 -> v6 harness refresh"
     Write-Host "      -DryRun         Preview full refresh without writing target files (requires -FullRefresh)"
-    Write-Host "  -Migrate            Migrate legacy CONTINUITY.md content to the new structure"
     Write-Host "  -g, -Global         Set up global memory system (~/.claude/)"
     Write-Host "  -w, -WithPlaywright Install Playwright framework templates (requires -Tech fullstack or typescript)"
     Write-Host ""
@@ -94,7 +98,6 @@ function Show-Usage {
     Write-Host "  .\setup.ps1 -f                       # Force overwrite existing files"
     Write-Host "  .\setup.ps1 -R                       # Ownership-aware full harness refresh"
     Write-Host "  .\setup.ps1 -FullRefresh -DryRun     # Read-only full refresh preview"
-    Write-Host "  .\setup.ps1 -Migrate                 # Migrate CONTINUITY.md to .claude/local/state.md + ADRs"
     Write-Host "  .\setup.ps1 -Global                  # Set up global memory (run once per machine)"
     Write-Host "  .\setup.ps1 -Global -f               # Force overwrite global settings"
     Write-Host "  .\setup.ps1 -Tech fullstack -WithPlaywright  # Install Playwright framework templates"
@@ -122,26 +125,15 @@ if ($FullRefresh) {
     exit $LASTEXITCODE
 }
 
-# --- Migration dispatch (PR #2 / continuity-split) -------------------------
-# Migration runs as a SEPARATE script for review hygiene. The logic lives at
-# $ScriptDir\scripts\migrate-continuity.ps1 -- not embedded here.
-if ($Migrate) {
-    $migrateHelper = Join-Path (Join-Path $ScriptDir "scripts") "migrate-continuity.ps1"
-    if (-not (Test-Path $migrateHelper)) {
-        [Console]::Error.WriteLine("x Migration helper not found at $migrateHelper")
-        [Console]::Error.WriteLine("  Your Forge clone may be incomplete. Re-clone from https://github.com/pablomarin/claude-codex-forge")
-        exit 1
-    }
-    & $migrateHelper
-    exit $LASTEXITCODE
-}
-
 function Test-V6PreflightNoLegacy {
     param([string]$Root, [ValidateSet("project", "global")][string]$Scope)
     $version = Join-Path $Root ".forge\version"
     if (Test-Path $version) {
         if (((Get-Content -Raw $version).Trim()) -ne "6") { throw "BLOCKED: unsupported Forge layout version at $version" }
         return
+    }
+    if ($Scope -eq "project" -and (Test-Path -LiteralPath (Join-Path $Root "CONTINUITY.md"))) {
+        throw "BLOCKED: legacy CONTINUITY.md requires authoritative preview; run .\setup.ps1 -FullRefresh -DryRun"
     }
     $manifest = Join-Path $ScriptDir "manifests\legacy-v5.tsv"
     if (-not (Test-Path $manifest)) { throw "BLOCKED: legacy v5 inventory is unavailable" }
@@ -732,36 +724,6 @@ if ($ForgeVersion -ne "unknown" -and ($prevForgeVersion -match '^\d+\.\d+$') -an
     Write-Color $forgeDriftWarn "Yellow"
 }
 
-# Detect whether a prior -Migrate already ran. The migration helper
-# (scripts/migrate-continuity.ps1) stamps a `<!-- forge:migrated DATE -->` sentinel
-# into CLAUDE.md and .claude/local/state.md, and PRESERVES CONTINUITY.md
-# byte-for-byte. Without this check the upgrade banner nags "run -Migrate" forever
-# after a successful migration — an unsatisfiable instruction, since re-running
-# -Migrate is a no-op once the sentinel is present.
-#
-# Mirrors setup.sh: gate on the sentinel in CLAUDE.md *only* (the durable,
-# git-committed bucket), NOT a state.md-only marker (gitignored, recreated blank on
-# a fresh clone — claiming the file is removable off it could discard unmoved content).
-# The migrated FLAG keys on the bare prefix `<!-- forge:migrated` (-SimpleMatch),
-# byte-identical to the migrate helper's idempotency probe — so a date-less/space-less
-# marker still counts as migrated and we never reintroduce the unsatisfiable nag. The
-# DATE is extracted separately with a strict YYYY-MM-DD pattern; malformed → empty.
-# -CaseSensitive mirrors bash's case-sensitive grep and the lowercase marker.
-$continuityMigrated = $false
-$continuityMigratedDate = ""
-$continuityMigratedParen = ""   # " (DATE)" when a well-formed date was parsed; empty otherwise
-if ($hadContinuity -and (Test-Path "CLAUDE.md")) {
-    $prefix = Select-String -Path "CLAUDE.md" -Pattern '<!-- forge:migrated' -SimpleMatch -CaseSensitive -List 2>$null
-    if ($prefix) {
-        $continuityMigrated = $true
-        $dm = Select-String -Path "CLAUDE.md" -Pattern '<!-- forge:migrated ([0-9]{4}-[0-9]{2}-[0-9]{2}) -->' -CaseSensitive -List 2>$null
-        if ($dm) {
-            $continuityMigratedDate = $dm.Matches[0].Groups[1].Value
-            $continuityMigratedParen = " ($continuityMigratedDate)"
-        }
-    }
-}
-
 & (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows
 Write-NativeGoalCollisions (Get-Location).Path
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -1287,55 +1249,23 @@ if ($Upgrade) {
     Write-Host "   git commit -m `"chore: upgrade Forge harness`""
     Write-Host "   git push"
     Write-Host ""
-    # 5.16: dropped the consolidated cry-wolf drift preamble that fired on
-    # every --upgrade regardless of actual drift. The migration script's
-    # Variant B "ask Claude to reconcile" message handles drift reconciliation
-    # when it actually matters (during --migrate). 5.17: also dropped the
-    # per-file inline drift hint at the same layer; replaced by the soft tip
-    # at end of upgrade summary below.
-    # PR #2 (continuity-split): legacy CONTINUITY.md migration prompt.
-    # Sentinel-aware (v5.48): once -Migrate has run, CONTINUITY.md is preserved on
-    # disk but redundant — so we stop nagging "run -Migrate" (re-running is a no-op)
-    # and point at removal. We do NOT assert deletion is unconditionally safe:
-    # -Migrate can stamp the sentinel yet skip content (a custom CLAUDE.md with no
-    # `## Project Overview` keeps the Goal only in CONTINUITY.md), so we tell the user
-    # to confirm the content landed before removing the file.
-    if ($hadContinuity -and $continuityMigrated) {
-        Write-Color "+ CONTINUITY.md already migrated$continuityMigratedParen." "Green"
-        Write-Host "  Its content was migrated to CLAUDE.md (durable), docs/adr/ (decisions),"
-        Write-Host "  and .forge/local/state.md (volatile). Once you've confirmed that content"
-        Write-Host "  landed (and nothing references the file), CONTINUITY.md can be removed:"
-        Write-Host ""
-        Write-Host "    Remove-Item CONTINUITY.md"
-        Write-Host ""
-    } elseif ($hadContinuity) {
+    if ($hadContinuity) {
         Write-Color "! Legacy CONTINUITY.md detected." "Yellow"
-        Write-Host "  PR #2 (continuity-split) replaces CONTINUITY.md with three artifacts:"
-        Write-Host "    - durable team-shared facts -> CLAUDE.md"
-        Write-Host "    - architecture decisions -> docs/adr/NNNN-*.md"
-        Write-Host "    - volatile per-developer state -> .claude/local/state.md (gitignored)"
-        Write-Host "  Run the migration assistant to move your content into the new structure:"
+        Write-Host "  Forge 6 does not rewrite this mixed-content legacy file automatically."
+        Write-Host "  Preview the authoritative upgrade inventory before changing anything:"
         Write-Host ""
-        Write-Host "    .\setup.ps1 -Migrate"
+        Write-Host "    .\setup.ps1 -FullRefresh -DryRun"
         Write-Host ""
-        Write-Host "  The migration is idempotent (sentinel-marker-based) and preserves your CONTINUITY.md byte-for-byte."
+        Write-Host "  Move durable facts to project instructions, decisions to docs/adr/, and"
+        Write-Host "  active state to .forge/local/state.md; then archive or remove CONTINUITY.md."
         Write-Host ""
     }
-    # Replaces a pre-existing hardcoded claim that lied whenever the user had
-    # deleted one of the files before running --upgrade.
-    # Sentinel-aware (v5.48): when CONTINUITY.md has already been migrated, the banner
-    # drops the unsatisfiable "run -Migrate" suffix and points at removal — gated on
-    # confirming the content landed (see the legacy-prompt note above re: skipped Goal).
-    if ($hadContinuity -and $continuityMigrated) {
-        # Sentinel found in CLAUDE.md => CLAUDE.md exists => $hadClaude is true, so
-        # there is no reachable "CONTINUITY-only, no CLAUDE.md" migrated variant.
-        Write-Color "Upgrade done! Your CLAUDE.md was preserved. CONTINUITY.md already migrated$continuityMigratedParen — remove it once you've confirmed its content landed in the new structure." "Green"
-    } elseif ($hadClaude -and $hadContinuity) {
-        Write-Color "Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved (run -Migrate to move content to the new structure)." "Green"
+    if ($hadClaude -and $hadContinuity) {
+        Write-Color "Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved; run -FullRefresh -DryRun to reconcile legacy continuity." "Green"
     } elseif ($hadClaude) {
         Write-Color "Upgrade done! Your CLAUDE.md was preserved (user content)." "Green"
     } elseif ($hadContinuity) {
-        Write-Color "Upgrade done! Your CONTINUITY.md was preserved (run -Migrate to move content to the new structure)." "Green"
+        Write-Color "Upgrade done! Your CONTINUITY.md was preserved; run -FullRefresh -DryRun to reconcile legacy continuity." "Green"
     } else {
         Write-Color "Upgrade done!" "Green"
     }

@@ -547,3 +547,45 @@ Report the branch, commit sequence, focused counts, aggregate result, Windows CI
 - independently developed active harnesses require an explicit owner decision;
 - sibling worktrees are not mutated;
 - no unsupported legacy layout is silently guessed or deleted.
+
+### Task 6: Retire the standalone continuity migration
+
+**Files:**
+- Modify: `setup.sh`, `setup.ps1`
+- Modify: `scripts/merge-settings.py`
+- Delete: `scripts/migrate-continuity.sh`, `scripts/migrate-continuity.ps1`
+- Modify: `hooks/check-state-updated.sh`, `hooks/check-state-updated.ps1`
+- Modify: `hooks/check-workflow-gates.sh`, `hooks/check-workflow-gates.ps1`
+- Modify: active README/docs and owning tests
+
+**Interfaces:**
+- Retires the functional `--migrate` / `-Migrate` workflow.
+- Preserves the old spellings only as non-mutating error tombstones pointing to full-refresh preview.
+- Produces `LEGACY_CONTINUITY_UNRESOLVED` during project full-refresh inventory.
+- Preserves existing valid state-translation receipts and reconciliation sentinels.
+
+- [x] **Step 1: Write RED retirement and inventory tests**
+
+Require both retired flags to return nonzero without changing the project and direct users to
+`-F --dry-run` / `-FullRefresh -DryRun`. Require an otherwise valid project containing unresolved
+`CONTINUITY.md` to block preview and execution before persistent writes while preserving the file.
+
+- [x] **Step 2: Keep proven prior migrations compatible**
+
+Build a valid historical sentinel plus exact old/new state receipt without invoking the retired
+command. Require full refresh to accept that evidence, while malformed or hash-mismatched receipts
+remain blocked.
+
+- [x] **Step 3: Remove the functional path and add fail-closed inventory**
+
+Delete both heuristic migration helpers and their standalone suite. Remove the command from active
+help/docs and redirect hook guidance to preview. Do not import semantic Markdown extraction into
+full refresh. A bare unresolved file is preserved byte-for-byte and reported with manual
+reconciliation instructions; execution repeats inventory under the transaction guard only after a
+pre-guard inventory is clean.
+
+- [x] **Step 4: Verify and deliver**
+
+Run the focused full-refresh, setup, hooks, contracts, lint, and platform-parity suites, then one
+final aggregate on the frozen tree. Commit, push `codex/forge-v6-upgrade-hardening`, and open a PR
+against `main`.

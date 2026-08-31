@@ -123,7 +123,8 @@ Run from a fresh `claude-codex-forge` clone.
 | `--global`                         | Install canonical global policy under `~/.forge/` plus bounded Claude Code and Codex adapters                                                                                                                                                                                                                         |
 | `--with-playwright`                | Scaffold Playwright config + auth fixture + reference CI workflow                                                                                                                                                                                                                                                     |
 | `--playwright-dir <path>`          | Override autodetected scaffolding directory for monorepos                                                                                                                                                                                                                                                             |
-| `--migrate`                        | Legacy CONTINUITY migration only: extracts Goal into `CLAUDE.md`, decisions into `docs/adr/`, and Done/Now/Next into `.forge/local/state.md`; preserves the original byte-for-byte                                                                                                                                     |
 
 PowerShell uses `-Force`, `-FullRefresh` (short alias `-R`), and `-DryRun`. Project and global full
 refreshes are separate transactions, and preview does not certify host `RUNTIME_READY` status.
+The old `--migrate` / `-Migrate` spellings are retired, non-mutating diagnostics. Legacy
+`CONTINUITY.md` is handled by the full-refresh inventory and manual reconciliation when needed.

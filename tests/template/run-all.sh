@@ -39,7 +39,6 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-hooks.sh"
     "$REPO_ROOT/tests/template/test-default-branch.sh"
     "$REPO_ROOT/tests/template/test-session-start.sh"
-    "$REPO_ROOT/tests/template/test-migrate.sh"
     "$REPO_ROOT/tests/template/test-full-refresh.sh"
     "$REPO_ROOT/tests/template/test-setup.sh"
 )

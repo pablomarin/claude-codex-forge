@@ -6,7 +6,7 @@
 #
 #   1. state.md missing breadcrumb (advisory, stderr only, exit 0).
 #      Fires only when legacy CONTINUITY.md is present (signals upgraded
-#      install that hasn't run --migrate yet). Suppressed otherwise to
+#      install that still needs full-refresh reconciliation). Suppressed otherwise to
 #      avoid spamming every Stop event.
 #
 #   2. Workflow reminder (advisory, stderr only, exit 0).
@@ -500,14 +500,14 @@ CHANGELOG_IN_BRANCH=$(git diff --name-only "$BRANCH_BASE" HEAD 2>/dev/null | gre
 # every Stop event in repos that never had CONTINUITY.md.
 if [ ! -f "$STATE_MD" ] && [ -f "CONTINUITY.md" ]; then
     echo "ℹ check-state-updated: Forge state.md not found, but CONTINUITY.md exists." >&2
-    echo "  Run setup --migrate to move your content to the new structure." >&2
+    echo "  Run setup -F --dry-run, resolve every reported blocker, then run setup -F." >&2
     # Continue to CHANGELOG check — gates are independent.
 fi
 
 # If .claude/local/state.md has an active workflow, extract phase/next-step for advisory reminder.
 #
 # IMPORTANT: scope the extraction to ONLY the `## Workflow` section. Migrated
-# content (e.g., from `setup.sh --migrate` ingesting old CONTINUITY.md "### Done"
+# content carried forward from an older Forge state source (for example old "### Done"
 # entries that mention prior workflow scaffolds) can leave stray `| Command |`
 # lines elsewhere in the file. A whole-file grep would match every one of them
 # and `xargs` would join them with spaces — yielding garbage like

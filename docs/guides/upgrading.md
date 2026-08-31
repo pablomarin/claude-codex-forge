@@ -153,6 +153,12 @@ changing anything. After recovery, rerun full refresh and then repeat host trust
 
 ## Legacy `CONTINUITY.md`
 
-Full refresh preserves the original file. The versioned migration recognizes supported v5 state and
-root-instruction regions; if it cannot prove where custom legacy content belongs, it reports
-`BLOCKED` for manual reconciliation rather than deleting or guessing.
+The standalone continuity migration command is retired in Forge 6. Full refresh preserves the
+original file and reports `LEGACY_CONTINUITY_UNRESOLVED` unless exact prior migration evidence
+proves that its state already landed in the canonical v6 destination. Forge does not guess how a
+mixed narrative file should be split.
+
+Run `setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun`. If blocked, move durable facts to
+project instructions, architecture decisions to `docs/adr/`, and current local state to
+`.forge/local/state.md`. Then archive or remove `CONTINUITY.md` and rerun preview. The retired
+`--migrate` / `-Migrate` spelling changes nothing and exits nonzero with this same direction.

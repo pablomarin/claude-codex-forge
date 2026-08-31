@@ -166,14 +166,14 @@ if (-not (Test-Path $stateFile)) {
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Breadcrumb wording byte-equivalent to bash variant for AC-4 parity.
     [Console]::Error.WriteLine("ℹ check-workflow-gates: Forge state.md not found.")
-    [Console]::Error.WriteLine("  If you have a legacy CONTINUITY.md, run setup --migrate before setup -R")
+    [Console]::Error.WriteLine("  Run setup -FullRefresh -DryRun, resolve every reported blocker, then run setup -FullRefresh.")
     Exit-ForgeAllow
 }
 
 $content = Get-Content $stateFile -Raw -ErrorAction SilentlyContinue
 
 # Scope extraction to ONLY the `## Workflow` section. Migrated content (e.g.,
-# from `setup.sh --migrate` ingesting old CONTINUITY.md "### Done" entries that
+# from an older state source carrying legacy "### Done" entries that
 # mention prior workflow scaffolds) can leave stray `| Command |` lines or
 # `### Checklist` headings elsewhere in the file. A whole-file Select-String
 # with `-First 1` would pick the first match — which can be the stray, not the
@@ -196,7 +196,7 @@ if (-not $cmdLine) { Exit-ForgeAllow }
 $cmd = ($cmdLine -split '\|')[2].Trim()
 if (-not $cmd -or $cmd -eq "none" -or $cmd -eq ([char]0x2014).ToString() -or $cmd -eq "-") { Exit-ForgeAllow }
 if (-not $stateIsV6) {
-    [Console]::Error.WriteLine("WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup --migrate, then setup -R.")
+    [Console]::Error.WriteLine("WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup -FullRefresh -DryRun, resolve blockers, then setup -FullRefresh.")
     exit 2
 }
 

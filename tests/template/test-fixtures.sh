@@ -191,7 +191,7 @@ make_state_md() {
 }
 
 # make_legacy_continuity_for_migration <scratch-dir>
-# Writes a canonical pre-migration CONTINUITY.md for testing --migrate.
+# Writes a canonical legacy CONTINUITY.md fixture for full-refresh inventory tests.
 make_legacy_continuity_for_migration() {
     local scratch="$1"
     cat > "$scratch/CONTINUITY.md" <<'EOF'
@@ -214,7 +214,7 @@ Build a thing that does the thing.
 
 - 2026-04-01: shipped feature X
 - 2026-04-02: shipped feature Y
-- 2026-04-03: shipped feature Z (older entry — should be trimmed by --migrate)
+- 2026-04-03: shipped feature Z (older legacy entry)
 - 2026-04-04: ancient entry (also trimmed)
 
 ### Now

@@ -670,13 +670,13 @@ if echo "$out_hc" | grep -qF "state.md not found"; then
 else
     fail "hook did not emit 'state.md not found' breadcrumb (got: $out_hc)"
 fi
-# P2-5: breadcrumb must name the migration command. Without this, AC-4
+# Breadcrumb must name the no-write full-refresh preview. Without this, AC-4
 # byte-parity could break (one platform changes the wording, the other
 # doesn't) before AC-13 catches it.
-if echo "$out_hc" | grep -qF "setup --migrate"; then
-    pass "breadcrumb names migration command ('setup --migrate')"
+if echo "$out_hc" | grep -qF "setup -F --dry-run"; then
+    pass "breadcrumb names full-refresh preview ('setup -F --dry-run')"
 else
-    fail "breadcrumb does NOT name migration command (got: $out_hc)"
+    fail "breadcrumb does NOT name full-refresh preview (got: $out_hc)"
 fi
 assert_equals "$rc_hc" "0" "hook exits 0 (does NOT gate even with CONTINUITY.md present)"
 
@@ -715,7 +715,7 @@ assert_equals "$rc_ad" "0" "Stop hook always exits 0 (advisory-only)"
 #
 # Pre-fix bug: hooks/check-state-updated.sh did `grep | awk | xargs` over the
 # WHOLE state.md, then xargs joined N matches with spaces. When migrated
-# content (e.g., from `setup.sh --migrate` ingesting an old CONTINUITY.md
+# content carried from an older state source (for example old CONTINUITY.md
 # Done entry that quoted a prior workflow scaffold) carried a stray
 # `| Command | … |` line in `### Done`, the reminder became garbage like:
 #   "WORKFLOW: none /lifecycle | Phase: n/a shipping | Next: n/a Fix #654 …"
@@ -2367,7 +2367,7 @@ V5_GATE_CMD=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["h
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V5I" \
     | (cd "$V5I" && CLAUDE_PROJECT_DIR="$V5I" sh -c "$V5_GATE_CMD") > "$V5I/gate.out" 2>&1
 assert_equals "$?" "2" "legacy reviewer, goal, and authorization lines cannot authorize shipping"
-assert_contains "$V5I/gate.out" 'migrat' "legacy ship block directs the developer to migrate"
+assert_contains "$V5I/gate.out" '-F --dry-run' "legacy ship block directs the developer to full-refresh preview"
 
 start_test "installed v6 boundaries reject an aliased canonical state path"
 V6BAD=$(scratch_dir v6-installed-invalid-state)

@@ -41,6 +41,24 @@ snapshot_project() {
     )
 }
 
+record_prior_continuity_migration() {
+    local target="$1" source destination receipt temporary
+    target=$(cd "$target" && pwd -P)
+    source="$target/.claude/local/state.md"
+    destination="$target/.forge/local/state.md"
+    receipt="$target/.forge/local/migration-evidence/continuity-state-v5-v6.json"
+    python3 "$REPO_ROOT/scripts/merge-settings.py" migrate-state-v5-v6 \
+        --source "$source" --destination "$destination" >/dev/null
+    (cd "$target" && python3 "$REPO_ROOT/scripts/merge-settings.py" write-continuity-receipt \
+        --source "$source" --destination "$destination" --receipt "$receipt") >/dev/null
+    temporary="$target/.CLAUDE.md.migration-evidence"
+    {
+        printf '<!-- forge:migrated 2026-08-31 -->\n\n'
+        cat "$target/CLAUDE.md"
+    } > "$temporary"
+    mv "$temporary" "$target/CLAUDE.md"
+}
+
 install_released_core() {
     local target="$1" version="$2" commit="$3"
     mkdir -p "$target/.claude/hooks" "$target/.claude/commands"
@@ -688,6 +706,43 @@ assert_equals "$?" "0" "exact global managed region with customized user bytes m
 assert_contains "$S17G/home/.claude/CLAUDE.md" 'GLOBAL_CUSTOM_REGION_!@#$%^&*()' \
     "global user-region bytes survive in the v6 root surface"
 
+start_test "retired continuity command is inert and unresolved legacy content blocks full refresh"
+S18R=$(scratch_dir full-refresh-continuity-retired)
+make_git_repo "$S18R"
+write_active_v5_state "$S18R" "CONTINUITY_RETIRED_COMMAND"
+printf '# CONTINUITY\n\n## State\n\n### Now\n\n- preserve me\n' > "$S18R/CONTINUITY.md"
+printf '# Developer-owned instructions\n' > "$S18R/CLAUDE.md"
+s18r_before=$(snapshot_project "$S18R")
+(cd "$S18R" && HOME="$S18R/.fakehome" "$REPO_ROOT/setup.sh" --migrate) \
+    > "${S18R}.migrate.log" 2>&1
+assert_equals "$?" "1" "retired Bash continuity command exits nonzero"
+assert_contains "${S18R}.migrate.log" "retired in Forge 6" \
+    "retired Bash command explains the compatibility boundary"
+assert_contains "${S18R}.migrate.log" "-F --dry-run" \
+    "retired Bash command points to read-only full-refresh preview"
+assert_equals "$(snapshot_project "$S18R")" "$s18r_before" \
+    "retired Bash command changes no project bytes"
+
+S18U=$(scratch_dir full-refresh-continuity-unresolved)
+make_git_repo "$S18U"
+write_active_v5_state "$S18U" "CONTINUITY_UNRESOLVED"
+printf '# CONTINUITY\n\n## State\n\n### Now\n\n- unresolved legacy state\n' > "$S18U/CONTINUITY.md"
+s18u_before=$(snapshot_project "$S18U")
+run_refresh "$S18U" "${S18U}.preview.log" -F --dry-run
+assert_equals "$?" "1" "unresolved CONTINUITY blocks preview"
+assert_contains "${S18U}.preview.log" "code=LEGACY_CONTINUITY_UNRESOLVED" \
+    "preview names the unresolved continuity boundary"
+assert_equals "$(snapshot_project "$S18U")" "$s18u_before" \
+    "blocked continuity preview preserves every project byte"
+run_refresh "$S18U" "${S18U}.execute.log" -F
+assert_equals "$?" "1" "unresolved CONTINUITY blocks execution"
+assert_contains "${S18U}.execute.log" "code=LEGACY_CONTINUITY_UNRESOLVED" \
+    "execution reports the same continuity blocker"
+assert_equals "$(snapshot_project "$S18U")" "$s18u_before" \
+    "blocked continuity execution leaves no persistent write"
+assert_file_missing "$S18U/.forge/version" \
+    "unresolved continuity cannot stamp v6 readiness"
+
 start_test "continuity migration receipt authorizes only the exact source and canonical target"
 S18=$(scratch_dir full-refresh-continuity-receipt)
 make_git_repo "$S18"
@@ -706,14 +761,12 @@ cat > "$S18/CLAUDE.md" <<'EOF'
 
 ## Project Overview
 EOF
-(cd "$S18" && HOME="$S18/.fakehome" "$REPO_ROOT/setup.sh" --migrate) \
-    > "$S18/migrate.log" 2>&1
-assert_equals "$?" "0" "Bash continuity migration succeeds before full refresh"
+record_prior_continuity_migration "$S18"
 receipt18="$S18/.forge/local/migration-evidence/continuity-state-v5-v6.json"
-assert_file_exists "$receipt18" "continuity migration creates a protected translation receipt"
+assert_file_exists "$receipt18" "prior continuity migration has a protected translation receipt"
 run_refresh "$S18" "$S18/refresh.log" -F
 assert_equals "$?" "0" "receipt-proven continuity translation can continue through full refresh"
-assert_contains "$S18/.forge/local/state.md" "continuity migration then full refresh" \
+assert_contains "$S18/.forge/local/state.md" "CONTINUITY_RECEIPT_CHECKPOINT" \
     "full refresh prefers the receipt-bound canonical continuity state"
 assert_file_missing "$S18/.claude/local/state.md" \
     "receipt-proven surviving legacy state is retired only at commit"
@@ -725,8 +778,7 @@ for tamper in receipt schema source target; do
     printf '# CONTINUITY\n\n## State\n\n### Now\n\n- receipt tamper case\n' \
         > "$tamper_root/CONTINUITY.md"
     printf '# Developer instructions\n\n## Project Overview\n' > "$tamper_root/CLAUDE.md"
-    (cd "$tamper_root" && HOME="$tamper_root/.fakehome" "$REPO_ROOT/setup.sh" --migrate) \
-        > "$tamper_root/migrate.log" 2>&1
+    record_prior_continuity_migration "$tamper_root"
     tamper_receipt="$tamper_root/.forge/local/migration-evidence/continuity-state-v5-v6.json"
     case "$tamper" in
         receipt)

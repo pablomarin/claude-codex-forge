@@ -380,6 +380,7 @@ def inventory_legacy(
     if scope == "project":
         findings.extend(active_harness_findings(target))
         findings.extend(state_source_findings(target, current_v6))
+        findings.extend(continuity_file_findings(target, current_v6))
 
     return LegacyInventory(
         selector=selector,
@@ -702,6 +703,68 @@ def state_source_findings(target: Path, current_v6: bool = False) -> tuple[Upgra
             ".forge/local/state.md",
             f"state conflict: multiple plausible state sources: {sources}{receipt_problem}",
             "choose one authoritative state, archive the others, then rerun -F --dry-run",
+        ),
+    )
+
+
+def continuity_file_findings(
+    target: Path, current_v6: bool = False
+) -> tuple[UpgradeFinding, ...]:
+    """Require explicit, byte-bound evidence before accepting legacy continuity."""
+    relative = Path("CONTINUITY.md")
+    continuity = target / relative
+    if not continuity.exists() and not continuity.is_symlink():
+        return ()
+    reject_link_ancestors(target, relative)
+    if continuity.is_symlink() or not continuity.is_file():
+        raise RefreshBlocked("legacy CONTINUITY.md is not a regular file")
+
+    claude = target / "CLAUDE.md"
+    old = target / ".claude/local/state.md"
+    new = target / ".forge/local/state.md"
+    receipt = target / CONTINUITY_RECEIPT_RELATIVE
+    evidence_problem = "recognized migration evidence is missing"
+    if (
+        claude.is_file()
+        and not claude.is_symlink()
+        and b"<!-- forge:migrated" in claude.read_bytes()
+        and new.is_file()
+        and not new.is_symlink()
+    ):
+        try:
+            if old.is_file() and not old.is_symlink():
+                validate_continuity_receipt(target, old, new)
+                return ()
+            if current_v6:
+                reject_link_ancestors(target, CONTINUITY_RECEIPT_RELATIVE)
+                if receipt.is_symlink() or not receipt.is_file():
+                    raise RefreshBlocked(
+                        "continuity translation receipt is missing or not a regular file"
+                    )
+                actual = json.loads(receipt.read_text(encoding="utf-8"))
+                if (
+                    actual.get("schema") != CONTINUITY_RECEIPT_SCHEMA
+                    or actual.get("source_relative") != ".claude/local/state.md"
+                    or actual.get("source_schema") != "forge-state-v5-unversioned"
+                    or not re.fullmatch(r"[0-9a-f]{64}", actual.get("source_hash", ""))
+                    or actual.get("target_relative") != ".forge/local/state.md"
+                    or actual.get("target_schema") != "forge-state-v6"
+                    or actual.get("target_hash") != sha256_path(new)
+                ):
+                    raise RefreshBlocked(
+                        "continuity translation receipt does not match the surviving canonical target"
+                    )
+                return ()
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RefreshBlocked) as error:
+            evidence_problem = str(error)
+
+    return (
+        UpgradeFinding(
+            "LEGACY_CONTINUITY_UNRESOLVED",
+            "project",
+            relative.as_posix(),
+            f"unresolved legacy continuity content sha256={sha256_path(continuity)}; {evidence_problem}",
+            "move relevant facts to project instructions, decisions to docs/adr, and active state to .forge/local/state.md; archive or remove CONTINUITY.md; then rerun -F --dry-run",
         ),
     )
 
@@ -1625,8 +1688,6 @@ def full_refresh(
     }
     journal: dict = {}
     try:
-        if not dry_run:
-            guard = acquire_guard(target, txid)
         inventory = inventory_legacy(repo_root, target, scope, platform)
         if inventory.findings:
             print_refresh_report(
@@ -1637,6 +1698,20 @@ def full_refresh(
                 next_step="resolve every listed blocker, then rerun full refresh preview",
             )
             raise RefreshBlocked("upgrade inventory contains blocking findings")
+        if not dry_run:
+            guard = acquire_guard(target, txid)
+            # Re-read after serialization so the transaction never relies on a
+            # preview that raced with another local process.
+            inventory = inventory_legacy(repo_root, target, scope, platform)
+            if inventory.findings:
+                print_refresh_report(
+                    report,
+                    inventory.findings,
+                    upgrade="BLOCKED",
+                    active_forge="unchanged",
+                    next_step="resolve every listed blocker, then rerun full refresh preview",
+                )
+                raise RefreshBlocked("upgrade inventory contains blocking findings")
         if dry_run:
             temporary = tempfile.TemporaryDirectory(prefix="forge-full-refresh-preview-")
             work_root = Path(temporary.name)
