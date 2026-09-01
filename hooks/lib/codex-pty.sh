@@ -37,7 +37,7 @@
 #   CLAUDE_FORGE_CODEX_PTY_VIA_WSL=1    (Windows only) escalate via WSL
 #
 # Invocation: this is a script-only file. Always invoke it directly via
-#   bash "$REPO/.claude/hooks/lib/codex-pty.sh" exec [codex-args...]
+#   bash "$REPO/.forge/hooks/lib/codex-pty.sh" exec [codex-args...]
 # Sourcing is NOT supported because the function uses `exec` to chain into
 # python3/codex; sourcing it into your shell and then calling the function
 # would replace your shell. (iter-2 fix — earlier docstring described a

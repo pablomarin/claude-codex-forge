@@ -1473,20 +1473,19 @@ assert_contains "$COUNCIL_PROTOCOL" "output-last-message" \
     "peer-review-protocol.md uses --output-last-message flag"
 
 # ---------------------------------------------------------------------------
-# Contract: setup.sh + setup.ps1 install the shim files via explicit copy_file
-# calls (per plan §2.5 — no auto-traversal).
+# Contract: the v6 manifest owns one canonical copy of each shim file. The
+# setup behavior suite proves both installers materialize these rows.
 # ---------------------------------------------------------------------------
-start_test "codex-pty-setup contract: setup.sh and setup.ps1 install the shim files"
+start_test "codex-pty-setup contract: v6 manifest owns the canonical shim files"
 
-SETUP_SH="$REPO_ROOT/setup.sh"
-SETUP_PS="$REPO_ROOT/setup.ps1"
+MANAGED_V6="$REPO_ROOT/manifests/managed-v6.tsv"
 
-assert_contains "$SETUP_SH" "codex-pty.sh" "setup.sh installs codex-pty.sh"
-assert_contains "$SETUP_SH" "codex-pty-helper.py" "setup.sh installs codex-pty-helper.py"
-assert_contains "$SETUP_SH" "codex-pty.ps1" "setup.sh installs codex-pty.ps1 (cross-platform parity)"
-assert_contains "$SETUP_PS" "codex-pty.ps1" "setup.ps1 installs codex-pty.ps1"
-assert_contains "$SETUP_PS" "codex-pty.sh" "setup.ps1 installs codex-pty.sh (cross-platform parity)"
-assert_contains "$SETUP_PS" "codex-pty-helper.py" "setup.ps1 installs codex-pty-helper.py"
+assert_contains "$MANAGED_V6" $'canonical\thooks/lib/codex-pty.sh\t.forge/hooks/lib/codex-pty.sh' \
+    "manifest installs canonical codex-pty.sh"
+assert_contains "$MANAGED_V6" $'canonical\thooks/lib/codex-pty.ps1\t.forge/hooks/lib/codex-pty.ps1' \
+    "manifest installs canonical codex-pty.ps1"
+assert_contains "$MANAGED_V6" $'canonical\thooks/lib/codex-pty-helper.py\t.forge/hooks/lib/codex-pty-helper.py' \
+    "manifest installs canonical codex-pty-helper.py"
 
 # ---------------------------------------------------------------------------
 # Contract: FORGE_GOAL_EVIDENCE producer/consumer/schema
@@ -2111,15 +2110,10 @@ for f in hooks/check-workflow-gates.ps1 hooks/build-evidence.ps1; do
     fi
 done
 
-start_test "convergence-breaker: installer twins ship both helper files"
-for inst in setup.sh setup.ps1; do
-    for twin in review-breaker.sh review-breaker.ps1; do
-        if grep -qF "$twin" "$REPO_ROOT/$inst"; then
-            pass "$inst references $twin"
-        else
-            fail "$inst does not ship $twin"
-        fi
-    done
+start_test "convergence-breaker: v6 manifest owns both canonical helper files"
+for twin in review-breaker.sh review-breaker.ps1; do
+    assert_contains "$REPO_ROOT/manifests/managed-v6.tsv" ".forge/hooks/lib/$twin" \
+        "managed v6 installs canonical $twin"
 done
 
 start_test "convergence-breaker: /goal council carve-out + convergence-breaker prose ship in commands + workflow"

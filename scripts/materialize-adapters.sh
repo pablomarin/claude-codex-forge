@@ -415,6 +415,9 @@ done
 mkdir -p "$MATERIALIZE_TARGET"
 MATERIALIZE_REPO=$(cd "$MATERIALIZE_REPO" && pwd -P)
 MATERIALIZE_TARGET=$(cd "$MATERIALIZE_TARGET" && pwd -P)
+MATERIALIZE_DIAGNOSTIC_TARGET=${FORGE_DIAGNOSTIC_TARGET:-$MATERIALIZE_TARGET}
+MATERIALIZE_DIAGNOSTIC_TARGET=$(cd "$MATERIALIZE_DIAGNOSTIC_TARGET" && pwd -P)
+MATERIALIZE_DIAGNOSTIC_HOME=${FORGE_DIAGNOSTIC_HOME:-${HOME:-}}
 MATERIALIZE_MANIFEST="$MATERIALIZE_REPO/manifests/managed-v6.tsv"
 load_managed_manifest "$MATERIALIZE_MANIFEST"
 materialize_scope
@@ -435,18 +438,18 @@ detect_engines | while IFS=$'\t' read -r engine availability binary version diag
 done
 
 if [ "$MATERIALIZE_SCOPE" = project ]; then
-    primary=$(primary_checkout_for "$MATERIALIZE_TARGET" || true)
-    current=$(cd "$MATERIALIZE_TARGET" && pwd -P)
+    primary=$(primary_checkout_for "$MATERIALIZE_DIAGNOSTIC_TARGET" || true)
+    current=$MATERIALIZE_DIAGNOSTIC_TARGET
     if [ -n "$primary" ] && [ "$(cd "$primary" 2>/dev/null && pwd -P)" != "$current" ]; then
         echo "CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration"
         echo "Run: cd '$primary' && '$MATERIALIZE_REPO/setup.sh'"
     else
         echo "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
     fi
-    if [ -x "${HOME:-}/.forge/bin/forge-goal-authorize" ]; then
+    if [ -x "$MATERIALIZE_DIAGNOSTIC_HOME/.forge/bin/forge-goal-authorize" ]; then
         echo "GOAL_OVERLAY: BLOCKED pending scripts/qualify-goal-feasibility.sh"
     else
         echo "GOAL_OVERLAY: BLOCKED run '$MATERIALIZE_REPO/setup.sh --global' from a separate terminal"
     fi
-    echo "VERIFY_RUNTIME: '$MATERIALIZE_TARGET/.forge/bin/verify-runtime' live --project-root '$MATERIALIZE_TARGET'"
+    echo "VERIFY_RUNTIME: '$MATERIALIZE_DIAGNOSTIC_TARGET/.forge/bin/verify-runtime' live --project-root '$MATERIALIZE_DIAGNOSTIC_TARGET'"
 fi

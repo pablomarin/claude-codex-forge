@@ -835,16 +835,6 @@ Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "c
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty-helper.py") "$libDir\codex-pty-helper.py" "$libDir\codex-pty-helper.py (Python pty.fork helper for the shim)"
 }
 
-# Transitional workflow bodies still reference these helpers until Task 9.
-$libDir = ".claude\hooks\lib"
-New-Item -ItemType Directory -Path $libDir -Force | Out-Null
-New-Item -ItemType Directory -Path ".claude\local" -Force | Out-Null
-if (-not (Test-Path ".claude\local\state.md")) { Copy-Item (Join-Path $ScriptDir "state.template.md") ".claude\local\state.md" }
-Copy-Item (Join-Path $ScriptDir "state.template.md") ".claude\state.template.md" -Force
-foreach ($helper in @("default-branch.ps1", "default-branch.sh", "review-breaker.ps1", "review-breaker.sh", "codex-pty.ps1", "codex-pty.sh", "codex-pty-helper.py")) {
-    Copy-Item (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") $helper) (Join-Path $libDir $helper) -Force
-}
-
 # ADRs -- ship template + README + seed ADRs (existing-file-skip semantics).
 if (-not (Test-Path "docs\adr")) { New-Item -ItemType Directory -Path "docs\adr" -Force | Out-Null }
 Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "docs") "adr\template.md") "docs\adr\template.md" "docs\adr\template.md"

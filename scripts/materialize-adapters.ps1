@@ -40,6 +40,16 @@ function Read-ManagedManifest {
     return $rows
 }
 
+function Get-PrimaryCheckout {
+    param([string]$Project)
+    $lines = @(& git -C $Project worktree list --porcelain 2>$null)
+    if ($LASTEXITCODE -ne 0) { return "" }
+    foreach ($line in $lines) {
+        if ($line.StartsWith("worktree ")) { return $line.Substring(9) }
+    }
+    return ""
+}
+
 function Assert-NoLinkAncestor {
     param([string]$Root, [string]$Relative)
     $current = (Resolve-Path $Root).Path
@@ -478,6 +488,21 @@ foreach ($engine in Get-EngineAvailability) {
     else { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED pending opt-in authenticated verify-runtime sentinel ($($engine.Path); $($engine.Version))" }
 }
 if ($Scope -eq "project") {
-    if (Test-Path (Join-Path $HOME ".forge\bin\forge-goal-authorize.ps1")) { Write-Host "GOAL_OVERLAY: BLOCKED pending qualify-goal-feasibility.ps1" }
+    $diagnosticTarget = if ($env:FORGE_DIAGNOSTIC_TARGET) {
+        (Resolve-Path -LiteralPath $env:FORGE_DIAGNOSTIC_TARGET).Path
+    } else {
+        (Resolve-Path -LiteralPath $Target).Path
+    }
+    $diagnosticHome = if ($env:FORGE_DIAGNOSTIC_HOME) { $env:FORGE_DIAGNOSTIC_HOME } else { $HOME }
+    $primary = Get-PrimaryCheckout $diagnosticTarget
+    if ($primary) { $primary = (Resolve-Path -LiteralPath $primary).Path }
+    if ($primary -and -not [string]::Equals($primary, $diagnosticTarget, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Host "CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration"
+        Write-Host "Run: Set-Location '$primary'; & '$RepoRoot\setup.ps1'"
+    } else {
+        Write-Host "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
+    }
+    if (Test-Path (Join-Path $diagnosticHome ".forge\bin\forge-goal-authorize.ps1")) { Write-Host "GOAL_OVERLAY: BLOCKED pending qualify-goal-feasibility.ps1" }
     else { Write-Host "GOAL_OVERLAY: BLOCKED run '$RepoRoot\setup.ps1 -Global' from a separate terminal" }
+    Write-Host "VERIFY_RUNTIME: '$(Join-Path $diagnosticTarget '.forge\bin\verify-runtime')' live --project-root '$diagnosticTarget'"
 }

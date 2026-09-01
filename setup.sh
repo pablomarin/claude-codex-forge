@@ -721,26 +721,6 @@ bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
     --repo-root "$SCRIPT_DIR" --target "$(pwd)" --scope project --platform unix
 report_native_goal_collisions "$(pwd -P)"
 
-# Transitional v5 workflow bodies still reference these three helper paths;
-# Task 9 removes the compatibility copies when those workflows are converted.
-mkdir -p .claude/hooks/lib .claude/local
-[ -f .claude/local/state.md ] || cp "$SCRIPT_DIR/state.template.md" .claude/local/state.md
-cp "$SCRIPT_DIR/state.template.md" .claude/state.template.md
-copy_file "$SCRIPT_DIR/hooks/lib/default-branch.sh" ".claude/hooks/lib/default-branch.sh" ".claude/hooks/lib/default-branch.sh (default-branch detection helper)"
-chmod +x .claude/hooks/lib/default-branch.sh 2>/dev/null || true
-copy_file "$SCRIPT_DIR/hooks/lib/default-branch.ps1" ".claude/hooks/lib/default-branch.ps1" ".claude/hooks/lib/default-branch.ps1 (PowerShell mirror)"
-copy_file "$SCRIPT_DIR/hooks/lib/review-breaker.sh" ".claude/hooks/lib/review-breaker.sh" ".claude/hooks/lib/review-breaker.sh (review-loop convergence breaker, v5.54)"
-chmod +x .claude/hooks/lib/review-breaker.sh 2>/dev/null || true
-copy_file "$SCRIPT_DIR/hooks/lib/review-breaker.ps1" ".claude/hooks/lib/review-breaker.ps1" ".claude/hooks/lib/review-breaker.ps1 (PowerShell mirror)"
-# codex-pty shim — work around openai/codex#19945 (silent empty exit when codex
-# exec runs without a controlling TTY). Both .sh + .ps1 + helper.py ship for
-# cross-platform parity (ADR 0005).
-copy_file "$SCRIPT_DIR/hooks/lib/codex-pty.sh" ".claude/hooks/lib/codex-pty.sh" ".claude/hooks/lib/codex-pty.sh (codex PTY shim, openai/codex#19945)"
-chmod +x .claude/hooks/lib/codex-pty.sh 2>/dev/null || true
-copy_file "$SCRIPT_DIR/hooks/lib/codex-pty-helper.py" ".claude/hooks/lib/codex-pty-helper.py" ".claude/hooks/lib/codex-pty-helper.py (Python pty.fork helper for the shim)"
-chmod +x .claude/hooks/lib/codex-pty-helper.py 2>/dev/null || true
-copy_file "$SCRIPT_DIR/hooks/lib/codex-pty.ps1" ".claude/hooks/lib/codex-pty.ps1" ".claude/hooks/lib/codex-pty.ps1 (Windows PowerShell shim)"
-
 # ADRs — ship template + README + seed ADRs (existing-file-skip semantics).
 mkdir -p docs/adr
 copy_file "$SCRIPT_DIR/docs/adr/template.md" "docs/adr/template.md" "docs/adr/template.md"

@@ -400,11 +400,44 @@ try {
     Assert-True ($profile4Run.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $archiveRuntime "runtime\workflow-runtime.mjs")).Contains("WINDOWS_PROFILE_FOUR_RUNTIME") -and [IO.File]::ReadAllText((Join-Path $profile4 ".forge\local\state.md")).Contains("WINDOWS_PROFILE_FOUR_NEWER_STATE")) "Windows profile 4 executes only after explicit archive and state selection"
     Assert-OneActiveForge $profile4 "Windows profile 4"
 
+    $managedSetup = New-Project "managed-setup"
+    $managedRun = Invoke-IsolatedPowerShell -Script $setup -Arguments @() -WorkingDirectory $managedSetup `
+        -Environment @{ HOME = (Join-Path $scratch "managed-home"); USERPROFILE = (Join-Path $scratch "managed-home") }
+    $retiredHelpers = @(
+        "default-branch.sh", "default-branch.ps1", "review-breaker.sh", "review-breaker.ps1",
+        "codex-pty.sh", "codex-pty.ps1", "codex-pty-helper.py"
+    )
+    $retiredHelperFound = @($retiredHelpers | Where-Object {
+        Test-Path -LiteralPath (Join-Path $managedSetup (".claude\hooks\lib\" + $_))
+    })
+    Assert-True ($managedRun.Code -eq 0 -and $retiredHelperFound.Count -eq 0 -and
+        (Test-Path -LiteralPath (Join-Path $managedSetup ".forge\hooks\lib\codex-pty.ps1") -PathType Leaf) -and
+        -not (Test-Path -LiteralPath (Join-Path $managedSetup ".claude\local\state.md")) -and
+        -not (Test-Path -LiteralPath (Join-Path $managedSetup ".claude\state.template.md"))) `
+        "ordinary Windows v6 setup installs canonical helpers/state without retired copies"
+    $installedCouncil = [IO.File]::ReadAllText((Join-Path $managedSetup ".forge\skills\council\SKILL.template.md"))
+    Assert-True ($installedCouncil.Contains(".forge/hooks/lib/codex-pty.sh") -and -not $installedCouncil.Contains(".claude/hooks/lib/codex-pty")) `
+        "ordinary Windows v6 setup installs canonical council shim paths"
+
     $project = New-Project "project"
     Write-AdversarialV5State $project
+    $projectOperatorHome = Join-Path $scratch "unused-home"
+    Write-Text (Join-Path $projectOperatorHome ".forge\bin\forge-goal-authorize.ps1") "# operator helper`n"
+    Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/README.md" `
+        (Join-Path $project "docs\adr\README.md")
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
-        -Environment @{ HOME = (Join-Path $scratch "unused-home"); USERPROFILE = (Join-Path $scratch "unused-home") }
+        -Environment @{ HOME = $projectOperatorHome; USERPROFILE = $projectOperatorHome }
     Assert-True ($first.Code -eq 0) "setup.ps1 -R translates a project under Windows PowerShell 5.1: $($first.Output.Trim())"
+    Assert-True ($first.Output.Contains("CODEX_HOOKS: MATERIALIZED primary worktree registration") -and
+        -not $first.Output.Contains("CODEX_HOOKS: BLOCKED linked worktree") -and
+        $first.Output.Contains("VERIFY_RUNTIME: '$(Join-Path $project '.forge\bin\verify-runtime')' live --project-root '$project'")) `
+        "PowerShell transaction diagnostics describe the live primary project"
+    Assert-True ($first.Output.Contains("GOAL_OVERLAY: BLOCKED pending qualify-goal-feasibility.ps1") -and
+        -not $first.Output.Contains("GOAL_OVERLAY: BLOCKED run")) `
+        "PowerShell transaction diagnostics inspect the operator home"
+    Assert-True ($first.Output.Contains("DELETED: docs/adr/README.md (exact released Forge seed)") -and
+        -not (Test-Path -LiteralPath (Join-Path $project "docs\adr\README.md"))) `
+        "PowerShell report distinguishes exact retired Forge seed deletion"
     $canonicalState = Join-Path $project ".forge\local\state.md"
     Assert-True ((Test-Path -LiteralPath $canonicalState) -and ([IO.File]::ReadAllText($canonicalState).Contains("WINDOWS_STATE_TRANSLATION"))) "translated canonical state preserves the active checkpoint"
     $canonicalStateText = [IO.File]::ReadAllText($canonicalState)
