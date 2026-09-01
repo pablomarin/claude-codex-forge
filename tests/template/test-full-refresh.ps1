@@ -402,9 +402,9 @@ try {
 
     $managedSetup = New-Project "managed-setup"
     [IO.Directory]::CreateDirectory((Join-Path $managedSetup "docs\adr")) | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repoRoot "docs\adr\README.md") `
+    Copy-Item -LiteralPath (Join-Path $root "docs\adr\README.md") `
         -Destination (Join-Path $managedSetup "docs\adr\README.md")
-    Copy-Item -LiteralPath (Join-Path $repoRoot "docs\adr\0001-volatile-state-not-auto-loaded.md") `
+    Copy-Item -LiteralPath (Join-Path $root "docs\adr\0001-volatile-state-not-auto-loaded.md") `
         -Destination (Join-Path $managedSetup "docs\adr\0001-volatile-state-not-auto-loaded.md")
     Write-Text (Join-Path $managedSetup "docs\adr\0006-write-tool-creates-missing-parents.md") `
         "# Project ADR 0006`n`nWINDOWS_CUSTOM_PROJECT_DECISION`n"
