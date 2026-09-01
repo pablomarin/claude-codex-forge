@@ -349,12 +349,31 @@ make_git_repo "$S5A"
 mkdir -p "$S5A/.claude"
 printf '5.60\n' > "$S5A/.claude/.forge-version"
 printf '# Project instructions\n\n@CONTINUITY.md\nUse /codex and .claude/rules/ for policy.\n' > "$S5A/AGENTS.md"
+{
+    printf '<!-- forge:migrated 2026-04-28 -->\n\n'
+    git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:CLAUDE.template.md
+    printf '\nDEVELOPER_CHANGED_MANAGED_TAIL\n'
+} > "$S5A/CLAUDE.md"
 write_active_v5_state "$S5A" "AMBIGUOUS_AGENTS_STATE"
 agents_hash=$(hash_file "$S5A/AGENTS.md")
 agents_log="${S5A}.preview.log"
 run_refresh "$S5A" "$agents_log" -F --dry-run
 assert_equals "$?" "1" "project-owned AGENTS with retired active policy blocks"
-assert_equals "$(grep -c 'code=ROOT_POLICY_AMBIGUOUS' "$agents_log")" "1" "obsolete root references are grouped once"
+assert_equals "$(grep -c 'code=ROOT_POLICY_AMBIGUOUS' "$agents_log")" "2" "both ambiguous project roots are reported"
+assert_contains "$agents_log" "ACTION_REQUIRED: reconcile project instruction files" \
+    "blocked root preview introduces a human-readable action section"
+assert_contains "$agents_log" "ACTION: path=AGENTS.md remove or replace the retired Forge v5 references listed above" \
+    "retired AGENTS references receive a concrete edit"
+assert_contains "$agents_log" "ACTION: path=CLAUDE.md Forge cannot safely separate customized project text from obsolete managed Forge v5 policy" \
+    "mixed CLAUDE policy receives a concrete reconciliation explanation"
+assert_contains "$agents_log" "SHARED_CONTEXT: docs/agent-context.md is the project-owned source shared by Claude and Codex" \
+    "preview names the canonical shared project context"
+assert_contains "$agents_log" 'ROOT_POINTER: Read `docs/agent-context.md` completely before acting.' \
+    "preview provides the exact thin root pointer"
+assert_contains "$agents_log" "RETRY: rerun the same full-refresh preview command after saving these edits" \
+    "preview states how to verify the reconciliation"
+assert_equals "$(grep -c '^BLOCKED: upgrade inventory contains blocking findings$' "$agents_log" || true)" "0" \
+    "reported inventory blockers are not duplicated as generic errors"
 assert_hash_equals "$S5A/AGENTS.md" "$agents_hash" "ambiguous AGENTS remains byte-identical"
 assert_file_missing "$S5A/.forge/version" "ambiguous root cannot stamp v6"
 
@@ -805,6 +824,7 @@ S19=$(scratch_dir full-refresh-hook-settings)
 make_git_repo "$S19"
 mkdir -p "$S19/.claude/hooks"
 printf '5.61\n' > "$S19/.claude/.forge-version"
+printf 'PROJECT_SPECIFIC_IGNORE\n' > "$S19/.gitignore"
 git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:settings/settings.template.json \
     > "$S19/.claude/settings.json"
 python3 -c 'import json,sys
@@ -842,6 +862,12 @@ raise SystemExit(1 if bad or managed!=expected_managed or len(inline)!=1 else 0)
 assert_equals "$?" "0" "installed event/matcher config executes each proven hook exactly once"
 assert_contains "$S19/.claude/hooks/session-start.sh" '.forge/hooks/session-start.sh' \
     "preserved v5 registration resolves through a thin canonical delegate"
+assert_contains "$S19/.gitignore" "PROJECT_SPECIFIC_IGNORE" \
+    "full refresh preserves existing project ignore content"
+assert_equals "$(grep -cxF '.forge/local/' "$S19/.gitignore" || true)" "1" \
+    "full refresh gitignores volatile Forge state exactly once"
+run_refresh "$S19" "$S19/v6-preview.log" -F --dry-run
+assert_equals "$?" "0" "migrated v6 thin hook delegates remain valid on the next preview"
 
 S19D=$(scratch_dir full-refresh-hook-dangling)
 make_git_repo "$S19D"
