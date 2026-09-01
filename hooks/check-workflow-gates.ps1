@@ -456,7 +456,7 @@ if ($unchecked.Count -gt 0) {
     [Console]::Error.WriteLine("  - Verified (tests):  run the verify-app agent")
     [Console]::Error.WriteLine("  - E2E verified:      run the verify-e2e agent AND persist its report, OR mark N/A:")
     [Console]::Error.WriteLine('                         - [x] E2E verified — N/A: <specific reason>')
-    [Console]::Error.WriteLine("  See .claude\rules\testing.md for the canonical gate vocabulary.")
+    [Console]::Error.WriteLine("  See .forge/rules/testing.md for the canonical gate vocabulary.")
     exit 2
 }
 
@@ -531,7 +531,7 @@ if (-not $ReceiptV2Active -and $e2eCheckedLine -and ($e2eCheckedLine -notmatch '
             [Console]::Error.WriteLine("  (b) Mark the gate N/A with justification:")
             [Console]::Error.WriteLine('        - [x] E2E verified — N/A: <specific reason>')
             [Console]::Error.WriteLine("")
-            [Console]::Error.WriteLine("See .claude\rules\testing.md for the full policy.")
+            [Console]::Error.WriteLine("See .forge/rules/testing.md for the full policy.")
             exit 2
         }
     }

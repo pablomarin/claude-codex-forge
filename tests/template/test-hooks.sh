@@ -151,8 +151,8 @@ rc=$(run_hook_sh "$S2" 'git commit -m "ship it"' "$CHECKLIST_E2E_UNCHECKED")
 assert_equals "$rc" "2" ".sh blocks when E2E verified is unchecked"
 assert_contains "$S2/.hook-stderr" "E2E verified" \
     "stderr names the missing gate"
-assert_contains "$S2/.hook-stderr" "rules/testing.md" \
-    "stderr points to canonical doc"
+assert_contains "$S2/.hook-stderr" ".forge/rules/testing.md" \
+    "stderr points to the installed canonical v6 policy"
 assert_contains "$S2/.hook-stderr" "verify-e2e agent" \
     "stderr tells user how to clear the gate"
 
@@ -287,6 +287,8 @@ if command -v pwsh >/dev/null 2>&1; then
     assert_equals "$rc" "2" ".ps1 blocks when E2E verified unchecked"
     assert_contains "$S8b/.hook-stderr" "E2E verified" \
         ".ps1 stderr names the missing gate"
+    assert_contains "$S8b/.hook-stderr" ".forge/rules/testing.md" \
+        ".ps1 stderr points to the installed canonical v6 policy"
 
     S8c=$(scratch_dir hooks-ps-e2e-na)
     rc=$(run_hook_ps "$S8c" 'git commit -m x' "$CHECKLIST_E2E_NA")

@@ -67,6 +67,7 @@ class LegacyInventory:
     region_selector: str
     recognized: bool
     proven_legacy: frozenset[str]
+    proven_seeded_legacy: frozenset[str]
     preserved_legacy: frozenset[str]
     findings: tuple[UpgradeFinding, ...]
 
@@ -300,6 +301,7 @@ def inventory_legacy(
     releases, fingerprints, aliases = released_ownership(repo_root)
     findings: list[UpgradeFinding] = []
     proven_legacy: set[str] = set()
+    proven_seeded_legacy: set[str] = set()
     preserved_legacy: set[str] = set()
     current_v6 = False
     v6_stamp = target / ".forge/version"
@@ -363,6 +365,8 @@ def inventory_legacy(
             recognized = recognized or verified
         if verified:
             proven_legacy.add(destination)
+            if ownership == "seeded-content":
+                proven_seeded_legacy.add(destination)
         elif ownership == "seeded-content":
             preserved_legacy.add(destination)
         else:
@@ -441,6 +445,7 @@ def inventory_legacy(
         region_selector=region_selector,
         recognized=recognized,
         proven_legacy=frozenset(proven_legacy),
+        proven_seeded_legacy=frozenset(proven_seeded_legacy),
         preserved_legacy=frozenset(preserved_legacy),
         findings=tuple(sorted(set(findings))),
     )
@@ -1441,7 +1446,9 @@ def selected_materializer(repo_root: Path, platform: str) -> list[str]:
     return ["bash", str(repo_root / "scripts/materialize-adapters.sh")]
 
 
-def materialize_stage(repo_root: Path, stage: Path, scope: str, platform: str) -> str:
+def materialize_stage(
+    repo_root: Path, target: Path, stage: Path, scope: str, platform: str
+) -> str:
     command = selected_materializer(repo_root, platform)
     if platform == "windows":
         command.extend(["-RepoRoot", str(repo_root), "-Target", str(stage), "-Scope", scope, "-Platform", platform])
@@ -1449,6 +1456,10 @@ def materialize_stage(repo_root: Path, stage: Path, scope: str, platform: str) -
         command.extend(["--repo-root", str(repo_root), "--target", str(stage), "--scope", scope, "--platform", platform])
     environment = os.environ.copy()
     environment["FORGE_TRANSACTION_STAGE"] = "1"
+    environment["FORGE_DIAGNOSTIC_TARGET"] = str(target)
+    environment["FORGE_DIAGNOSTIC_HOME"] = environment.get(
+        "HOME", environment.get("USERPROFILE", "")
+    )
     runtime_home = stage.parent / "runtime-home"
     environment["HOME"] = str(runtime_home)
     environment["USERPROFILE"] = str(runtime_home)
@@ -1625,7 +1636,11 @@ def operation_files(stage: Path, target: Path, quarantine_root: Path) -> list[di
 
 
 def deletion_operations(
-    target: Path, quarantine_root: Path, values: set[str], report: dict[str, list[str]]
+    target: Path,
+    quarantine_root: Path,
+    values: set[str],
+    exact_released_seeds: set[str],
+    report: dict[str, list[str]],
 ) -> list[dict]:
     operations: list[dict] = []
     for value in sorted(values):
@@ -1649,7 +1664,10 @@ def deletion_operations(
                 "delete": True,
             }
         )
-        report["DELETED"].append(relative.as_posix())
+        label = relative.as_posix()
+        if label in exact_released_seeds:
+            label += " (exact released Forge seed)"
+        report["DELETED"].append(label)
     return operations
 
 
@@ -1857,7 +1875,9 @@ def full_refresh(
                     copy_preserved(source, stage / relative)
                     report["PRESERVED"].append(relative)
 
-        materializer_output = materialize_stage(repo_root, stage, scope, platform)
+        materializer_output = materialize_stage(
+            repo_root, target, stage, scope, platform
+        )
         reconcile_legacy_hook_settings(
             repo_root, target, stage, proven_legacy, scope, report
         )
@@ -1875,7 +1895,13 @@ def full_refresh(
         for backup in stage.rglob("*.bak.*"):
             backup.unlink()
         initial_operations = operation_files(stage, target, quarantine)
-        deletes = deletion_operations(target, quarantine, legacy_deletions, report)
+        deletes = deletion_operations(
+            target,
+            quarantine,
+            legacy_deletions,
+            set(inventory.proven_seeded_legacy),
+            report,
+        )
         for operation in initial_operations:
             if operation["original_hash"]:
                 report["REWRITTEN"].append(operation["relative"])

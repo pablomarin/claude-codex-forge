@@ -471,7 +471,7 @@ if [ -n "$UNCHECKED" ]; then
     echo "  - Verified (tests):  run the verify-app agent" >&2
     echo "  - E2E verified:      run the verify-e2e agent AND persist its report, OR mark N/A:" >&2
     echo '                         - [x] E2E verified — N/A: <specific reason>' >&2
-    echo "  See .claude/rules/testing.md for the canonical gate vocabulary." >&2
+    echo "  See .forge/rules/testing.md for the canonical gate vocabulary." >&2
     exit 2
 fi
 
@@ -555,7 +555,7 @@ if [ "$RECEIPT_V2_ACTIVE" != true ] && [ -n "$E2E_CHECKED_LINE" ] && ! echo "$E2
         echo "  (b) Mark the gate N/A with justification:" >&2
         echo '        - [x] E2E verified — N/A: <specific reason>' >&2
         echo "" >&2
-        echo "See .claude/rules/testing.md for the full policy." >&2
+        echo "See .forge/rules/testing.md for the full policy." >&2
         exit 2
     fi
 fi

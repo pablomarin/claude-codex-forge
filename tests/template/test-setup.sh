@@ -355,6 +355,8 @@ assert_equals "$?" "0" "Test 8b: migrated-case initial install exits 0"
 # the sentinel stamped into CLAUDE.md + state.md, CONTINUITY.md preserved on disk.
 MIGRATED_SENTINEL="<!-- forge:migrated 2026-04-28 -->"
 printf '\n%s\n' "$MIGRATED_SENTINEL" >> "$S8M/CLAUDE.md"
+mkdir -p "$S8M/.claude/local"
+cp "$REPO_ROOT/state.template.md" "$S8M/.claude/local/state.md"
 printf '\n%s\n' "$MIGRATED_SENTINEL" >> "$S8M/.claude/local/state.md"
 printf '# Legacy notes\n\nOld task state.\n' > "$S8M/CONTINUITY.md"
 
@@ -391,6 +393,8 @@ run_setup "$S8P" "$LOG8p_install" -p "PartialTest" -t fullstack
 assert_equals "$?" "0" "Test 8c: partial-case initial install exits 0"
 
 # Marker ONLY in state.md; CLAUDE.md (durable bucket) has NO sentinel.
+mkdir -p "$S8P/.claude/local"
+cp "$REPO_ROOT/state.template.md" "$S8P/.claude/local/state.md"
 printf '\n<!-- forge:migrated 2026-04-28 -->\n' >> "$S8P/.claude/local/state.md"
 printf '# Legacy notes\n\nUnmoved content.\n' > "$S8P/CONTINUITY.md"
 
@@ -636,11 +640,9 @@ assert_contains "$S10c/.upgrade.log" "Upgrade done!" \
     "Scenario C: bare 'Upgrade done!' variant present"
 
 # ===========================================================================
-# Test 11: hooks/lib helper installed + executable + hash-identical to source
-# P1 gap from drift-hygiene PR #1 review: setup.sh copies the lib helper, but
-# no test asserted its presence, mode, or integrity in the scratch install.
+# Test 11: canonical hooks/lib helpers are installed once under .forge
 # ===========================================================================
-start_test "Test 11: hooks/lib/default-branch.sh installed by setup.sh"
+start_test "Test 11: hooks/lib helpers install only at canonical v6 paths"
 
 S11=$(scratch_dir hooks-lib)
 make_project "$S11" flat
@@ -649,70 +651,77 @@ LOG11="$S11/.setup.log"
 run_setup "$S11" "$LOG11" -p "HooksLibTest" -t fullstack
 assert_equals "$?" "0" "setup exits 0"
 
-# File must exist in the installed tree
-assert_file_exists "$S11/.claude/hooks/lib/default-branch.sh" \
-    ".claude/hooks/lib/default-branch.sh installed"
+# File must exist at the canonical v6 path.
+assert_file_exists "$S11/.forge/hooks/lib/default-branch.sh" \
+    ".forge/hooks/lib/default-branch.sh installed"
 
 # Must be executable (chmod +x applied by setup.sh)
-if [[ -x "$S11/.claude/hooks/lib/default-branch.sh" ]]; then
-    pass ".claude/hooks/lib/default-branch.sh is executable"
+if [[ -x "$S11/.forge/hooks/lib/default-branch.sh" ]]; then
+    pass ".forge/hooks/lib/default-branch.sh is executable"
 else
-    fail ".claude/hooks/lib/default-branch.sh is NOT executable"
+    fail ".forge/hooks/lib/default-branch.sh is NOT executable"
 fi
 
 # Content must be hash-identical to the source in the repo
 SRC_HASH=$(hash_file "$REPO_ROOT/hooks/lib/default-branch.sh")
-assert_hash_equals "$S11/.claude/hooks/lib/default-branch.sh" "$SRC_HASH" \
+assert_hash_equals "$S11/.forge/hooks/lib/default-branch.sh" "$SRC_HASH" \
     "installed default-branch.sh matches source (hash-identical)"
 
 # review-breaker.sh — same three assertions (installed, executable, hash-identical)
-assert_file_exists "$S11/.claude/hooks/lib/review-breaker.sh" \
-    ".claude/hooks/lib/review-breaker.sh installed"
+assert_file_exists "$S11/.forge/hooks/lib/review-breaker.sh" \
+    ".forge/hooks/lib/review-breaker.sh installed"
 
-if [[ -x "$S11/.claude/hooks/lib/review-breaker.sh" ]]; then
-    pass ".claude/hooks/lib/review-breaker.sh is executable"
+if [[ -x "$S11/.forge/hooks/lib/review-breaker.sh" ]]; then
+    pass ".forge/hooks/lib/review-breaker.sh is executable"
 else
-    fail ".claude/hooks/lib/review-breaker.sh is NOT executable"
+    fail ".forge/hooks/lib/review-breaker.sh is NOT executable"
 fi
 
 SRC_HASH_RS=$(hash_file "$REPO_ROOT/hooks/lib/review-breaker.sh")
-assert_hash_equals "$S11/.claude/hooks/lib/review-breaker.sh" "$SRC_HASH_RS" \
+assert_hash_equals "$S11/.forge/hooks/lib/review-breaker.sh" "$SRC_HASH_RS" \
     "installed review-breaker.sh matches source (hash-identical)"
 
 # review-breaker.ps1 — PowerShell mirror is shipped by setup.sh too (dot-sourced by
 # the .ps1 gate hooks on Windows). Assert presence + hash-identical (not +x: .ps1
 # files are not chmod'd by setup.sh).
-assert_file_exists "$S11/.claude/hooks/lib/review-breaker.ps1" \
-    ".claude/hooks/lib/review-breaker.ps1 installed"
+assert_file_exists "$S11/.forge/hooks/lib/review-breaker.ps1" \
+    ".forge/hooks/lib/review-breaker.ps1 installed"
 
 SRC_HASH_RSPS=$(hash_file "$REPO_ROOT/hooks/lib/review-breaker.ps1")
-assert_hash_equals "$S11/.claude/hooks/lib/review-breaker.ps1" "$SRC_HASH_RSPS" \
+assert_hash_equals "$S11/.forge/hooks/lib/review-breaker.ps1" "$SRC_HASH_RSPS" \
     "installed review-breaker.ps1 matches source (hash-identical)"
 
-# Note: setup.ps1 (Windows installer) installs default-branch.ps1; setup.sh
-# (Unix installer) installs only default-branch.sh. The cross-installer parity
-# is covered by test-contracts.sh (Contract: hooks/lib parity setup.sh ↔ setup.ps1).
+for retired_helper in default-branch.sh default-branch.ps1 review-breaker.sh review-breaker.ps1 codex-pty.sh codex-pty.ps1 codex-pty-helper.py; do
+    assert_file_missing "$S11/.claude/hooks/lib/$retired_helper" \
+        "ordinary v6 setup does not recreate retired .claude helper $retired_helper"
+done
+assert_contains "$S11/.forge/skills/council/SKILL.template.md" ".forge/hooks/lib/codex-pty.sh" \
+    "installed council routes Unix Codex calls through the canonical shim"
+assert_not_contains "$S11/.forge/skills/council/SKILL.template.md" ".claude/hooks/lib/codex-pty" \
+    "installed council does not point at retired Claude-private shim copies"
+assert_contains "$S11/.forge/skills/council/references/peer-review-protocol.md" ".forge/hooks/lib/codex-pty.sh" \
+    "installed council protocol routes through the canonical shim"
+assert_not_contains "$S11/.forge/skills/council/references/peer-review-protocol.md" ".claude/hooks/lib/codex-pty" \
+    "installed council protocol has no retired shim path"
 
 # ===========================================================================
 # Test 12: state.md, ADR, gitignore install assertions (PR #2 — continuity-split)
 # ===========================================================================
 start_test "Test 12: continuity-split install assertions"
 
-# Verify state.template.md installs to .claude/local/state.md (fresh install).
+# Verify v6 state exists only at the canonical local path on a fresh install.
 test_state_md_installs() {
     local scratch; scratch=$(scratch_dir state-md-install)
     ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
-    if [ -f "$scratch/.claude/local/state.md" ]; then
-        pass ".claude/local/state.md installed on fresh setup"
+    if [ -f "$scratch/.forge/local/state.md" ]; then
+        pass ".forge/local/state.md installed on fresh setup"
     else
-        fail ".claude/local/state.md NOT installed on fresh setup"
+        fail ".forge/local/state.md NOT installed on fresh setup"
     fi
-    # The harness-side state.template.md (from T12 Step 3 amendment) is also installed.
-    if [ -f "$scratch/.claude/state.template.md" ]; then
-        pass ".claude/state.template.md installed (T12 Step 3 amendment)"
-    else
-        fail ".claude/state.template.md NOT installed (T12 Step 3 amendment expected)"
-    fi
+    assert_file_missing "$scratch/.claude/local/state.md" \
+        "fresh v6 setup does not recreate legacy volatile state"
+    assert_file_missing "$scratch/.claude/state.template.md" \
+        "fresh v6 setup does not recreate legacy state template"
     # state.template.md (root) ships in the harness source tree.
     if [ -f "$REPO_ROOT/state.template.md" ]; then
         pass "state.template.md ships in repo root (source of truth)"
@@ -786,15 +795,15 @@ test_f_preserves_existing_continuity() {
     fi
 }
 
-# P2-3 regression guard: -f must NEVER overwrite an existing populated
-# .claude/local/state.md. The if-guard at setup.sh:533 protects this today, but
-# a future refactor could replace it with copy_file (which overwrites under -f).
+# Compatibility guard: -f must never overwrite an existing populated legacy
+# .claude/local/state.md, even though fresh v6 setup no longer creates it.
 test_f_preserves_existing_state_md() {
     local scratch; scratch=$(scratch_dir f-preserves-state-md)
     # Initial install creates state.md.
     ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
-    # Simulate a developer populating state.md with real workflow content.
-    echo "## USER WORKFLOW STATE SENTINEL" >> "$scratch/.claude/local/state.md"
+    # Simulate a developer-owned legacy state file after v6 installation.
+    mkdir -p "$scratch/.claude/local"
+    echo "## USER WORKFLOW STATE SENTINEL" > "$scratch/.claude/local/state.md"
     local before; before=$(hash_file "$scratch/.claude/local/state.md")
     # Re-run with -f. state.md must NOT be overwritten.
     ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
@@ -808,7 +817,7 @@ test_f_preserves_existing_state_md() {
 
 # P2-2 regression guard: fresh-install banner must NOT mention CONTINUITY.md
 # (post PR #2, no CONTINUITY.md is created — pointing users at it is misleading).
-# It SHOULD mention the new artifacts (.claude/local/state.md and docs/adr/).
+# It SHOULD mention the new artifacts (.forge/local/state.md and docs/adr/).
 test_fresh_install_banner_no_continuity_ref() {
     local scratch; scratch=$(scratch_dir fresh-banner-no-continuity)
     local log="$scratch/.setup.log"

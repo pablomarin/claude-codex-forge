@@ -233,12 +233,19 @@ assert_contains "$S3/invalid-evidence" 'FORGE_STATE_INVALID' \
 start_test "stamped exact v5 refresh translates state, installs both hosts, and reports categories"
 S4=$(scratch_dir full-refresh-happy)
 make_git_repo "$S4"
+S4_PHYSICAL=$(cd "$S4" && pwd -P)
 mkdir -p "$S4/.claude/hooks" "$S4/.claude/local" "$S4/.claude/commands"
 printf '5.61\n' > "$S4/.claude/.forge-version"
 git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/session-start.sh \
     > "$S4/.claude/hooks/session-start.sh"
 git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:commands/new-feature.md \
     > "$S4/.claude/commands/new-feature.md"
+mkdir -p "$S4/docs/adr"
+git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/README.md \
+    > "$S4/docs/adr/README.md"
+mkdir -p "$S4/.fakehome/.forge/bin"
+: > "$S4/.fakehome/.forge/bin/forge-goal-authorize"
+chmod +x "$S4/.fakehome/.forge/bin/forge-goal-authorize"
 write_active_v5_state "$S4" "V5_CHECKPOINT_TOKEN"
 printf 'SEED_SNAPSHOT_BYTES\n' > "$S4/.claude/local/.state-seed-snapshot.md"
 printf 'CUSTOM_EXTENSION_BYTES\n' > "$S4/.claude/developer-extension.txt"
@@ -266,6 +273,19 @@ assert_contains "$S4/refresh.log" "CREATED" "categorized CREATED report emitted"
 assert_contains "$S4/refresh.log" "REWRITTEN" "categorized REWRITTEN report emitted"
 assert_contains "$S4/refresh.log" "PRESERVED" "categorized PRESERVED report emitted"
 assert_contains "$S4/refresh.log" "INSTALLATION: MATERIALIZED" "materialization status emitted"
+assert_contains "$S4/refresh.log" "CODEX_HOOKS: MATERIALIZED primary worktree registration" \
+    "transaction diagnostics classify the real primary checkout"
+assert_not_contains "$S4/refresh.log" "CODEX_HOOKS: BLOCKED linked worktree" \
+    "transaction staging is never misreported as a linked worktree"
+assert_contains "$S4/refresh.log" "VERIFY_RUNTIME: '$S4_PHYSICAL/.forge/bin/verify-runtime' live --project-root '$S4_PHYSICAL'" \
+    "runtime diagnostics name the live project rather than transaction staging"
+assert_contains "$S4/refresh.log" "GOAL_OVERLAY: BLOCKED pending scripts/qualify-goal-feasibility.sh" \
+    "transaction diagnostics inspect the operator home"
+assert_not_contains "$S4/refresh.log" "GOAL_OVERLAY: BLOCKED run '$REPO_ROOT/setup.sh --global'" \
+    "transaction staging does not hide an installed global goal helper"
+assert_contains "$S4/refresh.log" "DELETED: docs/adr/README.md (exact released Forge seed)" \
+    "exact retired seed deletion is distinguished from project content"
+assert_file_missing "$S4/docs/adr/README.md" "exact released ADR seed is retired"
 
 start_test "ambiguous legacy bytes and old/new state conflicts block before mutation"
 S5=$(scratch_dir full-refresh-blocked)

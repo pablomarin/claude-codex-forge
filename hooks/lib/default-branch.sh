@@ -13,8 +13,8 @@
 #   - All git stderr redirected to /dev/null (silent contract)
 #
 # Dual-mode:
-#   Script-call:  default_branch=$(bash "$ROOT/.claude/hooks/lib/default-branch.sh") || default_branch="main"
-#   Source-mode:  source "$ROOT/.claude/hooks/lib/default-branch.sh"
+#   Script-call:  default_branch=$(bash "$ROOT/.forge/hooks/lib/default-branch.sh") || default_branch="main"
+#   Source-mode:  source "$ROOT/.forge/hooks/lib/default-branch.sh"
 #                 default_branch=$(detect_default_branch) || default_branch="main"
 #
 # KNOWN LIMITATION — stale-rename detection:

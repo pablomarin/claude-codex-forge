@@ -95,7 +95,7 @@ in addition to the dispatcher.
 2. The question/decision + context
 3. Instruction to follow the output schema from `references/output-schema.md`
 
-**Codex advisors:** Use `.claude/hooks/lib/codex-pty.sh exec` (the PTY shim — works around openai/codex#19945) via the Bash tool with `run_in_background: true`. On Windows, use `.claude/hooks/lib/codex-pty.ps1` instead. Each call includes:
+**Codex advisors:** Use `.forge/hooks/lib/codex-pty.sh exec` (the PTY shim — works around openai/codex#19945) via the Bash tool with `run_in_background: true`. On Windows, use `.forge/hooks/lib/codex-pty.ps1` instead. Each call includes:
 
 1. The persona text
 2. The question/decision + context
@@ -128,7 +128,7 @@ Construct the chairman prompt with:
 - Instruction to produce the Chairman Output Format from `references/output-schema.md`
 - Explicit instruction: "You MUST include a Minority Report section if any advisor OBJECTed"
 
-Run via `.claude/hooks/lib/codex-pty.sh exec` with `reasoning_effort=xhigh` AND `--output-last-message /tmp/council_chairman_response.txt`. Redirect stdout+stderr to `/tmp/council_chairman.txt`. Timeout: 1200000ms.
+Run via `.forge/hooks/lib/codex-pty.sh exec` with `reasoning_effort=xhigh` AND `--output-last-message /tmp/council_chairman_response.txt`. Redirect stdout+stderr to `/tmp/council_chairman.txt`. Timeout: 1200000ms.
 
 See `references/peer-review-protocol.md` for the exact chairman command and the two-file Output Capture pattern.
 

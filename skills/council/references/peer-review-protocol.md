@@ -66,10 +66,10 @@ Every codex call writes TWO files:
 
 ### Codex Advisor Dispatch
 
-Run via the codex-pty shim (`.claude/hooks/lib/codex-pty.sh`) — works around openai/codex#19945, which silently drops `codex exec` output when stdio is detached from a TTY (Claude Code's Bash tool). On Windows, use `.claude/hooks/lib/codex-pty.ps1` instead. Both forward args verbatim to `codex exec`:
+Run via the codex-pty shim (`.forge/hooks/lib/codex-pty.sh`) — works around openai/codex#19945, which silently drops `codex exec` output when stdio is detached from a TTY (Claude Code's Bash tool). On Windows, use `.forge/hooks/lib/codex-pty.ps1` instead. Both forward args verbatim to `codex exec`:
 
 ```bash
-.claude/hooks/lib/codex-pty.sh exec \
+.forge/hooks/lib/codex-pty.sh exec \
   -m "gpt-5.6-sol" \
   -c model_reasoning_effort="high" \
   -c service_tier="fast" \
@@ -92,7 +92,7 @@ Run Codex advisors with `run_in_background: true` in the Bash tool so they execu
 After all advisors complete, construct the chairman prompt:
 
 ```bash
-.claude/hooks/lib/codex-pty.sh exec \
+.forge/hooks/lib/codex-pty.sh exec \
   -m "gpt-5.6-sol" \
   -c model_reasoning_effort="xhigh" \
   -c service_tier="fast" \
@@ -150,7 +150,7 @@ This is the single source of truth for what constitutes a "high-impact surface."
 Before firing the full council, the Contrarian/Codex validates the "default wins" claim:
 
 ```bash
-.claude/hooks/lib/codex-pty.sh exec \
+.forge/hooks/lib/codex-pty.sh exec \
   -m "gpt-5.6-sol" \
   -c model_reasoning_effort="high" \
   -c service_tier="fast" \
