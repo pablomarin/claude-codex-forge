@@ -42,6 +42,7 @@ function Read-ManagedManifest {
 
 function Get-PrimaryCheckout {
     param([string]$Project)
+    if (-not (Test-Path -LiteralPath (Join-Path $Project ".git"))) { return "" }
     $lines = @(& git -C $Project worktree list --porcelain 2>$null)
     if ($LASTEXITCODE -ne 0) { return "" }
     foreach ($line in $lines) {
