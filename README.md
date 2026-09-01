@@ -285,14 +285,25 @@ preferred engine ran.
 | --- | --- | --- |
 | Fresh project | `setup.sh -p "My Project"` | `setup.ps1 -Project "My Project"` |
 | Global install | `setup.sh --global` | `setup.ps1 -Global` |
-| v5 → v6 project refresh | `./setup.sh -F` | `./setup.ps1 -FullRefresh` or `-R` |
-| Global authoritative refresh | `./setup.sh --global -F` | `./setup.ps1 -Global -FullRefresh` |
-| Legacy continuity migration only | `setup.sh --migrate` | `setup.ps1 -Migrate` |
+| Refresh an existing v6 install | `./setup.sh -f` | `./setup.ps1 -Force` |
+| Preview a v5/mixed → v6 project migration | `./setup.sh -F --dry-run` | `./setup.ps1 -FullRefresh -DryRun` |
+| Execute a ready project migration | `./setup.sh -F` | `./setup.ps1 -FullRefresh` or `-R` |
+| Preview a global migration | `./setup.sh --global -F --dry-run` | `./setup.ps1 -Global -FullRefresh -DryRun` |
+| Execute a ready global migration | `./setup.sh --global -F` | `./setup.ps1 -Global -FullRefresh` |
 | Playwright scaffold | `setup.sh -t fullstack --with-playwright` | `setup.ps1 -Tech fullstack -WithPlaywright` |
+
+Use `-f` only to refresh an existing v6 install. Use `-F` for the ownership-aware v5 or mixed-tree
+migration, and always preview it first. Preview performs the real discovery and staging validation
+without writing the project. `UPGRADE: READY` means the filesystem plan is safe to execute;
+`UPGRADE: BLOCKED` lists every ownership or state choice to resolve in one report. A successful run
+ends with `ACTIVE_FORGE: v6`: one canonical `.forge/` harness and thin native adapters, with project
+content preserved. `MATERIALIZED` still does not imply that either host is `RUNTIME_READY`.
 
 Full refresh is transactional. It proves released ownership, stages replacements, preserves user
 regions and custom configuration, translates state, writes `.forge/version` last, and rolls back on
-failure. An ambiguity reports `PRESERVED_COMPAT_BLOCKED` instead of guessing.
+failure. It changes only the current worktree; sibling linked worktrees keep their own local state
+and must be refreshed after the migration commit reaches their branch. Do not manually synchronize
+`CLAUDE.md` and `AGENTS.md`: their bounded Forge blocks point to the same canonical policy.
 
 Commit the harness as one versioned project change:
 

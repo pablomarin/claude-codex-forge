@@ -102,7 +102,7 @@ function Test-ForgeAuthorization([string]$Receipt, $Details) {
     if (-not (Test-Path $root -PathType Container) -or -not (Test-ForgeExternalGoalFile $Receipt $root $Details)) { return $false }
     $fields = Get-ForgeGoalFields $Receipt
     $writer = Join-Path $TrustedHome ".forge\bin\forge-goal-authorize.ps1"; if (-not (Test-Path $writer)) { return $false }
-    $writerText = [IO.File]::ReadAllText($writer); if ($writerText -notmatch '(?m)^\$WriterRevision = ''([^'']+)''$') { return $false }; $writerRevision = $Matches[1]
+    $writerText = [IO.File]::ReadAllText($writer); if ($writerText -notmatch '(?m)^\$WriterRevision = ''([^'']+)''\r?$') { return $false }; $writerRevision = $Matches[1]
     return ($fields["format"] -ceq "forge-goal-authorization-v1" -and $fields["project_root"] -ieq $Details.Root -and $fields["git_common_dir"] -ieq $Details.Common -and $fields["project_id"] -ceq $Details.Id -and $fields["approval_channel"] -ceq "physical-operator-action" -and $fields["writer_revision"] -ceq $writerRevision -and $fields["ceiling"] -eq "1")
 }
 
@@ -115,8 +115,8 @@ function Test-ForgeTrustedCodexCapture([string]$Receipt, $Details) {
     if (-not (Test-ForgeGoalRegularFile $captureHelper) -or -not (Test-ForgeGoalRegularFile "$captureHelper.sha256") -or -not (Test-ForgeGoalRegularFile $writer) -or -not (Test-ForgeGoalRegularFile "$writer.sha256")) { return $false }
     if ([IO.File]::ReadAllText("$captureHelper.sha256").Trim() -cne (Get-ForgeGoalHash $captureHelper) -or [IO.File]::ReadAllText("$writer.sha256").Trim() -cne (Get-ForgeGoalHash $writer)) { return $false }
     $captureText = [IO.File]::ReadAllText($captureHelper); $writerText = [IO.File]::ReadAllText($writer)
-    if ($captureText -notmatch '(?m)^\$CaptureRevision = ''([^'']+)''$') { return $false }; $captureRevision = $Matches[1]
-    if ($writerText -notmatch '(?m)^\$WriterRevision = ''([^'']+)''$') { return $false }; $writerRevision = $Matches[1]
+    if ($captureText -notmatch '(?m)^\$CaptureRevision = ''([^'']+)''\r?$') { return $false }; $captureRevision = $Matches[1]
+    if ($writerText -notmatch '(?m)^\$WriterRevision = ''([^'']+)''\r?$') { return $false }; $writerRevision = $Matches[1]
     if ($fields["capture_revision"] -cne $captureRevision -or $fields["writer_revision"] -cne $writerRevision) { return $false }
     $sessionDir = Split-Path -Parent (Resolve-Path $Receipt).Path; $transcript = $fields["transcript_path"]; $result = $fields["result_path"]
     if (-not (Test-ForgeExternalGoalFile $transcript $sessionDir $Details) -or -not (Test-ForgeExternalGoalFile $result $sessionDir $Details)) { return $false }

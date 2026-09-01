@@ -16,6 +16,7 @@ Exit codes:
 
 import argparse
 import contextlib
+import dataclasses
 import hashlib
 import json
 import os
@@ -24,6 +25,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime
@@ -32,6 +34,9 @@ from typing import Optional
 
 
 STATE_SCHEMA = b"<!-- forge:state-schema v6 -->\n"
+RECONCILIATION_SENTINEL = re.compile(
+    rb"\A<!-- forge:(?:migrated|reconciled) \d{4}-\d{2}-\d{2} -->\r?\n(?:\r?\n)?"
+)
 CONTINUITY_RECEIPT_SCHEMA = "forge-continuity-state-translation-v1"
 CONTINUITY_RECEIPT_RELATIVE = Path(
     ".forge/local/migration-evidence/continuity-state-v5-v6.json"
@@ -41,6 +46,55 @@ TERMINAL_JOURNAL_PHASES = {"committed", "rolled_back", "recovered"}
 
 class RefreshBlocked(RuntimeError):
     """A fail-closed migration disposition that must be shown to the operator."""
+
+
+@dataclasses.dataclass(frozen=True, order=True)
+class UpgradeFinding:
+    code: str
+    scope: str
+    path: str
+    detail: str
+    resolution: str
+
+
+@dataclasses.dataclass(frozen=True)
+class LegacyInventory:
+    selector: str
+    region_selector: str
+    recognized: bool
+    proven_legacy: frozenset[str]
+    findings: tuple[UpgradeFinding, ...]
+
+
+def print_refresh_report(
+    report: dict[str, list[str]],
+    findings: tuple[UpgradeFinding, ...],
+    *,
+    upgrade: str,
+    active_forge: str,
+    next_step: str,
+) -> None:
+    for category, values in report.items():
+        entries = sorted(set(values))
+        if entries:
+            for entry in entries:
+                print(f"{category}: {entry}")
+        else:
+            print(f"{category}: (none)")
+    for finding in findings:
+        print(
+            f"BLOCKED: code={finding.code} scope={finding.scope} path={finding.path} "
+            f"detail={finding.detail} resolution={finding.resolution}"
+        )
+    print(f"UPGRADE: {upgrade}")
+    print(f"ACTIVE_FORGE: {active_forge}")
+    print(
+        "CHANGES: "
+        f"created={len(set(report['CREATED']))} rewritten={len(set(report['REWRITTEN']))} "
+        f"deleted={len(set(report['DELETED']))} preserved={len(set(report['PRESERVED']))}"
+    )
+    print(f"BLOCKERS: {len(findings)}")
+    print(f"NEXT_STEP: {next_step}")
 
 
 def sha256_path(path: Path) -> str:
@@ -122,7 +176,9 @@ def read_tsv(path: Path, expected_fields: int) -> list[list[str]]:
     return rows
 
 
-def released_ownership(repo_root: Path) -> tuple[dict[str, tuple[str, str]], list[list[str]]]:
+def released_ownership(
+    repo_root: Path,
+) -> tuple[dict[str, tuple[str, str]], list[list[str]], list[list[str]]]:
     releases = {
         version: (fingerprint_set, region_set)
         for version, _commit, _mode, fingerprint_set, region_set in read_tsv(
@@ -130,7 +186,8 @@ def released_ownership(repo_root: Path) -> tuple[dict[str, tuple[str, str]], lis
         )
     }
     fingerprints = read_tsv(repo_root / "manifests/legacy-v5-fingerprints.tsv", 5)
-    return releases, fingerprints
+    aliases = read_tsv(repo_root / "manifests/legacy-v5-aliases.tsv", 5)
+    return releases, fingerprints, aliases
 
 
 def transaction_destination_allowed(
@@ -188,6 +245,150 @@ def fingerprint_hashes(
             continue
         result.setdefault(destination, set()).add(digest)
     return result
+
+
+def inventory_legacy(
+    repo_root: Path, target: Path, scope: str, platform: str
+) -> LegacyInventory:
+    releases, fingerprints, aliases = released_ownership(repo_root)
+    findings: list[UpgradeFinding] = []
+    proven_legacy: set[str] = set()
+    current_v6 = False
+    v6_stamp = target / ".forge/version"
+    if v6_stamp.is_file() and not v6_stamp.is_symlink():
+        current_v6 = v6_stamp.read_text(encoding="utf-8", errors="replace").strip() == "6"
+
+    stamp_relative = ".claude/.forge-version"
+    stamp = target / stamp_relative
+    if stamp.exists() or stamp.is_symlink():
+        reject_link_ancestors(target, relative_path(stamp_relative))
+        if not stamp.is_file():
+            raise RefreshBlocked("legacy Forge release stamp is not a regular file")
+    version = stamp.read_text(encoding="utf-8", errors="replace").strip() if stamp.is_file() else ""
+    # Current v6 releases before upgrade hardening still wrote the historical
+    # advisory stamp. It is inert once the canonical v6 stamp exists and must
+    # not make an otherwise healthy v6 install look like an unsupported v5.
+    if version and not current_v6 and version not in releases:
+        findings.append(
+            UpgradeFinding(
+                "UNSUPPORTED_LEGACY_RELEASE",
+                scope,
+                stamp_relative,
+                f"unsupported legacy Forge release stamp: {version}",
+                "install a supported released v5 snapshot or reconcile the legacy harness manually",
+            )
+        )
+    selector, region_selector = releases.get(version, ("", "")) if not current_v6 else ("", "")
+    recognized = bool(version and version in releases and not current_v6)
+    if recognized:
+        proven_legacy.add(stamp_relative)
+
+    allowed = fingerprint_hashes(fingerprints, selector, scope) if selector else {}
+    legacy_rows = [] if current_v6 else read_tsv(repo_root / "manifests/legacy-v5.tsv", 9)
+    seen_destinations: set[str] = set()
+    for kind, _source, destination, row_scope, row_platform, _host, ownership, _selector, _proof in legacy_rows:
+        if (
+            row_scope != scope
+            or row_platform not in {"all", platform}
+            or destination in seen_destinations
+            or "__PLAYWRIGHT_DIR__" in destination
+            or destination in {"CLAUDE.md", ".claude/CLAUDE.md"}
+        ):
+            continue
+        seen_destinations.add(destination)
+        path = target / relative_path(destination)
+        if not path.exists() and not path.is_symlink():
+            continue
+        reject_link_ancestors(target, relative_path(destination))
+        if kind == "merge" or ownership in {"managed-entry", "managed-line", "generated-value"}:
+            continue
+        if not path.is_file():
+            raise RefreshBlocked(f"legacy managed destination is not a regular file: {destination}")
+        digest = sha256_path(path)
+        if selector:
+            verified = digest in allowed.get(destination, set())
+        else:
+            verified = any(
+                dest == destination and fingerprint_scope == scope and fp == digest
+                for _selectors, _src, dest, fingerprint_scope, fp in fingerprints
+            )
+            recognized = recognized or verified
+        if verified:
+            proven_legacy.add(destination)
+        else:
+            findings.append(
+                UpgradeFinding(
+                    "LEGACY_FILE_MODIFIED",
+                    scope,
+                    destination,
+                    "modified or unverifiable legacy managed file",
+                    "restore the released bytes or archive and remove the active legacy registration",
+                )
+            )
+
+    if not current_v6:
+        for selectors, _source, destination, row_scope, expected in aliases:
+            if row_scope != scope:
+                continue
+            path = target / relative_path(destination)
+            if not path.exists() and not path.is_symlink():
+                continue
+            reject_link_ancestors(target, relative_path(destination))
+            if not path.is_file():
+                raise RefreshBlocked(f"legacy alias destination is not a regular file: {destination}")
+            selected = bool(selector and selector in selectors.split(","))
+            digest = sha256_path(path)
+            if selected and digest == expected:
+                proven_legacy.add(destination)
+            else:
+                findings.append(
+                    UpgradeFinding(
+                        "LEGACY_ALIAS_AMBIGUOUS",
+                        scope,
+                        destination,
+                        "cross-host alias is modified or is not proven for the stamped release",
+                        "archive the project-owned file or restore the exact released alias bytes",
+                    )
+                )
+
+    json_paths = (
+        [".claude/settings.json", ".mcp.json", ".codex/hooks.json"]
+        if scope == "project"
+        else [".claude/settings.json"]
+    )
+    for relative in json_paths:
+        source = target / relative
+        if not source.exists() and not source.is_symlink():
+            continue
+        reject_link_ancestors(target, relative_path(relative))
+        if not source.is_file():
+            raise RefreshBlocked(f"protected JSON is not a regular file: {relative}")
+        try:
+            json.loads(source.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            findings.append(
+                UpgradeFinding(
+                    "PROTECTED_JSON_MALFORMED",
+                    scope,
+                    relative,
+                    "malformed JSON is opaque and cannot be authoritatively merged",
+                    "repair the JSON syntax without changing ownership, then rerun preview",
+                )
+            )
+
+    findings.extend(root_instruction_findings(repo_root, target, scope, region_selector))
+    if scope == "project":
+        findings.extend(active_harness_findings(target))
+        findings.extend(state_source_findings(target, current_v6))
+        findings.extend(continuity_file_findings(target, current_v6))
+
+    return LegacyInventory(
+        selector=selector,
+        region_selector=region_selector,
+        recognized=recognized,
+        proven_legacy=frozenset(proven_legacy),
+        findings=tuple(sorted(set(findings))),
+    )
 
 
 def line_anchor_positions(raw: bytes, anchor: str) -> list[int]:
@@ -317,6 +518,255 @@ def recognize_mixed_regions(
             f"ambiguous legacy {scope} instructions: {reason} manifest segmentation"
         )
     return successful[0][2]
+
+
+def strip_reconciliation_sentinel(raw: bytes) -> tuple[bytes, bytes]:
+    match = RECONCILIATION_SENTINEL.match(raw)
+    if match is None:
+        return b"", raw
+    return raw[: match.end()], raw[match.end() :]
+
+
+def retired_reference_detail(raw: bytes) -> str:
+    tokens = (
+        "@CONTINUITY.md",
+        "/codex",
+        ".claude/commands/",
+        ".claude/rules/",
+        ".claude/hooks/",
+    )
+    matches: list[str] = []
+    for number, line in enumerate(raw.decode("utf-8", errors="replace").splitlines(), 1):
+        present = sorted(token for token in tokens if token in line)
+        if present:
+            matches.append(f"line {number} ({', '.join(present)})")
+    return "; ".join(matches)
+
+
+def without_v6_marker_block(raw: bytes) -> bytes:
+    return re.sub(
+        rb"(?s)<!-- forge:begin v6 -->.*?<!-- forge:end v6 -->",
+        b"",
+        raw,
+    )
+
+
+def root_instruction_findings(
+    repo_root: Path, target: Path, scope: str, region_selector: str
+) -> tuple[UpgradeFinding, ...]:
+    relatives = (
+        ("CLAUDE.md", "AGENTS.md")
+        if scope == "project"
+        else (".claude/CLAUDE.md", ".codex/AGENTS.md")
+    )
+    findings: list[UpgradeFinding] = []
+    for relative in relatives:
+        path = target / relative
+        if not path.exists() and not path.is_symlink():
+            continue
+        reject_link_ancestors(target, relative_path(relative))
+        if not path.is_file():
+            raise RefreshBlocked(f"root instructions are not a regular file: {relative}")
+        raw = path.read_bytes()
+        active = raw
+        legacy_destination = "CLAUDE.md" if scope == "project" else ".claude/CLAUDE.md"
+        if relative == legacy_destination:
+            _sentinel, legacy_body = strip_reconciliation_sentinel(raw)
+            looks_legacy = (
+                legacy_body.startswith(b"# CLAUDE.md - ")
+                if scope == "project"
+                else legacy_body.startswith(b"# Global Claude Code Instructions")
+            )
+            if looks_legacy:
+                try:
+                    active = recognize_mixed_regions(
+                        repo_root, legacy_body, scope, relative, region_selector
+                    )
+                except RefreshBlocked as error:
+                    findings.append(
+                        UpgradeFinding(
+                            "ROOT_POLICY_AMBIGUOUS",
+                            scope,
+                            relative,
+                            str(error),
+                            "reconcile the project-owned root text, then rerun full refresh preview",
+                        )
+                    )
+                    continue
+        detail = retired_reference_detail(without_v6_marker_block(active))
+        if detail:
+            findings.append(
+                UpgradeFinding(
+                    "ROOT_POLICY_AMBIGUOUS",
+                    scope,
+                    relative,
+                    f"retired active Forge references: {detail}",
+                    "replace only the obsolete project-owned references with neutral project context",
+                )
+            )
+    return tuple(findings)
+
+
+def active_harness_findings(target: Path) -> tuple[UpgradeFinding, ...]:
+    harness_relative = Path(".agent-workflows")
+    harness = target / harness_relative
+    if not harness.exists() and not harness.is_symlink():
+        return ()
+    reject_link_ancestors(target, harness_relative)
+    if not harness.is_dir():
+        raise RefreshBlocked("independent harness root is not a regular directory: .agent-workflows")
+    authority_files: list[str] = []
+    for candidate in sorted(harness.rglob("*")):
+        if candidate.is_symlink():
+            raise RefreshBlocked(f"independent harness contains a symlink/reparse point: {candidate}")
+        if candidate.is_file() and (
+            "runtime" in candidate.relative_to(harness).parts
+            or "policy" in candidate.name.lower()
+        ):
+            authority_files.append(candidate.relative_to(target).as_posix())
+    references: list[str] = []
+    for relative in (
+        "CLAUDE.md",
+        "AGENTS.md",
+        ".claude/settings.json",
+        ".codex/hooks.json",
+        ".codex/config.toml",
+    ):
+        source = target / relative
+        if not source.is_file() or source.is_symlink():
+            continue
+        if ".agent-workflows" in source.read_text(encoding="utf-8", errors="replace"):
+            references.append(relative)
+    if not authority_files or not references:
+        return ()
+    signals = ", ".join(sorted(authority_files + references))
+    return (
+        UpgradeFinding(
+            "CUSTOM_HARNESS_COLLISION",
+            "project",
+            ".agent-workflows",
+            f"independent active harness authority: {signals}",
+            "archive or retire the custom harness, remove its active registrations, then rerun -F --dry-run",
+        ),
+    )
+
+
+def state_source_findings(target: Path, current_v6: bool = False) -> tuple[UpgradeFinding, ...]:
+    plausible: list[tuple[str, Path]] = []
+    receipt_problem = ""
+    for relative in (
+        ".claude/local/state.md",
+        ".forge/local/state.md",
+        ".agent-workflows/local/state.md",
+    ):
+        path = target / relative
+        if not path.exists() and not path.is_symlink():
+            continue
+        reject_link_ancestors(target, relative_path(relative))
+        if not path.is_file():
+            raise RefreshBlocked(f"state source is not a regular file: {relative}")
+        raw = path.read_bytes()
+        if raw.startswith(STATE_SCHEMA) or raw.startswith(b"# Project State"):
+            plausible.append((relative, path))
+    if current_v6:
+        legacy = target / ".claude/local/state.md"
+        canonical_template = target / ".forge/state.template.md"
+        if (
+            legacy.is_file()
+            and not legacy.is_symlink()
+            and canonical_template.is_file()
+            and not canonical_template.is_symlink()
+            and legacy.read_bytes() == canonical_template.read_bytes()
+        ):
+            plausible = [item for item in plausible if item[0] != ".claude/local/state.md"]
+    if len(plausible) < 2:
+        return ()
+    by_relative = {relative: path for relative, path in plausible}
+    if set(by_relative) == {".claude/local/state.md", ".forge/local/state.md"}:
+        try:
+            validate_continuity_receipt(
+                target,
+                by_relative[".claude/local/state.md"],
+                by_relative[".forge/local/state.md"],
+            )
+            return ()
+        except RefreshBlocked as error:
+            receipt_problem = f"; continuity translation receipt invalid: {error}"
+    sources = ", ".join(
+        f"{relative} sha256={sha256_path(path)} mtime_ns={path.stat().st_mtime_ns}"
+        for relative, path in plausible
+    )
+    return (
+        UpgradeFinding(
+            "MULTIPLE_STATE_SOURCES",
+            "project",
+            ".forge/local/state.md",
+            f"state conflict: multiple plausible state sources: {sources}{receipt_problem}",
+            "choose one authoritative state, archive the others, then rerun -F --dry-run",
+        ),
+    )
+
+
+def continuity_file_findings(
+    target: Path, current_v6: bool = False
+) -> tuple[UpgradeFinding, ...]:
+    """Require explicit, byte-bound evidence before accepting legacy continuity."""
+    relative = Path("CONTINUITY.md")
+    continuity = target / relative
+    if not continuity.exists() and not continuity.is_symlink():
+        return ()
+    reject_link_ancestors(target, relative)
+    if continuity.is_symlink() or not continuity.is_file():
+        raise RefreshBlocked("legacy CONTINUITY.md is not a regular file")
+
+    claude = target / "CLAUDE.md"
+    old = target / ".claude/local/state.md"
+    new = target / ".forge/local/state.md"
+    receipt = target / CONTINUITY_RECEIPT_RELATIVE
+    evidence_problem = "recognized migration evidence is missing"
+    if (
+        claude.is_file()
+        and not claude.is_symlink()
+        and b"<!-- forge:migrated" in claude.read_bytes()
+        and new.is_file()
+        and not new.is_symlink()
+    ):
+        try:
+            if old.is_file() and not old.is_symlink():
+                validate_continuity_receipt(target, old, new)
+                return ()
+            if current_v6:
+                reject_link_ancestors(target, CONTINUITY_RECEIPT_RELATIVE)
+                if receipt.is_symlink() or not receipt.is_file():
+                    raise RefreshBlocked(
+                        "continuity translation receipt is missing or not a regular file"
+                    )
+                actual = json.loads(receipt.read_text(encoding="utf-8"))
+                if (
+                    actual.get("schema") != CONTINUITY_RECEIPT_SCHEMA
+                    or actual.get("source_relative") != ".claude/local/state.md"
+                    or actual.get("source_schema") != "forge-state-v5-unversioned"
+                    or not re.fullmatch(r"[0-9a-f]{64}", actual.get("source_hash", ""))
+                    or actual.get("target_relative") != ".forge/local/state.md"
+                    or actual.get("target_schema") != "forge-state-v6"
+                    or actual.get("target_hash") != sha256_path(new)
+                ):
+                    raise RefreshBlocked(
+                        "continuity translation receipt does not match the surviving canonical target"
+                    )
+                return ()
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RefreshBlocked) as error:
+            evidence_problem = str(error)
+
+    return (
+        UpgradeFinding(
+            "LEGACY_CONTINUITY_UNRESOLVED",
+            "project",
+            relative.as_posix(),
+            f"unresolved legacy continuity content sha256={sha256_path(continuity)}; {evidence_problem}",
+            "move relevant facts to project instructions, decisions to docs/adr, and active state to .forge/local/state.md; archive or remove CONTINUITY.md; then rerun -F --dry-run",
+        ),
+    )
 
 
 def strip_legacy_evidence(raw: bytes) -> bytes:
@@ -707,28 +1157,17 @@ def recover_refresh(journal_path: Path, requested_root: Path, repo_root: Path) -
 
 
 def prepare_legacy(
-    repo_root: Path, target: Path, scope: str, stage: Path, report: dict[str, list[str]]
+    repo_root: Path,
+    target: Path,
+    scope: str,
+    stage: Path,
+    report: dict[str, list[str]],
+    inventory: LegacyInventory,
 ) -> tuple[str, bool, set[str]]:
-    releases, fingerprints = released_ownership(repo_root)
-    current_v6 = False
-    v6_stamp = target / ".forge/version"
-    if v6_stamp.is_file() and not v6_stamp.is_symlink():
-        current_v6 = v6_stamp.read_text(encoding="utf-8", errors="replace").strip() == "6"
-    stamp = target / ".claude/.forge-version"
-    if stamp.exists() or stamp.is_symlink():
-        reject_link_ancestors(target, relative_path(".claude/.forge-version"))
-        if not stamp.is_file():
-            raise RefreshBlocked("legacy Forge release stamp is not a regular file")
-    version = stamp.read_text(encoding="utf-8", errors="replace").strip() if stamp.is_file() else ""
-    if version and version not in releases:
-        raise RefreshBlocked(f"unsupported legacy Forge release stamp: {version}")
-    selector = releases[version][0] if version else ""
-    region_selector = releases[version][1] if version else ""
-    recognized = bool(version)
-    proven_legacy: set[str] = set()
-    if version:
-        reject_link_ancestors(target, relative_path(".claude/.forge-version"))
-        proven_legacy.add(".claude/.forge-version")
+    selector = inventory.selector
+    region_selector = inventory.region_selector
+    recognized = inventory.recognized
+    proven_legacy = set(inventory.proven_legacy)
 
     root_instruction = target / ("CLAUDE.md" if scope == "project" else ".claude/CLAUDE.md")
     if root_instruction.exists() or root_instruction.is_symlink():
@@ -737,58 +1176,28 @@ def prepare_legacy(
             raise RefreshBlocked("legacy root instructions are not a regular file")
     if root_instruction.is_file():
         raw = root_instruction.read_bytes()
+        sentinel_prefix, legacy_body = strip_reconciliation_sentinel(raw)
         looks_legacy = (
-            raw.startswith(b"# CLAUDE.md - ")
+            legacy_body.startswith(b"# CLAUDE.md - ")
             if scope == "project"
-            else raw.startswith(b"# Global Claude Code Instructions")
+            else legacy_body.startswith(b"# Global Claude Code Instructions")
         )
         if looks_legacy:
             preserved = recognize_mixed_regions(
                 repo_root,
-                raw,
+                legacy_body,
                 scope,
                 root_instruction.relative_to(target).as_posix(),
                 region_selector,
             )
             staged_root = stage / root_instruction.relative_to(target)
             staged_root.parent.mkdir(parents=True, exist_ok=True)
-            staged_root.write_bytes(preserved)
+            staged_root.write_bytes(sentinel_prefix + preserved)
             report["PRESERVED"].append(f"{root_instruction.relative_to(target)} user regions (byte-exact)")
             recognized = True
         else:
             copy_preserved(root_instruction, stage / root_instruction.relative_to(target))
             report["PRESERVED"].append(str(root_instruction.relative_to(target)))
-
-    allowed = fingerprint_hashes(fingerprints, selector, scope) if selector else {}
-    legacy_rows = [] if current_v6 else read_tsv(repo_root / "manifests/legacy-v5.tsv", 9)
-    for kind, _source, destination, row_scope, platform, _host, ownership, _selector, _proof in legacy_rows:
-        if row_scope != scope or platform not in {"all", "unix", "windows"}:
-            continue
-        if "__PLAYWRIGHT_DIR__" in destination or destination in {"CLAUDE.md", ".claude/CLAUDE.md"}:
-            continue
-        path = target / relative_path(destination)
-        if not path.exists():
-            continue
-        reject_link_ancestors(target, relative_path(destination))
-        if kind == "merge" or ownership in {"managed-entry", "managed-line", "generated-value"}:
-            continue
-        if not path.is_file():
-            raise RefreshBlocked(f"legacy managed destination is not a regular file: {destination}")
-        digest = sha256_path(path)
-        possible = allowed.get(destination, set())
-        if selector and digest not in possible:
-            raise RefreshBlocked(f"modified or unverifiable legacy managed file: {destination}")
-        if not selector:
-            matching = {
-                selectors
-                for selectors, _src, dest, fingerprint_scope, fp in fingerprints
-                if dest == destination and fingerprint_scope == scope and fp == digest
-            }
-            if matching:
-                recognized = True
-            else:
-                raise RefreshBlocked(f"modified or unverifiable legacy managed file: {destination}")
-        proven_legacy.add(destination)
 
     for relative in (
         [".claude/settings.json", ".mcp.json", ".codex/hooks.json"]
@@ -802,7 +1211,7 @@ def prepare_legacy(
         try:
             parsed = json.loads(source.read_text(encoding="utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise RefreshBlocked(f"malformed JSON is opaque and cannot be authoritatively merged: {relative}") from error
+            raise RefreshBlocked(f"protected JSON changed after inventory: {relative}") from error
         if relative.endswith("settings.json"):
             plugins = parsed.get("enabledPlugins", {}) if isinstance(parsed, dict) else {}
             overlap = sorted(
@@ -955,6 +1364,11 @@ def materialize_stage(repo_root: Path, stage: Path, scope: str, platform: str) -
         command.extend(["--repo-root", str(repo_root), "--target", str(stage), "--scope", scope, "--platform", platform])
     environment = os.environ.copy()
     environment["FORGE_TRANSACTION_STAGE"] = "1"
+    runtime_home = stage.parent / "runtime-home"
+    environment["HOME"] = str(runtime_home)
+    environment["USERPROFILE"] = str(runtime_home)
+    environment["CODEX_HOME"] = str(runtime_home / ".codex")
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
     completed = subprocess.run(command, text=True, capture_output=True, env=environment, check=False)
     if completed.returncode:
         raise RefreshBlocked(
@@ -1218,7 +1632,13 @@ def prune_empty_transaction_directories(root: Path) -> None:
             (root / relative).rmdir()
 
 
-def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> None:
+def full_refresh(
+    repo_root: Path,
+    target: Path,
+    scope: str,
+    platform: str,
+    dry_run: bool = False,
+) -> None:
     repo_root = repo_root.resolve(strict=True)
     if scope not in {"project", "global"} or platform not in {"unix", "windows"}:
         raise RefreshBlocked("invalid full-refresh scope or platform")
@@ -1248,10 +1668,11 @@ def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> No
 
     validate_no_incomplete_journal(target)
     txid = f"{int(time.time())}-{uuid.uuid4().hex}"
-    guard = acquire_guard(target, txid)
-    work_root = target / ".forge/local/migration-staging" / txid
-    stage = work_root / "stage"
-    quarantine = work_root / "quarantine"
+    temporary: Optional[tempfile.TemporaryDirectory] = None
+    guard: Optional[Path] = None
+    work_root: Optional[Path] = None
+    stage: Optional[Path] = None
+    quarantine: Optional[Path] = None
     journal_path = target / ".forge/local/migration-journals" / f"{txid}.json"
     report: dict[str, list[str]] = {
         category: []
@@ -1267,8 +1688,41 @@ def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> No
     }
     journal: dict = {}
     try:
+        inventory = inventory_legacy(repo_root, target, scope, platform)
+        if inventory.findings:
+            print_refresh_report(
+                report,
+                inventory.findings,
+                upgrade="BLOCKED",
+                active_forge="unchanged",
+                next_step="resolve every listed blocker, then rerun full refresh preview",
+            )
+            raise RefreshBlocked("upgrade inventory contains blocking findings")
+        if not dry_run:
+            guard = acquire_guard(target, txid)
+            # Re-read after serialization so the transaction never relies on a
+            # preview that raced with another local process.
+            inventory = inventory_legacy(repo_root, target, scope, platform)
+            if inventory.findings:
+                print_refresh_report(
+                    report,
+                    inventory.findings,
+                    upgrade="BLOCKED",
+                    active_forge="unchanged",
+                    next_step="resolve every listed blocker, then rerun full refresh preview",
+                )
+                raise RefreshBlocked("upgrade inventory contains blocking findings")
+        if dry_run:
+            temporary = tempfile.TemporaryDirectory(prefix="forge-full-refresh-preview-")
+            work_root = Path(temporary.name)
+        else:
+            work_root = target / ".forge/local/migration-staging" / txid
+        stage = work_root / "stage"
+        quarantine = work_root / "quarantine"
         stage.mkdir(parents=True)
-        _selector, legacy, proven_legacy = prepare_legacy(repo_root, target, scope, stage, report)
+        _selector, legacy, proven_legacy = prepare_legacy(
+            repo_root, target, scope, stage, report, inventory
+        )
         translated_state_sources: set[str] = set()
         if scope == "project":
             translated_state_sources = prepare_state(target, stage, repo_root, report)
@@ -1308,9 +1762,27 @@ def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> No
         # collision-free backups under .forge/local/migration-backups/<txid>.
         for backup in stage.rglob("*.bak.*"):
             backup.unlink()
-        backup_root = stage / ".forge/local/migration-backups" / txid
         initial_operations = operation_files(stage, target, quarantine)
         deletes = deletion_operations(target, quarantine, legacy_deletions, report)
+        for operation in initial_operations:
+            if operation["original_hash"]:
+                report["REWRITTEN"].append(operation["relative"])
+            else:
+                report["CREATED"].append(operation["relative"])
+        if dry_run:
+            print(materializer_output)
+            if report["PRESERVED_COMPAT_BLOCKED"]:
+                print("claude RUNTIME_READY: BLOCKED preserved compatibility plugin requires qualification")
+            print_refresh_report(
+                report,
+                (),
+                upgrade="READY",
+                active_forge="unchanged",
+                next_step="run full refresh without --dry-run",
+            )
+            return
+
+        backup_root = stage / ".forge/local/migration-backups" / txid
         for operation in initial_operations + deletes:
             if not operation["original_hash"]:
                 continue
@@ -1319,11 +1791,6 @@ def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> No
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
 
-        for operation in initial_operations:
-            if operation["original_hash"]:
-                report["REWRITTEN"].append(operation["relative"])
-            else:
-                report["CREATED"].append(operation["relative"])
         report_path = stage / ".forge/local/migration-reports" / f"{txid}.tsv"
         report_path.parent.mkdir(parents=True, exist_ok=True)
         with report_path.open("w", encoding="utf-8", newline="\n") as handle:
@@ -1365,24 +1832,29 @@ def full_refresh(repo_root: Path, target: Path, scope: str, platform: str) -> No
         journal["phase"] = "committed"
         durable_json(journal_path, journal)
         print(materializer_output)
-        for category, entries in report.items():
-            if entries:
-                for entry in entries:
-                    print(f"{category}: {entry}")
-            else:
-                print(f"{category}: (none)")
         if report["PRESERVED_COMPAT_BLOCKED"]:
             print("claude RUNTIME_READY: BLOCKED preserved compatibility plugin requires qualification")
         print("INSTALLATION: MATERIALIZED")
+        print_refresh_report(
+            report,
+            (),
+            upgrade="READY",
+            active_forge="v6",
+            next_step="review per-host RUNTIME_READY diagnostics",
+        )
     except RefreshBlocked as error:
         report["BLOCKED"].append(str(error))
         print(f"BLOCKED: {error}", file=sys.stderr)
         raise
     finally:
-        if journal.get("phase") != "recovery_required":
-            shutil.rmtree(work_root, ignore_errors=True)
-        shutil.rmtree(guard, ignore_errors=True)
-        prune_empty_transaction_directories(target)
+        if temporary is not None:
+            temporary.cleanup()
+        else:
+            if work_root is not None and journal.get("phase") != "recovery_required":
+                shutil.rmtree(work_root, ignore_errors=True)
+            if guard is not None:
+                shutil.rmtree(guard, ignore_errors=True)
+            prune_empty_transaction_directories(target)
 
 
 def full_refresh_cli(argv: list[str]) -> int:
@@ -1391,9 +1863,10 @@ def full_refresh_cli(argv: list[str]) -> int:
     parser.add_argument("--target", required=True, type=Path)
     parser.add_argument("--scope", required=True, choices=("project", "global"))
     parser.add_argument("--platform", required=True, choices=("unix", "windows"))
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     try:
-        full_refresh(args.repo_root, args.target, args.scope, args.platform)
+        full_refresh(args.repo_root, args.target, args.scope, args.platform, args.dry_run)
     except (RefreshBlocked, OSError, ValueError, json.JSONDecodeError) as error:
         print(f"BLOCKED: {error}", file=sys.stderr)
         return 1

@@ -55,6 +55,13 @@ function Write-BlockedChild([string]$Path,[string]$Schema,[string]$Reason) {
     $body=@{schema=$Schema;status='BLOCKED';reason=$Reason;evidence_mode='authenticated';source_class='forge-runtime-qualifier'}|ConvertTo-Json -Compress
     [IO.File]::WriteAllText($Path,$body+"`n",$Utf8NoBom)
 }
+function Stop-QualificationProcessTree([int]$RootProcessId) {
+    $processes=@(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)
+    $tree=New-Object Collections.Generic.List[int];$pending=New-Object Collections.Generic.Queue[int]
+    $tree.Add($RootProcessId);$pending.Enqueue($RootProcessId)
+    while($pending.Count){$parent=$pending.Dequeue();foreach($child in @($processes|Where-Object{$_.ParentProcessId -eq $parent})){$childId=[int]$child.ProcessId;if(-not $tree.Contains($childId)){$tree.Add($childId);$pending.Enqueue($childId)}}}
+    foreach($processId in $tree){Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue}
+}
 function Invoke-QualificationChild([string[]]$Arguments,[string]$Receipt,[string]$Schema,[int]$TimeoutSeconds) {
     $start=New-Object Diagnostics.ProcessStartInfo
     $start.FileName='powershell.exe';$start.Arguments=(@($Arguments|ForEach-Object{ConvertTo-QualificationArgument $_}) -join ' ')
@@ -63,8 +70,8 @@ function Invoke-QualificationChild([string[]]$Arguments,[string]$Receipt,[string
     try {
         if(-not $process.Start()){Write-BlockedChild $Receipt $Schema 'qualification child failed to start';return 127}
         if(-not $process.WaitForExit($TimeoutSeconds*1000)){
-            & taskkill.exe /PID $process.Id /T /F 2>$null|Out-Null
-            try{$process.Kill()}catch{};$process.WaitForExit()
+            Stop-QualificationProcessTree $process.Id
+            try{$process.Kill()}catch{};$null=$process.WaitForExit(2000)
             Write-BlockedChild $Receipt $Schema 'qualification child timeout';return 124
         }
         $rc=$process.ExitCode

@@ -773,66 +773,24 @@ assert_contains "$SETUP_SH"  '(Full guide: $SCRIPT_DIR/docs/guides/upgrading.md)
 assert_contains "$SETUP_PS1" '(Full guide: $ScriptDir/docs/guides/upgrading.md)' \
     "setup.ps1 'Full guide' reference uses \$ScriptDir absolute path (5.17)"
 
-# (iv-bis) Migration prompt — both installers must surface --migrate (sh) /
-# -Migrate (ps1) when a legacy CONTINUITY.md is detected.
-assert_contains "$SETUP_SH"  "./setup.sh --migrate"  "setup.sh prompts --migrate for legacy CONTINUITY.md"
-assert_contains "$SETUP_PS1" "-Migrate"              "setup.ps1 prompts -Migrate for legacy CONTINUITY.md"
-
-# (v) Final-summary parity: three positive variants + negative legacy guard.
-# Post PR #2: when CONTINUITY.md is preserved the variant prompts the user to
-# run --migrate; when only CLAUDE.md is preserved the original "(user content)"
-# wording stays.
-BOTH_VARIANT_SH="Your CLAUDE.md and CONTINUITY.md were preserved (run --migrate to move content to the new structure)"
-BOTH_VARIANT_PS1="Your CLAUDE.md and CONTINUITY.md were preserved (run -Migrate to move content to the new structure)"
+# (v) Final-summary parity: preserved legacy continuity points to the one
+# authoritative, read-only upgrade inventory rather than an old semantic parser.
+BOTH_VARIANT="Your CLAUDE.md and CONTINUITY.md were preserved"
 CLAUDE_VARIANT="Your CLAUDE.md was preserved (user content)"
-CONTINUITY_VARIANT_SH="Your CONTINUITY.md was preserved (run --migrate to move content to the new structure)"
-CONTINUITY_VARIANT_PS1="Your CONTINUITY.md was preserved (run -Migrate to move content to the new structure)"
+CONTINUITY_VARIANT="Your CONTINUITY.md was preserved"
 LEGACY_STRING="were not modified"
 
-assert_contains "$SETUP_SH"  "$BOTH_VARIANT_SH"       "setup.sh has both-preserved final variant"
+assert_contains "$SETUP_SH"  "$BOTH_VARIANT"          "setup.sh has both-preserved final variant"
 assert_contains "$SETUP_SH"  "$CLAUDE_VARIANT"        "setup.sh has only-CLAUDE final variant"
-assert_contains "$SETUP_SH"  "$CONTINUITY_VARIANT_SH" "setup.sh has only-CONTINUITY final variant"
+assert_contains "$SETUP_SH"  "$CONTINUITY_VARIANT"    "setup.sh has only-CONTINUITY final variant"
 assert_not_contains "$SETUP_SH" "$LEGACY_STRING"      "setup.sh removed legacy 'were not modified'"
 
-assert_contains "$SETUP_PS1" "$BOTH_VARIANT_PS1"       "setup.ps1 has both-preserved final variant"
+assert_contains "$SETUP_PS1" "$BOTH_VARIANT"           "setup.ps1 has both-preserved final variant"
 assert_contains "$SETUP_PS1" "$CLAUDE_VARIANT"         "setup.ps1 has only-CLAUDE final variant"
-assert_contains "$SETUP_PS1" "$CONTINUITY_VARIANT_PS1" "setup.ps1 has only-CONTINUITY final variant"
+assert_contains "$SETUP_PS1" "$CONTINUITY_VARIANT"     "setup.ps1 has only-CONTINUITY final variant"
 assert_not_contains "$SETUP_PS1" "$LEGACY_STRING"      "setup.ps1 removed legacy 'were not modified'"
-
-# (v-bis) Sentinel-aware "already migrated" banner (v5.48). Once a prior
-# --migrate / -Migrate has stamped the `<!-- forge:migrated DATE -->` sentinel into
-# CLAUDE.md, CONTINUITY.md is preserved on disk but redundant — the banner drops the
-# unsatisfiable "run --migrate" nag and points at removal (gated on the user
-# confirming the content landed; NOT an unconditional "safe to delete"). Detection is
-# gated on the CLAUDE.md sentinel only, so the migrated banner always implies CLAUDE.md
-# was preserved — there is no reachable "CONTINUITY-only migrated" variant. The date is
-# spliced via a guarded paren var (empty when the sentinel carries no valid date).
-MIGRATED_BOTH_SH="Your CLAUDE.md was preserved. CONTINUITY.md already migrated"
-MIGRATED_BOTH_PS1="Your CLAUDE.md was preserved. CONTINUITY.md already migrated"
-
-assert_contains "$SETUP_SH"  "$MIGRATED_BOTH_SH"  "setup.sh has migrated removal banner (5.48)"
-assert_contains "$SETUP_SH"  "content landed"     "setup.sh migrated banner gates removal on 'content landed' (5.48)"
-assert_contains "$SETUP_PS1" "$MIGRATED_BOTH_PS1" "setup.ps1 has migrated removal banner (5.48)"
-assert_contains "$SETUP_PS1" "content landed"     "setup.ps1 migrated banner gates removal on 'content landed' (5.48)"
-# Guard against re-introducing an unconditional "safe to delete" assertion: the
-# migrate helper can stamp the sentinel yet skip content (Codex P2, iter 3), so the
-# banner must NOT promise unverified deletion safety.
-assert_not_contains "$SETUP_SH"  "— safe to delete." "setup.sh banner does NOT assert unconditional safe-to-delete (5.48)"
-assert_not_contains "$SETUP_PS1" "— safe to delete." "setup.ps1 banner does NOT assert unconditional safe-to-delete (5.48)"
-
-# Both installers must detect the sentinel by the SAME bare prefix the migrate helper
-# writes (SENTINEL_PREFIX) — pinned across all three files so a future rename of the
-# wire-format string can't silently desync the installers from the helper and
-# re-introduce the unsatisfiable nag.
-MIGRATE_SH="$REPO_ROOT/scripts/migrate-continuity.sh"
-MIGRATE_PS1="$REPO_ROOT/scripts/migrate-continuity.ps1"
-assert_contains "$MIGRATE_SH"  "<!-- forge:migrated" "migrate-continuity.sh defines the forge:migrated sentinel prefix"
-assert_contains "$SETUP_SH"    "<!-- forge:migrated" "setup.sh detects the same forge:migrated prefix (5.48)"
-assert_contains "$SETUP_PS1"   "<!-- forge:migrated" "setup.ps1 detects the same forge:migrated prefix (5.48)"
-# Both must guard the date with a YYYY-MM-DD check so a malformed sentinel can't
-# splice a garbage date into the removal banner.
-assert_contains "$SETUP_SH"  '[0-9]{4}-[0-9]{2}-[0-9]{2}' "setup.sh guards the migrated date format (5.48)"
-assert_contains "$SETUP_PS1" '[0-9]{4}-[0-9]{2}-[0-9]{2}' "setup.ps1 guards the migrated date format (5.48)"
+assert_contains "$SETUP_SH" '-F --dry-run' "setup.sh points preserved continuity to preview"
+assert_contains "$SETUP_PS1" '-FullRefresh -DryRun' "setup.ps1 points preserved continuity to preview"
 
 # ---------------------------------------------------------------------------
 # Contract: Forge version stamp + advisory drift warning (v5.51) — parity.
@@ -1152,122 +1110,6 @@ else
     fail "state.template.md default Command is not 'none' (AC-2 violation)"
 fi
 $all_ok && pass "state.template.md has all canonical schema headers (AC-2)"
-
-# P2-7: bash/PS migration-helper parity. Run both migrate-continuity scripts
-# on the same fixture, compare stdout + state.md + ADR file content. Skips
-# gracefully when no PowerShell runtime is installed.
-start_test "migration-parity-bash-vs-ps"
-ps_runner=$(detect_pwsh)
-if [ -z "$ps_runner" ]; then
-    pass "ℹ no PowerShell runtime found; skipping migration bash/PS parity test"
-else
-    # Build a shared fixture directory layout. Both runs need identical inputs.
-    make_fixture() {
-        local d="$1"
-        mkdir -p "$d/.claude/local"
-        cp "$REPO_ROOT/state.template.md" "$d/.claude/local/state.md"
-        cat > "$d/CONTINUITY.md" <<'EOF'
-# CONTINUITY
-
-## Goal
-
-Build a thing.
-
-## Architecture Decisions
-
-| Decision | Choice | Why |
-|----------|--------|-----|
-| DB | Postgres | ACID |
-
-## State
-
-### Done (recent 2-3 only)
-
-- 2026-04-01: shipped feature X
-- 2026-04-02: shipped feature Y
-- 2026-04-03: shipped feature Z
-
-### Now
-
-Working on the migration assistant.
-
-### Next
-
-- ship PR #2
-
-EOF
-        cat > "$d/CLAUDE.md" <<'EOF'
-# CLAUDE.md - Test Project
-
-## Project Overview
-
-A test project.
-EOF
-    }
-
-    sh_dir=$(mktemp -d)
-    ps_dir=$(mktemp -d)
-    make_fixture "$sh_dir"
-    make_fixture "$ps_dir"
-
-    sh_out=$(cd "$sh_dir" && bash "$REPO_ROOT/scripts/migrate-continuity.sh" 2>&1)
-    ps_out=$(cd "$ps_dir" && "$ps_runner" -NoProfile -File "$REPO_ROOT/scripts/migrate-continuity.ps1" 2>&1)
-
-    # Stdout: byte-equivalent.
-    if [ "$sh_out" = "$ps_out" ]; then
-        pass "bash and PS migrate-continuity emit byte-equivalent stdout"
-    else
-        fail "stdout differs between bash and PS migrate-continuity"
-        diff <(printf '%s' "$sh_out") <(printf '%s' "$ps_out") | head -20
-    fi
-
-    # state.md content: byte-equivalent.
-    if cmp -s "$sh_dir/.claude/local/state.md" "$ps_dir/.claude/local/state.md"; then
-        pass "state.md content byte-equivalent across bash and PS"
-    else
-        fail "state.md content differs between bash and PS migrate-continuity"
-        diff "$sh_dir/.claude/local/state.md" "$ps_dir/.claude/local/state.md" | head -20
-    fi
-
-    # Sentinel placement: line 1 of both state.md AND CLAUDE.md, in BOTH runs.
-    for d in "$sh_dir" "$ps_dir"; do
-        first_state=$(head -1 "$d/.claude/local/state.md")
-        first_claude=$(head -1 "$d/CLAUDE.md")
-        case "$first_state" in
-            "<!-- forge:migrated "*"-->") : ;;
-            *)  fail "sentinel NOT on line 1 of $d/.claude/local/state.md (got: $first_state)" ;;
-        esac
-        case "$first_claude" in
-            "<!-- forge:migrated "*"-->") : ;;
-            *)  fail "sentinel NOT on line 1 of $d/CLAUDE.md (got: $first_claude)" ;;
-        esac
-    done
-    pass "sentinel on line 1 of state.md AND CLAUDE.md in both bash and PS runs"
-
-    # ADR content: at least one ADR was created in both, and contents match.
-    sh_adr=$(find "$sh_dir/docs/adr" -name "*-db.md" -o -name "*-database.md" 2>/dev/null | head -1)
-    ps_adr=$(find "$ps_dir/docs/adr" -name "*-db.md" -o -name "*-database.md" 2>/dev/null | head -1)
-    if [ -n "$sh_adr" ] && [ -n "$ps_adr" ]; then
-        if cmp -s "$sh_adr" "$ps_adr"; then
-            pass "ADR file content byte-equivalent across bash and PS"
-        else
-            fail "ADR file content differs between bash and PS"
-            diff "$sh_adr" "$ps_adr" | head -20
-        fi
-    else
-        fail "ADR file missing in one or both runs (sh: '$sh_adr', ps: '$ps_adr')"
-    fi
-
-    # CLAUDE.md content: byte-equivalent (Goal injection should produce same output).
-    if cmp -s "$sh_dir/CLAUDE.md" "$ps_dir/CLAUDE.md"; then
-        pass "CLAUDE.md content byte-equivalent after migration (bash vs PS)"
-    else
-        fail "CLAUDE.md content differs between bash and PS migrate-continuity"
-        diff "$sh_dir/CLAUDE.md" "$ps_dir/CLAUDE.md" | head -20
-    fi
-
-    rm -rf "$sh_dir" "$ps_dir"
-fi
 
 # AC-2 byte-identical STATE-INIT contract: the bash block in commands/new-feature.md
 # and commands/fix-bug.md between # STATE-INIT-BEGIN and # STATE-INIT-END markers
@@ -2568,6 +2410,48 @@ assert_contains "$UPGRADING" 'PRESERVED_COMPAT_BLOCKED' \
 assert_contains "$UPGRADING" 'scripts/recover-full-refresh.sh' \
     "upgrade guide explains explicit recovery"
 
+start_test "v6 upgrade docs lead with preview and one-active-Forge outcomes"
+for upgrade_doc in "$README" "$GETTING_STARTED" "$REPO_ROOT/docs/guides/setup-scenarios.md" "$UPGRADING"; do
+    assert_contains "$upgrade_doc" 'setup.sh -F --dry-run' \
+        "$(basename "$upgrade_doc") shows the Unix no-write preview"
+    assert_contains "$upgrade_doc" 'setup.ps1 -FullRefresh -DryRun' \
+        "$(basename "$upgrade_doc") shows the Windows no-write preview"
+done
+for report_doc in "$README" "$UPGRADING"; do
+    assert_contains "$report_doc" 'UPGRADE: READY' "$(basename "$report_doc") explains a ready preview"
+    assert_contains "$report_doc" 'UPGRADE: BLOCKED' "$(basename "$report_doc") explains a blocked preview"
+    assert_contains "$report_doc" 'ACTIVE_FORGE: v6' "$(basename "$report_doc") explains successful convergence"
+    assert_contains "$report_doc" '`-f`' "$(basename "$report_doc") distinguishes the v6 force refresh"
+    assert_contains "$report_doc" '`-F`' "$(basename "$report_doc") distinguishes authoritative migration"
+done
+assert_contains "$UPGRADING" 'current worktree' \
+    "upgrade guide scopes full refresh to the current worktree"
+assert_contains "$UPGRADING" 'sibling worktrees' \
+    "upgrade guide says sibling worktrees are not mutated"
+assert_contains "$UPGRADING" 'Do not manually synchronize `CLAUDE.md` and `AGENTS.md`' \
+    "upgrade guide preserves one shared policy source"
+assert_contains "$UPGRADING" 'independently developed harness' \
+    "upgrade guide explains the explicit custom-runtime choice"
+assert_contains "$UPGRADING" 'archive the non-selected state' \
+    "upgrade guide gives a state-reconciliation action"
+
+start_test "Forge 6 retires standalone continuity migration behind full-refresh inventory"
+assert_contains "$SETUP_SH" '--migrate was retired in Forge 6' \
+    "Bash keeps an inert retired-command diagnostic"
+assert_contains "$SETUP_PS1" '-Migrate was retired in Forge 6' \
+    "PowerShell keeps an inert retired-command diagnostic"
+assert_contains "$SETUP_SH" '-F --dry-run' \
+    "Bash retired command points to full-refresh preview"
+assert_contains "$SETUP_PS1" '-FullRefresh -DryRun' \
+    "PowerShell retired command points to full-refresh preview"
+if [ ! -e "$REPO_ROOT/scripts/migrate-continuity.sh" ] && [ ! -e "$REPO_ROOT/scripts/migrate-continuity.ps1" ]; then
+    pass "functional continuity migration helpers are removed"
+else
+    fail "functional continuity migration helpers still exist"
+fi
+assert_contains "$REPO_ROOT/scripts/merge-settings.py" 'LEGACY_CONTINUITY_UNRESOLVED' \
+    "full refresh owns unresolved continuity classification"
+
 assert_contains "$GETTING_STARTED" '| Claude Code | `2.1.237`' \
     "compatibility table records the qualified Claude baseline"
 assert_contains "$GETTING_STARTED" '| Codex CLI | `0.144.1`' \
@@ -2677,8 +2561,8 @@ else
 fi
 STALE_SETUP=$(grep -nHE 'setup\.sh (-f|--upgrade)|setup\.ps1[^[:cntrl:]]*-(Force|Upgrade)' \
     "${ACTIVE_V6_DOCS[@]}" 2>/dev/null || true)
-if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh (-f|--upgrade)|setup\.ps1[^[:cntrl:]]*-(Force|Upgrade)'; then
-    STALE_SETUP="README live sections contain an obsolete incremental/force-upgrade instruction${STALE_SETUP:+$'\n'$STALE_SETUP}"
+if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh --upgrade|setup\.ps1[^[:cntrl:]]*-Upgrade'; then
+    STALE_SETUP="README live sections contain an obsolete upgrade instruction${STALE_SETUP:+$'\n'$STALE_SETUP}"
 fi
 if [ -z "$STALE_SETUP" ]; then
     pass "active v6 docs use authoritative full refresh rather than old force/upgrade commands"

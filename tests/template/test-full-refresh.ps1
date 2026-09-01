@@ -39,6 +39,27 @@ function Write-V5State {
     Write-Text (Join-Path $Project ".claude\local\state.md") $state
 }
 
+function Record-PriorContinuityMigration {
+    param([string]$Project)
+    $python = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $python) { $python = Get-Command python -ErrorAction Stop }
+    $merge = Join-Path $script:root "scripts\merge-settings.py"
+    $source = Join-Path $Project ".claude\local\state.md"
+    $destination = Join-Path $Project ".forge\local\state.md"
+    $receipt = Join-Path $Project ".forge\local\migration-evidence\continuity-state-v5-v6.json"
+    & $python.Source $merge migrate-state-v5-v6 --source $source --destination $destination | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "prior continuity state translation failed" }
+    Push-Location $Project
+    try {
+        & $python.Source $merge write-continuity-receipt --source $source --destination $destination --receipt $receipt | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "prior continuity receipt creation failed" }
+    } finally {
+        Pop-Location
+    }
+    $claude = Join-Path $Project "CLAUDE.md"
+    Write-Text $claude ("<!-- forge:migrated 2026-08-31 -->`n`n" + [IO.File]::ReadAllText($claude))
+}
+
 function Write-AdversarialV5State {
     param([string]$Project)
     Write-V5State $Project "WINDOWS_STATE_TRANSLATION`n`n- Narrative code review iteration remains developer context."
@@ -60,6 +81,20 @@ function Write-AdversarialV5State {
     Write-Text $path $state
 }
 
+function Get-ProjectSnapshot {
+    param([string]$Project)
+    $prefix = $Project.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    return @(
+        Get-ChildItem -LiteralPath $Project -Force -File -Recurse |
+            Where-Object { -not $_.FullName.StartsWith((Join-Path $Project ".git") + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) } |
+            Sort-Object FullName |
+            ForEach-Object {
+                $relative = $_.FullName.Substring($prefix.Length)
+                "$relative`t$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)"
+            }
+    ) -join "`n"
+}
+
 function Export-GitBlob {
     param([string]$RevisionPath, [string]$Destination)
     $parent = Split-Path -Parent $Destination
@@ -69,6 +104,51 @@ function Export-GitBlob {
     & $python.Source -c "import pathlib,subprocess,sys; pathlib.Path(sys.argv[3]).write_bytes(subprocess.check_output(['git','-C',sys.argv[1],'show',sys.argv[2]]))" `
         $script:root $RevisionPath $Destination
     if ($LASTEXITCODE -ne 0) { throw "git blob export failed: $RevisionPath" }
+}
+
+function Install-ReleasedCore {
+    param([string]$Project, [string]$Version, [string]$Commit)
+    Write-Text (Join-Path $Project ".claude\.forge-version") "$Version`n"
+    Export-GitBlob ("${Commit}:hooks/session-start.ps1") (Join-Path $Project ".claude\hooks\session-start.ps1")
+    Export-GitBlob ("${Commit}:commands/new-feature.md") (Join-Path $Project ".claude\commands\new-feature.md")
+    Write-V5State $Project ("WINDOWS_PROFILE_" + $Version + "_STATE")
+}
+
+function Assert-OneActiveForge {
+    param([string]$Project, [string]$Label)
+    $version = Join-Path $Project ".forge\version"
+    $instructions = Join-Path $Project ".forge\instructions.md"
+    $manifest = Join-Path $Project ".forge\managed-files.tsv"
+    $claudeRoot = [IO.File]::ReadAllText((Join-Path $Project "CLAUDE.md"))
+    $codexRoot = [IO.File]::ReadAllText((Join-Path $Project "AGENTS.md"))
+    Assert-True ((Test-Path -LiteralPath $version -PathType Leaf) -and ([IO.File]::ReadAllText($version).Trim() -eq "6")) "$Label has the v6 stamp"
+    Assert-True ((Test-Path -LiteralPath $instructions -PathType Leaf) -and (Test-Path -LiteralPath $manifest -PathType Leaf)) "$Label has one canonical Forge source and ownership manifest"
+    Assert-True (([regex]::Matches($claudeRoot, '<!-- forge:begin v6 -->').Count -eq 1) -and ([regex]::Matches($codexRoot, '<!-- forge:begin v6 -->').Count -eq 1)) "$Label has one bounded adapter per native root"
+    $commands = @(Get-ChildItem -LiteralPath (Join-Path $Project ".claude\commands") -Filter "*.md" -File -Recurse -ErrorAction SilentlyContinue)
+    $nonThin = @($commands | Where-Object {
+        $text = [IO.File]::ReadAllText($_.FullName)
+        -not ($text.Contains("forge-generated: true") -and $text.Contains("canonical-path:"))
+    })
+    Assert-True ($nonThin.Count -eq 0 -and -not (Test-Path -LiteralPath (Join-Path $Project ".claude\commands\codex.md"))) "$Label retains only thin Claude workflows and no retired codex command"
+    $settingsPath = Join-Path $Project ".claude\settings.json"
+    $badHook = $false
+    if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+        $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+        foreach ($eventProperty in $settings.hooks.PSObject.Properties) {
+            foreach ($block in $eventProperty.Value) {
+                foreach ($hook in $block.hooks) {
+                    if ($hook.type -eq "prompt") { $badHook = $true }
+                    $command = [string]$hook.command
+                    if ($command.Contains('$CLAUDE_PROJECT_DIR/.claude/hooks/')) {
+                        $leaf = (($command -split '\.claude/hooks/', 2)[1] -split '["''\s]', 2)[0]
+                        $delegate = Join-Path $Project (".claude\hooks\" + ($leaf -replace '/', '\'))
+                        if (-not (Test-Path -LiteralPath $delegate -PathType Leaf) -or -not [IO.File]::ReadAllText($delegate).Contains(".forge/hooks/")) { $badHook = $true }
+                    }
+                }
+            }
+        }
+    }
+    Assert-True (-not $badHook) "$Label has no active v5 prompt or full-body hook registration"
 }
 
 function Install-V561WindowsHooks {
@@ -120,6 +200,168 @@ function Invoke-IsolatedPowerShell {
 }
 
 try {
+    $previewProject = New-Project "preview"
+    Write-Text (Join-Path $previewProject ".claude\.forge-version") "5.61`n"
+    Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/session-start.ps1" `
+        (Join-Path $previewProject ".claude\hooks\session-start.ps1")
+    Write-V5State $previewProject "WINDOWS_DRY_RUN_STATE"
+    $previewBefore = Get-ProjectSnapshot $previewProject
+    $preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $previewProject `
+        -Environment @{ HOME = (Join-Path $scratch "preview-home"); USERPROFILE = (Join-Path $scratch "preview-home") }
+    if ($preview.Code -ne 0 -or -not $preview.Output.Contains("UPGRADE: READY")) {
+        throw "FAIL: setup.ps1 -FullRefresh -DryRun uses the real planner (code=$($preview.Code); output=$($preview.Output.Trim()))"
+    }
+    Assert-True $true "setup.ps1 -FullRefresh -DryRun uses the real planner"
+    Assert-True ((Get-ProjectSnapshot $previewProject) -ceq $previewBefore) "PowerShell preview leaves every target file byte-identical"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $previewProject ".forge\version"))) "PowerShell preview writes no v6 stamp"
+    $dryRunOnly = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-DryRun") -WorkingDirectory $previewProject
+    Assert-True ($dryRunOnly.Code -ne 0) "PowerShell rejects -DryRun without -FullRefresh"
+
+    $multiBlocker = New-Project "multi-blocker"
+    Write-Text (Join-Path $multiBlocker ".claude\.forge-version") "5.61`n"
+    foreach ($hook in @("session-start.ps1", "check-bash-safety.ps1")) {
+        $hookPath = Join-Path $multiBlocker (".claude\hooks\" + $hook)
+        Export-GitBlob ("cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/" + $hook) $hookPath
+        [IO.File]::AppendAllText($hookPath, "`nDEVELOPER_MODIFIED_$hook`n", $utf8NoBom)
+    }
+    Write-Text (Join-Path $multiBlocker ".claude\settings.json") "{ malformed settings`n"
+    Write-V5State $multiBlocker "WINDOWS_MULTI_BLOCKER_STATE"
+    $sessionHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\session-start.ps1")).Hash
+    $safetyHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\check-bash-safety.ps1")).Hash
+    $settingsHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\settings.json")).Hash
+    $multiResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $multiBlocker
+    Assert-True ($multiResult.Code -ne 0) "PowerShell multi-blocker preview returns nonzero"
+    Assert-True ($multiResult.Output.Contains(".claude/hooks/session-start.ps1") -and $multiResult.Output.Contains(".claude/hooks/check-bash-safety.ps1") -and $multiResult.Output.Contains(".claude/settings.json")) "PowerShell preview lists every ordinary blocker"
+    Assert-True ($multiResult.Output.Contains("BLOCKERS: 3")) "PowerShell preview reports the complete blocker count"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\session-start.ps1")).Hash -eq $sessionHash -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\hooks\check-bash-safety.ps1")).Hash -eq $safetyHash -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $multiBlocker ".claude\settings.json")).Hash -eq $settingsHash) "PowerShell blocked inventory preserves all source bytes"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $multiBlocker ".forge\version"))) "PowerShell blocked inventory writes no v6 stamp"
+
+    $sentinelRoot = New-Project "sentinel-root"
+    Write-Text (Join-Path $sentinelRoot ".claude\.forge-version") "5.60`n"
+    $releasedRoot = Join-Path $scratch "released-CLAUDE.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:CLAUDE.template.md" $releasedRoot
+    $releasedText = [IO.File]::ReadAllText($releasedRoot).Replace(
+        "[PROJECT DESCRIPTION - 2-3 sentences explaining what this project does]", "WINDOWS_SENTINEL_PROJECT_BYTES"
+    ).Replace(".claude/rules/testing.md", ".forge/rules/testing.md").Replace(
+        "/codex <instruction>    #", "/opinion <instruction>  #"
+    )
+    Write-Text (Join-Path $sentinelRoot "CLAUDE.md") ("<!-- forge:migrated 2026-04-28 -->`n`n" + $releasedText)
+    Write-V5State $sentinelRoot "WINDOWS_SENTINEL_STATE"
+    $sentinelResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $sentinelRoot
+    $sentinelInstalled = [IO.File]::ReadAllText((Join-Path $sentinelRoot "CLAUDE.md"))
+    Assert-True ($sentinelResult.Code -eq 0 -and $sentinelInstalled.Contains("WINDOWS_SENTINEL_PROJECT_BYTES") -and ([regex]::Matches($sentinelInstalled, '<!-- forge:begin v6 -->').Count -eq 1) -and -not $sentinelInstalled.Contains("/codex") -and -not $sentinelInstalled.Contains(".claude/rules/")) "PowerShell reconciles a sentinel-prefixed root without losing project bytes"
+
+    $ambiguousAgents = New-Project "ambiguous-agents"
+    Write-Text (Join-Path $ambiguousAgents ".claude\.forge-version") "5.60`n"
+    Write-Text (Join-Path $ambiguousAgents "AGENTS.md") "# Project instructions`n`n@CONTINUITY.md`nUse /codex and .claude/rules/ for policy.`n"
+    Write-V5State $ambiguousAgents "WINDOWS_AMBIGUOUS_AGENTS_STATE"
+    $ambiguousHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $ambiguousAgents "AGENTS.md")).Hash
+    $ambiguousResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $ambiguousAgents
+    Assert-True ($ambiguousResult.Code -ne 0 -and ([regex]::Matches($ambiguousResult.Output, 'code=ROOT_POLICY_AMBIGUOUS').Count -eq 1) -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $ambiguousAgents "AGENTS.md")).Hash -eq $ambiguousHash) "PowerShell groups ambiguous project-owned root references without mutation"
+
+    $aliasProject = New-Project "legacy-alias"
+    Write-Text (Join-Path $aliasProject ".claude\.forge-version") "5.60`n"
+    $aliasPath = Join-Path $aliasProject ".agents\skills\ui-design\SKILL.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/ui-design/SKILL.template.md" $aliasPath
+    Write-V5State $aliasProject "WINDOWS_ALIAS_STATE"
+    $aliasResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $aliasProject
+    Assert-True ($aliasResult.Code -eq 0 -and [IO.File]::ReadAllText($aliasPath).Contains("forge-generated: true")) "PowerShell replaces an exact version-bound cross-host alias"
+    $modifiedAlias = New-Project "legacy-alias-modified"
+    Write-Text (Join-Path $modifiedAlias ".claude\.forge-version") "5.60`n"
+    $modifiedAliasPath = Join-Path $modifiedAlias ".agents\skills\ui-design\SKILL.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/ui-design/SKILL.template.md" $modifiedAliasPath
+    [IO.File]::AppendAllText($modifiedAliasPath, "`nWINDOWS_PROJECT_ALIAS_CHANGE`n", $utf8NoBom)
+    Write-V5State $modifiedAlias "WINDOWS_MODIFIED_ALIAS_STATE"
+    $modifiedAliasResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $modifiedAlias
+    Assert-True ($modifiedAliasResult.Code -ne 0 -and $modifiedAliasResult.Output.Contains(".agents/skills/ui-design/SKILL.md")) "PowerShell blocks a modified cross-host alias"
+
+    $customHarness = New-Project "independent-harness"
+    Write-Text (Join-Path $customHarness ".claude\.forge-version") "5.61`n"
+    Write-Text (Join-Path $customHarness ".agent-workflows\runtime\workflow-runtime.mjs") "console.log('WINDOWS_CUSTOM_RUNTIME')`n"
+    Write-Text (Join-Path $customHarness "AGENTS.md") "# Project policy`n`nRun .agent-workflows/runtime/workflow-runtime.mjs for hooks.`n"
+    Write-V5State $customHarness "WINDOWS_CLAUDE_STATE"
+    $customState = [IO.File]::ReadAllText((Join-Path $root "state.template.md")) -replace '^<!-- forge:state-schema v6 -->\r?\n', ''
+    Write-Text (Join-Path $customHarness ".agent-workflows\local\state.md") $customState
+    $customBefore = Get-ProjectSnapshot $customHarness
+    $customResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $customHarness
+    Assert-True ($customResult.Code -ne 0 -and ([regex]::Matches($customResult.Output, 'code=CUSTOM_HARNESS_COLLISION').Count -eq 1) -and ([regex]::Matches($customResult.Output, 'code=MULTIPLE_STATE_SOURCES').Count -eq 1) -and ((Get-ProjectSnapshot $customHarness) -ceq $customBefore)) "PowerShell groups independent harness and multiple-state choices without mutation"
+
+    $profiles = Join-Path $scratch "downstream-profiles"
+    [IO.Directory]::CreateDirectory($profiles) | Out-Null
+
+    $profile1 = New-Project "profile-1"
+    Install-ReleasedCore $profile1 "5.60" "80dffe872cc0830243a617eacfecce1e5fc2a6f5"
+    $profile1RootBlob = Join-Path $profiles "profile-1-CLAUDE.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:CLAUDE.template.md" $profile1RootBlob
+    $profile1Root = [IO.File]::ReadAllText($profile1RootBlob).Replace(
+        "[PROJECT DESCRIPTION - 2-3 sentences explaining what this project does]", "WINDOWS_PROFILE_ONE_CONTEXT"
+    ).Replace(".claude/rules/testing.md", ".forge/rules/testing.md").Replace(
+        "/codex <instruction>    #", "/opinion <instruction>  #"
+    )
+    Write-Text (Join-Path $profile1 "CLAUDE.md") ("<!-- forge:migrated 2026-04-28 -->`n`n" + $profile1Root)
+    Write-Text (Join-Path $profile1 ".claude\rules\project-domain.md") "WINDOWS_PROFILE_ONE_RULE`n"
+    Write-Text (Join-Path $profile1 "docs\adr\0099-project.md") "WINDOWS_PROFILE_ONE_ADR`n"
+    Write-Text (Join-Path $profile1 ".claude\settings.json") '{"enabledPlugins":{"superpowers@claude-plugins-official":true},"developerSetting":"keep"}'
+    $profile1Before = Get-ProjectSnapshot $profile1
+    $profile1Preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $profile1
+    Assert-True ($profile1Preview.Code -eq 0 -and $profile1Preview.Output.Contains("UPGRADE: READY") -and $profile1Preview.Output.Contains("claude RUNTIME_READY: BLOCKED") -and ((Get-ProjectSnapshot $profile1) -ceq $profile1Before)) "Windows profile 1 previews ready without writes and separates plugin readiness"
+    $profile1Run = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $profile1
+    Assert-True ($profile1Run.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $profile1 ".claude\rules\project-domain.md")).Contains("WINDOWS_PROFILE_ONE_RULE") -and [IO.File]::ReadAllText((Join-Path $profile1 "docs\adr\0099-project.md")).Contains("WINDOWS_PROFILE_ONE_ADR")) "Windows profile 1 preserves project content and executes"
+    Assert-OneActiveForge $profile1 "Windows profile 1"
+
+    $profile2 = New-Project "profile-2"
+    Install-ReleasedCore $profile2 "5.58" "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34"
+    Write-Text (Join-Path $profile2 ".codex\project-context.md") "WINDOWS_PROFILE_TWO_CODEX`n"
+    Write-Text (Join-Path $profile2 ".agents\skills\project-audit\SKILL.md") "---`nname: project-audit`ndescription: Project-owned audit skill.`n---`n"
+    Write-Text (Join-Path $profile2 "docs\ci\README.md") "WINDOWS_PROFILE_TWO_CI`n"
+    & git -C $profile2 add .claude .codex .agents docs
+    & git -C $profile2 -c user.name=Forge -c user.email=forge@example.invalid commit -qm "tracked mixed profile"
+    $profile2Before = Get-ProjectSnapshot $profile2
+    $profile2Preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $profile2
+    Assert-True ($profile2Preview.Code -eq 0 -and ((Get-ProjectSnapshot $profile2) -ceq $profile2Before)) "Windows profile 2 tracked mixed tree previews without writes"
+    $profile2Run = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $profile2
+    Assert-True ($profile2Run.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $profile2 ".codex\project-context.md")).Contains("WINDOWS_PROFILE_TWO_CODEX") -and [IO.File]::ReadAllText((Join-Path $profile2 "docs\ci\README.md")).Contains("WINDOWS_PROFILE_TWO_CI")) "Windows profile 2 preserves custom Codex and CI content"
+    Assert-OneActiveForge $profile2 "Windows profile 2"
+
+    $profile3 = New-Project "profile-3"
+    Install-ReleasedCore $profile3 "5.60" "80dffe872cc0830243a617eacfecce1e5fc2a6f5"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/generate-image/SKILL.template.md" (Join-Path $profile3 ".agents\skills\generate-image\SKILL.md")
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:skills/ui-design/SKILL.template.md" (Join-Path $profile3 ".agents\skills\ui-design\SKILL.md")
+    Write-Text (Join-Path $profile3 ".claude\agents\project-quality.md") "WINDOWS_PROFILE_THREE_AGENT`n"
+    Write-Text (Join-Path $profile3 "AGENTS.md") "# Project`n`n@CONTINUITY.md`nUse /codex and .claude/rules/.`n"
+    $profile3Blocked = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $profile3
+    Assert-True ($profile3Blocked.Code -ne 0 -and ([regex]::Matches($profile3Blocked.Output, 'code=ROOT_POLICY_AMBIGUOUS').Count -eq 1)) "Windows profile 3 groups obsolete project root references"
+    Write-Text (Join-Path $profile3 "AGENTS.md") "# Project`n`nWINDOWS_PROFILE_THREE_NEUTRAL`n"
+    $profile3Run = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $profile3
+    Assert-True ($profile3Run.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $profile3 ".agents\skills\ui-design\SKILL.md")).Contains("forge-generated: true") -and [IO.File]::ReadAllText((Join-Path $profile3 ".claude\agents\project-quality.md")).Contains("WINDOWS_PROFILE_THREE_AGENT")) "Windows profile 3 replaces exact aliases and preserves its custom agent"
+    Assert-OneActiveForge $profile3 "Windows profile 3"
+
+    $profile4 = New-Project "profile-4"
+    Install-ReleasedCore $profile4 "5.61" "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff"
+    Write-Text (Join-Path $profile4 ".agent-workflows\runtime\workflow-runtime.mjs") "console.log('WINDOWS_PROFILE_FOUR_RUNTIME')`n"
+    Write-Text (Join-Path $profile4 ".agent-workflows\policy.md") "WINDOWS_PROFILE_FOUR_POLICY`n"
+    $profile4State = [IO.File]::ReadAllText((Join-Path $root "state.template.md")).Replace("(what you're actively working on)", "WINDOWS_PROFILE_FOUR_NEWER_STATE")
+    Write-Text (Join-Path $profile4 ".agent-workflows\local\state.md") $profile4State
+    Write-Text (Join-Path $profile4 "AGENTS.md") "Run .agent-workflows/runtime/workflow-runtime.mjs.`n"
+    Write-Text (Join-Path $profile4 ".claude\settings.json") '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"node .agent-workflows/runtime/workflow-runtime.mjs"}]}]}}'
+    Write-Text (Join-Path $profile4 ".agents\skills\custom-runtime\SKILL.md") "---`nname: custom-runtime`ndescription: Project runtime skill.`n---`n"
+    Write-Text (Join-Path $profile4 ".claude\hooks\project-runtime.ps1") "Write-Output 'WINDOWS_PROFILE_FOUR_HOOK'`n"
+    $profile4Before = Get-ProjectSnapshot $profile4
+    $profile4Blocked = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $profile4
+    Assert-True ($profile4Blocked.Code -ne 0 -and ([regex]::Matches($profile4Blocked.Output, 'code=CUSTOM_HARNESS_COLLISION').Count -eq 1) -and ([regex]::Matches($profile4Blocked.Output, 'code=MULTIPLE_STATE_SOURCES').Count -eq 1) -and ((Get-ProjectSnapshot $profile4) -ceq $profile4Before)) "Windows profile 4 groups harness and state choices without writes"
+    $archiveRuntime = Join-Path $profile4 "docs\archive\legacy-agent-workflows\runtime"
+    $archiveState = Join-Path $profile4 "docs\archive\legacy-state\claude-state.md"
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $archiveRuntime)) | Out-Null
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $archiveState)) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $profile4 ".claude\local\state.md") -Destination $archiveState
+    Copy-Item -LiteralPath (Join-Path $profile4 ".agent-workflows\local\state.md") -Destination (Join-Path $profile4 ".claude\local\state.md") -Force
+    Move-Item -LiteralPath (Join-Path $profile4 ".agent-workflows") -Destination $archiveRuntime
+    Write-Text (Join-Path $profile4 "AGENTS.md") "# Project`n`nWINDOWS_PROFILE_FOUR_NEUTRAL`n"
+    Write-Text (Join-Path $profile4 ".claude\settings.json") "{}`n"
+    $profile4Run = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $profile4
+    Assert-True ($profile4Run.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $archiveRuntime "runtime\workflow-runtime.mjs")).Contains("WINDOWS_PROFILE_FOUR_RUNTIME") -and [IO.File]::ReadAllText((Join-Path $profile4 ".forge\local\state.md")).Contains("WINDOWS_PROFILE_FOUR_NEWER_STATE")) "Windows profile 4 executes only after explicit archive and state selection"
+    Assert-OneActiveForge $profile4 "Windows profile 4"
+
     $project = New-Project "project"
     Write-AdversarialV5State $project
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
@@ -186,14 +428,29 @@ try {
     $modifiedResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $modifiedHook
     Assert-True ($modifiedResult.Code -ne 0 -and (Get-FileHash -Algorithm SHA256 -LiteralPath $modifiedPath).Hash -eq $modifiedHash) "modified referenced Windows hook blocks without mutation"
 
+    $retiredContinuity = New-Project "continuity-retired"
+    Write-V5State $retiredContinuity "WINDOWS_CONTINUITY_RETIRED"
+    Write-Text (Join-Path $retiredContinuity "CONTINUITY.md") "# CONTINUITY`n`n- preserve me`n"
+    $retiredBefore = Get-ProjectSnapshot $retiredContinuity
+    $retiredResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Migrate") -WorkingDirectory $retiredContinuity
+    Assert-True ($retiredResult.Code -ne 0 -and $retiredResult.Output.Contains("retired in Forge 6") -and $retiredResult.Output.Contains("-FullRefresh -DryRun") -and ((Get-ProjectSnapshot $retiredContinuity) -ceq $retiredBefore)) "retired PowerShell continuity command is inert and points to preview"
+
+    $unresolvedContinuity = New-Project "continuity-unresolved"
+    Write-V5State $unresolvedContinuity "WINDOWS_CONTINUITY_UNRESOLVED"
+    Write-Text (Join-Path $unresolvedContinuity "CONTINUITY.md") "# CONTINUITY`n`n- unresolved legacy state`n"
+    $unresolvedBefore = Get-ProjectSnapshot $unresolvedContinuity
+    $unresolvedPreview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $unresolvedContinuity
+    Assert-True ($unresolvedPreview.Code -ne 0 -and $unresolvedPreview.Output.Contains("code=LEGACY_CONTINUITY_UNRESOLVED") -and ((Get-ProjectSnapshot $unresolvedContinuity) -ceq $unresolvedBefore)) "unresolved Windows continuity file blocks preview without writes"
+    $unresolvedExecute = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $unresolvedContinuity
+    Assert-True ($unresolvedExecute.Code -ne 0 -and $unresolvedExecute.Output.Contains("code=LEGACY_CONTINUITY_UNRESOLVED") -and ((Get-ProjectSnapshot $unresolvedContinuity) -ceq $unresolvedBefore) -and -not (Test-Path -LiteralPath (Join-Path $unresolvedContinuity ".forge\version"))) "unresolved Windows continuity file blocks execution without persistent writes"
+
     $continuity = New-Project "continuity"
     Write-V5State $continuity "WINDOWS_CONTINUITY_STATE"
     Write-Text (Join-Path $continuity "CONTINUITY.md") "# CONTINUITY`n`n## State`n`n### Now`n`n- Windows continuity flow`n"
     Write-Text (Join-Path $continuity "CLAUDE.md") "# Developer instructions`n`n## Project Overview`n"
-    $migrated = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Migrate") -WorkingDirectory $continuity
-    Assert-True ($migrated.Code -eq 0) "setup.ps1 -Migrate succeeds before -R"
+    Record-PriorContinuityMigration $continuity
     $receipt = Join-Path $continuity ".forge\local\migration-evidence\continuity-state-v5-v6.json"
-    Assert-True (Test-Path -LiteralPath $receipt -PathType Leaf) "PowerShell continuity migration writes a translation receipt"
+    Assert-True (Test-Path -LiteralPath $receipt -PathType Leaf) "prior PowerShell continuity migration has a translation receipt"
     $continued = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $continuity
     Assert-True ($continued.Code -eq 0) "receipt-proven PowerShell continuity migration continues through full refresh"
 
@@ -201,7 +458,7 @@ try {
     Write-V5State $tampered "WINDOWS_CONTINUITY_TAMPER"
     Write-Text (Join-Path $tampered "CONTINUITY.md") "# CONTINUITY`n`n## State`n`n### Now`n`n- tamper`n"
     Write-Text (Join-Path $tampered "CLAUDE.md") "# Developer instructions`n`n## Project Overview`n"
-    $null = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Migrate") -WorkingDirectory $tampered
+    Record-PriorContinuityMigration $tampered
     $tamperedReceipt = Join-Path $tampered ".forge\local\migration-evidence\continuity-state-v5-v6.json"
     $receiptObject = Get-Content -LiteralPath $tamperedReceipt -Raw | ConvertFrom-Json
     $receiptObject.target_hash = "0" * 64
@@ -209,8 +466,12 @@ try {
     $tamperResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $tampered
     Assert-True ($tamperResult.Code -ne 0 -and $tamperResult.Output.Contains("continuity translation receipt")) "tampered PowerShell continuity receipt blocks before mutation"
 
-    $setupSource = [IO.File]::ReadAllText($setup)
-    Assert-True ($setupSource.Contains('& $refreshHelper -Target $HOME -Scope global')) "setup.ps1 routes global refresh to the canonical Windows home"
+    $globalPreviewHome = Join-Path $scratch "global-preview"
+    Write-Text (Join-Path $globalPreviewHome ".claude\.forge-version") "5.61`n"
+    $globalPreviewBefore = Get-ProjectSnapshot $globalPreviewHome
+    $globalPreview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R", "-DryRun") `
+        -Environment @{ HOME = $globalPreviewHome; USERPROFILE = $globalPreviewHome }
+    Assert-True ($globalPreview.Code -eq 0 -and $globalPreview.Output.Contains("UPGRADE: READY") -and ((Get-ProjectSnapshot $globalPreviewHome) -ceq $globalPreviewBefore)) "setup.ps1 routes global preview to the canonical Windows home without writes"
     $fixtureHome = Join-Path $scratch "home"
     [IO.Directory]::CreateDirectory($fixtureHome) | Out-Null
     $noncanonicalHome = Join-Path $fixtureHome "..\home"

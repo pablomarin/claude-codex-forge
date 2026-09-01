@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Target,
-    [Parameter(Mandatory = $false)][ValidateSet("project", "global")][string]$Scope = "project"
+    [Parameter(Mandatory = $false)][ValidateSet("project", "global")][string]$Scope = "project",
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +54,11 @@ if (-not $python) {
     exit 1
 }
 
-& $python.Source (Join-Path $repoRoot "scripts\merge-settings.py") full-refresh `
-    --repo-root $repoRoot --target $targetRoot --scope $Scope --platform windows
+$refreshArguments = @(
+    "full-refresh", "--repo-root", $repoRoot, "--target", $targetRoot,
+    "--scope", $Scope, "--platform", "windows"
+)
+if ($DryRun) { $refreshArguments += "--dry-run" }
+[Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")
+& $python.Source (Join-Path $repoRoot "scripts\merge-settings.py") @refreshArguments
 exit $LASTEXITCODE

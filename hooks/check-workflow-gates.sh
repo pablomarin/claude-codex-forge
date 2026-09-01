@@ -175,12 +175,12 @@ if [ ! -f "$STATE_FILE" ]; then
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Emit friendly breadcrumb on stderr, exit 0 (don't gate — nothing to enforce).
     echo "ℹ check-workflow-gates: Forge state.md not found." >&2
-    echo "  If you have a legacy CONTINUITY.md, run setup --migrate before setup -F." >&2
+    echo "  Run setup -F --dry-run, resolve every reported blocker, then run setup -F." >&2
     forge_allow
 fi
 
 # Scope extraction to ONLY the `## Workflow` section. Migrated content (e.g.,
-# from `setup.sh --migrate` ingesting old CONTINUITY.md "### Done" entries that
+# from an older state source carrying legacy "### Done" entries that
 # mention prior workflow scaffolds) can leave stray `| Command |` lines or
 # `### Checklist` headings elsewhere in the file. A whole-file grep with
 # `head -1` would pick the first match — which can be the stray, not the
@@ -202,7 +202,7 @@ WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -iE '\|\s*Command\s*\|' | head -1 |
 # Legacy workflow prose remains readable for migration context, but v5 review,
 # goal, and authorization lines can never certify a v6 ship action.
 if [ "$STATE_IS_V6" != true ]; then
-    echo "WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup --migrate, then setup -F." >&2
+    echo "WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup -F --dry-run, resolve blockers, then setup -F." >&2
     exit 2
 fi
 

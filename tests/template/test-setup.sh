@@ -275,10 +275,8 @@ assert_hash_equals "$S8/CONTINUITY.md" "$HASH_CONTINUITY" \
     "--upgrade does not touch CONTINUITY.md at all"
 
 # UC1 soft tip: --upgrade with CLAUDE.md preserved → end-of-summary soft tip
-# with full Variant B prompt, both-preserved final summary, migration prompt
-# for legacy CONTINUITY.md.
-# Post PR #2: CONTINUITY.template.md no longer exists. Legacy CONTINUITY.md gets
-# a migration prompt, and the both-preserved final summary points at --migrate.
+# with full reconcile prompt. Legacy continuity points to the authoritative
+# full-refresh preview rather than the retired semantic parser.
 # 5.17: per-file inline drift hint dropped; soft tip fires once at end of summary
 # when CLAUDE.md was preserved.
 assert_not_contains "$LOG8b" "Template may have drifted" \
@@ -308,10 +306,10 @@ assert_contains "$LOG8b" "CLAUDE.template.md" \
     "UC1: --upgrade references CLAUDE.template.md"
 assert_not_contains "$LOG8b" "CONTINUITY.template.md" \
     "UC1: --upgrade does NOT reference CONTINUITY.template.md (deleted in PR #2)"
-assert_contains "$LOG8b" "./setup.sh --migrate" \
-    "UC1: --upgrade prompts --migrate for legacy CONTINUITY.md"
-assert_contains "$LOG8b" "Your CLAUDE.md and CONTINUITY.md were preserved (run --migrate to move content to the new structure)" \
-    "UC1: --upgrade final summary = both-preserved variant (--migrate suffix)"
+assert_contains "$LOG8b" "./setup.sh -F --dry-run" \
+    "UC1: --upgrade points legacy CONTINUITY.md to full-refresh preview"
+assert_contains "$LOG8b" "Your CLAUDE.md and CONTINUITY.md were preserved; run -F --dry-run" \
+    "UC1: --upgrade final summary = both-preserved preview variant"
 assert_not_contains "$LOG8b" "were not modified" \
     "UC1: --upgrade does NOT contain legacy 'were not modified' string"
 
@@ -363,18 +361,16 @@ printf '# Legacy notes\n\nOld task state.\n' > "$S8M/CONTINUITY.md"
 run_setup "$S8M" "$LOG8m" --upgrade
 assert_equals "$?" "0" "Test 8b: --upgrade on migrated install exits 0"
 
-# The core fix: no "run --migrate" nag once the sentinel is present.
+# Forge 6 ignores sentinel-only claims in the ordinary installer and points to
+# the authoritative preview without guessing whether all content landed.
 assert_not_contains "$LOG8m" "./setup.sh --migrate" \
     "Test 8b: migrated install does NOT nag './setup.sh --migrate'"
 assert_not_contains "$LOG8m" "run --migrate to move content" \
     "Test 8b: migrated install banner drops the 'run --migrate' suffix"
-# Instead it points the user at removing the now-redundant file, citing the date.
-assert_contains "$LOG8m" "already migrated" \
-    "Test 8b: migrated install reports CONTINUITY.md already migrated"
-assert_contains "$LOG8m" "content landed" \
-    "Test 8b: migrated install gates removal on confirming content landed"
-assert_contains "$LOG8m" "2026-04-28" \
-    "Test 8b: migrated install cites the migration date from the sentinel"
+assert_contains "$LOG8m" "./setup.sh -F --dry-run" \
+    "Test 8b: prior sentinel still routes through full-refresh preview"
+assert_not_contains "$LOG8m" "already migrated" \
+    "Test 8b: ordinary setup does not certify migration from a sentinel alone"
 
 # ===========================================================================
 # Test 8c: state.md-only sentinel is NOT enough to claim the file is migrated
@@ -406,9 +402,9 @@ assert_not_contains "$LOG8p" "content landed" \
     "Test 8c: state.md-only marker does NOT point at removing CONTINUITY.md"
 assert_not_contains "$LOG8p" "already migrated" \
     "Test 8c: state.md-only marker does NOT report 'already migrated'"
-# ...and we DO fall through to the (idempotent, harmless) --migrate prompt.
-assert_contains "$LOG8p" "./setup.sh --migrate" \
-    "Test 8c: state.md-only marker still prompts the --migrate path"
+# ...and we route to the same read-only inventory.
+assert_contains "$LOG8p" "./setup.sh -F --dry-run" \
+    "Test 8c: state.md-only marker routes to full-refresh preview"
 
 # ===========================================================================
 # Test 8d: prefix-only / date-less sentinel — migrated, but no garbage in banner
@@ -437,13 +433,13 @@ printf '# Legacy notes\n' > "$S8D/CONTINUITY.md"
 run_setup "$S8D" "$LOG8d" --upgrade
 assert_equals "$?" "0" "Test 8d: --upgrade on date-less sentinel exits 0"
 
-# Still recognized as migrated → no nag, points at removal...
+# A prefix-only marker receives the same conservative preview direction.
 assert_not_contains "$LOG8d" "./setup.sh --migrate" \
     "Test 8d: date-less sentinel does NOT nag './setup.sh --migrate'"
-assert_contains "$LOG8d" "already migrated" \
-    "Test 8d: date-less sentinel still reports 'already migrated'"
-assert_contains "$LOG8d" "content landed" \
-    "Test 8d: date-less sentinel still points at removal (gated on content landed)"
+assert_contains "$LOG8d" "./setup.sh -F --dry-run" \
+    "Test 8d: date-less sentinel routes to full-refresh preview"
+assert_not_contains "$LOG8d" "already migrated" \
+    "Test 8d: date-less sentinel is not treated as certification"
 # ...but with NO spliced-in garbage date.
 assert_not_contains "$LOG8d" "(-->)" \
     "Test 8d: banner has no '(-->)' artifact from the date-less sentinel"
@@ -556,9 +552,9 @@ start_test "Test 10: asymmetric preservation drift notice"
 
 # Scenario A — legacy install with CONTINUITY.md, no CLAUDE.md.
 # Post PR #2 the fresh install does not create CONTINUITY.md, so we seed it
-# manually to simulate a legacy install that hasn't run --migrate yet (the
+# manually to simulate a legacy install that still needs v6 reconciliation (the
 # motivating real-world scenario for this variant).
-# Expect: migration prompt for CONTINUITY, only-CONTINUITY final summary variant.
+# Expect: preview direction for CONTINUITY, only-CONTINUITY final summary variant.
 S10a=$(scratch_dir upgrade-asym-a)
 make_project "$S10a" frontend
 run_setup "$S10a" "$S10a/.install.log" -p "AsymA" -t fullstack
@@ -573,16 +569,16 @@ assert_file_exists "$S10a/CLAUDE.md" \
 assert_file_exists "$S10a/CONTINUITY.md" \
     "Scenario A: CONTINUITY.md still present"
 
-# Migration prompt must fire because legacy CONTINUITY.md is present.
+# Preview direction must fire because legacy CONTINUITY.md is present.
 assert_contains "$S10a/.upgrade.log" "Legacy CONTINUITY.md detected" \
     "Scenario A: migration prompt fires (for legacy CONTINUITY)"
-assert_contains "$S10a/.upgrade.log" "./setup.sh --migrate" \
-    "Scenario A: migration prompt suggests ./setup.sh --migrate"
+assert_contains "$S10a/.upgrade.log" "./setup.sh -F --dry-run" \
+    "Scenario A: legacy continuity points to full-refresh preview"
 assert_not_contains "$S10a/.upgrade.log" "CONTINUITY.template.md" \
     "Scenario A: log does NOT reference CONTINUITY.template.md (deleted in PR #2)"
-# Final summary: only-CONTINUITY variant (with --migrate suffix).
-assert_contains "$S10a/.upgrade.log" "Your CONTINUITY.md was preserved (run --migrate to move content to the new structure)" \
-    "Scenario A: final summary = only-CONTINUITY variant (--migrate suffix)"
+# Final summary: only-CONTINUITY preview variant.
+assert_contains "$S10a/.upgrade.log" "Your CONTINUITY.md was preserved; run -F --dry-run" \
+    "Scenario A: final summary = only-CONTINUITY preview variant"
 assert_not_contains "$S10a/.upgrade.log" "Your CLAUDE.md and CONTINUITY.md were preserved" \
     "Scenario A: final summary is NOT the both-preserved variant"
 assert_not_contains "$S10a/.upgrade.log" "were not modified" \
@@ -1246,7 +1242,8 @@ for mode in default force upgrade; do
     esac
     rc=$?
     [ "$rc" -ne 0 ] && pass "$mode v5 preflight exits nonzero" || fail "$mode v5 preflight unexpectedly succeeded"
-    assert_contains "$legacy/setup.log" 'authoritative refresh' "$mode prints executable full-refresh remediation"
+    assert_contains "$legacy/setup.log" 'Preview first' "$mode points to preview before mutation"
+    assert_contains "$legacy/setup.log" '--dry-run' "$mode remediation is explicitly read-only"
     assert_contains "$legacy/setup.log" 'setup.sh' "$mode remediation identifies the Forge installer"
     assert_contains "$legacy/setup.log" '-F' "$mode remediation uses authoritative -F"
     assert_hash_equals "$legacy/.claude/settings.json" "$before" "$mode leaves v5 settings byte-preserved"
@@ -1292,7 +1289,8 @@ for mode in default force upgrade; do
     esac
     rc=$?
     [ "$rc" -ne 0 ] && pass "$mode global v5 preflight exits nonzero" || fail "$mode global v5 preflight unexpectedly succeeded"
-    assert_contains "$global_legacy/setup.log" 'authoritative refresh' "$mode global mode prints full-refresh remediation"
+    assert_contains "$global_legacy/setup.log" 'Preview first' "$mode global mode points to preview before mutation"
+    assert_contains "$global_legacy/setup.log" '--dry-run' "$mode global remediation is explicitly read-only"
     assert_contains "$global_legacy/setup.log" '--global' "$mode global remediation preserves global scope"
     assert_contains "$global_legacy/setup.log" '-F' "$mode global remediation uses authoritative -F"
     assert_hash_equals "$global_legacy/.claude/settings.json" "$global_before" "$mode global mode preserves v5 settings bytes"
@@ -1349,7 +1347,8 @@ for surface in skill agent; do
         esac
         rc=$?
         [ "$rc" -ne 0 ] && pass "$surface-only $mode preflight exits nonzero" || fail "$surface-only $mode preflight materialized v6 beside legacy policy"
-        assert_contains "$legacy/setup.log" 'authoritative refresh' "$surface-only $mode prints full-refresh remediation"
+        assert_contains "$legacy/setup.log" 'Preview first' "$surface-only $mode points to preview before mutation"
+        assert_contains "$legacy/setup.log" '--dry-run' "$surface-only $mode remediation is explicitly read-only"
         assert_contains "$legacy/setup.log" '-F' "$surface-only $mode remediation is executable"
         after=$(find "$legacy/.claude" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)
         assert_equals "$after" "$before" "$surface-only $mode preflight performs no write"

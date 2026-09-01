@@ -5,7 +5,7 @@
 #
 #   1. state.md missing breadcrumb (advisory, stderr only, exit 0).
 #      Fires only when legacy CONTINUITY.md is present (signals upgraded
-#      install that hasn't run -Migrate yet). Suppressed otherwise to
+#      install that still needs full-refresh reconciliation). Suppressed otherwise to
 #      avoid spamming every Stop event.
 #
 #   2. Workflow reminder (advisory, stderr only, exit 0).
@@ -400,14 +400,14 @@ if ($branchChangedOutput) {
 # (signals user upgraded but hasn't migrated) — avoid spamming every Stop event.
 if ((-not $stateMd -or -not (Test-Path $stateMd)) -and (Test-Path "CONTINUITY.md")) {
     [Console]::Error.WriteLine("ℹ check-state-updated: Forge state.md not found, but CONTINUITY.md exists.")
-    [Console]::Error.WriteLine("  Run setup --migrate to move your content to the new structure.")
+    [Console]::Error.WriteLine("  Run setup -FullRefresh -DryRun, resolve every reported blocker, then run setup -FullRefresh.")
     # Continue to CHANGELOG check — gates are independent.
 }
 
 # Workflow reminder — read .claude/local/state.md (gitignored), single-line format.
 #
 # IMPORTANT: scope the extraction to ONLY the `## Workflow` section. Migrated
-# content (e.g., from `setup.sh --migrate` ingesting old CONTINUITY.md "### Done"
+# content carried forward from an older Forge state source (for example old "### Done"
 # entries that mention prior workflow scaffolds) can leave stray `| Command |`
 # lines elsewhere in the file. A whole-file Select-String would match every one
 # of them; even with `Select-Object -First 1` the FIRST hit can be the stray if

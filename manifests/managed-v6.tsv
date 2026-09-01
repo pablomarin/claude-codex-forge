@@ -8,6 +8,7 @@ canonical	manifests/legacy-v5.tsv	.forge/migrations/legacy-v5.tsv	all	shared	pro
 canonical	manifests/legacy-v5-releases.tsv	.forge/migrations/legacy-v5-releases.tsv	all	shared	project	forge-canonical	.forge/migrations/legacy-v5-releases.tsv	v6
 canonical	manifests/legacy-v5-fingerprints.tsv	.forge/migrations/legacy-v5-fingerprints.tsv	all	shared	project	forge-canonical	.forge/migrations/legacy-v5-fingerprints.tsv	v6
 canonical	manifests/legacy-v5-regions.tsv	.forge/migrations/legacy-v5-regions.tsv	all	shared	project	forge-canonical	.forge/migrations/legacy-v5-regions.tsv	v6
+canonical	manifests/legacy-v5-aliases.tsv	.forge/migrations/legacy-v5-aliases.tsv	all	shared	project	forge-canonical	.forge/migrations/legacy-v5-aliases.tsv	v6
 canonical	manifests/host-capabilities.tsv	.forge/host-capabilities.tsv	all	shared	project	forge-canonical	.forge/host-capabilities.tsv	v6
 canonical	manifests/workflow-capabilities.tsv	.forge/workflow-capabilities.tsv	all	shared	project	forge-canonical	.forge/workflow-capabilities.tsv	v6
 canonical	commands/opinion.md	.forge/workflows/opinion.md	all	shared	project	forge-canonical	.forge/workflows/opinion.md	v6

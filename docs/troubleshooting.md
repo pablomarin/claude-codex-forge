@@ -5,8 +5,37 @@ Common issues and their solutions.
 ## Setup script says files already exist
 
 This is expected when Forge finds protected user content or existing host adapters. Use the
-authoritative `setup.sh -F` (`setup.ps1 -FullRefresh`) path; it reconciles only ownership-proven
-Forge content and preserves user text outside managed blocks.
+authoritative preview first:
+
+```bash
+~/claude-codex-forge/setup.sh -F --dry-run
+```
+
+```powershell
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
+```
+
+Resolve every named blocker, then rerun without the dry-run flag. Full refresh reconciles only
+ownership-proven Forge content and preserves user text outside managed blocks.
+
+## Full-refresh preview says `UPGRADE: BLOCKED`
+
+This is a safety result, not a partial installation. Preview writes no target files and prints all
+known blockers together. Common groups are:
+
+- `ROOT_POLICY_AMBIGUOUS`: remove only obsolete project-owned v5 references; keep neutral project
+  context.
+- `CUSTOM_HARNESS_COLLISION`: explicitly keep the independently developed harness, or archive it
+  and remove its active registrations before adopting Forge v6.
+- `MULTIPLE_STATE_SOURCES`: compare the reported hashes/timestamps, choose one state, and archive
+  the non-selected copy.
+- `LEGACY_FILE_MODIFIED` / `LEGACY_ALIAS_AMBIGUOUS`: restore exact released bytes or archive and
+  remove that active legacy surface; Forge will not guess ownership.
+
+Rerun preview until it says `UPGRADE: READY`; execution should finish with `ACTIVE_FORGE: v6`.
+`MATERIALIZED` can still coexist with a per-host `RUNTIME_READY: BLOCKED` diagnostic—for example,
+an overlapping enabled plugin or missing host authentication. Resolve that host diagnostic without
+manually duplicating policy between `CLAUDE.md` and `AGENTS.md`.
 
 ## Memory not persisting?
 
@@ -140,21 +169,20 @@ migration path. Current hooks read **only** `.forge/local/state.md`; they never 
 1. The repo has a legacy `CONTINUITY.md` at the root and `.forge/local/state.md` is missing.
 2. `.forge/local/` was wiped (for example by an aggressive `git clean -fdx`).
 
-**Fix:**
+**Fix:** run the authoritative v6 preview, resolve every reported blocker, then execute the same
+full refresh without `--dry-run`:
 
 ```bash
-# Option A — run the migration assistant (preferred if you have legacy content):
-~/claude-codex-forge/setup.sh --migrate
-
-# Option B — authoritative v6 refresh (if there's nothing to migrate):
+~/claude-codex-forge/setup.sh -F --dry-run
 ~/claude-codex-forge/setup.sh -F
 ```
 
-Both options preserve existing `.forge/local/state.md` content.
+Preview preserves every target byte. Existing `.forge/local/state.md` content is preserved unless
+the report identifies a competing state source that requires an explicit owner choice.
 
 ### Dangling `@CONTINUITY.md` import in `CLAUDE.md`
 
-If your `CLAUDE.md` still has a `@CONTINUITY.md` line at the top (the pre-5.15 default), Claude Code will silently fail to find the target — `@`-imports do not error on missing files. The migration assistant **detects but does not auto-edit** this; it prints a warning telling you the line is dangling.
+If your `CLAUDE.md` still has a `@CONTINUITY.md` line at the top (the pre-5.15 default), Claude Code will silently fail to find the target — `@`-imports do not error on missing files. Full-refresh preview reports the ambiguous root policy and does not auto-edit project-owned prose.
 
 **Fix:** delete the line yourself.
 
@@ -168,33 +196,16 @@ You don't need to replace it with anything. The v5 `.claude/local/state.md` path
 not imported; v6 preserves that design at `.forge/local/state.md`, which hooks read on demand (see
 [`docs/adr/0001-volatile-state-not-auto-loaded.md`](adr/0001-volatile-state-not-auto-loaded.md)).
 
-### `setup.sh --migrate` says "nothing to migrate" but I have a `CONTINUITY.md`
+### `--migrate` / `-Migrate` says it was retired
 
-The migration assistant uses sentinel markers in each destination to detect already-migrated content, so re-runs are no-ops. If you've already run `--migrate` once, subsequent invocations will skip every section and report nothing to do — that's correct behavior, not a bug. Verify by reading the destinations:
+That is intentional in Forge 6. The old semantic parser could not safely decide which parts of a
+custom mixed-content file were durable policy, architecture decisions, or current developer state.
+The retired command changes no files and exits nonzero.
 
-```bash
-grep -A1 "^### Goal" CLAUDE.md
-ls docs/adr/
-cat .forge/local/state.md
-```
-
-If those look right, the migration succeeded. Re-running is safe.
-
-### I want to start migration over
-
-The original `CONTINUITY.md` is preserved byte-for-byte and never modified by `--migrate`, so you can roll forward at any time. To re-do migration from a clean slate:
-
-```bash
-# Remove the migrated outputs (KEEP CONTINUITY.md — it's the source)
-rm -i .forge/local/state.md
-# Optionally remove auto-numbered ADRs added by the previous --migrate run
-# (review docs/adr/ first; seed ADRs 0001-0005 are NOT from --migrate)
-
-# Re-run
-~/claude-codex-forge/setup.sh --migrate
-```
-
-The Goal block in `CLAUDE.md` is overwritten only if you delete the `### Goal` subsection first; otherwise the assistant respects existing content.
+Run full-refresh preview. If it reports `LEGACY_CONTINUITY_UNRESOLVED`, manually move the content
+you still need into project instructions, `docs/adr/`, and `.forge/local/state.md`; archive or remove
+the legacy file; then preview again. Exact prior migration receipts remain readable, but the mere
+presence of an old sentinel does not certify that every section was moved.
 
 ## Permissions still prompting?
 
@@ -368,8 +379,10 @@ The Forge ships a PTY shim (since v5.22) that works around this. If you're hitti
    ls .forge/hooks/lib/codex-pty-helper.py # required on Unix
    ```
 
-   If any are missing, run the authoritative `setup.sh -F` (or `setup.ps1 -FullRefresh`) from your
-   local Forge checkout. It reconciles ownership-proven canonical files and generated adapters.
+   If any are missing, preview with `setup.sh -F --dry-run` (or
+   `setup.ps1 -FullRefresh -DryRun`) from your local Forge checkout. Execute the same full-refresh
+   command without the dry-run flag only after `UPGRADE: READY`; it reconciles ownership-proven
+   canonical files and generated adapters.
 
 2. **Confirm the runtime dependency:**
 

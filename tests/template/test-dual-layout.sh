@@ -14,6 +14,7 @@ LEGACY="$REPO_ROOT/manifests/legacy-v5.tsv"
 RELEASES="$REPO_ROOT/manifests/legacy-v5-releases.tsv"
 FINGERPRINTS="$REPO_ROOT/manifests/legacy-v5-fingerprints.tsv"
 REGIONS="$REPO_ROOT/manifests/legacy-v5-regions.tsv"
+ALIASES="$REPO_ROOT/manifests/legacy-v5-aliases.tsv"
 
 safe_relative_path() {
     local path="$1" old_ifs component
@@ -151,6 +152,29 @@ fingerprints_are_release_bound() {
     done < "$releases"
 }
 
+aliases_are_release_bound() {
+    local aliases="$1" releases="$2" selectors source destination scope expected extra selected_set release_commit actual key
+    [ -f "$aliases" ] || return 1
+    awk -F '\t' '
+        /^#/ || /^[[:space:]]*$/ {next}
+        NF != 5 || $1 == "" || $2 == "" || $3 !~ /^\.agents\// || $4 != "project" || length($5) != 64 || $5 ~ /[^0-9a-f]/ {bad=1; next}
+        {count=split($1, values, ","); for (i=1; i<=count; i++) if (seen[values[i] SUBSEP $3]++) bad=1}
+        END {exit bad ? 1 : 0}
+    ' "$aliases" || return 1
+    while IFS=$'\t' read -r selectors source destination scope expected extra; do
+        case "$selectors" in ""|'#'*) continue ;; esac
+        [ -z "$extra" ] || return 1
+        local old_ifs="$IFS"
+        IFS=','
+        for selected_set in $selectors; do
+            release_commit=$(awk -F '\t' -v set="$selected_set" '$4 == set {print $2; count++} END {if (count != 1) exit 1}' "$releases") || { IFS="$old_ifs"; return 1; }
+            actual=$(git show "$release_commit:$source" | hash_stdin) || { IFS="$old_ifs"; return 1; }
+            [ "$actual" = "$expected" ] || { IFS="$old_ifs"; return 1; }
+        done
+        IFS="$old_ifs"
+    done < "$aliases"
+}
+
 regions_are_release_bound() {
     local regions="$1" releases="$2" version release_commit stamp_mode fingerprint_set region_set extra
     local row_set scope destination sequence ownership region_id start_anchor end_anchor expected
@@ -266,6 +290,7 @@ for relative in \
     manifests/legacy-v5-releases.tsv \
     manifests/legacy-v5-fingerprints.tsv \
     manifests/legacy-v5-regions.tsv \
+    manifests/legacy-v5-aliases.tsv \
     manifests/host-capabilities.tsv \
     manifests/workflow-capabilities.tsv \
     templates/adapters/claude-command.template.md \
@@ -280,6 +305,12 @@ for relative in \
     GLOBAL-AGENTS.template.md; do
     assert_file_exists "$REPO_ROOT/$relative" "staged v6 artifact exists: $relative"
 done
+
+if aliases_are_release_bound "$ALIASES" "$RELEASES"; then
+    pass "legacy cross-host aliases are version-bound to exact released bytes"
+else
+    fail "legacy cross-host alias provenance is missing or invalid"
+fi
 
 start_test "genuine pre-stamp and older stamped v5 releases are recognized"
 if release_map_is_valid "$RELEASES" "$FINGERPRINTS" "$REGIONS"; then
@@ -396,6 +427,7 @@ if [ -f "$MANIFEST" ]; then
     assert_contains "$MANIFEST" $'merge\tsettings/settings.template.json\t.claude/settings.json\tunix\tclaude\tproject\tforge-managed-entries\t-\tv6' "Unix Claude settings use the Unix template"
     assert_contains "$MANIFEST" $'merge\tsettings/settings-windows.template.json\t.claude/settings.json\twindows\tclaude\tproject\tforge-managed-entries\t-\tv6' "Windows Claude settings use the Windows template"
     assert_contains "$MANIFEST" $'canonical\tmanifests/legacy-v5-releases.tsv\t.forge/migrations/legacy-v5-releases.tsv\tall\tshared\tproject' "supported legacy release map is installed canonically"
+    assert_contains "$MANIFEST" $'canonical\tmanifests/legacy-v5-aliases.tsv\t.forge/migrations/legacy-v5-aliases.tsv\tall\tshared\tproject' "version-bound legacy alias evidence is installed canonically"
     if awk -F '\t' '$1 == "canonical" && $2 ~ /^skills\/(.*\/)?(CLAUDE|AGENTS|MEMORY)\.md$/ {bad=1} END {exit bad ? 0 : 1}' "$MANIFEST"; then
         fail "host-memory sentinel is declared as a canonical skill"
     else
