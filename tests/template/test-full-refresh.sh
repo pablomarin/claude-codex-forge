@@ -372,6 +372,10 @@ assert_contains "$agents_log" 'ROOT_POINTER: Read `docs/agent-context.md` comple
     "preview provides the exact thin root pointer"
 assert_contains "$agents_log" "RETRY: rerun the same full-refresh preview command after saving these edits" \
     "preview states how to verify the reconciliation"
+assert_contains "$agents_log" "AGENT_ASSISTED_NEXT_STEP: ask Claude Code or Codex to explain this report" \
+    "blocked preview offers the primary human recovery path"
+assert_contains "$agents_log" "AGENT_APPROVAL: do not modify files or run full refresh until the user approves the proposed reconciliation" \
+    "blocked preview preserves the human mutation boundary"
 assert_equals "$(grep -c '^BLOCKED: upgrade inventory contains blocking findings$' "$agents_log" || true)" "0" \
     "reported inventory blockers are not duplicated as generic errors"
 assert_hash_equals "$S5A/AGENTS.md" "$agents_hash" "ambiguous AGENTS remains byte-identical"
@@ -447,6 +451,10 @@ ln -s "$S6/elsewhere" "$S6/.forge"
 run_refresh "$S6" "$S6/symlink.log" -F
 assert_equals "$?" "1" "symlinked managed ancestor is rejected"
 assert_contains "$S6/symlink.log" "symlink" "symlink rejection is explicit"
+assert_contains "$S6/symlink.log" "AGENT_ASSISTED_NEXT_STEP: ask Claude Code or Codex to explain this report" \
+    "non-inventory blocker offers agent-assisted recovery"
+assert_contains "$S6/symlink.log" "AGENT_APPROVAL: do not modify files or run full refresh until the user approves the proposed reconciliation" \
+    "non-inventory blocker preserves the human mutation boundary"
 
 S6F=$(scratch_dir full-refresh-rollback)
 make_git_repo "$S6F"

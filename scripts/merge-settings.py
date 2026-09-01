@@ -70,6 +70,17 @@ class LegacyInventory:
     findings: tuple[UpgradeFinding, ...]
 
 
+def print_agent_assisted_blocker_guidance() -> None:
+    print(
+        "AGENT_ASSISTED_NEXT_STEP: ask Claude Code or Codex to explain this report "
+        "and follow docs/guides/agent-assisted-setup.md from the Forge checkout"
+    )
+    print(
+        "AGENT_APPROVAL: do not modify files or run full refresh until the user "
+        "approves the proposed reconciliation"
+    )
+
+
 def print_root_policy_actions(findings: tuple[UpgradeFinding, ...]) -> None:
     root_findings = tuple(
         finding
@@ -119,6 +130,8 @@ def print_refresh_report(
             f"detail={finding.detail} resolution={finding.resolution}"
         )
     print_root_policy_actions(findings)
+    if findings:
+        print_agent_assisted_blocker_guidance()
     print(f"UPGRADE: {upgrade}")
     print(f"ACTIVE_FORGE: {active_forge}")
     print(
@@ -1953,6 +1966,7 @@ def full_refresh_cli(argv: list[str]) -> int:
     except (RefreshBlocked, OSError, ValueError, json.JSONDecodeError) as error:
         if not isinstance(error, ReportedRefreshBlocked):
             print(f"BLOCKED: {error}", file=sys.stderr)
+            print_agent_assisted_blocker_guidance()
         return 1
     return 0
 

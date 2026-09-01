@@ -4,6 +4,12 @@ Install once, open either supported host, and work. Forge installs one canonical
 plus native Claude Code and Codex adapters; it does not ask you to choose a permanent main agent.
 The host you are using leads the current action.
 
+For people, the recommended path is [agent-assisted setup](guides/agent-assisted-setup.md): open
+Claude Code or Codex in the target repository and paste the canonical setup prompt. The agent
+chooses the correct command, but `setup.sh` or `setup.ps1` performs every installation and remains
+the source of truth. The commands below remain the direct path for CI, automation, offline use, and
+troubleshooting.
+
 ## Compatibility
 
 Forge probes capabilities, not just version strings. These are the v6 tested baselines; newer
