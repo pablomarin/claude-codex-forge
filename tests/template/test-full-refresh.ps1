@@ -401,6 +401,15 @@ try {
     Assert-OneActiveForge $profile4 "Windows profile 4"
 
     $managedSetup = New-Project "managed-setup"
+    [IO.Directory]::CreateDirectory((Join-Path $managedSetup "docs\adr")) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root "docs\adr\README.md") `
+        -Destination (Join-Path $managedSetup "docs\adr\README.md")
+    Copy-Item -LiteralPath (Join-Path $root "docs\adr\0001-volatile-state-not-auto-loaded.md") `
+        -Destination (Join-Path $managedSetup "docs\adr\0001-volatile-state-not-auto-loaded.md")
+    Write-Text (Join-Path $managedSetup "docs\adr\0006-write-tool-creates-missing-parents.md") `
+        "# Project ADR 0006`n`nWINDOWS_CUSTOM_PROJECT_DECISION`n"
+    $customAdrHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+        (Join-Path $managedSetup "docs\adr\0006-write-tool-creates-missing-parents.md")).Hash
     $managedRun = Invoke-IsolatedPowerShell -Script $setup -Arguments @() -WorkingDirectory $managedSetup `
         -Environment @{ HOME = (Join-Path $scratch "managed-home"); USERPROFILE = (Join-Path $scratch "managed-home") }
     $retiredHelpers = @(
@@ -415,6 +424,14 @@ try {
         -not (Test-Path -LiteralPath (Join-Path $managedSetup ".claude\local\state.md")) -and
         -not (Test-Path -LiteralPath (Join-Path $managedSetup ".claude\state.template.md"))) `
         "ordinary Windows v6 setup installs canonical helpers/state without retired copies"
+    $managedAdrIndex = [IO.File]::ReadAllText((Join-Path $managedSetup "docs\adr\README.md"))
+    $customAdrHashAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+        (Join-Path $managedSetup "docs\adr\0006-write-tool-creates-missing-parents.md")).Hash
+    Assert-True ($managedAdrIndex.Contains("This directory records architecture decisions for this project.") -and
+        -not $managedAdrIndex.Contains("0010-dual-engine-canonical-harness.md") -and
+        -not (Test-Path -LiteralPath (Join-Path $managedSetup "docs\adr\0001-volatile-state-not-auto-loaded.md")) -and
+        $customAdrHashAfter -eq $customAdrHash) `
+        "ordinary Windows v6 setup retires exact Forge ADR seeds and preserves project ADRs"
     $installedCouncil = [IO.File]::ReadAllText((Join-Path $managedSetup ".forge\skills\council\SKILL.template.md"))
     Assert-True ($installedCouncil.Contains(".forge/hooks/lib/codex-pty.sh") -and -not $installedCouncil.Contains(".claude/hooks/lib/codex-pty")) `
         "ordinary Windows v6 setup installs canonical council shim paths"
