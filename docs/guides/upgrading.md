@@ -86,6 +86,13 @@ Full refresh preserves:
 Only entries proven Forge-owned by a generated marker, released fingerprint, or versioned mixed-file
 region may be rewritten or removed. An ambiguity blocks before the first live v6 write.
 
+Full refresh distinguishes active harness policy from content Forge merely seeded as a starting
+point. A modified rule, hook, workflow, setting, or native adapter still blocks because it can
+compete with v6. Modified ADR indexes, CI references, and other non-runtime seeded content are
+reported as `PRESERVED` and remain byte-identical. At a known cross-host alias path, an exact
+released whole-file hash is sufficient for safe replacement even when the advisory v5 stamp is
+older; any modified alias still blocks.
+
 ## Read the Report
 
 Every action is classified:

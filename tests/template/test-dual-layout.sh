@@ -124,7 +124,7 @@ fingerprints_are_release_bound() {
     while IFS=$'\t' read -r selectors source destination scope expected extra; do
         case "$selectors" in ""|'#'*) continue ;; esac
         [ -z "$extra" ] || return 1
-        if ! awk -F '\t' -v source="$source" -v destination="$destination" -v scope="$scope" '$1 == "legacy" && $2 == source && $3 == destination && $4 == scope && $7 == "whole-file" {found=1} END {exit found ? 0 : 1}' "$LEGACY"; then
+        if ! awk -F '\t' -v source="$source" -v destination="$destination" -v scope="$scope" '$1 == "legacy" && $2 == source && $3 == destination && $4 == scope && $7 ~ /^(whole-file|seeded-content)$/ {found=1} END {exit found ? 0 : 1}' "$LEGACY"; then
             return 1
         fi
         local old_ifs="$IFS" selected_set
@@ -140,7 +140,7 @@ fingerprints_are_release_bound() {
     while IFS=$'\t' read -r version release_commit stamp_mode fingerprint_set region_set extra; do
         case "$version" in ""|'#'*) continue ;; esac
         while IFS=$'\t' read -r kind source destination scope platform host ownership selector proof; do
-            [ "$kind" = "legacy" ] && [ "$ownership" = "whole-file" ] || continue
+            [ "$kind" = "legacy" ] && [[ "$ownership" =~ ^(whole-file|seeded-content)$ ]] || continue
             if git cat-file -e "$release_commit:$source" 2>/dev/null; then
                 expected=$(fingerprint_hash_for "$fingerprints" "$fingerprint_set" "$source" "$destination" "$scope") || return 1
                 actual=$(git show "$release_commit:$source" | hash_stdin) || return 1

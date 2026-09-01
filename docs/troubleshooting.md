@@ -31,8 +31,16 @@ known blockers together. Common groups are:
   and remove its active registrations before adopting Forge v6.
 - `MULTIPLE_STATE_SOURCES`: compare the reported hashes/timestamps, choose one state, and archive
   the non-selected copy.
-- `LEGACY_FILE_MODIFIED` / `LEGACY_ALIAS_AMBIGUOUS`: restore exact released bytes or archive and
-  remove that active legacy surface; Forge will not guess ownership.
+- `LEGACY_FILE_MODIFIED`: an active legacy rule, hook, workflow, setting, or adapter differs from
+  released bytes. Move any project-owned policy into shared context, restore the released file, and
+  rerun preview; Forge will not guess which active behavior to keep.
+- `LEGACY_ALIAS_AMBIGUOUS`: a known cross-host alias is not byte-exact released content. Preserve or
+  archive the customized alias explicitly before retrying. Exact known aliases are reconciled even
+  when an advisory v5 stamp is stale.
+
+Modified non-runtime seeds such as ADR indexes and CI reference templates are not blockers. Preview
+lists them under `PRESERVED` as modified seeded project content and leaves their bytes unchanged,
+even when a separate active-policy finding keeps the overall upgrade blocked.
 
 Rerun preview until it says `UPGRADE: READY`; execution should finish with `ACTIVE_FORGE: v6`.
 `MATERIALIZED` can still coexist with a per-host `RUNTIME_READY: BLOCKED` diagnostic—for example,

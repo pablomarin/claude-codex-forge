@@ -421,6 +421,65 @@ assert_equals "$?" "1" "modified cross-host alias blocks"
 assert_contains "${S5LM}.preview.log" ".agents/skills/ui-design/SKILL.md" "modified alias is actionable"
 assert_hash_equals "$S5LM/.agents/skills/ui-design/SKILL.md" "$modified_alias_hash" "modified alias remains untouched"
 
+S5L58=$(scratch_dir full-refresh-alias-v558)
+make_git_repo "$S5L58"
+mkdir -p "$S5L58/.claude" "$S5L58/.agents/skills/ui-design"
+printf '5.58\n' > "$S5L58/.claude/.forge-version"
+git -C "$REPO_ROOT" show cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:skills/ui-design/SKILL.template.md \
+    > "$S5L58/.agents/skills/ui-design/SKILL.md"
+write_active_v5_state "$S5L58" "V558_ALIAS_STATE"
+run_refresh "$S5L58" "$S5L58/refresh.log" -F
+assert_equals "$?" "0" "exact known alias migrates even when its source hash predates the observed alias selector"
+assert_contains "$S5L58/.agents/skills/ui-design/SKILL.md" "forge-generated: true" \
+    "exact v5.58 skill copy becomes the v6 Codex adapter"
+
+start_test "modified seeded project content is preserved while modified active policy still blocks"
+S5SEED=$(scratch_dir full-refresh-seeded-content)
+make_git_repo "$S5SEED"
+mkdir -p "$S5SEED/.claude" "$S5SEED/docs/adr" "$S5SEED/docs/ci-templates"
+printf '5.60\n' > "$S5SEED/.claude/.forge-version"
+git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:docs/adr/README.md \
+    > "$S5SEED/docs/adr/README.md"
+printf '\n| [0099](0099-project.md) | Project decision | Accepted |\n' >> "$S5SEED/docs/adr/README.md"
+git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:templates/ci-workflows/e2e.yml \
+    | sed 's/__PLAYWRIGHT_DIR__/frontend/g' > "$S5SEED/docs/ci-templates/e2e.yml"
+write_active_v5_state "$S5SEED" "SEEDED_CONTENT_STATE"
+seeded_adr_hash=$(hash_file "$S5SEED/docs/adr/README.md")
+seeded_ci_hash=$(hash_file "$S5SEED/docs/ci-templates/e2e.yml")
+run_refresh "$S5SEED" "${S5SEED}.preview.log" -F --dry-run
+assert_equals "$?" "0" "modified non-runtime Forge seeds do not block preview"
+assert_contains "${S5SEED}.preview.log" "PRESERVED: docs/adr/README.md (modified seeded project content)" \
+    "modified ADR index is reported as preserved project content"
+assert_contains "${S5SEED}.preview.log" "PRESERVED: docs/ci-templates/e2e.yml (modified seeded project content)" \
+    "rendered CI reference is reported as preserved project content"
+run_refresh "$S5SEED" "$S5SEED/refresh.log" -F
+assert_equals "$?" "0" "migration succeeds with modified seeded project content"
+assert_hash_equals "$S5SEED/docs/adr/README.md" "$seeded_adr_hash" "project ADR index remains byte-identical"
+assert_hash_equals "$S5SEED/docs/ci-templates/e2e.yml" "$seeded_ci_hash" "rendered CI reference remains byte-identical"
+
+S5ACTIVE=$(scratch_dir full-refresh-active-rule-modified)
+make_git_repo "$S5ACTIVE"
+mkdir -p "$S5ACTIVE/.claude/rules" "$S5ACTIVE/docs/adr"
+printf '5.60\n' > "$S5ACTIVE/.claude/.forge-version"
+git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:rules/critical-rules.md \
+    > "$S5ACTIVE/.claude/rules/critical-rules.md"
+printf '\nPROJECT_POLICY_CHANGE\n' >> "$S5ACTIVE/.claude/rules/critical-rules.md"
+git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:docs/adr/README.md \
+    > "$S5ACTIVE/docs/adr/README.md"
+printf '\nPROJECT_ADR_INDEX_CHANGE\n' >> "$S5ACTIVE/docs/adr/README.md"
+write_active_v5_state "$S5ACTIVE" "ACTIVE_RULE_STATE"
+active_rule_hash=$(hash_file "$S5ACTIVE/.claude/rules/critical-rules.md")
+run_refresh "$S5ACTIVE" "${S5ACTIVE}.preview.log" -F --dry-run
+assert_equals "$?" "1" "modified active legacy rule continues to block"
+assert_contains "${S5ACTIVE}.preview.log" "code=LEGACY_FILE_MODIFIED" "active policy blocker remains explicit"
+assert_contains "${S5ACTIVE}.preview.log" \
+    "preserve the project-specific behavior in docs/agent-context.md or another project-owned source" \
+    "active policy blocker explains how to preserve the project-specific behavior"
+assert_contains "${S5ACTIVE}.preview.log" "PRESERVED: docs/adr/README.md (modified seeded project content)" \
+    "blocked preview still reports independently preserved seeded content"
+assert_hash_equals "$S5ACTIVE/.claude/rules/critical-rules.md" "$active_rule_hash" \
+    "blocked active rule remains byte-identical"
+
 start_test "independent harness and multiple state sources are grouped before mutation"
 S5H=$(scratch_dir full-refresh-independent-harness)
 make_git_repo "$S5H"
