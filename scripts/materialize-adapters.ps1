@@ -78,6 +78,135 @@ function Get-FileRevision {
     finally { $sha.Dispose() }
 }
 
+function Get-LegacyAliasCatalog {
+    $catalog = @{}
+    $manifest = Join-Path $RepoRoot "manifests\legacy-v5-aliases.tsv"
+    foreach ($raw in [IO.File]::ReadAllLines($manifest)) {
+        if (-not $raw.Trim() -or $raw.StartsWith("#")) { continue }
+        $fields = $raw.Split("`t")
+        if ($fields.Count -ne 5) { throw "legacy alias manifest row must have five fields" }
+        $destination = $fields[2]
+        if ($fields[3] -ne "project") { continue }
+        if (-not (Test-SafeRelativePath $destination)) { throw "unsafe legacy alias destination: $destination" }
+        $digest = $fields[4]
+        if ($digest -notmatch '^[0-9a-f]{64}$') { throw "invalid legacy alias fingerprint: $destination" }
+        if (-not $catalog.ContainsKey($destination)) {
+            $catalog[$destination] = New-Object 'System.Collections.Generic.HashSet[string]'
+        }
+        [void]$catalog[$destination].Add($digest)
+    }
+    return $catalog
+}
+
+function Get-ExactLegacyAliases([hashtable]$Catalog) {
+    $exact = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($destination in $Catalog.Keys) {
+        Assert-NoLinkAncestor $Target $destination
+        $path = Join-Path $Target ($destination -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "legacy alias destination is not a regular file: $destination"
+        }
+        if ($Catalog[$destination].Contains((Get-FileRevision $path))) {
+            [void]$exact.Add($destination)
+        }
+    }
+    return ,$exact
+}
+
+function Get-LegacyCodexHookRelative([string]$Command) {
+    $match = [regex]::Match($Command, '(?i)(?:^|[\\/])\.codex[\\/]hooks[\\/]([A-Za-z0-9._/\\-]+)')
+    if (-not $match.Success) { return "" }
+    return ".codex/hooks/" + $match.Groups[1].Value.Replace('\', '/')
+}
+
+function Update-LegacyCodexHookPayload($Payload, [hashtable]$Catalog, $Exact) {
+    if (-not $Payload.PSObject.Properties["hooks"]) { return $false }
+    $hooks = $Payload.hooks
+    if (-not $hooks) { return $false }
+    $legacyInline = @(
+        "echo 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).' >&2; exit 0",
+        'powershell -Command "Write-Error ''COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).''; exit 0"'
+    )
+    $changed = $false
+    foreach ($eventName in @($hooks.PSObject.Properties.Name)) {
+        $retainedBlocks = @()
+        foreach ($block in @($hooks.$eventName)) {
+            if (-not $block.PSObject.Properties["hooks"]) {
+                $retainedBlocks += $block
+                continue
+            }
+            $retainedHooks = @()
+            foreach ($hook in @($block.hooks)) {
+                $command = if ($hook.command -is [string]) { [string]$hook.command } else { "" }
+                if ($legacyInline -contains $command) { $changed = $true; continue }
+                $relative = Get-LegacyCodexHookRelative $command
+                if (-not $relative -or -not $Catalog.ContainsKey($relative)) {
+                    $retainedHooks += $hook
+                    continue
+                }
+                if (-not $Exact.Contains($relative)) {
+                    throw "referenced legacy cross-host hook is missing, modified, or ambiguous: $relative"
+                }
+                $changed = $true
+            }
+            if ($retainedHooks.Count) {
+                $block.hooks = @($retainedHooks)
+                $retainedBlocks += $block
+            } else {
+                $changed = $true
+            }
+        }
+        if ($retainedBlocks.Count) {
+            $hooks.$eventName = @($retainedBlocks)
+        } else {
+            $hooks.PSObject.Properties.Remove($eventName)
+            $changed = $true
+        }
+    }
+    return $changed
+}
+
+function Invoke-LegacyAliasCleanup([ValidateSet("check", "apply")][string]$Mode) {
+    if ($Scope -ne "project" -or $env:FORGE_TRANSACTION_STAGE -eq "1") { return }
+    $catalog = Get-LegacyAliasCatalog
+    $exact = Get-ExactLegacyAliases $catalog
+    $hooksPath = Join-Path $Target ".codex\hooks.json"
+    $payload = $null
+    $changed = $false
+    if (Test-Path -LiteralPath $hooksPath) {
+        Assert-NoLinkAncestor $Target ".codex\hooks.json"
+        $item = Get-Item -LiteralPath $hooksPath -Force
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Codex hooks configuration is not a regular file"
+        }
+        try { $payload = Get-Content -LiteralPath $hooksPath -Raw | ConvertFrom-Json }
+        catch { throw "Codex hooks configuration is malformed" }
+        $changed = Update-LegacyCodexHookPayload $payload $catalog $exact
+    }
+    if ($Mode -eq "check") { return }
+    if ($changed) {
+        [IO.File]::WriteAllText($hooksPath, ($payload | ConvertTo-Json -Depth 30) + "`n", $Utf8NoBom)
+        Write-Host "RETIRED_COMPAT: .codex/hooks.json legacy registrations"
+    }
+    $removed = 0
+    foreach ($destination in @($exact | Sort-Object)) {
+        $path = Join-Path $Target ($destination -replace '/', '\')
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            -not $catalog[$destination].Contains((Get-FileRevision $path))) {
+            throw "legacy alias changed before cleanup: $destination"
+        }
+        Remove-Item -LiteralPath $path -Force
+        $removed++
+        Write-Host "RETIRED_COMPAT: $destination"
+    }
+    if ($removed -or $changed) {
+        Write-Host "RETIRED_COMPAT_SUMMARY: files=$removed registrations=$(if ($changed) { 1 } else { 0 })"
+    }
+}
+
 function Get-ForgeMaterializerTextHash([string]$Text) {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($sha.ComputeHash($Utf8NoBom.GetBytes($Text)))).Replace("-", "").ToLowerInvariant() }
@@ -417,6 +546,7 @@ function Write-InstallManifest {
     [IO.File]::WriteAllLines($out, $lines, $Utf8NoBom)
 }
 
+Invoke-LegacyAliasCleanup "check"
 $rows = Read-ManagedManifest $Manifest
 foreach ($row in $rows) {
     if ($row.Scope -ne $Scope -or @("all", $Platform) -notcontains $row.Platform) { continue }
@@ -455,6 +585,7 @@ if ($Scope -eq "project") {
     Merge-JsonManagedEntries (Join-Path $RepoRoot "mcp.template.json") (Join-Path $Target ".mcp.json")
     Merge-CodexHookEntries (Join-Path $RepoRoot "settings\codex-hooks.template.json") (Join-Path $Target ".codex\hooks.json")
     Set-CodexTomlBlock (Join-Path $RepoRoot "settings\codex-config.template.toml") (Join-Path $Target ".codex\config.toml") (Join-Path $Target ".mcp.json")
+    Invoke-LegacyAliasCleanup "apply"
 } else {
     foreach ($relative in @(".claude\settings.json", ".codex\config.toml", ".forge\goal-authorizations", ".forge\goal-captures")) { Assert-NoLinkAncestor $Target $relative }
     New-Item -ItemType Directory -Path (Join-Path $Target ".forge\goal-authorizations") -Force | Out-Null

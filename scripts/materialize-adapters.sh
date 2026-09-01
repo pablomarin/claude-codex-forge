@@ -246,6 +246,35 @@ merge_json_config() {
     fi
 }
 
+legacy_alias_candidates_exist() {
+    local selectors source destination scope digest extra
+    while IFS=$'\t' read -r selectors source destination scope digest extra; do
+        case "$selectors" in ""|'#'*) continue ;; esac
+        [ "$scope" = project ] || continue
+        if [ -e "$MATERIALIZE_TARGET/$destination" ] || [ -L "$MATERIALIZE_TARGET/$destination" ]; then
+            return 0
+        fi
+    done < "$MATERIALIZE_REPO/manifests/legacy-v5-aliases.tsv"
+    if [ -f "$MATERIALIZE_TARGET/.codex/hooks.json" ] \
+        && grep -Eq '\.codex[/\\]hooks[/\\]|COMPACTION IMMINENT' "$MATERIALIZE_TARGET/.codex/hooks.json"; then
+        return 0
+    fi
+    return 1
+}
+
+legacy_alias_cleanup() {
+    local mode="$1"
+    [ "$MATERIALIZE_SCOPE" = project ] || return 0
+    [ "${FORGE_TRANSACTION_STAGE:-0}" != 1 ] || return 0
+    if command -v python3 >/dev/null 2>&1; then
+        python3 "$MATERIALIZE_REPO/scripts/merge-settings.py" cleanup-legacy-aliases \
+            --repo-root "$MATERIALIZE_REPO" --target "$MATERIALIZE_TARGET" --mode "$mode"
+    elif legacy_alias_candidates_exist; then
+        echo "BLOCKED: Python 3 is required to reconcile legacy cross-host compatibility files safely" >&2
+        return 1
+    fi
+}
+
 primary_checkout_for() {
     git -C "$1" worktree list --porcelain 2>/dev/null | awk '/^worktree / {sub(/^worktree /, ""); print; exit}'
 }
@@ -351,6 +380,7 @@ materialize_scope() {
         mkdir -p "$MATERIALIZE_TARGET/.forge/local" "$MATERIALIZE_TARGET/.forge/memory"
         [ -f "$MATERIALIZE_TARGET/.forge/local/state.md" ] || cp "$MATERIALIZE_REPO/state.template.md" "$MATERIALIZE_TARGET/.forge/local/state.md"
         materialize_project_config
+        legacy_alias_cleanup apply
     else
         assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/goal-authorizations"
         assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/goal-captures"
@@ -420,6 +450,7 @@ MATERIALIZE_DIAGNOSTIC_TARGET=$(cd "$MATERIALIZE_DIAGNOSTIC_TARGET" && pwd -P)
 MATERIALIZE_DIAGNOSTIC_HOME=${FORGE_DIAGNOSTIC_HOME:-${HOME:-}}
 MATERIALIZE_MANIFEST="$MATERIALIZE_REPO/manifests/managed-v6.tsv"
 load_managed_manifest "$MATERIALIZE_MANIFEST"
+legacy_alias_cleanup check
 materialize_scope
 
 echo "INSTALLATION: MATERIALIZED"
