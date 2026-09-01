@@ -67,6 +67,7 @@ class LegacyInventory:
     region_selector: str
     recognized: bool
     proven_legacy: frozenset[str]
+    preserved_legacy: frozenset[str]
     findings: tuple[UpgradeFinding, ...]
 
 
@@ -299,6 +300,7 @@ def inventory_legacy(
     releases, fingerprints, aliases = released_ownership(repo_root)
     findings: list[UpgradeFinding] = []
     proven_legacy: set[str] = set()
+    preserved_legacy: set[str] = set()
     current_v6 = False
     v6_stamp = target / ".forge/version"
     if v6_stamp.is_file() and not v6_stamp.is_symlink():
@@ -361,6 +363,8 @@ def inventory_legacy(
             recognized = recognized or verified
         if verified:
             proven_legacy.add(destination)
+        elif ownership == "seeded-content":
+            preserved_legacy.add(destination)
         else:
             findings.append(
                 UpgradeFinding(
@@ -368,7 +372,9 @@ def inventory_legacy(
                     scope,
                     destination,
                     "modified or unverifiable legacy managed file",
-                    "restore the released bytes or archive and remove the active legacy registration",
+                    "preserve the project-specific behavior in docs/agent-context.md or another "
+                    "project-owned source, then restore the released bytes or archive and remove "
+                    "the active legacy registration",
                 )
             )
 
@@ -382,9 +388,11 @@ def inventory_legacy(
             reject_link_ancestors(target, relative_path(destination))
             if not path.is_file():
                 raise RefreshBlocked(f"legacy alias destination is not a regular file: {destination}")
-            selected = bool(selector and selector in selectors.split(","))
             digest = sha256_path(path)
-            if selected and digest == expected:
+            # An exact released whole-file hash at a known cross-host alias
+            # path is stronger evidence than an advisory/stale project stamp.
+            # Replacement is lossless and backed up; modified bytes still block.
+            if digest == expected:
                 proven_legacy.add(destination)
             else:
                 findings.append(
@@ -392,7 +400,7 @@ def inventory_legacy(
                         "LEGACY_ALIAS_AMBIGUOUS",
                         scope,
                         destination,
-                        "cross-host alias is modified or is not proven for the stamped release",
+                        "cross-host alias is modified or is not an exact released alias",
                         "archive the project-owned file or restore the exact released alias bytes",
                     )
                 )
@@ -433,6 +441,7 @@ def inventory_legacy(
         region_selector=region_selector,
         recognized=recognized,
         proven_legacy=frozenset(proven_legacy),
+        preserved_legacy=frozenset(preserved_legacy),
         findings=tuple(sorted(set(findings))),
     )
 
@@ -1783,6 +1792,10 @@ def full_refresh(
     journal: dict = {}
     try:
         inventory = inventory_legacy(repo_root, target, scope, platform)
+        report["PRESERVED"].extend(
+            f"{relative} (modified seeded project content)"
+            for relative in sorted(inventory.preserved_legacy)
+        )
         if inventory.findings:
             print_refresh_report(
                 report,
@@ -1797,6 +1810,10 @@ def full_refresh(
             # Re-read after serialization so the transaction never relies on a
             # preview that raced with another local process.
             inventory = inventory_legacy(repo_root, target, scope, platform)
+            report["PRESERVED"].extend(
+                f"{relative} (modified seeded project content)"
+                for relative in sorted(inventory.preserved_legacy)
+            )
             if inventory.findings:
                 print_refresh_report(
                     report,

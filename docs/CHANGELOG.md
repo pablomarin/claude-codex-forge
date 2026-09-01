@@ -45,6 +45,14 @@ dual-engine architecture and engineering lifecycle, shows the exact installed tr
 summaries name the complete v6 commit surface, and project-first setup no longer prevents the first
 global installation when the only existing machine artifact is Forge's advisory version stamp.
 
+Full-refresh ownership now distinguishes active legacy policy from non-runtime content that Forge
+seeded for projects to adopt. Customized ADR indexes, CI references, and Playwright scaffolds are
+preserved and reported instead of blocking; modified rules, hooks, workflows, settings, and adapters
+remain fail-closed. Exact known cross-host aliases can be safely replaced despite an older advisory
+v5 stamp, while any modified alias still requires explicit reconciliation. This closes upgrade
+blockers reproduced in real v5.58 and v5.60 downstream repositories without adding repository-specific
+exceptions or semantic Markdown merging.
+
 ## 5.61 — 2026-07-27 · `/codex` plan review gains a NECESSITY axis — the loop can now argue for _less_
 
 **Found by dogfooding v5.59/v5.60 in a downstream project.** Across roughly 30 review rounds the loop caught every omission and **not once** flagged anything as unnecessary. Concretely: an approved plan carried a pre-authoring gate demanding five third-party artifacts (model source, resolved manifest node/config, tool + adapter versions, a custom strategy macro, and one more) before the team was allowed to start authoring. It survived the entire loop. When a human finally challenged it, Codex conceded immediately and cleanly — _"there is no reachable correctness failure uniquely prevented by collecting all five artifacts"_ — and reduced the ask to a single coordination question. The capability was present; only the trigger was missing.

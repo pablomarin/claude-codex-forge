@@ -275,6 +275,44 @@ try {
     $modifiedAliasResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $modifiedAlias
     Assert-True ($modifiedAliasResult.Code -ne 0 -and $modifiedAliasResult.Output.Contains(".agents/skills/ui-design/SKILL.md")) "PowerShell blocks a modified cross-host alias"
 
+    $v558Alias = New-Project "legacy-alias-v558"
+    Write-Text (Join-Path $v558Alias ".claude\.forge-version") "5.58`n"
+    $v558AliasPath = Join-Path $v558Alias ".agents\skills\ui-design\SKILL.md"
+    Export-GitBlob "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:skills/ui-design/SKILL.template.md" $v558AliasPath
+    Write-V5State $v558Alias "WINDOWS_V558_ALIAS_STATE"
+    $v558AliasResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $v558Alias
+    Assert-True ($v558AliasResult.Code -eq 0 -and [IO.File]::ReadAllText($v558AliasPath).Contains("forge-generated: true")) "PowerShell replaces an exact known alias despite an older compatible stamp"
+
+    $seededContent = New-Project "seeded-content"
+    Write-Text (Join-Path $seededContent ".claude\.forge-version") "5.60`n"
+    $seededAdr = Join-Path $seededContent "docs\adr\README.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:docs/adr/README.md" $seededAdr
+    [IO.File]::AppendAllText($seededAdr, "`n| [0099](0099-project.md) | Project decision | Accepted |`n", $utf8NoBom)
+    $seededCi = Join-Path $seededContent "docs\ci-templates\e2e.yml"
+    $seededCiSource = Join-Path $scratch "seeded-e2e-source.yml"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:templates/ci-workflows/e2e.yml" $seededCiSource
+    Write-Text $seededCi ([IO.File]::ReadAllText($seededCiSource).Replace("__PLAYWRIGHT_DIR__", "frontend"))
+    Write-V5State $seededContent "WINDOWS_SEEDED_CONTENT_STATE"
+    $seededAdrHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $seededAdr).Hash
+    $seededCiHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $seededCi).Hash
+    $seededPreview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $seededContent
+    Assert-True ($seededPreview.Code -eq 0 -and $seededPreview.Output.Contains("PRESERVED: docs/adr/README.md (modified seeded project content)") -and $seededPreview.Output.Contains("PRESERVED: docs/ci-templates/e2e.yml (modified seeded project content)")) "PowerShell preserves modified non-runtime Forge seeds during preview"
+    $seededRun = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $seededContent
+    Assert-True ($seededRun.Code -eq 0 -and (Get-FileHash -Algorithm SHA256 -LiteralPath $seededAdr).Hash -eq $seededAdrHash -and (Get-FileHash -Algorithm SHA256 -LiteralPath $seededCi).Hash -eq $seededCiHash) "PowerShell migration preserves seeded project content byte-for-byte"
+
+    $activeRule = New-Project "active-rule-modified"
+    Write-Text (Join-Path $activeRule ".claude\.forge-version") "5.60`n"
+    $activeRulePath = Join-Path $activeRule ".claude\rules\critical-rules.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:rules/critical-rules.md" $activeRulePath
+    [IO.File]::AppendAllText($activeRulePath, "`nWINDOWS_PROJECT_POLICY_CHANGE`n", $utf8NoBom)
+    $blockedSeededAdr = Join-Path $activeRule "docs\adr\README.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:docs/adr/README.md" $blockedSeededAdr
+    [IO.File]::AppendAllText($blockedSeededAdr, "`nWINDOWS_PROJECT_ADR_INDEX_CHANGE`n", $utf8NoBom)
+    Write-V5State $activeRule "WINDOWS_ACTIVE_RULE_STATE"
+    $activeRuleHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $activeRulePath).Hash
+    $activeRuleResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $activeRule
+    Assert-True ($activeRuleResult.Code -ne 0 -and $activeRuleResult.Output.Contains("code=LEGACY_FILE_MODIFIED") -and $activeRuleResult.Output.Contains("preserve the project-specific behavior in docs/agent-context.md or another project-owned source") -and $activeRuleResult.Output.Contains("PRESERVED: docs/adr/README.md (modified seeded project content)") -and (Get-FileHash -Algorithm SHA256 -LiteralPath $activeRulePath).Hash -eq $activeRuleHash) "PowerShell keeps modified active policy blocking while explaining preservation and reporting preserved seeded content"
+
     $customHarness = New-Project "independent-harness"
     Write-Text (Join-Path $customHarness ".claude\.forge-version") "5.61`n"
     Write-Text (Join-Path $customHarness ".agent-workflows\runtime\workflow-runtime.mjs") "console.log('WINDOWS_CUSTOM_RUNTIME')`n"
