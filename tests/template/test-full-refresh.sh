@@ -453,6 +453,69 @@ assert_equals "$?" "0" "exact known alias migrates even when its source hash pre
 assert_contains "$S5L58/.agents/skills/ui-design/SKILL.md" "forge-generated: true" \
     "exact v5.58 skill copy becomes the v6 Codex adapter"
 
+start_test "full refresh retires proven cross-host compatibility copies and registrations"
+S5X=$(scratch_dir full-refresh-cross-host-compat)
+make_git_repo "$S5X"
+mkdir -p \
+    "$S5X/.claude" \
+    "$S5X/.codex/hooks" \
+    "$S5X/.agents/skills/ui-design/references"
+printf '5.58\n' > "$S5X/.claude/.forge-version"
+git -C "$REPO_ROOT" show \
+    cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:hooks/session-start.sh \
+    > "$S5X/.codex/hooks/session-start.sh"
+git -C "$REPO_ROOT" show \
+    cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:skills/ui-design/references/polish-checklist.md \
+    > "$S5X/.agents/skills/ui-design/references/polish-checklist.md"
+git -C "$REPO_ROOT" show \
+    cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:hooks/check-workflow-gates.ps1 \
+    > "$S5X/.codex/hooks/check-workflow-gates.ps1"
+printf '\nPROJECT_CUSTOMIZED_HOOK\n' >> "$S5X/.codex/hooks/check-workflow-gates.ps1"
+custom_cross_host_hash=$(hash_file "$S5X/.codex/hooks/check-workflow-gates.ps1")
+python3 - "$S5X" <<'PY'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+payload = {
+    "projectSetting": "KEEP-CROSS-HOST-SETTING",
+    "hooks": {
+        "SessionStart": [{
+            "matcher": "startup|resume|clear|compact",
+            "hooks": [{
+                "type": "command",
+                "command": f"'{root}/.codex/hooks/session-start.sh'",
+            }],
+        }],
+        "CustomEvent": [{"projectOwned": "KEEP-CUSTOM-EVENT"}],
+    },
+}
+(root / ".codex/hooks.json").write_text(json.dumps(payload, indent=2) + "\n")
+PY
+write_active_v5_state "$S5X" "CROSS_HOST_COMPAT_STATE"
+run_refresh "$S5X" "$S5X/refresh.log" -F
+assert_equals "$?" "0" "full refresh accepts byte-proven cross-host compatibility files"
+assert_file_missing "$S5X/.codex/hooks/session-start.sh" \
+    "full refresh retires the exact legacy Codex hook copy"
+assert_file_missing "$S5X/.agents/skills/ui-design/references/polish-checklist.md" \
+    "full refresh retires the exact duplicated skill reference"
+assert_hash_equals "$S5X/.codex/hooks/check-workflow-gates.ps1" "$custom_cross_host_hash" \
+    "full refresh preserves an unregistered customized compatibility file"
+python3 - "$S5X/.codex/hooks.json" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1]))
+hooks = payload.get("hooks", {})
+assert "SessionStart" not in hooks
+assert hooks.get("CustomEvent") == [{"projectOwned": "KEEP-CUSTOM-EVENT"}]
+assert payload.get("projectSetting") == "KEEP-CROSS-HOST-SETTING"
+assert any(entry.get("forgeManagedId") == "session-start" for entry in hooks.get("session_start", []))
+PY
+assert_equals "$?" "0" \
+    "full refresh removes only the proven legacy registration and preserves user JSON"
+
 start_test "modified seeded project content is preserved while modified active policy still blocks"
 S5SEED=$(scratch_dir full-refresh-seeded-content)
 make_git_repo "$S5SEED"

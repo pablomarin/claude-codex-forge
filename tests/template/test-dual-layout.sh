@@ -153,11 +153,11 @@ fingerprints_are_release_bound() {
 }
 
 aliases_are_release_bound() {
-    local aliases="$1" releases="$2" selectors source destination scope expected extra selected_set release_commit actual key
+    local aliases="$1" releases="$2" selectors source destination scope expected extra selected_set release_commit release_commits actual key
     [ -f "$aliases" ] || return 1
     awk -F '\t' '
         /^#/ || /^[[:space:]]*$/ {next}
-        NF != 5 || $1 == "" || $2 == "" || $3 !~ /^\.agents\// || $4 != "project" || length($5) != 64 || $5 ~ /[^0-9a-f]/ {bad=1; next}
+        NF != 5 || $1 == "" || $2 == "" || $3 !~ /^\.(agents|codex)\// || $4 != "project" || length($5) != 64 || $5 ~ /[^0-9a-f]/ {bad=1; next}
         {count=split($1, values, ","); for (i=1; i<=count; i++) if (seen[values[i] SUBSEP $3]++) bad=1}
         END {exit bad ? 1 : 0}
     ' "$aliases" || return 1
@@ -167,9 +167,13 @@ aliases_are_release_bound() {
         local old_ifs="$IFS"
         IFS=','
         for selected_set in $selectors; do
-            release_commit=$(awk -F '\t' -v set="$selected_set" '$4 == set {print $2; count++} END {if (count != 1) exit 1}' "$releases") || { IFS="$old_ifs"; return 1; }
-            actual=$(git show "$release_commit:$source" | hash_stdin) || { IFS="$old_ifs"; return 1; }
-            [ "$actual" = "$expected" ] || { IFS="$old_ifs"; return 1; }
+            release_commits=$(awk -F '\t' -v set="$selected_set" '$4 == set {print $2; count++} END {if (count == 0) exit 1}' "$releases") || { IFS="$old_ifs"; return 1; }
+            IFS="$old_ifs"
+            for release_commit in $release_commits; do
+                actual=$(git show "$release_commit:$source" | hash_stdin) || { IFS="$old_ifs"; return 1; }
+                [ "$actual" = "$expected" ] || { IFS="$old_ifs"; return 1; }
+            done
+            IFS=','
         done
         IFS="$old_ifs"
     done < "$aliases"

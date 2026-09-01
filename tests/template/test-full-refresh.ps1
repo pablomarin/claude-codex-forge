@@ -283,6 +283,99 @@ try {
     $v558AliasResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $v558Alias
     Assert-True ($v558AliasResult.Code -eq 0 -and [IO.File]::ReadAllText($v558AliasPath).Contains("forge-generated: true")) "PowerShell replaces an exact known alias despite an older compatible stamp"
 
+    $crossHostCompat = New-Project "cross-host-compat"
+    Write-Text (Join-Path $crossHostCompat ".claude\.forge-version") "5.58`n"
+    $legacyCodexHook = Join-Path $crossHostCompat ".codex\hooks\session-start.ps1"
+    $legacySkillReference = Join-Path $crossHostCompat ".agents\skills\ui-design\references\polish-checklist.md"
+    $customCompatHook = Join-Path $crossHostCompat ".codex\hooks\check-workflow-gates.sh"
+    Export-GitBlob "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:hooks/session-start.ps1" $legacyCodexHook
+    Export-GitBlob "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:skills/ui-design/references/polish-checklist.md" $legacySkillReference
+    Export-GitBlob "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:hooks/check-workflow-gates.sh" $customCompatHook
+    [IO.File]::AppendAllText($customCompatHook, "`nWINDOWS_PROJECT_CUSTOMIZED_HOOK`n", $utf8NoBom)
+    $customCompatHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $customCompatHook).Hash
+    $legacyCommand = "'" + $legacyCodexHook + "'"
+    $crossHostPayload = [ordered]@{
+        projectSetting = "KEEP-CROSS-HOST-SETTING"
+        hooks = [ordered]@{
+            SessionStart = @([ordered]@{
+                matcher = "startup|resume|clear|compact"
+                hooks = @([ordered]@{ type = "command"; command = $legacyCommand })
+            })
+            CustomEvent = @([ordered]@{ projectOwned = "KEEP-CUSTOM-EVENT" })
+        }
+    }
+    Write-Text (Join-Path $crossHostCompat ".codex\hooks.json") (($crossHostPayload | ConvertTo-Json -Depth 20) + "`n")
+    Write-V5State $crossHostCompat "WINDOWS_CROSS_HOST_COMPAT_STATE"
+    $crossHostRun = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $crossHostCompat
+    $crossHostInstalled = Get-Content -LiteralPath (Join-Path $crossHostCompat ".codex\hooks.json") -Raw | ConvertFrom-Json
+    $crossHostProperties = @($crossHostInstalled.hooks.PSObject.Properties.Name)
+    $installedSessionIds = @($crossHostInstalled.hooks.session_start | ForEach-Object { $_.forgeManagedId })
+    Assert-True ($crossHostRun.Code -eq 0 -and
+        -not (Test-Path -LiteralPath $legacyCodexHook) -and
+        -not (Test-Path -LiteralPath $legacySkillReference) -and
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $customCompatHook).Hash -eq $customCompatHash) `
+        "PowerShell full refresh retires exact compatibility copies and preserves customized inert files"
+    Assert-True ($crossHostProperties -notcontains "SessionStart" -and
+        $crossHostProperties -contains "CustomEvent" -and
+        $crossHostInstalled.projectSetting -eq "KEEP-CROSS-HOST-SETTING" -and
+        $installedSessionIds -contains "session-start") `
+        "PowerShell full refresh removes only the proven registration and preserves user JSON"
+
+    $managedCompat = New-Project "managed-cross-host-compat"
+    $materializer = Join-Path $root "scripts\materialize-adapters.ps1"
+    $managedFirst = Invoke-IsolatedPowerShell -Script $materializer -Arguments @(
+        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows"
+    ) -WorkingDirectory $managedCompat
+    Assert-True ($managedFirst.Code -eq 0) "PowerShell managed compatibility fixture starts as v6"
+    $managedLegacyHook = Join-Path $managedCompat ".codex\hooks\session-start.ps1"
+    $managedLegacyReference = Join-Path $managedCompat ".agents\skills\ui-design\references\polish-checklist.md"
+    $managedCustomHook = Join-Path $managedCompat ".codex\hooks\check-workflow-gates.sh"
+    Export-GitBlob "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:hooks/session-start.ps1" $managedLegacyHook
+    Export-GitBlob "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:skills/ui-design/references/polish-checklist.md" $managedLegacyReference
+    Export-GitBlob "cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:hooks/check-workflow-gates.sh" $managedCustomHook
+    [IO.File]::AppendAllText($managedCustomHook, "`nWINDOWS_PROJECT_CUSTOMIZED_HOOK`n", $utf8NoBom)
+    $managedCustomHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $managedCustomHook).Hash
+    $managedHooksPath = Join-Path $managedCompat ".codex\hooks.json"
+    $managedHooks = Get-Content -LiteralPath $managedHooksPath -Raw | ConvertFrom-Json
+    $managedHooks | Add-Member -NotePropertyName projectSetting -NotePropertyValue "KEEP-CROSS-HOST-SETTING" -Force
+    $managedHooks.hooks | Add-Member -NotePropertyName SessionStart -NotePropertyValue @([pscustomobject]@{
+        matcher = "startup|resume|clear|compact"
+        hooks = @([pscustomobject]@{ type = "command"; command = ("'" + $managedLegacyHook + "'") })
+    }) -Force
+    $managedHooks.hooks | Add-Member -NotePropertyName CustomEvent -NotePropertyValue @([pscustomobject]@{
+        projectOwned = "KEEP-CUSTOM-EVENT"
+    }) -Force
+    Write-Text $managedHooksPath (($managedHooks | ConvertTo-Json -Depth 30) + "`n")
+    $managedSecond = Invoke-IsolatedPowerShell -Script $materializer -Arguments @(
+        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows"
+    ) -WorkingDirectory $managedCompat
+    $managedInstalled = Get-Content -LiteralPath $managedHooksPath -Raw | ConvertFrom-Json
+    $managedProperties = @($managedInstalled.hooks.PSObject.Properties.Name)
+    $managedSessionIds = @($managedInstalled.hooks.session_start | ForEach-Object { $_.forgeManagedId })
+    Assert-True ($managedSecond.Code -eq 0 -and
+        -not (Test-Path -LiteralPath $managedLegacyHook) -and
+        -not (Test-Path -LiteralPath $managedLegacyReference) -and
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $managedCustomHook).Hash -eq $managedCustomHash) `
+        "PowerShell managed refresh retires exact compatibility copies and preserves customized inert files"
+    Assert-True ($managedProperties -notcontains "SessionStart" -and
+        $managedProperties -contains "CustomEvent" -and
+        $managedInstalled.projectSetting -eq "KEEP-CROSS-HOST-SETTING" -and
+        $managedSessionIds -contains "session-start") `
+        "PowerShell managed refresh removes only the proven registration and preserves user JSON"
+
+    $managedInstalled.hooks | Add-Member -NotePropertyName PreToolUse -NotePropertyValue @([pscustomobject]@{
+        matcher = "Bash"
+        hooks = @([pscustomobject]@{ type = "command"; command = ("'" + $managedCustomHook + "'") })
+    }) -Force
+    Write-Text $managedHooksPath (($managedInstalled | ConvertTo-Json -Depth 30) + "`n")
+    $managedBlocked = Invoke-IsolatedPowerShell -Script $materializer -Arguments @(
+        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows"
+    ) -WorkingDirectory $managedCompat
+    Assert-True ($managedBlocked.Code -ne 0 -and
+        $managedBlocked.Output.Contains("referenced legacy cross-host hook is missing, modified, or ambiguous") -and
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $managedCustomHook).Hash -eq $managedCustomHash) `
+        "PowerShell managed refresh blocks an actively registered customized compatibility hook"
+
     $seededContent = New-Project "seeded-content"
     Write-Text (Join-Path $seededContent ".claude\.forge-version") "5.60`n"
     $seededAdr = Join-Path $seededContent "docs\adr\README.md"

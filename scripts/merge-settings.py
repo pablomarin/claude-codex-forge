@@ -42,6 +42,10 @@ CONTINUITY_RECEIPT_RELATIVE = Path(
     ".forge/local/migration-evidence/continuity-state-v5-v6.json"
 )
 TERMINAL_JOURNAL_PHASES = {"committed", "rolled_back", "recovered"}
+LEGACY_INLINE_PRECOMPACT = {
+    "echo 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).' >&2; exit 0",
+    "powershell -Command \"Write-Error 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).'; exit 0\"",
+}
 
 
 class RefreshBlocked(RuntimeError):
@@ -238,6 +242,116 @@ def released_ownership(
     return releases, fingerprints, aliases
 
 
+def legacy_alias_hashes(
+    aliases: list[list[str]], scope: str
+) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
+    for _selectors, _source, destination, row_scope, digest in aliases:
+        if row_scope != scope:
+            continue
+        relative_path(destination)
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise RefreshBlocked(f"invalid legacy alias fingerprint: {destination}")
+        result.setdefault(destination, set()).add(digest)
+    return result
+
+
+def exact_legacy_aliases(
+    target: Path, catalog: dict[str, set[str]]
+) -> set[str]:
+    exact: set[str] = set()
+    for destination, expected in catalog.items():
+        relative = relative_path(destination)
+        path = target / relative
+        if not path.exists() and not path.is_symlink():
+            continue
+        reject_link_ancestors(target, relative)
+        if path.is_symlink() or not path.is_file():
+            raise RefreshBlocked(
+                f"legacy alias destination is not a regular file: {destination}"
+            )
+        if sha256_path(path) in expected:
+            exact.add(destination)
+    return exact
+
+
+def inert_legacy_compatibility_alias(destination: str) -> bool:
+    """Return whether a legacy alias is inert unless separately registered."""
+    return destination.startswith(".codex/hooks/") or (
+        destination.startswith(".agents/skills/") and "/references/" in destination
+    )
+
+
+def legacy_codex_hook_relative(command: str) -> str:
+    match = re.search(
+        r"(?:^|[\\/])\.codex[\\/]hooks[\\/]([A-Za-z0-9._/\\-]+)",
+        command,
+    )
+    if not match:
+        return ""
+    return ".codex/hooks/" + match.group(1).replace("\\", "/")
+
+
+def reconcile_legacy_codex_hook_payload(
+    payload: dict,
+    exact_aliases: set[str],
+    catalog: dict[str, set[str]],
+) -> bool:
+    hooks = payload.get("hooks", {})
+    if not isinstance(hooks, dict):
+        raise RefreshBlocked("Codex hook registrations are not an object")
+    changed = False
+    for event in list(hooks):
+        blocks = hooks[event]
+        if not isinstance(blocks, list):
+            raise RefreshBlocked(f"Codex hook event is not a list: {event}")
+        retained_blocks: list = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                raise RefreshBlocked(f"Codex hook entry is malformed: {event}")
+            registered = block.get("hooks")
+            # Native v6 Codex entries are direct event objects, not nested
+            # Claude-style matcher blocks. Preserve them untouched.
+            if registered is None:
+                retained_blocks.append(block)
+                continue
+            if not isinstance(registered, list):
+                raise RefreshBlocked(f"Codex legacy matcher block is malformed: {event}")
+            retained_hooks: list = []
+            for legacy_hook in registered:
+                if not isinstance(legacy_hook, dict):
+                    raise RefreshBlocked(f"Codex legacy hook registration is malformed: {event}")
+                command = legacy_hook.get("command", "")
+                if not isinstance(command, str):
+                    retained_hooks.append(legacy_hook)
+                    continue
+                if command in LEGACY_INLINE_PRECOMPACT:
+                    changed = True
+                    continue
+                relative = legacy_codex_hook_relative(command)
+                if not relative or relative not in catalog:
+                    retained_hooks.append(legacy_hook)
+                    continue
+                if relative not in exact_aliases:
+                    raise RefreshBlocked(
+                        "referenced legacy cross-host hook is missing, modified, or "
+                        f"ambiguous: {relative}"
+                    )
+                changed = True
+            if retained_hooks:
+                updated = dict(block)
+                updated["hooks"] = retained_hooks
+                retained_blocks.append(updated)
+            else:
+                changed = True
+        if retained_blocks:
+            hooks[event] = retained_blocks
+        else:
+            del hooks[event]
+            changed = True
+    return changed
+
+
 def transaction_destination_allowed(
     repo_root: Path, scope: str, txid: str, relative: Path, operation: dict
 ) -> bool:
@@ -268,6 +382,10 @@ def transaction_destination_allowed(
     for row in read_tsv(repo_root / "manifests/legacy-v5.tsv", 9):
         destination, row_scope = row[2], row[3]
         if row_scope == scope and "__" not in destination:
+            allowed.add(destination)
+    for row in read_tsv(repo_root / "manifests/legacy-v5-aliases.tsv", 5):
+        destination, row_scope = row[2], row[3]
+        if row_scope == scope:
             allowed.add(destination)
     if value in allowed:
         return True
@@ -382,23 +500,16 @@ def inventory_legacy(
                 )
             )
 
+    alias_catalog = legacy_alias_hashes(aliases, scope)
+    exact_aliases = exact_legacy_aliases(target, alias_catalog)
+    proven_legacy.update(exact_aliases)
     if not current_v6:
-        for selectors, _source, destination, row_scope, expected in aliases:
-            if row_scope != scope:
-                continue
+        for destination in sorted(alias_catalog):
             path = target / relative_path(destination)
-            if not path.exists() and not path.is_symlink():
-                continue
-            reject_link_ancestors(target, relative_path(destination))
-            if not path.is_file():
-                raise RefreshBlocked(f"legacy alias destination is not a regular file: {destination}")
-            digest = sha256_path(path)
-            # An exact released whole-file hash at a known cross-host alias
-            # path is stronger evidence than an advisory/stale project stamp.
-            # Replacement is lossless and backed up; modified bytes still block.
-            if digest == expected:
-                proven_legacy.add(destination)
-            else:
+            if (path.exists() or path.is_symlink()) and destination not in exact_aliases:
+                if inert_legacy_compatibility_alias(destination):
+                    preserved_legacy.add(destination)
+                    continue
                 findings.append(
                     UpgradeFinding(
                         "LEGACY_ALIAS_AMBIGUOUS",
@@ -1517,10 +1628,6 @@ def reconcile_legacy_hook_settings(
         and ownership == "whole-file"
         and destination.startswith(".claude/hooks/")
     }
-    legacy_inline_commands = {
-        "echo 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).' >&2; exit 0",
-        "powershell -Command \"Write-Error 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).'; exit 0\"",
-    }
     changed = False
     for event, blocks in hooks.items():
         if not isinstance(blocks, list):
@@ -1539,7 +1646,7 @@ def reconcile_legacy_hook_settings(
                 match = re.search(
                     r"\$CLAUDE_PROJECT_DIR/\.claude/hooks/([^\"'\s]+)", command
                 )
-                is_released_inline = command in legacy_inline_commands
+                is_released_inline = command in LEGACY_INLINE_PRECOMPACT
                 if not match and not is_released_inline:
                     continue
                 if match:
@@ -1606,6 +1713,35 @@ def reconcile_legacy_hook_settings(
                 block["hooks"] = [item for item in registered if id(item) not in remove_ids]
     if changed:
         settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+
+
+def reconcile_legacy_codex_hook_settings(
+    repo_root: Path,
+    stage: Path,
+    proven_legacy: set[str],
+    scope: str,
+    report: dict[str, list[str]],
+) -> None:
+    if scope != "project":
+        return
+    hooks_path = stage / ".codex/hooks.json"
+    if not hooks_path.is_file():
+        return
+    try:
+        payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RefreshBlocked("staged Codex hooks are malformed") from error
+    if not isinstance(payload, dict):
+        raise RefreshBlocked("staged Codex hooks are not an object")
+    catalog = legacy_alias_hashes(
+        read_tsv(repo_root / "manifests/legacy-v5-aliases.tsv", 5), scope
+    )
+    exact = {relative for relative in proven_legacy if relative in catalog}
+    if reconcile_legacy_codex_hook_payload(payload, exact, catalog):
+        durable_json(hooks_path, payload)
+        report["REWRITTEN"].append(
+            ".codex/hooks.json (retired proven legacy compatibility registrations)"
+        )
 
 
 def operation_files(stage: Path, target: Path, quarantine_root: Path) -> list[dict]:
@@ -1881,6 +2017,9 @@ def full_refresh(
         reconcile_legacy_hook_settings(
             repo_root, target, stage, proven_legacy, scope, report
         )
+        reconcile_legacy_codex_hook_settings(
+            repo_root, stage, proven_legacy, scope, report
+        )
         legacy_deletions = stage_legacy_hook_delegates(stage, proven_legacy, scope, report)
         legacy_deletions.update(translated_state_sources)
         state = stage / ".forge/local/state.md"
@@ -2089,6 +2228,75 @@ def write_continuity_receipt_cli(argv: list[str]) -> int:
     return 0
 
 
+def prune_empty_alias_directories(target: Path, removed: Path) -> None:
+    stop_roots = {target / ".codex", target / ".agents"}
+    current = removed.parent
+    while current not in stop_roots and current != target:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def cleanup_legacy_aliases_cli(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="merge-settings.py cleanup-legacy-aliases")
+    parser.add_argument("--repo-root", required=True, type=Path)
+    parser.add_argument("--target", required=True, type=Path)
+    parser.add_argument("--mode", required=True, choices=("check", "apply"))
+    args = parser.parse_args(argv)
+    try:
+        repo_root = args.repo_root.resolve(strict=True)
+        lexical_target = args.target.absolute()
+        if lexical_target.is_symlink():
+            raise RefreshBlocked(f"symlink cleanup root: {lexical_target}")
+        target = lexical_target.resolve(strict=True)
+        catalog = legacy_alias_hashes(
+            read_tsv(repo_root / "manifests/legacy-v5-aliases.tsv", 5),
+            "project",
+        )
+        exact = exact_legacy_aliases(target, catalog)
+        hooks_path = target / ".codex/hooks.json"
+        payload: dict = {}
+        changed = False
+        if hooks_path.exists() or hooks_path.is_symlink():
+            reject_link_ancestors(target, relative_path(".codex/hooks.json"))
+            if hooks_path.is_symlink() or not hooks_path.is_file():
+                raise RefreshBlocked("Codex hooks configuration is not a regular file")
+            try:
+                payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise RefreshBlocked("Codex hooks configuration is malformed") from error
+            if not isinstance(payload, dict):
+                raise RefreshBlocked("Codex hooks configuration is not an object")
+            changed = reconcile_legacy_codex_hook_payload(payload, exact, catalog)
+        if args.mode == "check":
+            return 0
+        if changed:
+            durable_json(hooks_path, payload)
+            print("RETIRED_COMPAT: .codex/hooks.json legacy registrations")
+        removed = 0
+        # Re-evaluate each path immediately before removal so a customized file
+        # is never deleted based on an earlier hash observation.
+        for destination in sorted(exact):
+            path = target / relative_path(destination)
+            if not path.is_file() or path.is_symlink():
+                raise RefreshBlocked(f"legacy alias changed type before cleanup: {destination}")
+            if sha256_path(path) not in catalog[destination]:
+                raise RefreshBlocked(f"legacy alias changed before cleanup: {destination}")
+            path.unlink()
+            fsync_directory(path.parent)
+            prune_empty_alias_directories(target, path)
+            removed += 1
+            print(f"RETIRED_COMPAT: {destination}")
+        if removed or changed:
+            print(f"RETIRED_COMPAT_SUMMARY: files={removed} registrations={'1' if changed else '0'}")
+    except (RefreshBlocked, OSError, ValueError) as error:
+        print(f"BLOCKED: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def merge_arrays(template_arr, user_arr):
     """Append items from template that aren't already in user's array."""
     added = []
@@ -2277,6 +2485,8 @@ def main():
         sys.exit(migrate_state_cli(sys.argv[2:]))
     if len(sys.argv) >= 2 and sys.argv[1] == "write-continuity-receipt":
         sys.exit(write_continuity_receipt_cli(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "cleanup-legacy-aliases":
+        sys.exit(cleanup_legacy_aliases_cli(sys.argv[2:]))
     if len(sys.argv) != 3:
         print(f"Usage: {sys.argv[0]} <template_file> <user_file>", file=sys.stderr)
         sys.exit(1)

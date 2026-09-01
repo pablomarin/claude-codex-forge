@@ -1254,6 +1254,91 @@ assert_not_contains "$ROOT_CASE/setup.log" 'CODEX_MCP_PARITY: BLOCKED' "unchange
 BUILTIN_CODEX_MCPS=$(grep -c '^\[mcp_servers\.' "$ROOT_CASE/.codex/config.toml")
 assert_equals "$BUILTIN_CODEX_MCPS" "2" "clean install config contains one Context7 and one Playwright server"
 
+start_test "managed v6 refresh retires proven cross-host compatibility copies and registrations"
+mkdir -p \
+    "$ROOT_CASE/.codex/hooks" \
+    "$ROOT_CASE/.agents/skills/ui-design/references"
+git -C "$REPO_ROOT" show \
+    cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:hooks/session-start.sh \
+    > "$ROOT_CASE/.codex/hooks/session-start.sh"
+git -C "$REPO_ROOT" show \
+    cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:skills/ui-design/references/polish-checklist.md \
+    > "$ROOT_CASE/.agents/skills/ui-design/references/polish-checklist.md"
+git -C "$REPO_ROOT" show \
+    cc2b901fc1203f8b46693c8a0c95b6fe3a0fdf34:hooks/check-workflow-gates.ps1 \
+    > "$ROOT_CASE/.codex/hooks/check-workflow-gates.ps1"
+printf '\nPROJECT_CUSTOMIZED_HOOK\n' >> "$ROOT_CASE/.codex/hooks/check-workflow-gates.ps1"
+V6_CUSTOM_COMPAT_HASH=$(hash_file "$ROOT_CASE/.codex/hooks/check-workflow-gates.ps1")
+python3 - "$ROOT_CASE" <<'PY'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+path = root / ".codex/hooks.json"
+payload = json.loads(path.read_text())
+payload["projectSetting"] = "KEEP-CROSS-HOST-SETTING"
+payload.setdefault("hooks", {})["SessionStart"] = [{
+    "matcher": "startup|resume|clear|compact",
+    "hooks": [{
+        "type": "command",
+        "command": f"'{root}/.codex/hooks/session-start.sh'",
+    }],
+}]
+payload["hooks"]["CustomEvent"] = [{"projectOwned": "KEEP-CUSTOM-EVENT"}]
+path.write_text(json.dumps(payload, indent=2) + "\n")
+PY
+(cd "$ROOT_CASE" && PATH="$V6_BASE/both/bin:/usr/bin:/bin" HOME="$ROOT_CASE/.fakehome" \
+    "$REPO_ROOT/setup.sh" -f -p "Managed compatibility cleanup" -t fullstack \
+    > "$ROOT_CASE/setup-compat-cleanup.log" 2>&1)
+assert_equals "$?" "0" "managed v6 force refresh accepts byte-proven compatibility files"
+assert_file_missing "$ROOT_CASE/.codex/hooks/session-start.sh" \
+    "managed refresh retires the exact legacy Codex hook copy"
+assert_file_missing "$ROOT_CASE/.agents/skills/ui-design/references/polish-checklist.md" \
+    "managed refresh retires the exact duplicated skill reference"
+assert_hash_equals "$ROOT_CASE/.codex/hooks/check-workflow-gates.ps1" "$V6_CUSTOM_COMPAT_HASH" \
+    "managed refresh preserves an unregistered customized compatibility file"
+python3 - "$ROOT_CASE/.codex/hooks.json" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1]))
+hooks = payload.get("hooks", {})
+assert "SessionStart" not in hooks
+assert hooks.get("CustomEvent") == [{"projectOwned": "KEEP-CUSTOM-EVENT"}]
+assert payload.get("projectSetting") == "KEEP-CROSS-HOST-SETTING"
+assert any(entry.get("forgeManagedId") == "session-start" for entry in hooks.get("session_start", []))
+PY
+assert_equals "$?" "0" \
+    "managed refresh removes only the proven legacy registration and preserves user JSON"
+
+python3 - "$ROOT_CASE" <<'PY'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+path = root / ".codex/hooks.json"
+payload = json.loads(path.read_text())
+payload.setdefault("hooks", {})["PreToolUse"] = [{
+    "matcher": "Bash",
+    "hooks": [{
+        "type": "command",
+        "command": f"'{root}/.codex/hooks/check-workflow-gates.ps1'",
+    }],
+}]
+path.write_text(json.dumps(payload, indent=2) + "\n")
+PY
+(cd "$ROOT_CASE" && PATH="$V6_BASE/both/bin:/usr/bin:/bin" HOME="$ROOT_CASE/.fakehome" \
+    "$REPO_ROOT/setup.sh" -f -p "Managed compatibility cleanup" -t fullstack \
+    > "$ROOT_CASE/setup-compat-blocked.log" 2>&1)
+assert_equals "$?" "1" "managed refresh blocks a customized compatibility hook while it is registered"
+assert_contains "$ROOT_CASE/setup-compat-blocked.log" \
+    "referenced legacy cross-host hook is missing, modified, or ambiguous" \
+    "managed refresh explains the active customized compatibility blocker"
+assert_hash_equals "$ROOT_CASE/.codex/hooks/check-workflow-gates.ps1" "$V6_CUSTOM_COMPAT_HASH" \
+    "blocked managed refresh preserves the customized hook bytes"
+
 start_test "Task 2 preflight blocks v5 before every project write mode"
 for mode in default force upgrade; do
     legacy="$V6_BASE/legacy-$mode"
