@@ -6,10 +6,11 @@ Canonical project instructions live at `.forge/instructions.md`.
 
 ```
 your-project/
-├── CLAUDE.md                          # User text + bounded Claude Code adapter
-├── AGENTS.md                          # User text + bounded Codex adapter
+├── CLAUDE.md                          # Shared-context pointer + bounded Claude adapter
+├── AGENTS.md                          # Shared-context pointer + bounded Codex adapter
 ├── .mcp.json                          # Shared MCP server definitions
 ├── docs/
+│   ├── agent-context.md               # Optional team-owned shared project knowledge
 │   ├── CHANGELOG.md                   # Historical record
 │   ├── adr/                           # Architecture Decision Records
 │   ├── prds/                          # Product requirements
@@ -63,6 +64,26 @@ your-project/
     ├── hooks.json
     └── agents/
 ```
+
+The ownership hierarchy is:
+
+```text
+.forge/                     Forge-owned engineering policy
+docs/agent-context.md       Team-owned shared project knowledge
+CLAUDE.md                   Thin Claude discovery adapter + shared-context pointer
+AGENTS.md                   Thin Codex discovery adapter + shared-context pointer
+```
+
+Forge creates and refreshes its bounded root blocks, but it does not invent the project's domain
+knowledge. When a project needs shared instructions, the team creates `docs/agent-context.md` and
+places this pointer outside the Forge block in both root files:
+
+```markdown
+Read `docs/agent-context.md` completely before acting.
+```
+
+Shared changes then happen once in that document; only genuinely host-specific text belongs
+exclusively in one root.
 
 The Codex hook registration may originate in the primary checkout, but
 `codex-worktree-dispatch.{sh,ps1}` validates the event's absolute `cwd`, Git common directory, and

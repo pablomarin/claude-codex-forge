@@ -173,7 +173,23 @@ nonce, persistent turn count, evidence, and next step survive a host switch.
 Prerequisites: Git 2.23+ and at least one authenticated supported host. Both adapters are installed
 even if only one CLI is currently available.
 
-### macOS and Linux
+### Choose the correct installation path
+
+Do not layer a fresh installation over an existing agent harness. Choose from the repository's
+current state:
+
+| Repository state | Use |
+| --- | --- |
+| New repository with no agent harness | Normal project setup: `setup.sh -p "My Project"` or `setup.ps1 -Project "My Project"` |
+| Existing Forge v6 installation | Managed refresh: `setup.sh -f` or `setup.ps1 -Force` |
+| Forge v5, Claude-only files, Codex-only files, a mixed tree, or another/custom harness | Read-only inventory first: `setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun` |
+| Not sure what is installed | Use the same read-only full-refresh preview; it writes nothing |
+
+For an existing harness, resolve every printed blocker and rerun the preview. Execute `-F` /
+`-FullRefresh` only after it reports `UPGRADE: READY`. Forge will not silently stack v6 beside
+unresolved legacy or custom machinery.
+
+### Fresh installation — macOS and Linux
 
 ```bash
 git clone https://github.com/pablomarin/claude-codex-forge.git ~/claude-codex-forge
@@ -195,7 +211,7 @@ claude
 codex
 ```
 
-### Windows PowerShell
+### Fresh installation — Windows PowerShell
 
 ```powershell
 git clone https://github.com/pablomarin/claude-codex-forge.git $HOME\claude-codex-forge
@@ -234,7 +250,9 @@ your-project/
 ├── .claude/                        # Claude commands, agents, skills, settings
 ├── .codex/                         # Codex agents, hooks, config
 ├── .agents/skills/                 # Codex workflow and skill adapters
-├── docs/                           # ADRs, plans, PRDs, research, solutions
+├── docs/
+│   ├── agent-context.md            # Optional team-owned shared project knowledge
+│   └── ...                         # ADRs, plans, PRDs, research, solutions
 └── tests/e2e/                      # Use cases and local reports
 ```
 
@@ -246,6 +264,13 @@ global adapters at `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
 Forge does **not** ask teams to keep two copies of the same instructions synchronized. Both hosts
 discover the filename they support natively, and each root file points into one shared policy:
 
+```text
+.forge/                     Forge-owned engineering policy
+docs/agent-context.md       Team-owned shared project knowledge
+CLAUDE.md                   Thin Claude discovery adapter + shared-context pointer
+AGENTS.md                   Thin Codex discovery adapter + shared-context pointer
+```
+
 | Forge source | Installed destination | Role |
 | --- | --- | --- |
 | `FORGE.template.md` | `.forge/instructions.md` | Canonical shared policy for both engines |
@@ -254,10 +279,18 @@ discover the filename they support natively, and each root file points into one 
 | `CLAUDE.template.md` | No new v6 destination | Retained only to reconcile proven v5 installations |
 
 `.forge/instructions.md` is setup-managed; change `FORGE.template.md` when developing the harness,
-not the installed copy. In a downstream project, keep team-owned facts and commands in one neutral
-tracked file such as `docs/agent-context.md`. Add a one-time `@docs/agent-context.md` import outside
-the Forge block in `CLAUDE.md` and a one-time `Read docs/agent-context.md` instruction outside the
-Forge block in `AGENTS.md`. After that, edit only the neutral document.
+not the installed copy. In a downstream project, keep shared architecture, domain facts, repository
+maps, and project commands in the neutral tracked file `docs/agent-context.md`. Forge cannot infer
+that project knowledge, so the team creates and maintains this file when shared context is needed.
+
+Put this same project-owned pointer outside the Forge-managed block in both root files:
+
+```markdown
+Read `docs/agent-context.md` completely before acting.
+```
+
+After that, edit shared knowledge only in `docs/agent-context.md`. Do not duplicate it between the
+two root files.
 
 For a genuinely Claude-only instruction, use the user-owned part of `CLAUDE.md`; for a genuinely
 Codex-only instruction, use the user-owned part of `AGENTS.md`.

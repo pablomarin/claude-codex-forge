@@ -24,7 +24,9 @@ This is a safety result, not a partial installation. Preview writes no target fi
 known blockers together. Common groups are:
 
 - `ROOT_POLICY_AMBIGUOUS`: remove only obsolete project-owned v5 references; keep neutral project
-  context.
+  context. The report's `ACTION_REQUIRED` section names each file, recommends
+  `docs/agent-context.md` for shared project knowledge, gives the exact root pointer, and tells you
+  which preview to retry.
 - `CUSTOM_HARNESS_COLLISION`: explicitly keep the independently developed harness, or archive it
   and remove its active registrations before adopting Forge v6.
 - `MULTIPLE_STATE_SOURCES`: compare the reported hashes/timestamps, choose one state, and archive
@@ -36,6 +38,23 @@ Rerun preview until it says `UPGRADE: READY`; execution should finish with `ACTI
 `MATERIALIZED` can still coexist with a per-host `RUNTIME_READY: BLOCKED` diagnostic—for example,
 an overlapping enabled plugin or missing host authentication. Resolve that host diagnostic without
 manually duplicating policy between `CLAUDE.md` and `AGENTS.md`.
+
+For a root-policy reconciliation, use this ownership model:
+
+```text
+.forge/                     Forge-owned engineering policy
+docs/agent-context.md       Team-owned shared project knowledge
+CLAUDE.md                   Thin Claude discovery adapter + shared-context pointer
+AGENTS.md                   Thin Codex discovery adapter + shared-context pointer
+```
+
+Forge does not populate project knowledge automatically. Preserve useful architecture, commands,
+and domain facts in `docs/agent-context.md`, then put the following line outside the managed block
+in both root files:
+
+```markdown
+Read `docs/agent-context.md` completely before acting.
+```
 
 ## Memory not persisting?
 

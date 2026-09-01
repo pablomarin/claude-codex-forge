@@ -48,6 +48,10 @@ class RefreshBlocked(RuntimeError):
     """A fail-closed migration disposition that must be shown to the operator."""
 
 
+class ReportedRefreshBlocked(RefreshBlocked):
+    """A blocked disposition already explained by a complete operator report."""
+
+
 @dataclasses.dataclass(frozen=True, order=True)
 class UpgradeFinding:
     code: str
@@ -64,6 +68,34 @@ class LegacyInventory:
     recognized: bool
     proven_legacy: frozenset[str]
     findings: tuple[UpgradeFinding, ...]
+
+
+def print_root_policy_actions(findings: tuple[UpgradeFinding, ...]) -> None:
+    root_findings = tuple(
+        finding
+        for finding in findings
+        if finding.code == "ROOT_POLICY_AMBIGUOUS" and finding.scope == "project"
+    )
+    if not root_findings:
+        return
+    print("ACTION_REQUIRED: reconcile project instruction files")
+    for finding in root_findings:
+        if finding.detail.startswith("retired active Forge references:"):
+            print(
+                f"ACTION: path={finding.path} remove or replace the retired Forge v5 "
+                "references listed above; do not copy shared policy into both root files"
+            )
+        elif finding.detail.startswith("ambiguous legacy project instructions:"):
+            print(
+                f"ACTION: path={finding.path} Forge cannot safely separate customized project "
+                "text from obsolete managed Forge v5 policy; move the shared project knowledge "
+                "to docs/agent-context.md and replace the user-owned root text with the pointer below"
+            )
+    print(
+        "SHARED_CONTEXT: docs/agent-context.md is the project-owned source shared by Claude and Codex"
+    )
+    print("ROOT_POINTER: Read `docs/agent-context.md` completely before acting.")
+    print("RETRY: rerun the same full-refresh preview command after saving these edits")
 
 
 def print_refresh_report(
@@ -86,6 +118,7 @@ def print_refresh_report(
             f"BLOCKED: code={finding.code} scope={finding.scope} path={finding.path} "
             f"detail={finding.detail} resolution={finding.resolution}"
         )
+    print_root_policy_actions(findings)
     print(f"UPGRADE: {upgrade}")
     print(f"ACTIVE_FORGE: {active_forge}")
     print(
@@ -1231,6 +1264,25 @@ def prepare_legacy(
     return selector, recognized, proven_legacy
 
 
+def thin_hook_delegate_content(relative: Path) -> Optional[str]:
+    if relative.suffix == ".sh":
+        return (
+            "#!/usr/bin/env bash\n"
+            "set -u\n"
+            'FORGE_PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"\n'
+            f'exec "$FORGE_PROJECT_ROOT/.forge/hooks/{relative.name}" "$@"\n'
+        )
+    if relative.suffix == ".ps1":
+        return (
+            '$ErrorActionPreference = "Stop"\n'
+            '$forgeProjectRoot = $env:CLAUDE_PROJECT_DIR\n'
+            'if (-not $forgeProjectRoot) { $forgeProjectRoot = (& git rev-parse --show-toplevel 2>$null) }\n'
+            f'& (Join-Path $forgeProjectRoot ".forge\\hooks\\{relative.name}") @args\n'
+            'exit $LASTEXITCODE\n'
+        )
+    return None
+
+
 def stage_legacy_hook_delegates(
     stage: Path, proven_legacy: set[str], scope: str, report: dict[str, list[str]]
 ) -> set[str]:
@@ -1255,26 +1307,12 @@ def stage_legacy_hook_delegates(
             continue
         destination = stage / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        if relative.suffix == ".sh":
-            destination.write_text(
-                "#!/usr/bin/env bash\n"
-                "set -u\n"
-                'FORGE_PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"\n'
-                f'exec "$FORGE_PROJECT_ROOT/.forge/hooks/{relative.name}" "$@"\n',
-                encoding="utf-8",
-            )
-            destination.chmod(0o755)
-        elif relative.suffix == ".ps1":
-            destination.write_text(
-                '$ErrorActionPreference = "Stop"\n'
-                '$forgeProjectRoot = $env:CLAUDE_PROJECT_DIR\n'
-                'if (-not $forgeProjectRoot) { $forgeProjectRoot = (& git rev-parse --show-toplevel 2>$null) }\n'
-                f'& (Join-Path $forgeProjectRoot ".forge\\hooks\\{relative.name}") @args\n'
-                'exit $LASTEXITCODE\n',
-                encoding="utf-8",
-            )
-        else:
+        delegate_content = thin_hook_delegate_content(relative)
+        if delegate_content is None:
             continue
+        destination.write_text(delegate_content, encoding="utf-8")
+        if relative.suffix == ".sh":
+            destination.chmod(0o755)
         remaining.discard(value)
         report["REWRITTEN"].append(f"{value} -> thin v6 hook delegate")
     return remaining
@@ -1343,6 +1381,31 @@ def prepare_state(
         return set()
 
 
+def prepare_project_gitignore(
+    target: Path, stage: Path, report: dict[str, list[str]]
+) -> None:
+    relative = Path(".gitignore")
+    source = target / relative
+    if source.exists() or source.is_symlink():
+        reject_link_ancestors(target, relative)
+        if source.is_symlink() or not source.is_file():
+            raise RefreshBlocked("project .gitignore is not a regular file")
+        original = source.read_bytes()
+        if b".forge/local/" in original.splitlines():
+            return
+        newline = b"\r\n" if b"\r\n" in original else b"\n"
+        updated = original
+        if updated and not updated.endswith((b"\n", b"\r")):
+            updated += newline
+        updated += b".forge/local/" + newline
+        report["REWRITTEN"].append(".gitignore (added .forge/local/)")
+    else:
+        updated = b".forge/local/\n"
+        report["CREATED"].append(".gitignore")
+    staged = stage / relative
+    staged.write_bytes(updated)
+
+
 def selected_materializer(repo_root: Path, platform: str) -> list[str]:
     if platform == "windows":
         return [
@@ -1398,6 +1461,12 @@ def reconcile_legacy_hook_settings(
     settings_path = stage / ".claude/settings.json"
     if not settings_path.is_file():
         return
+    version_path = target / ".forge/version"
+    current_v6 = (
+        version_path.is_file()
+        and not version_path.is_symlink()
+        and version_path.read_text(encoding="utf-8", errors="replace").strip() == "6"
+    )
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -1443,7 +1512,19 @@ def reconcile_legacy_hook_settings(
                 if match:
                     relative_value = f".claude/hooks/{match.group(1)}"
                     if relative_value in known_hook_paths:
-                        if relative_value not in proven_legacy:
+                        exact_v6_delegate = False
+                        if current_v6:
+                            live_delegate = target / relative_path(relative_value)
+                            expected_delegate = thin_hook_delegate_content(
+                                relative_path(relative_value)
+                            )
+                            exact_v6_delegate = (
+                                live_delegate.is_file()
+                                and not live_delegate.is_symlink()
+                                and expected_delegate is not None
+                                and live_delegate.read_text(encoding="utf-8") == expected_delegate
+                            )
+                        if relative_value not in proven_legacy and not exact_v6_delegate:
                             raise RefreshBlocked(
                                 f"referenced legacy hook is missing, modified, or ambiguous: {relative_value}"
                             )
@@ -1697,7 +1778,7 @@ def full_refresh(
                 active_forge="unchanged",
                 next_step="resolve every listed blocker, then rerun full refresh preview",
             )
-            raise RefreshBlocked("upgrade inventory contains blocking findings")
+            raise ReportedRefreshBlocked("upgrade inventory contains blocking findings")
         if not dry_run:
             guard = acquire_guard(target, txid)
             # Re-read after serialization so the transaction never relies on a
@@ -1711,7 +1792,7 @@ def full_refresh(
                     active_forge="unchanged",
                     next_step="resolve every listed blocker, then rerun full refresh preview",
                 )
-                raise RefreshBlocked("upgrade inventory contains blocking findings")
+                raise ReportedRefreshBlocked("upgrade inventory contains blocking findings")
         if dry_run:
             temporary = tempfile.TemporaryDirectory(prefix="forge-full-refresh-preview-")
             work_root = Path(temporary.name)
@@ -1726,6 +1807,7 @@ def full_refresh(
         translated_state_sources: set[str] = set()
         if scope == "project":
             translated_state_sources = prepare_state(target, stage, repo_root, report)
+            prepare_project_gitignore(target, stage, report)
             for relative in ("AGENTS.md", ".codex/config.toml"):
                 source = target / relative
                 if source.exists():
@@ -1844,7 +1926,8 @@ def full_refresh(
         )
     except RefreshBlocked as error:
         report["BLOCKED"].append(str(error))
-        print(f"BLOCKED: {error}", file=sys.stderr)
+        if not isinstance(error, ReportedRefreshBlocked):
+            print(f"BLOCKED: {error}", file=sys.stderr)
         raise
     finally:
         if temporary is not None:
@@ -1868,7 +1951,8 @@ def full_refresh_cli(argv: list[str]) -> int:
     try:
         full_refresh(args.repo_root, args.target, args.scope, args.platform, args.dry_run)
     except (RefreshBlocked, OSError, ValueError, json.JSONDecodeError) as error:
-        print(f"BLOCKED: {error}", file=sys.stderr)
+        if not isinstance(error, ReportedRefreshBlocked):
+            print(f"BLOCKED: {error}", file=sys.stderr)
         return 1
     return 0
 
