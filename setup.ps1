@@ -835,12 +835,28 @@ Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "c
 Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "hooks") "lib") "codex-pty-helper.py") "$libDir\codex-pty-helper.py" "$libDir\codex-pty-helper.py (Python pty.fork helper for the shim)"
 }
 
-# ADRs -- ship template + README + seed ADRs (existing-file-skip semantics).
+# ADRs belong to the downstream project. Retire only byte-exact copies of
+# Forge's internal decisions; preserve customized and same-numbered project
+# ADRs. Then seed neutral project scaffolding if absent.
 if (-not (Test-Path "docs\adr")) { New-Item -ItemType Directory -Path "docs\adr" -Force | Out-Null }
-Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "docs") "adr\template.md") "docs\adr\template.md" "docs\adr\template.md"
-Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "docs") "adr\README.md") "docs\adr\README.md" "docs\adr\README.md (ADR index)"
-foreach ($adr in @("0001-volatile-state-not-auto-loaded", "0002-bash-and-powershell-dual-platform", "0003-template-distributed-no-build-step", "0004-diataxis-docs-structure", "0005-hard-platform-parity-rule")) {
-    Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "docs") "adr\$adr.md") "docs\adr\$adr.md" "docs\adr\$adr.md"
+$forgeAdrSourceDir = Join-Path (Join-Path $ScriptDir "docs") "adr"
+$forgeAdrSeeds = @((Join-Path $forgeAdrSourceDir "README.md")) + @(
+    Get-ChildItem -LiteralPath $forgeAdrSourceDir -File | Where-Object { $_.Name -match '^\d{4}-.+\.md$' } | ForEach-Object { $_.FullName }
+)
+foreach ($forgeAdrSource in $forgeAdrSeeds) {
+    $forgeAdrTarget = Join-Path "docs\adr" (Split-Path -Leaf $forgeAdrSource)
+    if ((Test-Path -LiteralPath $forgeAdrTarget -PathType Leaf) -and
+        -not [string]::Equals((Resolve-Path -LiteralPath $forgeAdrSource).Path, (Resolve-Path -LiteralPath $forgeAdrTarget).Path, [StringComparison]::OrdinalIgnoreCase) -and
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $forgeAdrSource).Hash -eq (Get-FileHash -Algorithm SHA256 -LiteralPath $forgeAdrTarget).Hash) {
+        Remove-Item -LiteralPath $forgeAdrTarget -Force
+        Write-Host "  Retired exact Forge-internal ADR seed: $forgeAdrTarget"
+    }
+}
+if (-not (Test-Path -LiteralPath "docs\adr\template.md" -PathType Leaf)) {
+    Copy-TemplateFile (Join-Path $forgeAdrSourceDir "template.md") "docs\adr\template.md" "docs\adr\template.md"
+}
+if (-not (Test-Path -LiteralPath "docs\adr\README.md" -PathType Leaf)) {
+    Copy-TemplateFile (Join-Path (Join-Path (Join-Path $ScriptDir "templates") "project-adr") "README.md") "docs\adr\README.md" "docs\adr\README.md (project ADR index)"
 }
 
 # Append .claude/local/ to root .gitignore if not already present (idempotent).

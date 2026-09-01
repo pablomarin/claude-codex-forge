@@ -59,6 +59,10 @@ is not mistaken for project-data loss. Ordinary v6 setup keeps state and helper 
 `.forge/`; council and ship-gate guidance now points to those canonical paths instead of recreating or
 referencing retired `.claude/` copies.
 
+Downstream `docs/adr/` content is project-owned. Ordinary setup retires only byte-exact copies of
+Forge's own internal ADR index and numbered decisions, preserves customized or same-numbered project
+ADRs, and creates a neutral project index and ADR template only when those files are absent.
+
 ## 5.61 — 2026-07-27 · `/codex` plan review gains a NECESSITY axis — the loop can now argue for _less_
 
 **Found by dogfooding v5.59/v5.60 in a downstream project.** Across roughly 30 review rounds the loop caught every omission and **not once** flagged anything as unnecessary. Concretely: an approved plan carried a pre-authoring gate demanding five third-party artifacts (model source, resolved manifest node/config, tool + adapter versions, a custom strategy macro, and one more) before the team was allowed to start authoring. It survived the entire loop. When a human finally challenged it, Codex conceded immediately and cleanly — _"there is no reachable correctness failure uniquely prevented by collecting all five artifacts"_ — and reduced the ask to a single coordination question. The capability was present; only the trigger was missing.

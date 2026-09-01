@@ -751,18 +751,35 @@ test_gitignore_idempotent() {
     assert_equals "$count" "1" ".claude/local/ entry is idempotent (one occurrence after -f rerun)"
 }
 
-# Verify ADRs install.
+# Verify downstream ADR ownership: Forge-internal decisions are not installed,
+# exact old Forge seeds are retired, and project decisions survive -f.
 test_adrs_install() {
     local scratch; scratch=$(scratch_dir adrs-install)
-    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
-    local all_ok=true
-    for adr in template README 0001-volatile-state-not-auto-loaded 0002-bash-and-powershell-dual-platform 0003-template-distributed-no-build-step 0004-diataxis-docs-structure 0005-hard-platform-parity-rule; do
-        if [ ! -f "$scratch/docs/adr/${adr}.md" ]; then
-            fail "docs/adr/${adr}.md not installed"
-            all_ok=false
-        fi
-    done
-    $all_ok && pass "all ADR files installed (template, README, 0001-0005)"
+    mkdir -p "$scratch/docs/adr" "$scratch/.fakehome"
+    cp "$REPO_ROOT/docs/adr/README.md" "$scratch/docs/adr/README.md"
+    cp "$REPO_ROOT/docs/adr/0001-volatile-state-not-auto-loaded.md" \
+        "$scratch/docs/adr/0001-volatile-state-not-auto-loaded.md"
+    printf '# Project ADR 0006\n\nCUSTOM_PROJECT_DECISION\n' \
+        > "$scratch/docs/adr/0006-write-tool-creates-missing-parents.md"
+    local custom_hash
+    custom_hash=$(hash_file "$scratch/docs/adr/0006-write-tool-creates-missing-parents.md")
+
+    ( cd "$scratch" && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
+
+    assert_file_exists "$scratch/docs/adr/template.md" \
+        "fresh v6 setup provides a project ADR template"
+    assert_file_exists "$scratch/docs/adr/README.md" \
+        "fresh v6 setup provides a project-owned ADR index"
+    assert_contains "$scratch/docs/adr/README.md" \
+        "This directory records architecture decisions for this project." \
+        "project ADR index is neutral rather than Forge-internal"
+    assert_not_contains "$scratch/docs/adr/README.md" \
+        "0010-dual-engine-canonical-harness.md" \
+        "project ADR index has no Forge-internal links"
+    assert_file_missing "$scratch/docs/adr/0001-volatile-state-not-auto-loaded.md" \
+        "byte-exact Forge-internal ADR seed is retired"
+    assert_hash_equals "$scratch/docs/adr/0006-write-tool-creates-missing-parents.md" "$custom_hash" \
+        "same-numbered project ADR survives -f byte-for-byte"
 }
 
 # Verify CONTINUITY.template.md is NOT installed (legacy file should not be generated

@@ -721,13 +721,25 @@ bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
     --repo-root "$SCRIPT_DIR" --target "$(pwd)" --scope project --platform unix
 report_native_goal_collisions "$(pwd -P)"
 
-# ADRs — ship template + README + seed ADRs (existing-file-skip semantics).
+# ADRs belong to the downstream project. Retire only byte-exact copies of
+# Forge's internal decisions; preserve every customized or project-authored
+# file, including same-numbered ADRs. Then seed neutral scaffolding if absent.
 mkdir -p docs/adr
-copy_file "$SCRIPT_DIR/docs/adr/template.md" "docs/adr/template.md" "docs/adr/template.md"
-copy_file "$SCRIPT_DIR/docs/adr/README.md" "docs/adr/README.md" "docs/adr/README.md (ADR index)"
-for adr in 0001-volatile-state-not-auto-loaded 0002-bash-and-powershell-dual-platform 0003-template-distributed-no-build-step 0004-diataxis-docs-structure 0005-hard-platform-parity-rule; do
-    copy_file "$SCRIPT_DIR/docs/adr/${adr}.md" "docs/adr/${adr}.md" "docs/adr/${adr}.md"
+for forge_adr_source in "$SCRIPT_DIR/docs/adr/README.md" "$SCRIPT_DIR"/docs/adr/[0-9][0-9][0-9][0-9]-*.md; do
+    [[ -f "$forge_adr_source" ]] || continue
+    forge_adr_name=$(basename "$forge_adr_source")
+    forge_adr_target="docs/adr/$forge_adr_name"
+    if [[ -f "$forge_adr_target" ]] && ! [[ "$forge_adr_source" -ef "$forge_adr_target" ]] && cmp -s "$forge_adr_source" "$forge_adr_target"; then
+        rm -f "$forge_adr_target"
+        echo -e "  ${BLUE}○${NC} Retired exact Forge-internal ADR seed: $forge_adr_target"
+    fi
 done
+if [[ ! -f docs/adr/template.md ]]; then
+    copy_file "$SCRIPT_DIR/docs/adr/template.md" "docs/adr/template.md" "docs/adr/template.md"
+fi
+if [[ ! -f docs/adr/README.md ]]; then
+    copy_file "$SCRIPT_DIR/templates/project-adr/README.md" "docs/adr/README.md" "docs/adr/README.md (project ADR index)"
+fi
 
 # Keep both the v6 canonical local state and the transitional v5-compatible
 # state path private and idempotently ignored.
