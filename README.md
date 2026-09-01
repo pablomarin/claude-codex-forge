@@ -173,7 +173,18 @@ nonce, persistent turn count, evidence, and next step survive a host switch.
 Prerequisites: Git 2.23+ and at least one authenticated supported host. Both adapters are installed
 even if only one CLI is currently available.
 
-### Choose the correct installation path
+### Recommended for people: install with Claude Code or Codex
+
+**Agent-first for people; CLI-first for machines.** Open either supported host in the target
+repository and ask it to install or upgrade Forge. The agent inspects the repository, runs the
+correct preview or setup command, explains blockers, and asks before changing files. The agent does
+not implement setup itself: `setup.sh` and `setup.ps1` remain the sole deterministic installers.
+
+Use the copy-paste prompt in [Agent-assisted setup](docs/guides/agent-assisted-setup.md). It covers
+fresh projects, existing Forge v6 refreshes, Forge v5 and mixed-harness migrations, global setup,
+approval boundaries, and final diff/readiness review.
+
+### CLI and automation: choose the correct installation path
 
 Do not layer a fresh installation over an existing agent harness. Choose from the repository's
 current state:
@@ -271,17 +282,17 @@ CLAUDE.md                   Thin Claude discovery adapter + shared-context point
 AGENTS.md                   Thin Codex discovery adapter + shared-context pointer
 ```
 
-| Forge source | Installed destination | Role |
+| Setup-managed component | Installed destination | Role |
 | --- | --- | --- |
 | `FORGE.template.md` | `.forge/instructions.md` | Canonical shared policy for both engines |
 | `templates/adapters/CLAUDE.block.template.md` | Forge-owned block in `CLAUDE.md` | Claude Code discovery and host-specific composition |
 | `templates/adapters/AGENTS.block.template.md` | Forge-owned block in `AGENTS.md` | Codex discovery and host-specific composition |
 | `CLAUDE.template.md` | No new v6 destination | Retained only to reconcile proven v5 installations |
 
-`.forge/instructions.md` is setup-managed; change `FORGE.template.md` when developing the harness,
-not the installed copy. In a downstream project, keep shared architecture, domain facts, repository
-maps, and project commands in the neutral tracked file `docs/agent-context.md`. Forge cannot infer
-that project knowledge, so the team creates and maintains this file when shared context is needed.
+`.forge/instructions.md` is setup-managed and should not be edited directly. Keep shared
+architecture, domain facts, repository maps, and project commands in the neutral tracked file
+`docs/agent-context.md`. Forge cannot infer that project knowledge, so the team creates and
+maintains this file when shared context is needed.
 
 Put this same project-owned pointer outside the Forge-managed block in both root files:
 
@@ -313,6 +324,10 @@ If one host is not ready, ordinary reviewer selection visibly falls back rather 
 preferred engine ran.
 
 ## Setup, refresh, and team upgrades
+
+For interactive use, start with the [agent-assisted setup guide](docs/guides/agent-assisted-setup.md).
+The table below is the direct CLI reference for automation, offline use, and troubleshooting; both
+paths invoke the same installer.
 
 | Task | macOS/Linux | Windows PowerShell |
 | --- | --- | --- |

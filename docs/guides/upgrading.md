@@ -3,7 +3,13 @@
 Forge 6 changes harness ownership. This path applies to Forge v5 and to repositories that already
 contain any other agent harness: Claude-only files, Codex-only files, a mixture of both, or an
 independently developed harness. Upgrade with one previewed, authoritative full refresh—not a fresh
-install or a sequence of force copies:
+install or a sequence of force copies.
+
+For a person performing the upgrade, agent-assisted setup is the recommended human path; follow the
+[canonical guide](agent-assisted-setup.md). Claude Code or Codex runs the preview, preserves its
+exact output, explains each blocker, and asks before making reconciliation changes or executing the
+migration. The agent never replaces the transaction below. Use the commands directly for CI,
+automation, offline use, or troubleshooting:
 
 ```bash
 git -C ~/claude-codex-forge pull

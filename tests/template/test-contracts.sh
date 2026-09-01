@@ -2665,4 +2665,58 @@ assert_not_contains "$REPO_ROOT/docs/guides/customize-project.md" 'mirror' \
 assert_contains "$REPO_ROOT/docs/guides/customize-project.md" '`docs/agent-context.md`' \
     "customization guide uses the same neutral project context convention"
 
+start_test "human setup is agent-first while installers remain authoritative"
+AGENT_SETUP="$REPO_ROOT/docs/guides/agent-assisted-setup.md"
+assert_file_exists "$AGENT_SETUP" \
+    "canonical agent-assisted setup guide exists"
+assert_contains "$README" 'Agent-first for people; CLI-first for machines' \
+    "README states the setup boundary"
+assert_contains "$README" 'docs/guides/agent-assisted-setup.md' \
+    "README leads people to the canonical agent-assisted guide"
+assert_contains "$GETTING_STARTED" 'guides/agent-assisted-setup.md' \
+    "getting started leads people to the canonical agent-assisted guide"
+assert_contains "$UPGRADING" 'agent-assisted setup is the recommended human path' \
+    "upgrade guide recommends agent assistance without replacing the installer"
+assert_contains "$AGENT_SETUP" 'Agent-assisted setup is the primary path for people' \
+    "canonical guide makes the human default explicit"
+assert_contains "$AGENT_SETUP" '`setup.sh` and `setup.ps1` remain the only installation engines' \
+    "canonical guide keeps one deterministic implementation"
+assert_contains "$AGENT_SETUP" 'CI, automation, offline environments, or an unavailable agent' \
+    "canonical guide preserves the direct machine path"
+for setup_mode in 'fresh project' 'existing Forge v6' 'Forge v5, Claude-only, Codex-only, mixed, custom, or unknown'; do
+    assert_contains "$AGENT_SETUP" "$setup_mode" \
+        "canonical guide routes $setup_mode repositories"
+done
+for safety_rule in 'Run the read-only full-refresh preview first' \
+    'Preserve the exact installer output' \
+    'Do not bypass ownership blockers' \
+    'Ask for my approval before modifying files or running the non-preview command' \
+    'Review the final Git diff and per-host readiness diagnostics'; do
+    assert_contains "$AGENT_SETUP" "$safety_rule" \
+        "copy-paste prompt requires: $safety_rule"
+done
+assert_contains "$AGENT_SETUP" \
+    'Run the read-only full-refresh preview first for Forge v5, Claude-only, Codex-only, mixed, custom, or unknown harnesses.' \
+    "copy-paste prompt sends non-v6 existing harnesses through full refresh"
+assert_not_contains "$AGENT_SETUP" 'for every existing' \
+    "copy-paste prompt does not route existing v6 through full refresh"
+
+start_test "public documentation is written for Forge users"
+assert_not_contains "$README" 'when developing the harness' \
+    "README does not instruct users how to develop Forge"
+assert_not_contains "$README" 'not the installed copy' \
+    "README does not contrast harness source editing with installed usage"
+assert_contains "$README" '`.forge/instructions.md` is setup-managed and should not be edited directly' \
+    "README gives the downstream ownership rule directly"
+PUBLIC_FORGE_MAINTAINER_GUIDANCE=$(rg -n -i \
+    'develop(ing|ers? of) (the )?(Forge|harness)|maintain(ing|ers? of) (the )?(Forge|harness)' \
+    "$REPO_ROOT/README.md" "$REPO_ROOT/docs/getting-started.md" \
+    "$REPO_ROOT/docs/guides" "$REPO_ROOT/docs/explanation" \
+    "$REPO_ROOT/docs/reference" "$REPO_ROOT/docs/troubleshooting.md" || true)
+if [ -z "$PUBLIC_FORGE_MAINTAINER_GUIDANCE" ]; then
+    pass "active public docs contain no Forge-development guidance"
+else
+    fail "active public docs contain Forge-development guidance: $PUBLIC_FORGE_MAINTAINER_GUIDANCE"
+fi
+
 report "test-contracts.sh"
