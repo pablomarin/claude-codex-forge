@@ -1,7 +1,9 @@
 # Upgrading to Forge 6
 
-Forge 6 changes harness ownership. Upgrade an installed repository with one previewed,
-authoritative full refresh—not a sequence of force copies:
+Forge 6 changes harness ownership. This path applies to Forge v5 and to repositories that already
+contain any other agent harness: Claude-only files, Codex-only files, a mixture of both, or an
+independently developed harness. Upgrade with one previewed, authoritative full refresh—not a fresh
+install or a sequence of force copies:
 
 ```bash
 git -C ~/claude-codex-forge pull
@@ -28,6 +30,9 @@ a stale preview never authorizes changed bytes.
 v5/mixed-to-v6 migration. If ordinary force detects legacy machinery, it points you back to the
 read-only preview instead of layering v6 beside v5.
 
+If you do not know which harness or version is present, run the preview. It is the safe inventory
+command and writes no project files.
+
 ## What the Transaction Does
 
 The checked-in manifests identify canonical v6 files, generated adapters, protected paths, and
@@ -40,8 +45,27 @@ It creates one canonical `.forge/` harness and thin native adapters under `.clau
 `.agents/`. Active v5 state is translated to `.forge/local/state.md`; legacy review, goal, and
 authorization evidence is invalidated because it cannot certify the new contract.
 
-Do not manually synchronize `CLAUDE.md` and `AGENTS.md`. Project-owned text stays outside their
-bounded Forge blocks, and both blocks load the same `.forge/instructions.md` policy.
+### Instruction ownership after migration
+
+```text
+.forge/                     Forge-owned engineering policy
+docs/agent-context.md       Team-owned shared project knowledge
+CLAUDE.md                   Thin Claude discovery adapter + shared-context pointer
+AGENTS.md                   Thin Codex discovery adapter + shared-context pointer
+```
+
+Do not manually synchronize `CLAUDE.md` and `AGENTS.md`. Shared project instructions belong in the
+neutral context file instead. Project-owned text stays outside their bounded Forge blocks, and both
+blocks load the same `.forge/instructions.md` policy. Forge cannot infer repository architecture,
+domain facts, or local commands; create `docs/agent-context.md` when the project needs shared
+context and put this same pointer outside the managed block in both roots:
+
+```markdown
+Read `docs/agent-context.md` completely before acting.
+```
+
+Then maintain shared knowledge only in the neutral document. Keep only genuinely host-specific
+instructions in the corresponding root file.
 
 ## Protected Content
 
@@ -103,9 +127,12 @@ states, choose the authoritative one, archive the non-selected state, and put th
 the single source the report names before rerunning preview. Preserve custom skills, agents, hooks,
 and documentation that do not collide with required Forge surfaces.
 
-Root-policy findings are also manual by design. Replace only obsolete project-owned references such
-as `@CONTINUITY.md`, the retired Codex-only review command, or old `.claude/rules/` imports; do not replace the whole root
-file or copy shared Forge policy into both native files.
+Root-policy findings are also manual by design. The report prints an `ACTION_REQUIRED` section with
+file-specific edits, the shared-context location, the exact root pointer, and the preview command to
+retry. Replace only obsolete project-owned references such as `@CONTINUITY.md`, the retired
+Codex-only review command, or old `.claude/rules/` imports. Preserve useful project facts by moving
+shared material to `docs/agent-context.md`; do not replace the whole root file or copy shared Forge
+policy into both native files.
 
 ## Project and Global Scopes
 

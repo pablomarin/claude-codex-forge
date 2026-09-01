@@ -35,7 +35,22 @@ Windows PowerShell:
 git clone https://github.com/pablomarin/claude-codex-forge.git $HOME\claude-codex-forge
 ```
 
-## 2. Install the global harness
+## 2. Choose the project installation path
+
+The project command depends on what is already in the repository:
+
+| Repository state | Next command |
+| --- | --- |
+| Fresh repository with no agent harness | Continue to the normal project installation below |
+| Existing Forge v6 | Use the managed-refresh command in the [README setup table](../README.md#setup-refresh-and-team-upgrades); full refresh is not required |
+| Forge v5, Claude-only, Codex-only, mixed, or another/custom harness | `setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun` |
+| Unknown | Run the same full-refresh preview; it is read-only |
+
+Never use normal fresh setup to layer v6 over an existing harness. A full-refresh preview inventories
+ownership, root instructions, state, settings, and hooks. Resolve its blockers and execute the same
+command without the dry-run flag only after `UPGRADE: READY`.
+
+## 3. Install the global harness
 
 ```bash
 ~/claude-codex-forge/setup.sh --global
@@ -49,7 +64,7 @@ Global and project scopes are separate. Installing global first is the clearest 
 install may come first; a later `--global` / `-Global` recognizes the advisory machine stamp and
 materializes the global harness normally. A project refresh never rewrites global policy.
 
-## 3. Install a fresh project
+## 4A. Install a fresh project
 
 From the Git repository root:
 
@@ -61,10 +76,31 @@ From the Git repository root:
 & $HOME\claude-codex-forge\setup.ps1 -Project "My Project"
 ```
 
-Both adapters are installed even when only one CLI is available. If this repository already has a
-v5 harness, use the [authoritative full-refresh path](guides/upgrading.md) instead.
+Both adapters are installed even when only one CLI is available. If this repository already has any
+agent harness, use the [authoritative full-refresh path](guides/upgrading.md) instead.
 
-## 4. Open either host
+## 4B. Upgrade a repository with any existing harness
+
+This path covers Forge v5, a repository with only `.claude/` or `CLAUDE.md`, a repository with only
+Codex/`AGENTS.md` surfaces, a mixture of both, and independently developed agent harnesses:
+
+```bash
+~/claude-codex-forge/setup.sh -F --dry-run
+# Resolve every named blocker. When the preview says UPGRADE: READY:
+~/claude-codex-forge/setup.sh -F
+```
+
+```powershell
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
+# Resolve every named blocker. When the preview says UPGRADE: READY:
+& $HOME\claude-codex-forge\setup.ps1 -FullRefresh
+```
+
+The preview writes nothing. The migration proves ownership before replacing or deleting legacy
+files, preserves unknown project content, and blocks rather than guessing when instructions or
+state are ambiguous. See [Upgrading](guides/upgrading.md) for report meanings and reconciliation.
+
+## 5. Open either host
 
 ```bash
 claude
@@ -83,7 +119,7 @@ state, memory, tools, MCP, network, database/API access, and write capability. I
 special Forge sandbox or allowlist; destructive and protected external mutations still use the
 same host prompts and explicit human authority as ordinary engineering work.
 
-## 5. Verify installation and trust
+## 6. Verify installation and trust
 
 Run the deterministic discovery check from the project root:
 
@@ -100,29 +136,18 @@ belongs to the primary checkout; a linked worktree prints the exact primary-chec
 instead of mutating shared Git metadata from the side. Until authenticated discovery and the hook
 sentinel are observed, setup truthfully reports `RUNTIME_READY: BLOCKED`.
 
-## Existing project
+## Shared project instructions after setup
 
-Pull the Forge clone and run the breaking v6 refresh:
+Forge policy belongs to `.forge/`. Team-owned project context belongs in one neutral file such as
+`docs/agent-context.md`. When that context is needed, create the file and put this same line outside
+the Forge-managed block in both `CLAUDE.md` and `AGENTS.md`:
 
-```bash
-git -C ~/claude-codex-forge pull
-cd /path/to/project
-~/claude-codex-forge/setup.sh -F --dry-run
-# Resolve every named blocker, then:
-~/claude-codex-forge/setup.sh -F
+```markdown
+Read `docs/agent-context.md` completely before acting.
 ```
 
-```powershell
-git -C $HOME\claude-codex-forge pull
-Set-Location C:\path\to\project
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
-# Resolve every named blocker, then:
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh
-```
-
-The preview writes nothing. `UPGRADE: READY` means the migration can run; `UPGRADE: BLOCKED` gives
-the complete reconciliation list. Execution is complete only when it reports `ACTIVE_FORGE: v6`.
-See [Upgrading](guides/upgrading.md) before resolving any blocked report.
+Forge does not generate your architecture or domain knowledge. Maintain it once in
+`docs/agent-context.md`; do not synchronize duplicate copies between the native root files.
 
 ## Next
 
