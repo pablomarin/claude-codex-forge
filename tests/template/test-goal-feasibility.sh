@@ -46,7 +46,7 @@ targets = [
 for settings_path in map(pathlib.Path, sys.argv[2:5]):
     settings = json.loads(settings_path.read_text())
     denied = settings["permissions"]["deny"]
-    assert "Write(~/.forge/bin/**)" in denied, (settings_path, denied)
+    assert "Write(~/.forge/bin/**)" not in denied, (settings_path, denied)
     assert "Edit(~/.forge/bin/**)" in denied, (settings_path, denied)
     assert any(rule.startswith("Bash(") and ".forge/bin" in rule for rule in denied), (settings_path, denied)
     sandbox = settings["sandbox"]

@@ -8,10 +8,9 @@
 #      install that still needs full-refresh reconciliation). Suppressed otherwise to
 #      avoid spamming every Stop event.
 #
-#   2. Workflow reminder (advisory, stderr only, exit 0).
-#      Reads .claude/local/state.md ## Workflow table; emits
-#      "WORKFLOW: <cmd> | Phase: <n> | Next: <step>" so the model always
-#      sees current phase even when no issues fire.
+#   2. Workflow checkpoint (v6 only).
+#      An unchanged canonical state hash continues the model once with the
+#      current command/phase/next step; changed state stops normally.
 #
 #   3. CHANGELOG threshold gate (BLOCKS via exit 2).
 #      If 4+ files changed on branch (committed + uncommitted) but
@@ -479,9 +478,36 @@ if ($issues) {
     exit 2
 }
 
-# Advisory: remind about active workflow even when no issues (non-blocking)
+# A changed v6 state checkpoint stops normally. If the exact state hash remains
+# unchanged across normal Stops, give the model one visible continuation turn.
 if ($workflowReminder) {
-    [Console]::Error.WriteLine($workflowReminder)
+    if ($stateLocalDir -ne ".forge/local") {
+        [Console]::Error.WriteLine($workflowReminder)
+        Exit-ForgeAllow
+    }
+    $stateStopHash = Get-ForgeFileSha $stateMd
+    $stateStopFile = Join-Path $stateLocalDir "state-last-stop.sha256"
+    $stateStopItem = Get-Item -LiteralPath $stateStopFile -Force -ErrorAction SilentlyContinue
+    if ($stateStopItem -and (($stateStopItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $stateStopItem.PSIsContainer)) {
+        [Console]::Error.WriteLine("FORGE_STATE_INVALID: invalid state checkpoint sidecar")
+        exit 2
+    }
+    $stateStopPrevious = ""
+    if ($stateStopItem) { $stateStopPrevious = ([IO.File]::ReadAllText($stateStopFile)).Trim() }
+    if ($stateStopPrevious -ne $stateStopHash) {
+        $stateStopTemp = Join-Path $stateLocalDir (".state-last-stop." + [Guid]::NewGuid().ToString("N"))
+        try {
+            [IO.File]::WriteAllText($stateStopTemp, "$stateStopHash`n", (New-Object Text.UTF8Encoding($false)))
+            Move-Item -LiteralPath $stateStopTemp -Destination $stateStopFile -Force
+        } catch {
+            Remove-Item -LiteralPath $stateStopTemp -Force -ErrorAction SilentlyContinue
+            [Console]::Error.WriteLine("FORGE_STATE_INVALID: could not publish state checkpoint sidecar")
+            exit 2
+        }
+        Exit-ForgeAllow
+    }
+    [Console]::Error.WriteLine("$workflowReminder. Read .forge/local/state.md before continuing; update its exact next step and record any durable learning in the appropriate Forge memory layer before stopping.")
+    exit 2
 }
 
 # All good, allow stop

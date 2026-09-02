@@ -197,6 +197,10 @@ trap 'rm -f "$manifest" "$paths" "$paths_after"' EXIT HUP INT TERM
 # symlinks remain inert Git mode+target bytes and are allowed.
 while IFS= read -r special; do
     rel=${special#"$root"/}; case "$rel" in .git|.git/*|.forge/local|.forge/local/*) continue ;; esac
+    # Generated environments such as .venv commonly contain symlinks. If Git
+    # excludes the path, it is outside the review candidate and must not block
+    # capture. Unignored special paths remain fail-closed below.
+    git -C "$root" check-ignore -q -- "$rel" 2>/dev/null && continue
     git -C "$root" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 || die_fp "untracked path is not a regular file: $rel"
 done < <(find -P "$root" \( -path "$root/.git" -o -path "$root/.forge/local" \) -prune -o \( -type l -o ! -type f ! -type d \) -print 2>/dev/null)
 git -C "$root" ls-files --others --exclude-standard -z -- . ':(exclude).forge/local/**' > "$paths"
@@ -272,6 +276,22 @@ elif [ "$mode" = capture ]; then
             unlink "$link" || die_fp 'cannot inert tracked symlink'
             mv "$link_bytes" "$link" || die_fp 'cannot materialize inert tracked symlink bytes'
         done < <(find -P "$snapshot" -path "$snapshot/.git" -prune -o -type l -print0 2>/dev/null)
+        if [ "$artifact_kind" = git-working-tree ]; then
+            git -C "$snapshot" add -A || die_fp 'candidate index materialization failed'
+            candidate_tree=$(git -C "$snapshot" write-tree 2>/dev/null) || die_fp 'candidate tree materialization failed'
+            candidate_commit=$(printf 'Forge immutable review candidate\n' | \
+                GIT_AUTHOR_NAME=Forge GIT_AUTHOR_EMAIL=forge@invalid \
+                GIT_COMMITTER_NAME=Forge GIT_COMMITTER_EMAIL=forge@invalid \
+                git -C "$snapshot" commit-tree "$candidate_tree" -p "$head" 2>/dev/null) \
+                || die_fp 'candidate commit materialization failed'
+            git -C "$snapshot" update-ref refs/heads/candidate "$candidate_commit" \
+                || die_fp 'candidate ref materialization failed'
+            git -C "$snapshot" checkout -q --detach "$candidate_commit" \
+                || die_fp 'candidate checkout materialization failed'
+        else
+            git -C "$snapshot" update-ref refs/heads/candidate "$head" \
+                || die_fp 'candidate ref materialization failed'
+        fi
     fi
     snapshot=$(cd "$snapshot" 2>/dev/null && pwd -P) || die_fp 'cannot canonicalize candidate snapshot'
 fi
@@ -292,6 +312,7 @@ while IFS=$'\t' read -r rel mode_bits bytes expected; do
 done < "$manifest"
 while IFS= read -r special; do
     rel=${special#"$root"/}; case "$rel" in .git|.git/*|.forge/local|.forge/local/*) continue ;; esac
+    git -C "$root" check-ignore -q -- "$rel" 2>/dev/null && continue
     git -C "$root" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 || die_fp "untracked special path appeared during capture: $rel"
 done < <(find -P "$root" \( -path "$root/.git" -o -path "$root/.forge/local" \) -prune -o \( -type l -o ! -type f ! -type d \) -print 2>/dev/null)
 

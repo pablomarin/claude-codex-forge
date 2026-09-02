@@ -59,6 +59,13 @@ is not mistaken for project-data loss. Ordinary v6 setup keeps state and helper 
 `.forge/`; council and ship-gate guidance now points to those canonical paths instead of recreating or
 referencing retired `.claude/` copies.
 
+V6 linked-worktree continuity is now executable instead of prompt-only. The shared Bash/PowerShell
+helper creates exact `feat/` or `fix/` branches, bootstraps missing private installed harness files,
+seeds a narrative-only state baseline, and safely folds it back only while the primary narrative is
+unchanged. Active-workflow Stop gives the model one visible checkpoint turn, while compact-session
+rehydration names canonical state, its exact next step, and existing memory indexes. PreCompact
+diagnostics are documented honestly as diagnostics rather than automatic model-memory writes.
+
 Downstream `docs/adr/` content is project-owned. Ordinary setup retires only byte-exact copies of
 Forge's own internal ADR index and numbered decisions, preserves customized or same-numbered project
 ADRs, and creates a neutral project index and ADR template only when those files are absent.

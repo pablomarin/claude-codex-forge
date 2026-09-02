@@ -92,6 +92,8 @@ function Assert-NoUntrackedReparse([string]$Root) {
     foreach ($item in Get-NoFollowTreeItems $Root) {
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { continue }
         $relative = $item.FullName.Substring($Root.Length).TrimStart('\', '/')
+        & git -C $Root check-ignore -q -- $relative 2>$null
+        if ($LASTEXITCODE -eq 0) { continue }
         & git -C $Root ls-files --error-unmatch -- $relative 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "BLOCKED[artifact]: untracked junction or reparse point rejected: $relative" }
     }
@@ -374,6 +376,27 @@ try {
                     Copy-Item -LiteralPath $source -Destination $destination
                 }
             }
+            if ($kind -eq 'git-working-tree') {
+                & git -C $snapshot add -A
+                if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: candidate index materialization failed' }
+                $candidateTree = Invoke-GitText @('-C', $snapshot, 'write-tree')
+                $savedAuthorName = $env:GIT_AUTHOR_NAME; $savedAuthorEmail = $env:GIT_AUTHOR_EMAIL
+                $savedCommitterName = $env:GIT_COMMITTER_NAME; $savedCommitterEmail = $env:GIT_COMMITTER_EMAIL
+                try {
+                    $env:GIT_AUTHOR_NAME = 'Forge'; $env:GIT_AUTHOR_EMAIL = 'forge@invalid'
+                    $env:GIT_COMMITTER_NAME = 'Forge'; $env:GIT_COMMITTER_EMAIL = 'forge@invalid'
+                    $candidateCommit = ("Forge immutable review candidate`n" | & git -C $snapshot commit-tree $candidateTree -p $head) -join ''
+                    if ($LASTEXITCODE -ne 0 -or -not $candidateCommit) { throw 'BLOCKED[artifact]: candidate commit materialization failed' }
+                }
+                finally {
+                    $env:GIT_AUTHOR_NAME = $savedAuthorName; $env:GIT_AUTHOR_EMAIL = $savedAuthorEmail
+                    $env:GIT_COMMITTER_NAME = $savedCommitterName; $env:GIT_COMMITTER_EMAIL = $savedCommitterEmail
+                }
+                & git -C $snapshot update-ref refs/heads/candidate $candidateCommit
+                if ($LASTEXITCODE -eq 0) { & git -C $snapshot checkout -q --detach $candidateCommit }
+            }
+            else { & git -C $snapshot update-ref refs/heads/candidate $head }
+            if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: candidate ref materialization failed' }
         }
     }
 

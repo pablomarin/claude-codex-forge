@@ -374,6 +374,10 @@ See [Upgrading](docs/guides/upgrading.md) for ownership reports and transaction 
 - `.forge/memory/`, `docs/adr/`, and `docs/solutions/` contain verified project knowledge that can
   be committed.
 - Global memory stores stable cross-project patterns, never current-task progress or secrets.
+- If canonical state stays unchanged across normal active-workflow stops, Forge gives the model one
+  visible checkpoint turn to update state or memory; a newly changed checkpoint stops normally.
+  After compaction, SessionStart points it back to the exact next step and any concise local/durable
+  `MEMORY.md` indexes. Forge does not claim hook diagnostics are automatically saved as model memory.
 
 You may plan in Claude, close it, and continue implementation in Codex—or the reverse. The new host
 resumes the same Git branch and Forge checkpoint. Forge warns against editing one worktree from both

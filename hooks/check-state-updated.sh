@@ -9,10 +9,9 @@
 #      install that still needs full-refresh reconciliation). Suppressed otherwise to
 #      avoid spamming every Stop event.
 #
-#   2. Workflow reminder (advisory, stderr only, exit 0).
-#      Reads .claude/local/state.md ## Workflow table; emits
-#      "WORKFLOW: <cmd> | Phase: <n> | Next: <step>" so the model always
-#      sees current phase even when no issues fire.
+#   2. Workflow checkpoint (v6 only).
+#      An unchanged canonical state hash continues the model once with the
+#      current command/phase/next step; changed state stops normally.
 #
 #   3. CHANGELOG threshold gate (BLOCKS via exit 2).
 #      If 4+ files changed on branch (committed + uncommitted) but
@@ -558,9 +557,33 @@ if [ -n "$ISSUES" ]; then
     exit 2
 fi
 
-# Advisory: remind about active workflow even when no issues (non-blocking)
+# A changed v6 state checkpoint stops normally. If the exact state hash remains
+# unchanged across normal Stops, give the model one visible continuation turn.
+# This avoids paying an extra model turn when the workflow already checkpointed.
 if [ -n "$WORKFLOW_REMINDER" ]; then
-    echo "$WORKFLOW_REMINDER" >&2
+    if [ "$STATE_LOCAL_DIR" != .forge/local ]; then
+        echo "$WORKFLOW_REMINDER" >&2
+        forge_allow
+    fi
+    STATE_STOP_HASH=$(_forge_hash_file "$STATE_MD") || {
+        echo "FORGE_STATE_INVALID: could not hash canonical state checkpoint" >&2
+        exit 2
+    }
+    STATE_STOP_FILE="$STATE_LOCAL_DIR/state-last-stop.sha256"
+    if [ -L "$STATE_STOP_FILE" ] || { [ -e "$STATE_STOP_FILE" ] && [ ! -f "$STATE_STOP_FILE" ]; }; then
+        echo "FORGE_STATE_INVALID: invalid state checkpoint sidecar" >&2
+        exit 2
+    fi
+    STATE_STOP_PREVIOUS=$(tr -d '[:space:]' < "$STATE_STOP_FILE" 2>/dev/null || true)
+    if [ "$STATE_STOP_PREVIOUS" != "$STATE_STOP_HASH" ]; then
+        STATE_STOP_TMP=$(mktemp "$STATE_LOCAL_DIR/.state-last-stop.XXXXXX") || exit 2
+        printf '%s\n' "$STATE_STOP_HASH" > "$STATE_STOP_TMP" \
+            && mv -f "$STATE_STOP_TMP" "$STATE_STOP_FILE" \
+            || { rm -f "$STATE_STOP_TMP"; echo "FORGE_STATE_INVALID: could not publish state checkpoint sidecar" >&2; exit 2; }
+        forge_allow
+    fi
+    echo "$WORKFLOW_REMINDER. Read .forge/local/state.md before continuing; update its exact next step and record any durable learning in the appropriate Forge memory layer before stopping." >&2
+    exit 2
 fi
 
 # All good, allow stop

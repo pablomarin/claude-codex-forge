@@ -32,15 +32,25 @@ $claudeExpected = @{
     "auto-approve-local"=@("PermissionRequest", 'powershell -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/.forge/hooks/auto-approve-local-writes.ps1"')
     "post-format"=@("PostToolUse", 'powershell -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/.forge/hooks/post-tool-format.ps1"')
 }
+$routerPrefix = 'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh" '
 $codexExpected = @{
-    "session-start"=@("session_start", ".forge/hooks/lib/codex-worktree-dispatch.sh|session-start.sh")
-    "bash-safety"=@("pre_tool_use", ".forge/hooks/lib/codex-worktree-dispatch.sh|check-bash-safety.sh")
-    "workflow-gates"=@("pre_tool_use", ".forge/hooks/lib/codex-worktree-dispatch.sh|check-workflow-gates.sh")
-    "format"=@("post_tool_use", ".forge/hooks/lib/codex-worktree-dispatch.sh|post-tool-format.sh")
-    "subagent-review-receipt"=@("subagent_stop", ".forge/hooks/lib/codex-worktree-dispatch.sh|check-subagent-review.sh")
-    "precompact-memory"=@("pre_compact", ".forge/hooks/lib/codex-worktree-dispatch.sh|pre-compact-memory.sh")
-    "build-evidence"=@("stop", ".forge/hooks/lib/codex-worktree-dispatch.sh|build-evidence.sh")
-    "state-updated"=@("stop", ".forge/hooks/lib/codex-worktree-dispatch.sh|check-state-updated.sh")
+    "host-context"=@("SessionStart", 'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/host-context.sh" hook --host codex', "host-context.ps1")
+    "session-start"=@("SessionStart", $routerPrefix + "session-start.sh", "session-start.ps1")
+    "bash-safety"=@("PreToolUse", $routerPrefix + "check-bash-safety.sh", "check-bash-safety.ps1")
+    "workflow-gates"=@("PreToolUse", $routerPrefix + "check-workflow-gates.sh", "check-workflow-gates.ps1")
+    "external-mutation-auth"=@("PreToolUse", $routerPrefix + "check-external-mutation-auth.sh", "check-external-mutation-auth.ps1")
+    "format"=@("PostToolUse", $routerPrefix + "post-tool-format.sh", "post-tool-format.ps1")
+    "subagent-review-receipt"=@("SubagentStop", $routerPrefix + "check-subagent-review.sh", "check-subagent-review.ps1")
+    "precompact-memory"=@("PreCompact", $routerPrefix + "pre-compact-memory.sh", "pre-compact-memory.ps1")
+    "build-evidence"=@("Stop", $routerPrefix + "build-evidence.sh", "build-evidence.ps1")
+    "state-updated"=@("Stop", $routerPrefix + "check-state-updated.sh", "check-state-updated.ps1")
+}
+$codexTokens = @{
+    "host-context"="host-context.sh"; "session-start"="session-start.sh";
+    "bash-safety"="check-bash-safety.sh"; "workflow-gates"="check-workflow-gates.sh";
+    "external-mutation-auth"="check-external-mutation-auth.sh"; "format"="post-tool-format.sh";
+    "subagent-review-receipt"="check-subagent-review.sh"; "precompact-memory"="pre-compact-memory.sh";
+    "build-evidence"="build-evidence.sh"; "state-updated"="check-state-updated.sh"
 }
 $rows = New-Object System.Collections.Generic.List[string]
 foreach ($event in $claude.hooks.PSObject.Properties) {
@@ -49,14 +59,27 @@ foreach ($event in $claude.hooks.PSObject.Properties) {
     }}
 }
 foreach ($event in $codex.hooks.PSObject.Properties) {
-    foreach ($hook in @($event.Value)) { if ($hook.forgeManagedId) { $rows.Add("codex|$($hook.forgeManagedId)|$($event.Name)|$(@($hook.command) -join '|')") } }
+    foreach ($group in @($event.Value)) { foreach ($hook in @($group.hooks)) {
+        $matches = @($codexTokens.Keys | Where-Object {
+            [string]$hook.command -like "*/$($codexTokens[$_])" -or [string]$hook.command -like "* $($codexTokens[$_])"
+        })
+        if ($matches.Count -eq 1) {
+            $rows.Add("codex|$($matches[0])|$($event.Name)|$($hook.command)|$($hook.commandWindows)|$($hook.type)")
+        }
+    }}
 }
-foreach ($pair in @(@("claude",$claudeExpected), @("codex",$codexExpected))) {
-    $host=$pair[0]; $expected=$pair[1]
-    foreach ($id in $expected.Keys) {
-        $want = "$host|$id|$($expected[$id][0])|$($expected[$id][1])"
-        $candidates = @($rows | Where-Object { $_ -like "$host|$id|*" })
-        if ($candidates.Count -ne 1 -or $candidates[0] -cne $want) { [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: $host managed hook changed or duplicated: $id"); exit 2 }
+foreach ($id in $claudeExpected.Keys) {
+    $want = "claude|$id|$($claudeExpected[$id][0])|$($claudeExpected[$id][1])"
+    $candidates = @($rows | Where-Object { $_ -like "claude|$id|*" })
+    if ($candidates.Count -ne 1 -or $candidates[0] -cne $want) { [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: claude managed hook changed or duplicated: $id"); exit 2 }
+}
+foreach ($id in $codexExpected.Keys) {
+    $candidates = @($rows | Where-Object { $_ -like "codex|$id|*" })
+    if ($candidates.Count -ne 1) { [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: codex managed hook changed or duplicated: $id"); exit 2 }
+    $parts = $candidates[0] -split '\|', 6
+    if ($parts[2] -cne $codexExpected[$id][0] -or $parts[3] -cne $codexExpected[$id][1] -or
+        $parts[4] -notlike "*$($codexExpected[$id][2])*" -or $parts[5] -cne 'command') {
+        [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: codex managed hook changed: $id"); exit 2
     }
 }
 $joined = (@($rows | Sort-Object) -join "`n") + "`n"

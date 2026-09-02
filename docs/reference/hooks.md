@@ -11,7 +11,7 @@ their native events into the same policy.
 | `Stop` | Main host finishes a turn | Builds candidate evidence and reminds the host to keep `.forge/local/state.md` current |
 | `PreToolUse` | Before a shell command | Audits commands, blocks dangerous patterns, enforces workflow evidence, and checks protected external-mutation authority |
 | `PostToolUse` | After supported file writes | Runs the configured formatter |
-| `PreCompact` | Before context compression | Reminds either host to save volatile drafts under `.forge/local/memory/` |
+| `PreCompact` | Before context compression | Ensures the volatile memory directory exists and logs a diagnostic; it does not claim to inject a save instruction into model context |
 | `SubagentStop` | Reviewer/producer finishes | Validates structured, candidate-bound review output |
 | `ConfigChange` | Claude Code configuration changes | Audits changes and may block managed deny-rule removal in strict mode |
 

@@ -40,7 +40,8 @@ your-project/
 │   │   │   ├── codex-pty.sh            # PTY shim wrapping codex exec (.ps1)
 │   │   │   ├── codex-pty-helper.py     # Unix pty.fork helper
 │   │   │   ├── host-context.sh         # Current-host adapter (.ps1)
-│   │   │   └── state-path.sh           # Canonical state resolver (.ps1)
+│   │   │   ├── state-path.sh           # Canonical state resolver (.ps1)
+│   │   │   └── worktree-lifecycle.sh   # Private harness seed/fold helper (.ps1)
 │   │   ├── session-start.sh              # Branch/drift context (.ps1)
 │   │   ├── check-workflow-gates.sh       # Candidate evidence gates (.ps1)
 │   │   ├── check-external-mutation-auth.sh # Human mutation boundary (.ps1)
@@ -48,10 +49,10 @@ your-project/
 │   ├── bin/                            # Runtime checks and trusted helpers
 │   ├── local/                          # Per-developer/worktree; gitignored
 │   │   ├── state.md                    # Workflow, goal nonce, exact next step
-│   │   ├── memory/                     # Volatile memory drafts
+│   │   ├── memory/                     # Volatile memory drafts; optional MEMORY.md index
 │   │   ├── reviews/                    # Review prompts, outputs, receipts
 │   │   └── evidence/                   # Candidate-bound verification evidence
-│   └── memory/                         # Project-owned durable memory; Git-tracked
+│   └── memory/                         # Project-owned durable memory; optional MEMORY.md index
 ├── .claude/                           # Generated Claude Code adapters/settings
 │   ├── settings.json
 │   ├── commands/                       # Slash-command adapters

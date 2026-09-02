@@ -40,8 +40,7 @@ if (-not (Test-Path -LiteralPath $stateHelper)) { $stateHelper = Join-Path (Get-
 if (Test-Path -LiteralPath $stateHelper) {
     try {
         . $stateHelper
-        $root = $env:CLAUDE_PROJECT_DIR
-        if (-not $root) { $root = (Get-Location).Path }
+        $root = $projectRoot
         $stateMd = Get-ForgeStatePath -Root $root -Mode Read
         if ($stateMd -and (Test-Path -LiteralPath $stateMd)) {
             $rawState = (Get-Content -LiteralPath $stateMd -Raw -ErrorAction SilentlyContinue) -replace "`r", ""
@@ -53,13 +52,30 @@ if (Test-Path -LiteralPath $stateHelper) {
             }
             $cmdLine = $workflowLines | Select-String '\|\s*Command\s*\|' | Select-Object -First 1
             $phaseLine = $workflowLines | Select-String '\|\s*Phase\s*\|' | Select-Object -First 1
+            $nextLine = $workflowLines | Select-String '\|\s*Next step\s*\|' | Select-Object -First 1
             $resumeCmd = if ($cmdLine) { ($cmdLine -split '\|')[2].Trim() } else { "" }
             $resumePhase = if ($phaseLine) { ($phaseLine -split '\|')[2].Trim() } else { "" }
+            $resumeNext = if ($nextLine) { ($nextLine -split '\|')[2].Trim() } else { "" }
             if ($resumeCmd -and $resumeCmd -ne "none" -and $resumeCmd -ne "-" -and $resumeCmd -ne ([char]0x2014).ToString()) {
-                $context = "$context (Forge resume: $resumeCmd; phase: $resumePhase)"
+                if (-not $resumePhase -or -not $resumeNext) {
+                    $context += " (FORGE_STATE_INVALID: active workflow in .forge/local/state.md is missing Phase or Next step; repair it before continuing)"
+                } else {
+                    $context = "$context (Forge resume from .forge/local/state.md: $resumeCmd; phase: $resumePhase; next step: $resumeNext - read it before continuing)"
+                }
+            }
+            if (Test-Path -LiteralPath (Join-Path $root ".forge\local\memory\MEMORY.md") -PathType Leaf) {
+                $context += " (local memory index: .forge/local/memory/MEMORY.md)"
+            }
+            if (Test-Path -LiteralPath (Join-Path $root ".forge\memory\MEMORY.md") -PathType Leaf) {
+                $context += " (durable memory index: .forge/memory/MEMORY.md)"
             }
         }
-    } catch {}
+    } catch {
+        if ((Test-Path -LiteralPath (Join-Path $root ".forge\version")) -or
+            (Test-Path -LiteralPath (Join-Path $root ".forge\local\state.md"))) {
+            $context += " (FORGE_STATE_INVALID: canonical .forge/local/state.md could not be resolved; repair it before continuing)"
+        }
+    }
 }
 
 if ($source -eq "startup" -or $source -eq "resume") {

@@ -13,9 +13,8 @@ try {
         & $materializer -RepoRoot $root -Target $target -Scope $scope -Platform windows | Out-Null
         $settings = Join-Path $target ".claude\settings.json"
         $profile = Get-Content -Raw $settings | ConvertFrom-Json
-        foreach ($rule in @("Write(~/.forge/bin/**)", "Edit(~/.forge/bin/**)")) {
-            if ($profile.permissions.deny -notcontains $rule) { throw "$scope profile does not deny $rule" }
-        }
+        if ($profile.permissions.deny -contains "Write(~/.forge/bin/**)") { throw "$scope profile contains ignored Write-path syntax" }
+        if ($profile.permissions.deny -notcontains "Edit(~/.forge/bin/**)") { throw "$scope profile does not deny Forge bin edits" }
         if (@($profile.permissions.deny | Where-Object { $_ -like "Bash(*.forge/bin*" }).Count -eq 0) { throw "$scope profile does not command-gate the global Forge bin" }
         if ($profile.sandbox.filesystem.denyWrite -notcontains "~/.forge/bin") { throw "$scope sandbox does not protect the complete global Forge bin" }
         $before = [IO.File]::ReadAllBytes($settings)

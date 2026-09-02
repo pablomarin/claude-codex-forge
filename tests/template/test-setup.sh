@@ -1304,10 +1304,11 @@ import sys
 
 payload = json.load(open(sys.argv[1]))
 hooks = payload.get("hooks", {})
-assert "SessionStart" not in hooks
 assert hooks.get("CustomEvent") == [{"projectOwned": "KEEP-CUSTOM-EVENT"}]
 assert payload.get("projectSetting") == "KEEP-CROSS-HOST-SETTING"
-assert any(entry.get("forgeManagedId") == "session-start" for entry in hooks.get("session_start", []))
+commands = [handler.get("command", "") for group in hooks.get("SessionStart", []) for handler in group.get("hooks", [])]
+assert all(".codex/hooks/session-start.sh" not in command for command in commands), commands
+assert any("/.forge/hooks/lib/codex-worktree-dispatch.sh" in command and command.endswith(" session-start.sh") for command in commands), commands
 PY
 assert_equals "$?" "0" \
     "managed refresh removes only the proven legacy registration and preserves user JSON"

@@ -10,16 +10,25 @@ the main agent for this session; there is no permanent main engine.
    state, not shell commands.
 2. Record `Last active host`. On a host switch, resume the exact next unchecked durable step. Warn
    about simultaneous editing; do not create a lock or lease.
-3. Work outside the protected default branch in one isolated worktree.
-4. On new worktree creation, seed only `## State` (with `### Now` cleared), `## Open Questions`, and
-   `## Blockers` from the primary checkout, and persist that exact baseline at
-   `.forge/local/.state-seed-snapshot.md`. Never seed workflow, goal, authorization, or receipt
-   sections. An adopted worktree preserves its recorded snapshot; if it is missing, require an
-   explicit reconciliation baseline rather than guessing.
-5. Before the first fix change, persist the intended base ref and resolved base SHA. Reuse an
+3. Work outside the protected default branch in one isolated worktree. From the primary checkout,
+   create it with `.forge/hooks/lib/worktree-lifecycle.sh create --kind fix --name <slug> --base
+   <ref-or-sha>` (PowerShell: `worktree-lifecycle.ps1 -Action Create -Kind fix -Name <slug> -Base
+   <ref-or-sha>`). Only in the Forge source checkout, when the installed path is absent, use the
+   tracked `hooks/lib/worktree-lifecycle.sh` or `.ps1` instead. This creates exactly `fix/<slug>`
+   under `.worktrees/<slug>` and copies missing private/ignored installed harness files without
+   overwriting anything.
+4. Continue from a native Claude Code or Codex session rooted in the new worktree so its normal
+   SessionStart hook creates the protected host receipt. If that receipt is absent, stop and reopen
+   the host in the worktree; never synthesize a receipt or bind an older task/session ID manually.
+5. The helper seeds only `## State` (with `### Now` cleared), `## Open Questions`, and `## Blockers`
+   from the primary checkout and writes the exact baseline to
+   `.forge/local/.state-seed-snapshot.md`. It never seeds workflow, goal, authorization, receipts,
+   evidence, or local memory. For an adopted worktree, run the helper's `seed` action once; if a
+   state or snapshot already exists, reconcile it explicitly rather than guessing.
+6. Before the first fix change, persist the intended base ref and resolved base SHA. Reuse an
    already-recorded base for an adopted worktree; when ancestry is ambiguous, require an explicit
    base. Never recompute from a later-moving default branch.
-6. Replace the active workflow checklist with:
+7. Replace the active workflow checklist with:
 
    ```markdown
    - [ ] Symptom reproduced
@@ -76,6 +85,13 @@ Use `/council` only for a consequential design fork.
 Freeze the plan hash and dispatch a fresh `plan` reviewer with `--engine auto`. Automatic
 same-engine fallback handles an unavailable/failed other engine without stopping. Findings are not
 fallback.
+
+The plan remains at `docs/plans/<bug>.md` inside the candidate. Dispatch the plan review with
+`--artifact git:working-tree` so the immutable snapshot contains the plan, current code, and tests.
+Before capture, run `git add -N -f -- docs/plans/<bug>.md`; this intent-to-add marker makes an
+ignored plan visible to the snapshot without staging its contents or committing it.
+Do not move or copy the plan into `.forge/local` or a hand-built review-context directory, and do
+not use a file-only artifact for a review that depends on repository context.
 
 Before each plan-review iteration: use one broad review, one repair pass, and one closure review.
 Closure checks only named findings and direct regressions; do not start a second broad scan. One
