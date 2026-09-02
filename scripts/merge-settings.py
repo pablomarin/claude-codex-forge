@@ -2317,6 +2317,35 @@ def merge_objects(template_obj, user_obj):
     return added
 
 
+_FORGE_CODEX_HOOK_IDS = {
+    "host-context": "host-context",
+    "session-start": "session-start",
+    "check-bash-safety": "bash-safety",
+    "check-workflow-gates": "workflow-gates",
+    "check-external-mutation-auth": "external-mutation-auth",
+    "post-tool-format": "format",
+    "check-subagent-review": "subagent-review-receipt",
+    "pre-compact-memory": "precompact-memory",
+    "build-evidence": "build-evidence",
+    "check-state-updated": "state-updated",
+}
+
+
+def _forge_codex_hook_id(h):
+    """Return a stable id only for known canonical Forge hook commands.
+
+    Codex's native hook schema rejects Forge-specific metadata fields, so the
+    canonical script basename is the ownership identity for these handlers.
+    """
+    command = h.get("command")
+    if not isinstance(command, str) or ".forge/hooks/lib/" not in command:
+        return None
+    for token, managed_id in _FORGE_CODEX_HOOK_IDS.items():
+        if f"/{token}.sh" in command or command.endswith(f" {token}.sh"):
+            return managed_id
+    return None
+
+
 def _hook_key(h):
     """Identity tuple for a hook (type, command, prompt). Two hooks with the
     same key are considered the same command; the user-side instance is kept
@@ -2324,6 +2353,9 @@ def _hook_key(h):
     managed_id = h.get("forgeManagedId")
     if managed_id:
         return ("forge-managed", managed_id)
+    codex_id = _forge_codex_hook_id(h)
+    if codex_id:
+        return ("forge-managed", codex_id)
     return (h.get("type"), h.get("command"), h.get("prompt"))
 
 
@@ -2373,7 +2405,8 @@ def merge_hook_event(template_event, user_event):
             tk = _hook_key(template_hook)
             if tk in user_by_key:
                 user_hook = user_by_key[tk]
-                if template_hook.get("forgeManagedId"):
+                managed_id = template_hook.get("forgeManagedId") or _forge_codex_hook_id(template_hook)
+                if managed_id:
                     # The stable managed id proves ownership of the fields Forge
                     # emits. Refresh those fields while retaining unknown user
                     # annotations on the same object.
@@ -2382,7 +2415,7 @@ def merge_hook_event(template_event, user_event):
                     new_hooks.append(refreshed)
                     if refreshed != user_hook:
                         changes.append(
-                            f"refreshed managed hook {template_hook['forgeManagedId']} "
+                            f"refreshed managed hook {managed_id} "
                             f"in matcher={matcher!r}"
                         )
                 else:
@@ -2424,6 +2457,30 @@ def merge_hook_event(template_event, user_event):
 def merge_settings(template, user):
     """Merge settings.json: hooks, permissions, enabledPlugins."""
     changes = []
+
+    # Forge v6 initially emitted a non-native Codex hook shape. Retire only
+    # the entries carrying Forge's own stable ids, then install the native
+    # PascalCase matcher-block schema. Unknown user entries remain untouched.
+    if template.get("description") == "Forge v6 project hooks":
+        if user.get("forgeManagedVersion") == 6:
+            del user["forgeManagedVersion"]
+            changes.append("  Removed obsolete Forge Codex schema marker")
+        old_events = {
+            "session_start", "pre_tool_use", "post_tool_use",
+            "subagent_stop", "pre_compact", "stop",
+        }
+        user_hooks = user.setdefault("hooks", {})
+        for event_name in old_events:
+            entries = user_hooks.get(event_name)
+            if not isinstance(entries, list):
+                continue
+            retained = [entry for entry in entries if not isinstance(entry, dict) or not entry.get("forgeManagedId")]
+            if len(retained) != len(entries):
+                if retained:
+                    user_hooks[event_name] = retained
+                else:
+                    del user_hooks[event_name]
+                changes.append(f"  Removed obsolete Forge Codex hook event: {event_name}")
 
     # Merge enabledPlugins (add new plugins)
     if "enabledPlugins" in template:

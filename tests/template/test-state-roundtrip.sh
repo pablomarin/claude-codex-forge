@@ -59,12 +59,16 @@ mkdir -p "$MEM/.forge/hooks" "$MEM/.forge/local/memory" "$MEM/.forge/memory"
 cp "$REPO_ROOT/hooks/pre-compact-memory.sh" "$MEM/.forge/hooks/pre-compact-memory.sh"
 printf '%s\n' 'local-only-learning' > "$MEM/.forge/local/memory/session.md"
 printf '%s\n' 'durable-team-learning' > "$MEM/.forge/memory/project.md"
-printf '{"trigger":"manual","cwd":"%s"}' "$MEM" \
+printf '{"trigger":"manual","host":"codex","cwd":"%s"}' "$MEM" \
     | (cd "$MEM" && CLAUDE_PROJECT_DIR="$MEM" bash .forge/hooks/pre-compact-memory.sh) \
-    > "$MEM/precompact.out" 2>&1
-assert_contains "$MEM/precompact.out" '.forge/local/memory' \
-    "pre-compact reminder owns only volatile local memory"
-assert_not_contains "$MEM/precompact.out" 'auto memory' \
+    > "$MEM/precompact.stdout" 2> "$MEM/precompact.stderr"
+assert_contains "$MEM/precompact.stdout" '{}' \
+    "Codex PreCompact emits only the hook allow envelope"
+assert_not_contains "$MEM/precompact.stdout" '.forge/local/memory' \
+    "PreCompact does not pretend its diagnostic is model context"
+assert_contains "$MEM/precompact.stderr" '.forge/local/memory' \
+    "pre-compact diagnostic owns only volatile local memory"
+assert_not_contains "$MEM/precompact.stderr" 'auto memory' \
     "pre-compact never redirects Forge continuity into private host memory"
 assert_contains "$REPO_ROOT/rules/memory.md" '.forge/memory/' \
     "durable project memory is documented as an ordinary reviewed change"
@@ -84,6 +88,9 @@ printf '%s\n' 'claude-local' > "$MW_MAIN/.forge/local/memory/session.md"
 printf '%s\n' 'codex-local' > "$MW_PEER/.forge/local/memory/session.md"
 cat > "$MW_MAIN/.forge/local/state.md" <<'EOF'
 <!-- forge:state-schema v6 -->
+## Identity
+| Field | Value |
+| Worktree root | fixture-main |
 ## Workflow
 | Field | Value |
 | Command | /new-feature local-isolation |
@@ -94,9 +101,27 @@ cat > "$MW_MAIN/.forge/local/state.md" <<'EOF'
 - [x] Simplified
 - [x] Verified (tests/lint/types)
 - [x] E2E verified — N/A: isolation fixture
+## State
+### Done (recent 2-3 only)
+- fixture
+### Now
+- fixture
+### Next
+- fixture
+### Deferred
+- fixture
+## Open Questions
+- none
+## Blockers
+- none
+## Update Rules
+fixture
 EOF
 cat > "$MW_PEER/.forge/local/state.md" <<'EOF'
 <!-- forge:state-schema v6 -->
+## Identity
+| Field | Value |
+| Worktree root | fixture-peer |
 ## Workflow
 | Field | Value |
 | Command | /new-feature local-isolation |
@@ -107,6 +132,21 @@ cat > "$MW_PEER/.forge/local/state.md" <<'EOF'
 - [x] Simplified
 - [x] Verified (tests/lint/types)
 - [x] E2E verified — N/A: isolation fixture
+## State
+### Done (recent 2-3 only)
+- fixture
+### Now
+- fixture
+### Next
+- fixture
+### Deferred
+- fixture
+## Open Questions
+- none
+## Blockers
+- none
+## Update Rules
+fixture
 EOF
 printf '{"cwd":"%s","tool_input":{"command":"git push"}}' "$MW_MAIN" \
     | (cd "$MW_MAIN" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$MW_MAIN/gate.out" 2>&1
@@ -185,18 +225,18 @@ if [ "$WORKFLOW_STAGE" = "complete" ]; then
             "$workflow persists the primary narrative baseline"
         assert_contains "$surface" '### Now` cleared' \
             "$workflow clears volatile Now content when seeding"
-        assert_contains "$surface" 'Never seed workflow, goal, authorization, or receipt' \
+        assert_contains "$surface" 'never seeds workflow, goal, authorization, receipts' \
             "$workflow excludes gate and authority sections"
-        assert_contains "$surface" 'explicit reconciliation baseline' \
+        assert_contains "$surface" 'reconcile it explicitly' \
             "$workflow refuses to guess a missing adopted-worktree baseline"
     done
-    assert_contains "$FBR" '.forge/local/.state-seed-snapshot.md' \
-        "finish-branch reads the persisted seed baseline"
+    assert_contains "$FBR" 'worktree-lifecycle.sh fold' \
+        "finish-branch invokes the executable guarded fold"
     assert_contains "$FBR" 'FOLD_SAFE_STOP' \
         "finish-branch stops on a missing or malformed baseline"
     assert_contains "$FBR" 'FOLD_DIVERGED' \
         "finish-branch stops when primary narrative changed"
-    assert_contains "$FBR" 'Do not touch `## Workflow`, `## /goal session`, `## PR authorization`' \
+    assert_contains "$FBR" 'never touches' \
         "finish-branch preserves gate and authority sections"
     report "test-state-roundtrip.sh"
     exit 0

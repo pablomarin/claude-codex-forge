@@ -85,6 +85,22 @@ for tuple in 'claude codex' 'codex claude'; do
     assert_receipt_value "$S" actual_engine "$actual"
 done
 
+start_test "single-file artifacts reach the isolated reviewer without Git metadata"
+S=$(scratch_dir dispatch-file-artifact); make_repo "$S"; printf 'review one file\n' > "$S/prompt.txt"
+printf 'bounded plan artifact\n' > "$S/plan.md"; capture_context "$S" claude sid
+base=$(git -C "$S" rev-parse HEAD)
+if launch_dispatch "$S" claude run --engine codex --fallback-policy none --role plan --profile review \
+    --artifact file:plan.md --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base \
+    --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/file-result.txt" --timeout-seconds 2 \
+    >"$S/file.stdout" 2>"$S/file.stderr"; then
+  file_rc=0
+else
+  file_rc=$?
+fi
+assert_equals "$file_rc" "0" "file artifact review reaches the engine"
+assert_receipt_value "$S" artifact_kind file
+assert_receipt_value "$S" semantic_verdict CLEAN
+
 start_test "materialized native hook context and fixed launcher invoke the installed dispatcher"
 S=$(scratch_dir "dispatch installed path"); make_repo "$S"
 bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" --target "$S" --scope project --platform unix > "$S/install.log" 2>&1
@@ -190,6 +206,9 @@ set -e
 assert_equals "$resume_rc" "0" "Claude council exact-id resume succeeds"
 assert_contains "$claude_log" "--session-id $session" "first council turn binds exact Claude session id"
 assert_contains "$claude_log" "--resume $session" "critique turn resumes the exact Claude session id"
+assert_contains "$claude_log" "--tools Read,Grep,Glob" "Claude review can inspect the immutable candidate without write tools"
+assert_not_contains "$claude_log" "--tools Read,Grep,Glob,Bash" "Claude review has no mutable shell access"
+assert_not_contains "$claude_log" "--allowedTools" "Claude review does not grant shell exceptions"
 assert_contains "$claude_log" "home=$HOME user=${USER:-} logname=${LOGNAME:-${USER:-}}" "Claude child preserves the authenticated operator identity"
 
 S=$(scratch_dir dispatch-codex-resume); make_repo "$S"; council_prompt="$S/.forge/local/reviews/council-prompt.txt"; question_hash=$(printf 'same council question' | shasum -a 256 | awk '{print $1}'); printf 'question_hash=%s\nfirst advisor prompt\n' "$question_hash" > "$council_prompt"; capture_context "$S" claude sid
@@ -296,6 +315,18 @@ assert_contains "$S/fingerprint" "untracked_count=1" "untracked manifest is boun
 snapshot=$(awk -F= '$1=="snapshot_path" {sub(/^[^=]*=/,""); print}' "$S/fingerprint")
 assert_contains "$snapshot/app.txt" "feature commit" "snapshot includes earlier committed feature work"
 assert_contains "$snapshot/app.txt" "working" "snapshot includes exact working delta"
+if git -C "$snapshot" show-ref --verify --quiet refs/heads/candidate; then
+    pass "snapshot exposes the immutable candidate ref named by the reviewer prompt"
+else
+    fail "snapshot is missing the immutable candidate ref named by the reviewer prompt"
+fi
+candidate_diff=$(git -C "$snapshot" diff --name-only "$base..candidate" 2>/dev/null || true)
+candidate_diff_file="$S/candidate-diff.txt"; printf '%s\n' "$candidate_diff" > "$candidate_diff_file"
+assert_contains "$candidate_diff_file" "app.txt" \
+    "reviewer base..candidate range includes tracked candidate changes"
+assert_contains "$candidate_diff_file" "new file.txt" \
+    "reviewer base..candidate range includes untracked candidate files"
+if [ -z "$(git -C "$snapshot" status --porcelain)" ]; then pass "reviewer candidate snapshot is clean"; else fail "reviewer candidate snapshot is unexpectedly dirty"; fi
 
 start_test "candidate base and worktree binding come from canonical state, not caller choice"
 S=$(scratch_dir dispatch-state-base); make_repo "$S"; workflow_base=$(git -C "$S" rev-parse HEAD)
@@ -336,6 +367,31 @@ assert_equals "$rc" "2" "untracked symlink rejected"
 unlink "$S/escape-link"; mkfifo "$S/pipe"
 set +e; (cd "$S" && bash "$FINGERPRINT" capture --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref x --output "$S/fp") >/dev/null 2>&1; rc=$?; set -e
 assert_equals "$rc" "2" "untracked FIFO rejected"
+
+start_test "reviewer cannot rewrite the immutable candidate ref and certify a different range"
+S=$(scratch_dir dispatch-candidate-ref-mutation); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; printf 'candidate change\n' >> "$S/app.txt"; capture_context "$S" codex sid
+set +e
+FAKE_CLAUDE_BEHAVIOR=mutate-candidate-ref run_dispatch "$S" codex sid claude general none >/dev/null 2>&1
+rc=$?
+set -e
+assert_equals "$rc" "2" "candidate ref mutation blocks certification"
+assert_receipt_value "$S" semantic_verdict BLOCKED
+assert_receipt_value "$S" blocked_class artifact
+
+start_test "ignored generated environments do not enter or block the review candidate"
+S=$(scratch_dir dispatch-ignored-environment); make_repo "$S"; base=$(git -C "$S" rev-parse HEAD)
+printf '.venv/\ndocs/plans/\n' > "$S/.gitignore"; git -C "$S" add .gitignore; git -C "$S" commit -qm ignore-environment
+base=$(git -C "$S" rev-parse HEAD); write_state "$S" "$base" refs/heads/ignored-base
+mkdir -p "$S/.venv/bin"; ln -s /usr/bin/python3 "$S/.venv/bin/python3"
+mkdir -p "$S/docs/plans"; printf 'canonical plan\n' > "$S/docs/plans/plan.md"; git -C "$S" add -N -f -- docs/plans/plan.md
+if (cd "$S" && bash "$FINGERPRINT" capture --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/ignored-base --output "$S/fp") >/dev/null 2>&1; then
+    pass "ignored environment symlinks do not block candidate capture"
+else
+    fail "ignored environment symlink blocked candidate capture"
+fi
+ignored_snapshot=$(awk -F= '$1=="snapshot_path" {sub(/^[^=]*=/,""); print}' "$S/fp")
+if [ ! -e "$ignored_snapshot/.venv" ]; then pass "ignored environment is absent from candidate"; else fail "ignored environment leaked into candidate"; fi
+assert_contains "$ignored_snapshot/docs/plans/plan.md" 'canonical plan' "intent-to-add makes an ignored canonical plan reviewable"
 
 start_test "Claude review is isolated from the real cwd and real Forge-local writes"
 S=$(scratch_dir dispatch-claude-isolation); make_repo "$S"; mkdir -p "$S/.claude"; printf 'AMBIENT_CANARY\n' > "$S/.claude/CLAUDE.md"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" codex sid
@@ -631,8 +687,12 @@ assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "InvestigationMode = '
   "PowerShell investigation records the full-agent worktree mode"
 assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "if (\$Role -eq 'investigation')" \
   "PowerShell dispatcher has a distinct unrestricted investigation branch"
-assert_contains "$REPO_ROOT/scripts/materialize-adapters.ps1" '".forge/hooks/lib/host-context.ps1", "-Mode", "hook", "-Host", "codex"' \
-  "PowerShell materializer renders Codex host context as a direct invocation"
+assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "'Read,Grep,Glob'" \
+  "PowerShell Claude review can inspect the immutable Git candidate without write tools"
+assert_not_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "'--allowedTools', 'Bash(git *)'" \
+  "PowerShell Claude review grants no mutable shell exception"
+assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" "host-context.ps1') -Mode hook -Host codex" \
+  "Codex hook template renders host context as a direct invocation"
 
 start_test "child review cannot mutate canonical state or authorization records"
 S=$(scratch_dir dispatch-state); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; printf 'auth\n' > "$S/.forge/local/authorization-record"; capture_context "$S" claude sid

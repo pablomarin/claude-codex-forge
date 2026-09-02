@@ -350,7 +350,14 @@ function Invoke-Engine([string]$Selected) {
         if ($LASTEXITCODE -ne 0 -or (Get-Value $attemptFingerprint 'artifact_hash') -cne $ArtifactHash -or (Get-Value $attemptFingerprint 'worktree_identity') -cne $worktreeIdentity) { return @{ Rc = 2; Class = 'artifact'; Reason = 'candidate-capture-failed'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
         $snapshot = Get-Value $attemptFingerprint 'snapshot_path'
     }
+    $artifactKind = Get-Value $FingerprintReceipt 'artifact_kind'
     $snapshotBefore = Get-SnapshotState $snapshot
+    $snapshotRef = ''; $snapshotHead = ''
+    if ($artifactKind -ne 'file') {
+        $snapshotRef = (& git -C $snapshot rev-parse refs/heads/candidate 2>$null) -join ''
+        $snapshotHead = (& git -C $snapshot rev-parse HEAD 2>$null) -join ''
+        if (-not $snapshotRef -or -not $snapshotHead) { return @{ Rc = 2; Class = 'artifact'; Reason = 'candidate-ref-missing'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
+    }
     if ($Conversation -eq 'resume' -and (Get-SnapshotStateHash $snapshotBefore) -cne $SessionSnapshotHash) { return @{ Rc = 2; Class = 'artifact'; Reason = 'resume-snapshot-mismatch'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
     $primary = Join-Path $scratch 'primary'
     $canaryBody = "forge_canary_hash=$canaryHash`nforge_config_hash=$configHash`nforge_qualification_revision=$QualificationRevision`n"
@@ -383,7 +390,21 @@ function Invoke-Engine([string]$Selected) {
         $runnerBody = ($runnerLines -join "`n") + "`n"
         [IO.File]::WriteAllText($script:ReproRunner, $runnerBody, $Utf8)
     }
-    $prompt = "You are a fresh independent $Selected reviewer. Your cwd is a clean primary. First read .forge-dispatch-canary and copy its exact observation lines into the result. Logical project root: $snapshot. Review immutable scope $WorkflowBaseSha..candidate. Ambient instructions, hooks, plugins, skills, and write-capable MCP are absent. Return only the Forge line envelope.`n" + [IO.File]::ReadAllText($PromptFile)
+    if ($artifactKind -eq 'file') {
+        $scopeInstruction = "The isolated review root is $snapshot and contains only the requested file artifact. Do not assume repository, PRD, or Git access; if the requested review needs absent context, return BLOCKED with blocked_class=artifact."
+    }
+    else {
+        $reviewPatch = Join-Path $primary '.forge-review.patch'; $reviewPaths = Join-Path $primary '.forge-review-paths'
+        $patchLines = @(& git -C $snapshot diff --no-ext-diff --binary "$WorkflowBaseSha..candidate")
+        if ($LASTEXITCODE -ne 0) { return @{ Rc = 2; Class = 'artifact'; Reason = 'candidate-diff-unavailable'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
+        $pathLines = @(& git -C $snapshot diff --no-ext-diff --name-only "$WorkflowBaseSha..candidate")
+        if ($LASTEXITCODE -ne 0) { return @{ Rc = 2; Class = 'artifact'; Reason = 'candidate-diff-unavailable'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
+        [IO.File]::WriteAllText($reviewPatch, (($patchLines -join "`n") + "`n"), $Utf8)
+        [IO.File]::WriteAllText($reviewPaths, (($pathLines -join "`n") + "`n"), $Utf8)
+        $scopeInstruction = "Logical project root: $snapshot. The dispatcher materialized the exact immutable $WorkflowBaseSha..candidate diff at $reviewPatch and its changed-path list at $reviewPaths; read those files and the candidate root. Shell access is intentionally absent."
+    }
+    $envelopeInstruction = "Return ONLY newline-delimited fields with no Markdown or surrounding prose. Required envelope:`nschema_version=1`nverdict=CLEAN|FINDINGS|BLOCKED`nmax_severity=NONE|P0|P1|P2|P3`nblocked_class=none|engine|capability|artifact|authorization|invariant`nforge_canary_hash=<observed>`nforge_config_hash=<observed>`nforge_qualification_revision=<observed>`nFor FINDINGS add one line per finding: finding=<sequence>|P0|P1|P2|P3|open|<concise evidence>. BLOCKED must contain no finding lines.`n"
+    $prompt = "You are a fresh independent $Selected reviewer. Your cwd is a clean primary. First read .forge-dispatch-canary and copy its exact observation lines into the result. $scopeInstruction Ambient instructions, hooks, plugins, skills, and write-capable MCP are absent.`n" + [IO.File]::ReadAllText($PromptFile) + "`n" + $envelopeInstruction
     if ($script:ReproMode) { $prompt = "This is the dispatcher-owned $($script:ReproCheckKind) reproduction check. Under the already-qualified no-network workspace boundary, execute powershell.exe -NoProfile -ExecutionPolicy Bypass -File $($script:ReproRunner) exactly once. Do not edit it or synthesize its stdout/exit files.`n" + $prompt }
     $bound = Join-Path $scratch 'bound.out'
     $environment = @{ FORGE_DISPATCH_MODE = $(if ($Profile -eq 'investigate') { 'investigate' } else { 'review' }); FORGE_CANDIDATE_ROOT = $snapshot; FORGE_REPRO_RUNNER = $(if ($script:ReproMode) { $script:ReproRunner } else { '' }); FORGE_DISPATCH_SESSION_ID = $(if ($Conversation -eq 'new') { $SessionProvisionalId } else { $SessionId }); FORGE_DISPATCH_SEAT_HASH = $seatHash; FORGE_DISPATCH_CONFIG_HASH = $configHash; FORGE_DISPATCH_CANARY_HASH = $canaryHash; FORGE_DISPATCH_QUALIFICATION_REVISION = $QualificationRevision }
@@ -400,7 +421,8 @@ function Invoke-Engine([string]$Selected) {
         $environment.USERNAME = $(if ($env:USERNAME) { $env:USERNAME } else { [Environment]::UserName })
         if ($env:USER) { $environment.USER = $env:USER }
         if ($env:LOGNAME) { $environment.LOGNAME = $env:LOGNAME }
-        $arguments = @('-p', '--safe-mode', '--strict-mcp-config', '--mcp-config', (Join-Path $scratch 'mcp.json'), '--settings', (Join-Path $scratch 'claude-settings.json'), '--setting-sources', '', '--tools', $tools, '--permission-mode', 'dontAsk', '--add-dir', $snapshot, '--model', $model, '--effort', $effort, '--output-format', 'json')
+        $arguments = @('-p', '--safe-mode', '--strict-mcp-config', '--mcp-config', (Join-Path $scratch 'mcp.json'), '--settings', (Join-Path $scratch 'claude-settings.json'), '--setting-sources', '', '--tools', $tools)
+        $arguments += @('--permission-mode', 'dontAsk', '--add-dir', $snapshot, '--model', $model, '--effort', $effort, '--output-format', 'json')
         if ($Conversation -eq 'ephemeral') { $arguments += '--no-session-persistence' }
         elseif ($Conversation -eq 'new') { $arguments += @('--session-id', $SessionProvisionalId) }
         else { $arguments += @('--resume', $SessionId) }
@@ -465,6 +487,15 @@ function Invoke-Engine([string]$Selected) {
     }
     $envelope = Read-Envelope $bound
     if (-not $envelope.Valid) { return @{ Rc = 1; Class = 'engine'; Reason = $envelope.Reason; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0 } }
+    $snapshotMutated = (Get-SnapshotStateHash (Get-SnapshotState $snapshot)) -cne (Get-SnapshotStateHash $snapshotBefore)
+    if ($artifactKind -ne 'file') {
+        $snapshotMutated = $snapshotMutated -or
+            ((& git -C $snapshot rev-parse refs/heads/candidate 2>$null) -join '') -cne $snapshotRef -or
+            ((& git -C $snapshot rev-parse HEAD 2>$null) -join '') -cne $snapshotHead
+    }
+    if ($snapshotMutated) {
+        return @{ Rc = 2; Class = 'artifact'; Reason = 'candidate-snapshot-mutated'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = $process.Exit; Session = 'none' }
+    }
     $boundLines = [IO.File]::ReadAllLines($bound)
     foreach ($observation in @(@('forge_canary_hash', $canaryHash), @('forge_config_hash', $configHash), @('forge_qualification_revision', $QualificationRevision))) {
         $prefix = "$($observation[0])="; $values = @($boundLines | Where-Object { $_.StartsWith($prefix, [StringComparison]::Ordinal) } | ForEach-Object { $_.Substring($prefix.Length) })

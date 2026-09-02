@@ -572,6 +572,15 @@ else
     pass "python3 not available — Stop hook ordering test skipped (not a failure)"
 fi
 
+start_test "Claude permission templates use the effective Edit deny vocabulary"
+for settings_file in settings/settings.template.json settings/settings-windows.template.json settings/global-settings.template.json; do
+    if jq -e '.permissions.deny[]? | select(startswith("Write(~/.forge/"))' "$REPO_ROOT/$settings_file" >/dev/null; then
+        fail "$settings_file contains an ignored Write(~/.forge/...) deny rule"
+    else
+        pass "$settings_file protects Forge paths through effective Edit rules"
+    fi
+done
+
 # ---------------------------------------------------------------------------
 # Contract 3c: cache-delete permissions (ask-tier-cache-deletes, v5.53)
 #
@@ -1162,14 +1171,14 @@ fi
 FBR="$REPO_ROOT/commands/finish-branch.md"
 if [ "$HOST_NEUTRAL_WORKFLOWS" = "1" ]; then
 start_test "host-neutral finish-branch preserves guarded narrative fold before cleanup"
-assert_contains "$FBR" ".state-seed-snapshot.md"        "finish-branch reads the seed snapshot"
+assert_contains "$FBR" "worktree-lifecycle.sh fold"     "finish-branch invokes the executable guarded fold"
 assert_contains "$FBR" "## State"                       "finish-branch fold names the State narrative section"
 assert_contains "$FBR" "## Open Questions"              "finish-branch fold names Open Questions"
 assert_contains "$FBR" "## Blockers"                    "finish-branch fold names Blockers"
 assert_contains "$FBR" "FOLD_SAFE_STOP"                 "finish-branch stops on a missing or malformed seed"
 assert_contains "$FBR" "FOLD_DIVERGED"                  "finish-branch stops on primary-state divergence"
-assert_contains "$FBR" "stop cleanup"                   "finish-branch does not remove the worktree after a fold failure"
-assert_contains "$FBR" "Do not touch"                   "finish-branch preserves workflow and gate sections"
+assert_contains "$FBR" "every state file"               "finish-branch preserves inputs after a fold failure"
+assert_contains "$FBR" "never touches"                  "finish-branch preserves workflow and gate sections"
 assert_contains "$FBR" "## /goal session"               "finish-branch preserves goal authority"
 assert_contains "$FBR" ".forge/memory/"                 "finish-branch keeps durable memory separate"
 fold_line=$(grep -n '^## 3\. Preserve Continuity' "$FBR" | head -1 | cut -d: -f1)
@@ -1835,6 +1844,11 @@ if command -v git > /dev/null 2>&1; then
 
         cat > .forge/local/state.md <<EOF
 <!-- forge:state-schema v6 -->
+## Identity
+
+| Field | Value |
+| Worktree root | fixture |
+
 ## /goal session
 
 | Field            | Value |
@@ -1859,6 +1873,26 @@ if command -v git > /dev/null 2>&1; then
 ### Checklist
 
 - [x] E2E verified via verify-e2e agent (Phase 5.4)
+
+## State
+
+### Done (recent 2-3 only)
+- fixture
+### Now
+- fixture
+### Next
+- fixture
+### Deferred
+- fixture
+
+## Open Questions
+- none
+
+## Blockers
+- none
+
+## Update Rules
+fixture
 EOF
 
         INPUT='{"tool_name":"Bash","tool_input":{"command":"gh pr create --title test"}}'
@@ -2004,11 +2038,28 @@ for surface in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
             || { fail "$surface missing plan-stage spec-loss token: $token"; ok=0; }
     done
 done
+
 # Regression guard: the strict plan-review EXIT must remain no-P0/P1/P2 in the
 # rules (this change sharpens classification, it does NOT relax the gate).
 grep -qF -- "no P0/P1/P2 from all available reviewers on the same pass" "$REPO_ROOT/rules/workflow.md" \
     || { fail "rules/workflow.md: plan-review exit criterion was relaxed (must stay no P0/P1/P2)"; ok=0; }
 [ "$ok" = "1" ] && pass "plan-stage spec-loss=P1 rule present in all 3 surfaces; strict exit preserved"
+
+start_test "plan reviews use one immutable repository candidate"
+for workflow in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bug.md"; do
+    assert_contains "$workflow" '--artifact git:working-tree' \
+        "$(basename "$workflow") requires the repository candidate for plan review"
+    assert_contains "$workflow" 'git add -N -f -- docs/plans/' \
+        "$(basename "$workflow") makes an ignored canonical plan visible without staging its contents"
+    assert_contains "$workflow" 'Do not move or copy the plan into `.forge/local`' \
+        "$(basename "$workflow") forbids stale private plan copies"
+    assert_contains "$workflow" 'file-only artifact' \
+        "$(basename "$workflow") rejects incomplete plan-review context"
+    assert_contains "$workflow" 'SessionStart hook creates the protected host receipt' \
+        "$(basename "$workflow") requires native worktree session binding"
+    assert_contains "$workflow" 'never synthesize a receipt or bind an older task/session ID manually' \
+        "$(basename "$workflow") forbids manual host receipt substitution"
+done
 
 # ---------------------------------------------------------------------------
 # Contract: Task 5 host-neutral review replaces direct /codex launch policy.

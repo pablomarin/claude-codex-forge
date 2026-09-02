@@ -49,7 +49,7 @@ function Set-Context([string]$Repository, [string]$EngineHost, [string]$Session)
     try { $contextRc = Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$hostContext,'-Mode','issue-test','-Host',$EngineHost,'-SessionId',$Session); if ($contextRc -ne 0) { throw 'context capture failed' } }
     finally { Pop-Location }
 }
-function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Session, [string]$Requested, [string]$Role = 'general', [string]$Fallback = 'automatic', [string]$Conversation = 'ephemeral', [string]$ExactSession = '', [string]$SessionOutput = '', [string]$PromptText = '', [string]$OutputPath = '') {
+function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Session, [string]$Requested, [string]$Role = 'general', [string]$Fallback = 'automatic', [string]$Conversation = 'ephemeral', [string]$ExactSession = '', [string]$SessionOutput = '', [string]$PromptText = '', [string]$OutputPath = '', [string]$Artifact = 'git:working-tree') {
     if ($Conversation -ne 'resume') { Set-Context $Repository $EngineHost $Session }
     $script:DispatchSequence++; $prompt = Join-Path $Repository '.forge/local/reviews/prompt.txt'
     if ($PromptText) { [IO.File]::WriteAllText($prompt, $PromptText) }
@@ -57,7 +57,7 @@ function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Sess
     $base = (& git -C $Repository rev-parse HEAD)
     if (-not $OutputPath) { $OutputPath = Join-Path $Repository ".forge/local/reviews/result-$($script:DispatchSequence).txt" }
     $timeout = if ($Role -eq 'investigation-repro') { '60' } else { '2' }
-    $arguments = @('-Mode', 'run', '-Engine', $Requested, '-FallbackPolicy', $Fallback, '-Role', $Role, '-Profile', $(if ($Role -like 'investigation*') { 'investigate' } else { 'review' }), '-Artifact', 'git:working-tree', '-WorkflowBaseSha', $base, '-WorkflowBaseRef', 'refs/heads/test-base', '-PromptFile', $prompt, '-Output', $OutputPath, '-Conversation', $Conversation, '-TimeoutSeconds', $timeout)
+    $arguments = @('-Mode', 'run', '-Engine', $Requested, '-FallbackPolicy', $Fallback, '-Role', $Role, '-Profile', $(if ($Role -like 'investigation*') { 'investigate' } else { 'review' }), '-Artifact', $Artifact, '-WorkflowBaseSha', $base, '-WorkflowBaseRef', 'refs/heads/test-base', '-PromptFile', $prompt, '-Output', $OutputPath, '-Conversation', $Conversation, '-TimeoutSeconds', $timeout)
     if ($Role -like 'council-*') { $arguments += @('-SeatId', 'advisor-1') }
     if ($ExactSession) { $arguments += @('-SessionId', $ExactSession) }
     if ($SessionOutput) { $arguments += @('-SessionIdOutput', $SessionOutput) }
@@ -141,6 +141,12 @@ public static class ForgeFakeEngine {
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'auto') 0 'malformed other engine visibly falls back'
     Assert-Equal (Get-ReceiptValue $repo 'fallback') 'true' 'fallback is recorded'
     Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'claude' 'fallback engine is fresh main engine'
+
+    Write-Host 'PowerShell single-file artifact review'
+    $repo = New-Repository 'file artifact'; [IO.File]::WriteAllText((Join-Path $repo 'plan.md'), "bounded plan artifact`n"); $env:FAKE_CODEX_BEHAVIOR = 'clean'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan' 'none' 'ephemeral' '' '' '' '' 'file:plan.md') 0 'file artifact reaches the isolated reviewer without Git metadata'
+    Assert-Equal (Get-ReceiptValue $repo 'artifact_kind') 'file' 'file artifact kind is recorded'
+    Assert-Equal (Get-ReceiptValue $repo 'semantic_verdict') 'CLEAN' 'file artifact can certify clean'
 
     Write-Host 'PowerShell exact empty Claude argv preservation'
     $repo = New-Repository 'empty argv'; $argvLog = Join-Path $repo '.forge/local/reviews/claude-argv.log'; $env:FAKE_CLAUDE_ARGV_LOG = $argvLog; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
@@ -249,12 +255,43 @@ public static class ForgeFakeEngine {
     Remove-Item Env:FORGE_CODEX_AUTH_FILE, Env:FAKE_CODEX_LOG -ErrorAction SilentlyContinue
 
     Write-Host 'PowerShell path and reparse safety'
+    $repo = New-Repository 'candidate ref'; $base = (& git -C $repo rev-parse HEAD)
+    Add-Content -LiteralPath (Join-Path $repo 'app.txt') -Value 'candidate change'
+    [IO.File]::WriteAllText((Join-Path $repo 'new.txt'), "new`n")
+    $candidateReceipt = Join-Path $repo '.forge/local/fp'
+    Push-Location $repo
+    try { $candidateRc = Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$fingerprint,'-Mode','capture','-Artifact','git:working-tree','-WorkflowBaseSha',$base,'-WorkflowBaseRef','refs/heads/test-base','-Output',$candidateReceipt) }
+    finally { Pop-Location }
+    Assert-Equal $candidateRc 0 'PowerShell candidate capture succeeds'
+    $snapshot = ((Get-Content -LiteralPath $candidateReceipt | Where-Object { $_ -like 'snapshot_path=*' } | Select-Object -First 1) -replace '^snapshot_path=', '')
+    & git -C $snapshot show-ref --verify --quiet refs/heads/candidate
+    Assert-Equal $LASTEXITCODE 0 'PowerShell candidate exposes the immutable candidate ref'
+    $range = @(& git -C $snapshot diff --name-only "$base..candidate")
+    Assert-True ($range -contains 'app.txt' -and $range -contains 'new.txt') 'PowerShell base-to-candidate range contains working changes'
+    Assert-Equal (@(& git -C $snapshot status --porcelain).Count) 0 'PowerShell candidate snapshot is clean'
+
     $repo = New-Repository 'junction rejection'; $outside = Join-Path $temporary 'outside'; New-Item -ItemType Directory -Path $outside | Out-Null
     & cmd.exe /d /c mklink /J "$(Join-Path $repo 'junction')" "$outside" | Out-Null
     $base = (& git -C $repo rev-parse HEAD); Set-State $repo $base 'x'; Push-Location $repo
     try { $junctionRc = Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$fingerprint,'-Mode','capture','-Artifact','git:working-tree','-WorkflowBaseSha',$base,'-WorkflowBaseRef','x','-Output',(Join-Path $repo '.forge/local/fp')) }
     finally { Pop-Location }
     if ($junctionRc -ne 0) { Pass 'untracked junction or reparse point is rejected' } else { Fail 'untracked junction was accepted' }
+
+    $repo = New-Repository 'ignored environment'; [IO.File]::WriteAllText((Join-Path $repo '.gitignore'), ".venv/`ndocs/plans/`n")
+    & git -C $repo add .gitignore; & git -C $repo commit -qm ignore-environment
+    $base = (& git -C $repo rev-parse HEAD); Set-State $repo $base 'refs/heads/ignored-base'
+    $outside = Join-Path $temporary 'ignored environment target'; New-Item -ItemType Directory -Path $outside | Out-Null
+    & cmd.exe /d /c mklink /J "$(Join-Path $repo '.venv')" "$outside" | Out-Null
+    $plan = Join-Path $repo 'docs/plans/plan.md'; New-Item -ItemType Directory -Path (Split-Path $plan -Parent) -Force | Out-Null; [IO.File]::WriteAllText($plan, "canonical plan`n")
+    & git -C $repo add -N -f -- docs/plans/plan.md
+    $ignoredReceipt = Join-Path $repo '.forge/local/fp'
+    Push-Location $repo
+    try { $ignoredRc = Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$fingerprint,'-Mode','capture','-Artifact','git:working-tree','-WorkflowBaseSha',$base,'-WorkflowBaseRef','refs/heads/ignored-base','-Output',$ignoredReceipt) }
+    finally { Pop-Location }
+    Assert-Equal $ignoredRc 0 'ignored generated-environment junction does not block capture'
+    $ignoredSnapshot = ((Get-Content -LiteralPath $ignoredReceipt | Where-Object { $_ -like 'snapshot_path=*' } | Select-Object -First 1) -replace '^snapshot_path=', '')
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $ignoredSnapshot '.venv'))) 'ignored generated environment is absent from candidate'
+    Assert-Contains (Join-Path $ignoredSnapshot 'docs/plans/plan.md') 'canonical plan' 'intent-to-add makes an ignored canonical plan reviewable'
     foreach ($reserved in @('sessions','session-stores')) {
         $repo = New-Repository "reserved $reserved"; $outside = Join-Path $repo "outside-$reserved"; New-Item -ItemType Directory -Path $outside | Out-Null
         & cmd.exe /d /c mklink /J "$(Join-Path $repo ".forge\local\reviews\$reserved")" "$outside" | Out-Null
@@ -267,10 +304,13 @@ public static class ForgeFakeEngine {
     $installed = Join-Path $temporary 'materialized adapters'; New-Item -ItemType Directory -Path $installed | Out-Null
     Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $root 'scripts/materialize-adapters.ps1'),'-RepoRoot',$root,'-Target',$installed,'-Scope','project','-Platform','windows')) 0 'PowerShell adapters materialize'
     $hooks = Get-Content -LiteralPath (Join-Path $installed '.codex/hooks.json') -Raw | ConvertFrom-Json
-    $hostEntry = @($hooks.hooks.session_start | Where-Object { $_.forgeManagedId -eq 'host-context' })[0]
-    Assert-Equal (($hostEntry.command -join '|')) 'powershell.exe|-NoProfile|-ExecutionPolicy|Bypass|-File|.forge/hooks/lib/host-context.ps1|-Mode|hook|-Host|codex' 'Codex host-context invokes the Windows hook directly'
-    $sessionEntry = @($hooks.hooks.session_start | Where-Object { $_.forgeManagedId -eq 'session-start' })[0]
-    Assert-Equal $sessionEntry.command[5] '.forge/hooks/lib/codex-worktree-dispatch.ps1' 'other Codex hooks retain worktree routing'
+    $sessionHandlers = @($hooks.hooks.SessionStart | ForEach-Object { @($_.hooks) })
+    $hostEntry = @($sessionHandlers | Where-Object { [string]$_.command -like '*/host-context.sh*' })[0]
+    Assert-True ([string]$hostEntry.commandWindows -like '*host-context.ps1*' -and [string]$hostEntry.commandWindows -like '*-Host codex*') 'Codex host-context invokes the Windows hook directly'
+    $sessionEntry = @($sessionHandlers | Where-Object {
+        [string]$_.command -like '*codex-worktree-dispatch.sh*session-start.sh*'
+    })[0]
+    Assert-True ([string]$sessionEntry.commandWindows -like '*codex-worktree-dispatch.ps1*' -and [string]$sessionEntry.commandWindows -like '*session-start.ps1*') 'other Codex hooks retain worktree routing'
 }
 finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue

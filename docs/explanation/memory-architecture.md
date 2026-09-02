@@ -50,5 +50,9 @@ overwrites project-owned durable memory.
 - Debugging insights: reproducible causes and constraints
 
 Do not save secrets, speculative conclusions, candidate receipts, or goal authorization as memory.
-Pre-compact hooks remind either host to save useful drafts under `.forge/local/memory/`; promotion to
-`.forge/memory/` remains deliberate.
+PreCompact ensures the local memory directory exists and writes an operator diagnostic, but neither
+host treats that successful-hook stderr as model context. If canonical state remains unchanged
+across normal active-workflow stops, the Stop checkpoint gives the model one visible continuation
+turn to update state/memory; a changed checkpoint stops normally. SessionStart after compaction
+points it back to canonical state and concise `MEMORY.md` indexes. Promotion to `.forge/memory/`
+remains deliberate.

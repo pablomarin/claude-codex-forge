@@ -47,6 +47,55 @@ _make_state_md() {
 HOOK_SH="$REPO_ROOT/tests/template/test-workflow-gate-v6-wrapper.sh"
 HOOK_PS="$REPO_ROOT/tests/template/test-workflow-gate-v6-wrapper.ps1"
 
+# ===========================================================================
+# Native Codex config schema: the real CLI must accept generated hooks/agents.
+# ===========================================================================
+start_test "Codex hook and custom-agent templates use native supported schemas"
+if python3 - "$REPO_ROOT" <<'PY'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+payload = json.loads((root / "settings/codex-hooks.template.json").read_text())
+assert set(payload) <= {"description", "hooks"}, set(payload)
+allowed_events = {
+    "SessionStart", "PreToolUse", "PostToolUse", "SubagentStop",
+    "PreCompact", "Stop",
+}
+assert set(payload["hooks"]) <= allowed_events, set(payload["hooks"])
+for event, groups in payload["hooks"].items():
+    assert isinstance(groups, list) and groups, event
+    for group in groups:
+        assert set(group) <= {"matcher", "hooks"}, (event, group)
+        assert isinstance(group.get("hooks"), list) and group["hooks"], (event, group)
+        for handler in group["hooks"]:
+            assert set(handler) <= {
+                "type", "command", "commandWindows", "timeout",
+                "statusMessage", "async",
+            }, (event, handler)
+            assert handler.get("type") == "command", (event, handler)
+            assert isinstance(handler.get("command"), str), (event, handler)
+            if "commandWindows" in handler:
+                assert isinstance(handler["commandWindows"], str), (event, handler)
+
+allowed_agent_keys = {"name", "description", "developer_instructions"}
+for relative in (
+    "templates/adapters/codex-agent.template.toml",
+    "templates/adapters/codex-reviewer.template.toml",
+):
+    keys = {
+        line.split("=", 1)[0].strip().strip('"')
+        for line in (root / relative).read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#") and "=" in line
+    }
+    assert keys <= allowed_agent_keys, (relative, keys)
+    assert allowed_agent_keys <= keys, (relative, keys)
+PY
+then pass "Codex hook and custom-agent templates use native supported schemas"
+else fail "Codex hook and custom-agent templates use native supported schemas"
+fi
+
 # ---------------------------------------------------------------------------
 # Fixture helper: write a CONTINUITY.md with a Workflow table + checklist in
 # a scratch dir, run the hook there with a synthetic tool_input JSON, capture
@@ -683,10 +732,10 @@ fi
 assert_equals "$rc_hc" "0" "hook exits 0 (does NOT gate even with CONTINUITY.md present)"
 
 # ===========================================================================
-# Stop-hook advisory test: uncommitted changes + state.md unchanged should
-# emit advisory reminder but exit 0 (post PR #2 — no CONTINUITY-style block).
+# Stop-hook checkpoint test: an active workflow must visibly continue once so
+# the model can reread/update canonical state before the response ends.
 # ===========================================================================
-start_test "Stop hook is advisory-only (state.md unchanged → exit 0)"
+start_test "Stop hook gives active workflow one model-visible checkpoint turn"
 
 S_AD=$(scratch_dir stop-advisory)
 (
@@ -700,16 +749,40 @@ S_AD=$(scratch_dir stop-advisory)
 # Uncommitted changes + state.md unchanged should NOT block.
 ( cd "$S_AD" && echo "uncommitted" > new.txt )
 _make_state_md "$S_AD"
+mkdir -p "$S_AD/.forge/local"
+{ printf '%s\n' '<!-- forge:state-schema v6 -->'; cat "$S_AD/.claude/local/state.md"; } \
+    > "$S_AD/.forge/local/state.md"
+printf '6\n' > "$S_AD/.forge/version"
 
-out_ad=$(cd "$S_AD" && bash "$REPO_ROOT/hooks/check-state-updated.sh" < /dev/null 2>&1)
+out_ad_first=$(cd "$S_AD" && printf '{"stop_hook_active":false}' | bash "$REPO_ROOT/hooks/check-state-updated.sh" 2>&1)
+rc_ad_first=$?
+assert_equals "$rc_ad_first" "0" "a newly changed state checkpoint stops without an extra model turn"
+out_ad=$(cd "$S_AD" && printf '{"stop_hook_active":false}' | bash "$REPO_ROOT/hooks/check-state-updated.sh" 2>&1)
 rc_ad=$?
 
 if echo "$out_ad" | grep -qE "WORKFLOW:.*Phase:.*Next:"; then
-    pass "advisory reminder on stderr (WORKFLOW: phase/next-step present)"
+    pass "checkpoint continuation names workflow phase and next step"
 else
-    fail "advisory reminder missing (got: $out_ad)"
+    fail "checkpoint continuation missing (got: $out_ad)"
 fi
-assert_equals "$rc_ad" "0" "Stop hook always exits 0 (advisory-only)"
+if echo "$out_ad" | grep -qF "Read .forge/local/state.md"; then
+    pass "checkpoint continuation names canonical state"
+else
+    fail "checkpoint continuation does not name canonical state (got: $out_ad)"
+fi
+assert_equals "$rc_ad" "2" "first active-workflow Stop continues the model"
+out_ad_repeat=$(cd "$S_AD" && printf '{"stop_hook_active":true}' | bash "$REPO_ROOT/hooks/check-state-updated.sh" 2>&1)
+rc_ad_repeat=$?
+assert_equals "$rc_ad_repeat" "0" "stop_hook_active prevents a continuation loop"
+if echo "$out_ad_repeat" | grep -qF "Read .forge/local/state.md"; then
+    fail "repeat Stop emitted another checkpoint continuation"
+else
+    pass "repeat Stop does not emit another checkpoint continuation"
+fi
+printf '\n- refreshed checkpoint\n' >> "$S_AD/.forge/local/state.md"
+out_ad_changed=$(cd "$S_AD" && printf '{"stop_hook_active":false}' | bash "$REPO_ROOT/hooks/check-state-updated.sh" 2>&1)
+rc_ad_changed=$?
+assert_equals "$rc_ad_changed" "0" "a state update clears the stale-checkpoint continuation"
 
 # ===========================================================================
 # Regression: stray Workflow-shaped tables in state.md must NOT poison the
@@ -2422,10 +2495,10 @@ for group in claude["hooks"].get("SubagentStop", []):
             commands.append(("claude", hook["command"]))
         if hook.get("type") == "prompt":
             prompt.append(hook.get("prompt", ""))
-for hook in codex["hooks"].get("subagent_stop", []):
-    if hook.get("forgeManagedId") == "subagent-review-receipt":
-        command = hook["command"]
-        commands.append(("codex", " ".join(command) if isinstance(command, list) else command))
+for group in codex["hooks"].get("SubagentStop", []):
+    for hook in group.get("hooks", []):
+        if hook.get("command", "").endswith(" check-subagent-review.sh"):
+            commands.append(("codex", hook["command"]))
 assert [host for host, _ in commands] == ["claude", "codex"], commands
 def selected(agent_type):
     return [h for group in groups if re.search(group.get("matcher", ""), agent_type)
@@ -2496,12 +2569,20 @@ wanted = {
     "session-start", "bash-safety", "workflow-gates", "format",
     "precompact-memory", "build-evidence", "state-updated",
 }
+tokens = {
+    "session-start": "session-start.sh", "bash-safety": "check-bash-safety.sh",
+    "workflow-gates": "check-workflow-gates.sh", "format": "post-tool-format.sh",
+    "precompact-memory": "pre-compact-memory.sh", "build-evidence": "build-evidence.sh",
+    "state-updated": "check-state-updated.sh",
+}
 rows = []
-for hooks in d["hooks"].values():
-    for hook in hooks:
-        if hook.get("forgeManagedId") in wanted:
-            command = hook["command"]
-            rows.append((hook["forgeManagedId"], " ".join(command) if isinstance(command, list) else command))
+for groups in d["hooks"].values():
+    for group in groups:
+        for hook in group.get("hooks", []):
+            command = hook.get("command", "")
+            matches = [name for name, token in tokens.items() if f"/{token}" in command or command.endswith(f" {token}")]
+            if len(matches) == 1 and matches[0] in wanted:
+                rows.append((matches[0], command))
 assert {name for name, _ in rows} == wanted, rows
 for name, command in sorted(rows):
     print(name + "\t" + command)
@@ -2845,23 +2926,25 @@ assert_equals "$(head -1 "$GB/.forge/local/goal-counters/$GB_NONCE_6/budget-exha
 # Report
 # ===========================================================================
 start_test "Task 5 native host binding and external-mutation hooks are registered"
-for config in "$REPO_ROOT/settings/settings.template.json" "$REPO_ROOT/settings/settings-windows.template.json" "$REPO_ROOT/settings/codex-hooks.template.json"; do
+for config in "$REPO_ROOT/settings/settings.template.json" "$REPO_ROOT/settings/settings-windows.template.json"; do
     assert_contains "$config" '"forgeManagedId": "host-context"' \
         "$(basename "$config") registers native host context"
     assert_contains "$config" '"forgeManagedId": "external-mutation-auth"' \
         "$(basename "$config") registers external mutation defense"
 done
+assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" '/host-context.sh\" hook --host codex' \
+    "Codex SessionStart binds the Codex host"
+assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" 'check-external-mutation-auth.sh' \
+    "Codex registers external mutation defense through the native hook schema"
 assert_contains "$REPO_ROOT/settings/settings.template.json" 'host-context.sh\" hook --host claude' \
     "Claude Unix SessionStart binds the Claude host"
 assert_contains "$REPO_ROOT/settings/settings-windows.template.json" 'host-context.ps1\" -Mode hook -Host claude' \
     "Claude Windows SessionStart binds the Claude host"
-assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" '[".forge/hooks/lib/host-context.sh", "hook", "--host", "codex"]' \
-    "Codex SessionStart binds the Codex host"
 for config in "$REPO_ROOT/settings/settings.template.json" "$REPO_ROOT/settings/settings-windows.template.json"; do
     assert_contains "$config" 'Read(~/.forge/host-contexts/**)' \
         "$(basename "$config") prevents agents from reading protected host receipts"
-    assert_contains "$config" 'Write(~/.forge/host-contexts/**)' \
-        "$(basename "$config") prevents agents from writing protected host receipts"
+    assert_contains "$config" 'Edit(~/.forge/host-contexts/**)' \
+        "$(basename "$config") prevents all file-editing tools from changing protected host receipts"
 done
 
 start_test "Task 8 receipt-v2 helpers and final evidence boundaries are shipped symmetrically"

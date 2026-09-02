@@ -39,12 +39,29 @@ STATE_HELPER="$HOOK_DIR/lib/state-path.sh"
 if [ -f "$STATE_HELPER" ]; then
     # shellcheck disable=SC1090
     . "$STATE_HELPER"
-    STATE_MD=$(forge_state_path "$PROJECT_ROOT" read 2>/dev/null || true)
-    if [ -f "$STATE_MD" ]; then
+    STATE_MD=""
+    if STATE_MD=$(forge_state_path "$PROJECT_ROOT" read 2>/dev/null); then
         WORKFLOW_BLOCK=$(tr -d '\r' < "$STATE_MD" | awk '/^## Workflow$/{f=1;next} f && /^## /{f=0} f')
         RESUME_CMD=$(printf '%s\n' "$WORKFLOW_BLOCK" | grep -iE '\|[[:space:]]*Command[[:space:]]*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
         RESUME_PHASE=$(printf '%s\n' "$WORKFLOW_BLOCK" | grep -iE '\|[[:space:]]*Phase[[:space:]]*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
-        case "$RESUME_CMD" in ""|none|-|—) ;; *) CONTEXT="$CONTEXT (Forge resume: $RESUME_CMD; phase: $RESUME_PHASE)" ;; esac
+        RESUME_NEXT=$(printf '%s\n' "$WORKFLOW_BLOCK" | grep -iE '\|[[:space:]]*Next step[[:space:]]*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
+        case "$RESUME_CMD" in
+            ""|none|-|—) ;;
+            *)
+                if [ -z "$RESUME_PHASE" ] || [ -z "$RESUME_NEXT" ]; then
+                    CONTEXT="$CONTEXT (FORGE_STATE_INVALID: active workflow in .forge/local/state.md is missing Phase or Next step; repair it before continuing)"
+                else
+                    CONTEXT="$CONTEXT (Forge resume from .forge/local/state.md: $RESUME_CMD; phase: $RESUME_PHASE; next step: $RESUME_NEXT — read it before continuing)"
+                fi
+                ;;
+        esac
+        [ -f "$PROJECT_ROOT/.forge/local/memory/MEMORY.md" ] \
+            && CONTEXT="$CONTEXT (local memory index: .forge/local/memory/MEMORY.md)"
+        [ -f "$PROJECT_ROOT/.forge/memory/MEMORY.md" ] \
+            && CONTEXT="$CONTEXT (durable memory index: .forge/memory/MEMORY.md)"
+    elif [ -e "$PROJECT_ROOT/.forge/version" ] || [ -e "$PROJECT_ROOT/.forge/local/state.md" ] \
+        || [ -L "$PROJECT_ROOT/.forge" ] || [ -L "$PROJECT_ROOT/.forge/local" ]; then
+        CONTEXT="$CONTEXT (FORGE_STATE_INVALID: canonical .forge/local/state.md could not be resolved; repair it before continuing)"
     fi
 fi
 

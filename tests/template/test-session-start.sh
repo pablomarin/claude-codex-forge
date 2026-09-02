@@ -119,11 +119,38 @@ mkdir -p "$S_RESUME/repo/.forge/local" "$S_RESUME/repo/.claude/local"
 printf '6\n' > "$S_RESUME/repo/.forge/version"
 cat > "$S_RESUME/repo/.forge/local/state.md" <<'EOF'
 <!-- forge:state-schema v6 -->
+## Identity
+| Field | Value |
+| Worktree root | fixture |
+
 ## Workflow
 | Field | Value |
 | Command | /new-feature canonical-resume |
 | Phase | 4 — Implementation |
 | Next step | continue |
+
+## State
+
+### Done (recent 2-3 only)
+- prior
+
+### Now
+- active
+
+### Next
+- continue
+
+### Deferred
+- none
+
+## Open Questions
+- none
+
+## Blockers
+- none
+
+## Update Rules
+fixture
 EOF
 cat > "$S_RESUME/repo/.claude/local/state.md" <<'EOF'
 ## Workflow
@@ -133,7 +160,46 @@ cat > "$S_RESUME/repo/.claude/local/state.md" <<'EOF'
 EOF
 OUTFILE=$(run_session_start_sh "$S_RESUME/repo" "resume")
 assert_contains "$OUTFILE" "/new-feature canonical-resume" "resume context reads canonical v6 workflow"
+assert_contains "$OUTFILE" "next step: continue" "resume context includes the exact durable next step"
+assert_contains "$OUTFILE" ".forge/local/state.md" "resume context names the canonical state authority"
+assert_contains "$OUTFILE" "read it before continuing" "resume context tells the model to rehydrate from state"
 assert_not_contains "$OUTFILE" "stale-legacy" "resume context never resurrects conflicting v5 state"
+
+start_test "source=compact rehydrates active workflow and optional memory indexes"
+mkdir -p "$S_RESUME/repo/.forge/local/memory" "$S_RESUME/repo/.forge/memory"
+printf '%s\n' '# Local memory index' > "$S_RESUME/repo/.forge/local/memory/MEMORY.md"
+printf '%s\n' '# Durable memory index' > "$S_RESUME/repo/.forge/memory/MEMORY.md"
+OUTFILE=$(run_session_start_sh "$S_RESUME/repo" "compact")
+assert_contains "$OUTFILE" "next step: continue" "compact rehydrates the exact durable next step"
+assert_contains "$OUTFILE" ".forge/local/memory/MEMORY.md" "compact points to local memory index"
+assert_contains "$OUTFILE" ".forge/memory/MEMORY.md" "compact points to durable memory index"
+
+start_test "invalid canonical v6 state is visible instead of silently swallowed"
+printf 'corrupt\n' > "$S_RESUME/repo/.forge/local/state.md"
+OUTFILE=$(run_session_start_sh "$S_RESUME/repo" "compact")
+assert_contains "$OUTFILE" 'FORGE_STATE_INVALID' "invalid state is visible in SessionStart context"
+
+start_test "truncated canonical v6 state is visible instead of degrading to branch-only context"
+cat > "$S_RESUME/repo/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field   | Value |
+| ------- | ----- |
+| Command | /fix-bug truncated-active-workflow |
+EOF
+OUTFILE=$(run_session_start_sh "$S_RESUME/repo" "compact")
+assert_contains "$OUTFILE" 'FORGE_STATE_INVALID' "active workflow without phase and next step cannot bypass structural validation"
+
+start_test "explicit inactive command-only state remains backward compatible"
+cat > "$S_RESUME/repo/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
+## Workflow
+| Field   | Value |
+| ------- | ----- |
+| Command | none  |
+EOF
+OUTFILE=$(run_session_start_sh "$S_RESUME/repo" "compact")
+assert_not_contains "$OUTFILE" 'FORGE_STATE_INVALID' "explicit inactive state does not require active-workflow resume fields"
 
 # ===========================================================================
 # Test 1: source=clear → no fetch, branch-only context
@@ -455,7 +521,7 @@ python3 - "$CFG/.codex/hooks.json" <<'PY'
 import json, pathlib, sys
 p = pathlib.Path(sys.argv[1])
 d = json.loads(p.read_text())
-d["hooks"]["pre_tool_use"][0]["command"][-1] = "tampered-hook.sh"
+d["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = "tampered-hook.sh"
 p.write_text(json.dumps(d, indent=2) + "\n")
 PY
 printf '{"source":"resume","host":"codex","cwd":"%s"}' "$CFG" \

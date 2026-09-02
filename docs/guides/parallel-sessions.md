@@ -5,8 +5,12 @@ developer may resume one worktree in the other host after stopping the first ses
 
 ## Isolated Features
 
-`/new-feature` and `/fix-bug` create `.worktrees/<name>/` when started from the primary branch. Each
-worktree has its own branch, candidate, `.forge/local/state.md`, and local evidence.
+`/new-feature` and `/fix-bug` use the installed `worktree-lifecycle` helper when started from the
+primary checkout. It creates `.worktrees/<name>/` on exactly `feat/<name>` or `fix/<name>`, copies
+missing ignored/private installed harness files without overwriting tracked content, then seeds the
+worktree-local state and its guarded fold baseline. It never copies local memory, receipts, goal
+authorization, or evidence. Each worktree therefore has its own candidate, `.forge/local/state.md`,
+and local evidence even when the harness is intentionally uncommitted.
 
 ```bash
 # Terminal 1

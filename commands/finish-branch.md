@@ -28,18 +28,18 @@ worktrees.
 
 When running inside an isolated worktree:
 
-1. Read the worktree's `.forge/local/.state-seed-snapshot.md`, worktree state, and primary-checkout
-   state before navigating away.
-2. Extract only the foldable narrative sections: `## State` (Done/Next/Deferred, with `### Now`
-   cleared), `## Open Questions`, and `## Blockers`.
-3. Compare the primary narrative with the seed snapshot. If the snapshot is missing, any extraction
-   is malformed, or primary narrative changed since the seed, emit `FOLD_SAFE_STOP` or
-   `FOLD_DIVERGED` and stop cleanup. Preserve both copies for manual reconciliation; do not ask an
-   engine to guess a merge.
-4. On an exact seed match, replace only those narrative sections in primary
-   `.forge/local/state.md`. Do not touch `## Workflow`, `## /goal session`, `## PR authorization`,
-   receipts, objective nonce, or persistent Forge turn records.
-5. Fold verified durable learnings separately into `.forge/memory/`; never copy local receipts or
+1. Run `.forge/hooks/lib/worktree-lifecycle.sh fold --worktree <absolute-worktree-path>`
+   (PowerShell: `worktree-lifecycle.ps1 -Action Fold -Worktree <absolute-worktree-path>`) before
+   navigating away. Only in the Forge source checkout, when the installed path is absent, use the
+   tracked `hooks/lib/worktree-lifecycle.sh` or `.ps1` instead.
+2. The helper compares the primary foldable narrative with the exact seed snapshot. Missing or
+   malformed inputs emit `FOLD_SAFE_STOP`; primary divergence emits `FOLD_DIVERGED`. Both preserve
+   every state file for manual reconciliation—no engine guesses a merge.
+3. On an exact seed match, the helper atomically replaces only `## State` (Done/Next/Deferred, with
+   `### Now` cleared), `## Open Questions`, and `## Blockers` in primary state. It never touches
+   `## Workflow`, `## /goal session`, `## PR authorization`, receipts, objective nonce, or
+   persistent Forge turn records.
+4. Fold verified durable learnings separately into `.forge/memory/`; never copy local receipts or
    volatile session history there.
 
 When not in a worktree, record `FOLD_SKIP` and continue.

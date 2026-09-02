@@ -58,6 +58,10 @@ case "${FAKE_CLAUDE_BEHAVIOR:-clean}" in
   reject-dirty-candidate)
     [ ! -e "${FORGE_CANDIDATE_ROOT:-}/fallback-dirty" ] || { printf 'dirty fallback candidate reused\n'; exit 67; }
     clean_json ;;
+  mutate-candidate-ref)
+    parent=$(git -C "${FORGE_CANDIDATE_ROOT:?}" rev-parse HEAD^)
+    git -C "$FORGE_CANDIDATE_ROOT" update-ref refs/heads/candidate "$parent"
+    clean_json ;;
   *) exit 64 ;;
 esac
 [ -z "${FAKE_MUTATE_REAL:-}" ] || printf 'raced\n' >> "$FAKE_MUTATE_REAL"

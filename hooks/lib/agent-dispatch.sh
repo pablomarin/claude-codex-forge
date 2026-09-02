@@ -390,7 +390,7 @@ attempt_full_investigation_dispatch() {
 
 attempt_engine_dispatch() {
     local selected="$1" attempt_number="$2" binary row provider model effort mechanism observable minout qualified fallback_col help missing flag
-    local scratch raw stderr_file prompt bound_output rc snapshot primary config_hash computed_config_hash profile_mode extracted observed observed_provider sandbox tools snapshot_check captured_thread attempt_fingerprint auth_source executable parent
+    local scratch raw stderr_file prompt bound_output rc snapshot primary config_hash computed_config_hash profile_mode extracted observed observed_provider sandbox tools snapshot_check snapshot_after snapshot_ref snapshot_head captured_thread attempt_fingerprint auth_source executable parent review_patch review_paths
     ATTEMPT_ENGINE="$selected"; ATTEMPT_CLASS=engine; ATTEMPT_REASON=binary-unavailable; ATTEMPT_VERDICT=BLOCKED; ATTEMPT_SEVERITY=NONE; ATTEMPT_SCHEMA=none; ATTEMPT_FINDINGS_DIGEST=MISSING
     ATTEMPT_REQUESTED_PROVIDER=UNQUALIFIED; ATTEMPT_REQUESTED_MODEL=UNQUALIFIED; ATTEMPT_REQUESTED_EFFORT=UNQUALIFIED
     ATTEMPT_ACTUAL_PROVIDER=UNOBSERVABLE; ATTEMPT_ACTUAL_MODEL=UNOBSERVABLE; ATTEMPT_ACTUAL_EFFORT=UNOBSERVABLE; ATTEMPT_CONFIG_HASH=MISSING; ATTEMPT_SESSION_ID=none; ATTEMPT_EXIT=127
@@ -440,6 +440,11 @@ EOF
       snapshot=$(kv_dispatch "$attempt_fingerprint" snapshot_path); [ -d "$snapshot" ] && [ ! -L "$snapshot" ] || { ATTEMPT_CLASS=artifact; ATTEMPT_REASON=candidate-snapshot-unavailable; return 2; }
     fi
     ATTEMPT_SNAPSHOT="$snapshot"; ATTEMPT_SNAPSHOT_BEFORE="$scratch/snapshot-before.manifest"; snapshot_manifest_dispatch "$snapshot" "$ATTEMPT_SNAPSHOT_BEFORE"
+    snapshot_ref=""; snapshot_head=""
+    if [ "$artifact_kind" != file ]; then
+      snapshot_ref=$(git -C "$snapshot" rev-parse refs/heads/candidate 2>/dev/null) || { ATTEMPT_CLASS=artifact; ATTEMPT_REASON=candidate-ref-missing; return 2; }
+      snapshot_head=$(git -C "$snapshot" rev-parse HEAD 2>/dev/null) || { ATTEMPT_CLASS=artifact; ATTEMPT_REASON=candidate-head-missing; return 2; }
+    fi
     {
       printf 'forge_canary_hash=%s\nforge_config_hash=%s\nforge_qualification_revision=%s\n' "$ATTEMPT_CANARY_HASH" "$config_hash" "$qualification_revision"
     } > "$primary/.forge-dispatch-canary"
@@ -456,17 +461,28 @@ EOF
       chmod 700 "$REPRO_RUNNER" || { ATTEMPT_CLASS=capability; ATTEMPT_REASON=reproduction-runner-render-failed; return 1; }
     fi
     {
-      printf 'You are a fresh independent %s reviewer. Your cwd is a clean primary. First read .forge-dispatch-canary there and copy its three exact observation lines into the result. The logical project root is %s. Run Git/project commands there. Review immutable scope %s..candidate. Ambient instructions, hooks, plugins, skills, and write-capable MCP are absent by contract. Return ONLY the Forge line envelope below.\n' "$selected" "$snapshot" "$workflow_base_sha"
+      printf 'You are a fresh independent %s reviewer. Your cwd is a clean primary. First read .forge-dispatch-canary there and copy its three exact observation lines into the result. ' "$selected"
+      if [ "$artifact_kind" = file ]; then
+        printf 'The isolated review root is %s and contains only the requested file artifact. Do not assume repository, PRD, or Git access; if the requested review needs absent context, return BLOCKED with blocked_class=artifact. ' "$snapshot"
+      else
+        review_patch="$primary/.forge-review.patch"; review_paths="$primary/.forge-review-paths"
+        git -C "$snapshot" diff --no-ext-diff --binary "$workflow_base_sha..candidate" > "$review_patch" \
+          && git -C "$snapshot" diff --no-ext-diff --name-only "$workflow_base_sha..candidate" > "$review_paths" \
+          || { ATTEMPT_CLASS=artifact; ATTEMPT_REASON=candidate-diff-unavailable; return 2; }
+        printf 'The logical project root is %s. The dispatcher materialized the exact immutable %s..candidate diff at %s and its changed-path list at %s; read those files and the candidate root. Shell access is intentionally absent. ' "$snapshot" "$workflow_base_sha" "$review_patch" "$review_paths"
+      fi
+      printf 'Ambient instructions, hooks, plugins, skills, and write-capable MCP are absent by contract.\n'
       if [ "${REPRO_MODE:-false}" = true ]; then
         printf 'This is the dispatcher-owned %s reproduction check. Under the already-qualified no-network workspace boundary, execute the exact dispatcher-owned runner %s once. Do not edit it or synthesize its stdout/exit files.\n' "$REPRO_CHECK_KIND" "$REPRO_RUNNER"
       fi
       cat "$prompt_file"
-      printf '\nRequired envelope:\nschema_version=1\nverdict=CLEAN|FINDINGS|BLOCKED\nmax_severity=NONE|P0|P1|P2|P3\nblocked_class=none|engine|capability|artifact|authorization|invariant\nforge_canary_hash=<observed>\nforge_config_hash=<observed>\nforge_qualification_revision=<observed>\n'
+      printf '\nReturn ONLY newline-delimited fields with no Markdown or surrounding prose. Required envelope:\nschema_version=1\nverdict=CLEAN|FINDINGS|BLOCKED\nmax_severity=NONE|P0|P1|P2|P3\nblocked_class=none|engine|capability|artifact|authorization|invariant\nforge_canary_hash=<observed>\nforge_config_hash=<observed>\nforge_qualification_revision=<observed>\nFor FINDINGS add one line per finding: finding=<sequence>|P0|P1|P2|P3|open|<concise evidence>. BLOCKED must contain no finding lines.\n'
     } > "$scratch/prompt.txt"
     profile_mode=review; [ "$profile" = investigate ] && profile_mode=investigate
     if [ "$selected" = claude ]; then
       tools='Read,Grep,Glob'; [ "$profile" = investigate ] && tools='Read,Write,Edit,Bash,WebSearch,WebFetch'; [ "${REPRO_MODE:-false}" != true ] || tools='Read,Write,Edit,Bash'
-      claude_args=(-p --safe-mode --strict-mcp-config --mcp-config "$scratch/mcp.json" --settings "$scratch/claude-settings.json" --setting-sources '' --tools "$tools" --permission-mode dontAsk --add-dir "$snapshot" --model "$model" --effort "$effort" --output-format json)
+      claude_args=(-p --safe-mode --strict-mcp-config --mcp-config "$scratch/mcp.json" --settings "$scratch/claude-settings.json" --setting-sources '' --tools "$tools")
+      claude_args+=(--permission-mode dontAsk --add-dir "$snapshot" --model "$model" --effort "$effort" --output-format json)
       case "$conversation" in ephemeral) claude_args+=(--no-session-persistence) ;; new) claude_args+=(--session-id "$SESSION_PROVISIONAL_ID") ;; resume) claude_args+=(--resume "$session_id") ;; esac
       claude_args+=("$(cat "$scratch/prompt.txt")")
       run_with_timeout_dispatch "$timeout_seconds" "$raw" "$stderr_file" "$primary" env -i PATH="$PATH" HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-${USER:-}}" TMPDIR="${TMPDIR:-/tmp}" FORGE_DISPATCH_MODE="$profile_mode" FORGE_CANDIDATE_ROOT="$snapshot" FORGE_REPRO_RUNNER="${REPRO_RUNNER:-}" FORGE_DISPATCH_SESSION_ID="${SESSION_PROVISIONAL_ID:-$session_id}" FORGE_DISPATCH_SEAT_HASH="$ATTEMPT_SEAT_HASH" FORGE_DISPATCH_CONFIG_HASH="$config_hash" FORGE_DISPATCH_CANARY_HASH="$ATTEMPT_CANARY_HASH" FORGE_DISPATCH_QUALIFICATION_REVISION="$qualification_revision" FORGE_DISPATCH_TEST_MODE="${FORGE_DISPATCH_TEST_MODE:-0}" FORGE_TEST_DISABLE_ENGINE="${FORGE_TEST_DISABLE_ENGINE:-}" FAKE_CLAUDE_BEHAVIOR="${FAKE_CLAUDE_BEHAVIOR:-clean}" FAKE_CLAUDE_LOG="${FAKE_CLAUDE_LOG:-}" FAKE_CLAUDE_CWD_FILE="${FAKE_CLAUDE_CWD_FILE:-}" FAKE_REAL_ROOT="${FAKE_REAL_ROOT:-}" \
@@ -526,6 +542,13 @@ EOF
       [ "$identity_match" = true ] || { ATTEMPT_CLASS=capability; ATTEMPT_REASON=observable-identity-mismatch; return 1; }
     fi
     if ! validate_envelope_dispatch "$bound_output"; then ATTEMPT_REASON="$RESULT_REASON"; ATTEMPT_CLASS=engine; return 1; fi
+    snapshot_after="$scratch/snapshot-after.manifest"; snapshot_manifest_dispatch "$snapshot" "$snapshot_after"
+    if ! cmp -s "$ATTEMPT_SNAPSHOT_BEFORE" "$snapshot_after" \
+       || { [ "$artifact_kind" != file ] \
+         && { [ "$(git -C "$snapshot" rev-parse refs/heads/candidate 2>/dev/null || true)" != "$snapshot_ref" ] \
+           || [ "$(git -C "$snapshot" rev-parse HEAD 2>/dev/null || true)" != "$snapshot_head" ]; }; }; then
+      ATTEMPT_CLASS=artifact; ATTEMPT_REASON=candidate-snapshot-mutated; return 2
+    fi
     [ "$(awk -F= '$1=="forge_canary_hash" {n++} END {print n+0}' "$bound_output")" -ge 1 ] || { ATTEMPT_CLASS=capability; ATTEMPT_REASON=isolation-canary-missing; return 1; }
     observation_matches_dispatch "$bound_output" forge_canary_hash "$ATTEMPT_CANARY_HASH" || { ATTEMPT_CLASS=capability; ATTEMPT_REASON=isolation-canary-mismatch; return 1; }
     observation_matches_dispatch "$bound_output" forge_config_hash "$config_hash" || { ATTEMPT_CLASS=capability; ATTEMPT_REASON=observed-config-mismatch; return 1; }

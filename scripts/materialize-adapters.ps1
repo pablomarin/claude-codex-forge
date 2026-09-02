@@ -336,6 +336,18 @@ function Get-ManagedJsonIdentity {
         if ($Value.PSObject.Properties["matcher"]) { return "matcher:$($Value.matcher)" }
         if ($Value.PSObject.Properties["command"]) {
             $command = if ($Value.command -is [Array]) { $Value.command -join "`0" } else { [string]$Value.command }
+            if ($command -like '*.forge/hooks/lib/*') {
+                $known = [ordered]@{
+                    'host-context'='host-context'; 'session-start'='session-start';
+                    'check-bash-safety'='bash-safety'; 'check-workflow-gates'='workflow-gates';
+                    'check-external-mutation-auth'='external-mutation-auth'; 'post-tool-format'='format';
+                    'check-subagent-review'='subagent-review-receipt'; 'pre-compact-memory'='precompact-memory';
+                    'build-evidence'='build-evidence'; 'check-state-updated'='state-updated'
+                }
+                foreach ($token in $known.Keys) {
+                    if ($command -like "*/$token.sh*" -or $command.EndsWith(" $token.sh")) { return "managed:$($known[$token])" }
+                }
+            }
             return "command:$($Value.type):$command"
         }
     }
@@ -387,6 +399,18 @@ function Merge-JsonManagedEntries {
     $user = Get-Content -Raw $Destination | ConvertFrom-Json
     $owned = Get-Content -Raw $Template | ConvertFrom-Json
     $beforeCanonical = $user | ConvertTo-Json -Depth 30 -Compress
+    if ([string]$owned.description -ceq 'Forge v6 project hooks') {
+        if ($user.PSObject.Properties['forgeManagedVersion'] -and [int]$user.forgeManagedVersion -eq 6) {
+            $user.PSObject.Properties.Remove('forgeManagedVersion')
+        }
+        foreach ($legacyEvent in @('session_start','pre_tool_use','post_tool_use','subagent_stop','pre_compact','stop')) {
+            $property = $user.hooks.PSObject.Properties[$legacyEvent]
+            if (-not $property) { continue }
+            [object[]]$retained = @($property.Value | Where-Object { -not $_.forgeManagedId })
+            if ($retained.Count -eq 0) { $user.hooks.PSObject.Properties.Remove($legacyEvent) }
+            else { $property.Value = $retained }
+        }
+    }
     Merge-ManagedJsonObject $user $owned
     $afterCanonical = $user | ConvertTo-Json -Depth 30 -Compress
     if ($beforeCanonical -ceq $afterCanonical) { return }
@@ -397,27 +421,7 @@ function Merge-JsonManagedEntries {
 
 function Merge-CodexHookEntries {
     param([string]$Template, [string]$Destination)
-    $owned = Get-Content -Raw $Template | ConvertFrom-Json
-    foreach ($event in $owned.hooks.PSObject.Properties) {
-        foreach ($entry in $event.Value) {
-            $hook = [string]$entry.command[1]
-            if ($hook.EndsWith(".sh")) { $hook = $hook.Substring(0, $hook.Length - 3) + ".ps1" }
-            if ([string]$entry.forgeManagedId -eq 'host-context') {
-                $entry.command = @("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".forge/hooks/lib/host-context.ps1", "-Mode", "hook", "-Host", "codex")
-            }
-            else {
-                $entry.command = @(
-                    "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                    ".forge/hooks/lib/codex-worktree-dispatch.ps1", $hook
-                )
-            }
-        }
-    }
-    $temporary = Join-Path ([IO.Path]::GetTempPath()) ("forge-codex-hooks-" + [Guid]::NewGuid().ToString("N") + ".json")
-    try {
-        [IO.File]::WriteAllText($temporary, ($owned | ConvertTo-Json -Depth 30) + "`n", $Utf8NoBom)
-        Merge-JsonManagedEntries $temporary $Destination
-    } finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+    Merge-JsonManagedEntries $Template $Destination
 }
 
 function Convert-McpJsonToCodexToml {
