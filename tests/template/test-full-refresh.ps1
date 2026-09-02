@@ -317,7 +317,9 @@ try {
         "PowerShell full refresh retires exact compatibility copies and preserves customized inert files"
     Assert-True ($crossHostProperties -contains "SessionStart" -and $crossHostProperties -contains "CustomEvent" -and
         $crossHostInstalled.projectSetting -eq "KEEP-CROSS-HOST-SETTING" -and
-        @($installedSessionCommands | Where-Object { $_ -like '*/session-start.sh' -and $_ -notlike '*.codex/hooks/*' }).Count -eq 1) `
+        @($installedSessionCommands | Where-Object {
+            $_ -like '*codex-worktree-dispatch.sh*session-start.sh*' -and $_ -notlike '*.codex/hooks/*'
+        }).Count -eq 1) `
         "PowerShell full refresh removes only the proven registration and preserves user JSON"
 
     $managedCompat = New-Project "managed-cross-host-compat"
@@ -358,7 +360,9 @@ try {
         "PowerShell managed refresh retires exact compatibility copies and preserves customized inert files"
     Assert-True ($managedProperties -contains "SessionStart" -and $managedProperties -contains "CustomEvent" -and
         $managedInstalled.projectSetting -eq "KEEP-CROSS-HOST-SETTING" -and
-        @($managedSessionCommands | Where-Object { $_ -like '*/session-start.sh' -and $_ -notlike '*.codex/hooks/*' }).Count -eq 1) `
+        @($managedSessionCommands | Where-Object {
+            $_ -like '*codex-worktree-dispatch.sh*session-start.sh*' -and $_ -notlike '*.codex/hooks/*'
+        }).Count -eq 1) `
         "PowerShell managed refresh removes only the proven registration and preserves user JSON"
 
     $managedInstalled.hooks | Add-Member -NotePropertyName PreToolUse -NotePropertyValue @([pscustomobject]@{

@@ -307,7 +307,9 @@ public static class ForgeFakeEngine {
     $sessionHandlers = @($hooks.hooks.SessionStart | ForEach-Object { @($_.hooks) })
     $hostEntry = @($sessionHandlers | Where-Object { [string]$_.command -like '*/host-context.sh*' })[0]
     Assert-True ([string]$hostEntry.commandWindows -like '*host-context.ps1*' -and [string]$hostEntry.commandWindows -like '*-Host codex*') 'Codex host-context invokes the Windows hook directly'
-    $sessionEntry = @($sessionHandlers | Where-Object { [string]$_.command -like '*/session-start.sh' })[0]
+    $sessionEntry = @($sessionHandlers | Where-Object {
+        [string]$_.command -like '*codex-worktree-dispatch.sh*session-start.sh*'
+    })[0]
     Assert-True ([string]$sessionEntry.commandWindows -like '*codex-worktree-dispatch.ps1*' -and [string]$sessionEntry.commandWindows -like '*session-start.ps1*') 'other Codex hooks retain worktree routing'
 }
 finally {
