@@ -10,7 +10,7 @@ try {
         $target = Join-Path $scratch $scope
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         if ($scope -eq "project") { & git -C $target init -q }
-        $materializerOutput = (& $materializer -RepoRoot $root -Target $target -Scope $scope -Platform windows | Out-String)
+        $materializerOutput = (& $materializer -RepoRoot $root -Target $target -Scope $scope -Platform windows 6>&1 | Out-String)
         if ($scope -eq "project") {
             if (-not $materializerOutput.Contains("NORMAL_PROJECT_WORKFLOWS: READY") -or
                 -not $materializerOutput.Contains("NATIVE_GOAL_RUNTIME:") -or
@@ -42,7 +42,7 @@ try {
     $savedDiagnosticHome = $env:FORGE_DIAGNOSTIC_HOME
     try {
         $env:FORGE_DIAGNOSTIC_HOME = $partialHome
-        $partialOutput = (& $materializer -RepoRoot $root -Target $partialProject -Scope project -Platform windows | Out-String)
+        $partialOutput = (& $materializer -RepoRoot $root -Target $partialProject -Scope project -Platform windows 6>&1 | Out-String)
     } finally {
         $env:FORGE_DIAGNOSTIC_HOME = $savedDiagnosticHome
     }
