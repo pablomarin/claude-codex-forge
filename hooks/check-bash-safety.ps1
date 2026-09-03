@@ -97,11 +97,6 @@ elseif ($Command -match 'pnpm\s+(add|install|i)\s+(-g|--global)|pnpm\s+(-g|--glo
 elseif ($Command -match '(^|\s)pip3?\s+install\s+[^-]' -and $Command -notmatch 'pip3?\s+install\s+(-r\s|-e\s|\.\s*$)|uv\s+pip') {
     $Reason = "Unscoped pip install detected (supply chain risk — use venv or uv)"
 }
-# Native SessionStart hooks own protected host receipts. Agent shell commands
-# may not substitute a borrowed or fabricated task/session identifier.
-elseif ($Command -match '(?i)(^|[ \t])([^ \t]*/)?host-context\.(sh|ps1)[ \t].*(hook|-mode[ \t]+hook)([ \t]|$)') {
-    $Reason = "Native host receipts may be issued only by the host SessionStart hook"
-}
 # 8. Workflow-safety (NOT security): block Bash read-utilities that read
 #    .claude/local/state.md inline — mirrors check #8 in check-bash-safety.sh.
 #    A Bash read of this sensitive file trips CC's sensitive-file prompt and

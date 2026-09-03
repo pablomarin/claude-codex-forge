@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Merge template settings/MCP JSON into existing user files.
 
-Strategy: add-only, never remove.
+Strategy: add-only except for exact, explicitly retired Forge-owned values.
 - Objects (hooks, enabledPlugins, mcpServers): add new keys, skip existing
 - Arrays (permissions.allow/deny/ask): append items not already present
+- A recognized Forge project template may retire a fixed set of obsolete values
 - Creates timestamped backup before modifying
 
 Usage:
@@ -46,6 +47,12 @@ LEGACY_INLINE_PRECOMPACT = {
     "echo 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).' >&2; exit 0",
     "powershell -Command \"Write-Error 'COMPACTION IMMINENT. Save learnings to auto memory: bug root causes, patterns, architecture insights, user preferences. NOT session state (that goes in .claude/local/state.md).'; exit 0\"",
 }
+RETIRED_FORGE_PERMISSION_DENIES = {
+    "Read(~/.forge/host-contexts/**)",
+    "Edit(~/.forge/host-contexts/**)",
+    "Bash(*.forge/host-contexts*:*)",
+}
+RETIRED_FORGE_SANDBOX_DENY_WRITES = {"~/.forge/host-contexts"}
 
 
 class RefreshBlocked(RuntimeError):
@@ -2457,9 +2464,59 @@ def merge_hook_event(template_event, user_event):
     return changes
 
 
+def is_forge_project_settings_template(template):
+    """Recognize the project settings Forge owns through its stable hook id."""
+    hooks = template.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return False
+    return any(
+        hook.get("forgeManagedId") == "host-context"
+        for groups in hooks.values()
+        if isinstance(groups, list)
+        for group in groups
+        if isinstance(group, dict)
+        for hook in group.get("hooks", [])
+        if isinstance(hook, dict)
+    )
+
+
+def retire_forge_host_context_permissions(user):
+    """Remove only Forge's obsolete host-receipt permission values."""
+    changes = []
+    permissions = user.get("permissions")
+    if isinstance(permissions, dict):
+        denied = permissions.get("deny")
+        if isinstance(denied, list):
+            retained = [
+                value
+                for value in denied
+                if value not in RETIRED_FORGE_PERMISSION_DENIES
+            ]
+            if retained != denied:
+                permissions["deny"] = retained
+                changes.append("  Retired obsolete Forge host-context permission denies")
+
+    sandbox = user.get("sandbox")
+    filesystem = sandbox.get("filesystem") if isinstance(sandbox, dict) else None
+    deny_write = filesystem.get("denyWrite") if isinstance(filesystem, dict) else None
+    if isinstance(deny_write, list):
+        retained = [
+            value
+            for value in deny_write
+            if value not in RETIRED_FORGE_SANDBOX_DENY_WRITES
+        ]
+        if retained != deny_write:
+            filesystem["denyWrite"] = retained
+            changes.append("  Retired obsolete Forge host-context sandbox denyWrite")
+    return changes
+
+
 def merge_settings(template, user):
     """Merge settings.json: hooks, permissions, enabledPlugins."""
     changes = []
+
+    if is_forge_project_settings_template(template):
+        changes.extend(retire_forge_host_context_permissions(user))
 
     # Forge v6 initially emitted a non-native Codex hook shape. Retire only
     # the entries carrying Forge's own stable ids, then install the native

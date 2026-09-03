@@ -215,6 +215,88 @@ else
     fail "permissions check failed: $(cat "$S5/.assert")"
 fi
 
+start_test "merge: only a recognized Forge template retires exact host-context permissions"
+
+S5R=$(scratch_dir merge-retired-forge-permissions)
+cat > "$S5R/template.json" <<'EOF'
+{
+  "permissions": {"deny": ["Bash(current-forge:*)"]},
+  "sandbox": {"filesystem": {"denyWrite": ["~/.forge/bin"]}},
+  "hooks": {
+    "SessionStart": [
+      {"matcher": "startup|resume|clear|compact", "hooks": [
+        {"type": "command", "forgeManagedId": "host-context", "command": "stable compatibility hook"}
+      ]}
+    ]
+  }
+}
+EOF
+cat > "$S5R/user.json" <<'EOF'
+{
+  "permissions": {"deny": [
+    "Read(~/.forge/host-contexts/**)",
+    "Edit(~/.forge/host-contexts/**)",
+    "Bash(*.forge/host-contexts*:*)",
+    "Bash(project-custom:*)"
+  ]},
+  "sandbox": {"filesystem": {"denyWrite": ["~/.forge/host-contexts", "~/custom-protected"]}}
+}
+EOF
+python3 "$MERGE" "$S5R/template.json" "$S5R/user.json" > "$S5R/merge.out" 2>&1
+python3 - "$S5R/user.json" <<'PY' > "$S5R/.assert" 2>&1
+import json, sys
+settings = json.load(open(sys.argv[1]))
+retired = {
+    "Read(~/.forge/host-contexts/**)",
+    "Edit(~/.forge/host-contexts/**)",
+    "Bash(*.forge/host-contexts*:*)",
+}
+assert retired.isdisjoint(set(settings["permissions"]["deny"]))
+assert "~/.forge/host-contexts" not in settings["sandbox"]["filesystem"]["denyWrite"]
+assert "Bash(project-custom:*)" in settings["permissions"]["deny"]
+assert "~/custom-protected" in settings["sandbox"]["filesystem"]["denyWrite"]
+print("ok")
+PY
+if [[ "$(cat "$S5R/.assert")" == "ok" ]]; then
+    pass "recognized Forge merge retires only the exact obsolete permission values"
+else
+    fail "Forge permission-retirement check failed: $(cat "$S5R/.assert")"
+fi
+
+S5C=$(scratch_dir merge-retired-permissions-control)
+cat > "$S5C/template.json" <<'EOF'
+{"permissions": {"deny": ["Bash(non-forge-template:*)"]}}
+EOF
+cat > "$S5C/user.json" <<'EOF'
+{
+  "permissions": {"deny": [
+    "Read(~/.forge/host-contexts/**)",
+    "Edit(~/.forge/host-contexts/**)",
+    "Bash(*.forge/host-contexts*:*)",
+    "Bash(project-custom:*)"
+  ]},
+  "sandbox": {"filesystem": {"denyWrite": ["~/.forge/host-contexts", "~/custom-protected"]}}
+}
+EOF
+python3 "$MERGE" "$S5C/template.json" "$S5C/user.json" > "$S5C/merge.out" 2>&1
+python3 - "$S5C/user.json" <<'PY' > "$S5C/.assert" 2>&1
+import json, sys
+settings = json.load(open(sys.argv[1]))
+expected = {
+    "Read(~/.forge/host-contexts/**)",
+    "Edit(~/.forge/host-contexts/**)",
+    "Bash(*.forge/host-contexts*:*)",
+}
+assert expected.issubset(set(settings["permissions"]["deny"]))
+assert "~/.forge/host-contexts" in settings["sandbox"]["filesystem"]["denyWrite"]
+print("ok")
+PY
+if [[ "$(cat "$S5C/.assert")" == "ok" ]]; then
+    pass "non-Forge settings merge preserves matching user permission values"
+else
+    fail "non-Forge retirement control failed: $(cat "$S5C/.assert")"
+fi
+
 # ---------------------------------------------------------------------------
 # Test 6 (Codex P2-2 regression guard): order-only changes must be persisted.
 #

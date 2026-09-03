@@ -2925,55 +2925,53 @@ assert_equals "$(head -1 "$GB/.forge/local/goal-counters/$GB_NONCE_6/budget-exha
 # ===========================================================================
 # Report
 # ===========================================================================
-start_test "Task 5 native host binding and external-mutation hooks are registered"
+start_test "Task 5 stable host compatibility and external-mutation hooks are registered"
 for config in "$REPO_ROOT/settings/settings.template.json" "$REPO_ROOT/settings/settings-windows.template.json"; do
     assert_contains "$config" '"forgeManagedId": "host-context"' \
-        "$(basename "$config") registers native host context"
+        "$(basename "$config") registers the stable host compatibility hook"
     assert_contains "$config" '"forgeManagedId": "external-mutation-auth"' \
         "$(basename "$config") registers external mutation defense"
-    HOST_CONTEXT_EVENTS=$(python3 - "$config" <<'PY'
+    case "$config" in
+      *windows*) EXPECTED_HOST_COMMAND='powershell -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/.forge/hooks/lib/host-context.ps1" -Mode hook -Host claude' ;;
+      *) EXPECTED_HOST_COMMAND='bash "$CLAUDE_PROJECT_DIR/.forge/hooks/lib/host-context.sh" hook --host claude' ;;
+    esac
+    HOST_CONTEXT_RESULT=$(python3 - "$config" "$EXPECTED_HOST_COMMAND" <<'PY'
 import json, sys
 config = json.load(open(sys.argv[1]))
-events = []
+expected = sys.argv[2]
+found = []
 for event, groups in config.get("hooks", {}).items():
     for group in groups:
         for hook in group.get("hooks", []):
             if hook.get("forgeManagedId") == "host-context":
-                events.append(event)
-print(" ".join(sorted(events)))
+                found.append((event, hook.get("command")))
+assert sorted(found) == [("SessionStart", expected), ("UserPromptSubmit", expected)], found
+print("ok")
 PY
 )
-    assert_equals "$HOST_CONTEXT_EVENTS" "SessionStart UserPromptSubmit" \
-        "$(basename "$config") refreshes native host context at session and prompt boundaries"
+    assert_equals "$HOST_CONTEXT_RESULT" "ok" \
+        "$(basename "$config") keeps exact compatibility hook commands at both boundaries"
+    assert_not_contains "$config" '~/.forge/host-contexts' \
+        "$(basename "$config") grants no obsolete host-receipt permissions"
 done
-assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" '/host-context.sh\" hook --host codex' \
-    "Codex SessionStart binds the Codex host"
-CODEX_HOST_CONTEXT_EVENTS=$(python3 - "$REPO_ROOT/settings/codex-hooks.template.json" <<'PY'
+CODEX_HOST_CONTEXT_RESULT=$(python3 - "$REPO_ROOT/settings/codex-hooks.template.json" <<'PY'
 import json, sys
 config = json.load(open(sys.argv[1]))
-events = []
+expected = 'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/host-context.sh" hook --host codex'
+found = []
 for event, groups in config.get("hooks", {}).items():
     for group in groups:
         for hook in group.get("hooks", []):
             if "/host-context.sh\" hook --host codex" in hook.get("command", ""):
-                events.append(event)
-print(" ".join(sorted(events)))
+                found.append((event, hook.get("command")))
+assert sorted(found) == [("SessionStart", expected), ("UserPromptSubmit", expected)], found
+print("ok")
 PY
 )
-assert_equals "$CODEX_HOST_CONTEXT_EVENTS" "SessionStart UserPromptSubmit" \
-    "Codex refreshes native host context at session and prompt boundaries"
+assert_equals "$CODEX_HOST_CONTEXT_RESULT" "ok" \
+    "Codex keeps exact compatibility hook commands at both boundaries"
 assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" 'check-external-mutation-auth.sh' \
     "Codex registers external mutation defense through the native hook schema"
-assert_contains "$REPO_ROOT/settings/settings.template.json" 'host-context.sh\" hook --host claude' \
-    "Claude Unix SessionStart binds the Claude host"
-assert_contains "$REPO_ROOT/settings/settings-windows.template.json" 'host-context.ps1\" -Mode hook -Host claude' \
-    "Claude Windows SessionStart binds the Claude host"
-for config in "$REPO_ROOT/settings/settings.template.json" "$REPO_ROOT/settings/settings-windows.template.json"; do
-    assert_contains "$config" 'Read(~/.forge/host-contexts/**)' \
-        "$(basename "$config") prevents agents from reading protected host receipts"
-    assert_contains "$config" 'Edit(~/.forge/host-contexts/**)' \
-        "$(basename "$config") prevents all file-editing tools from changing protected host receipts"
-done
 
 start_test "Task 8 receipt-v2 helpers and final evidence boundaries are shipped symmetrically"
 for helper in verification-receipt.sh verification-receipt.ps1; do
