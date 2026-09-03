@@ -8,11 +8,6 @@ function New-Fixture([string]$Name) {
   $dir=Join-Path ([IO.Path]::GetTempPath()) ("forge-council-$Name-"+[Guid]::NewGuid().ToString('N'));$repo=Join-Path $dir 'repo';$lib=Join-Path $repo '.forge\hooks\lib';$bin=Join-Path $dir 'bin'
   New-Item -ItemType Directory -Force -Path $lib,(Join-Path $repo '.forge'),$bin|Out-Null
   Copy-Item -LiteralPath $source -Destination (Join-Path $lib 'council-dispatch.ps1')
-  @'
-param([string]$Mode)
-Write-Output $(if($env:FAKE_MAIN){$env:FAKE_MAIN}else{'claude'})
-exit 0
-'@ | Set-Content (Join-Path $lib 'host-context.ps1')
   @("model-council-advisor`tclaude`tqualified","model-council-chair`tclaude`tqualified","model-council-advisor`tcodex`tqualified","model-council-chair`tcodex`tqualified")|Set-Content (Join-Path $repo '.forge\host-capabilities.tsv')
   @'
 param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
@@ -32,7 +27,7 @@ exit 0
   return @{Dir=$dir;Repo=$repo;Bin=$bin;Log=(Join-Path $dir 'calls.log');Council=(Join-Path $lib 'council-dispatch.ps1')}
 }
 function Invoke-Fixture([hashtable]$Fixture,[string]$Failure='',[string[]]$Extra=@()) {
-  $gitDir=Split-Path -Parent (Get-Command git.exe).Source;$env:PATH="$($Fixture.Bin);$gitDir;$env:SystemRoot\System32";$env:FAKE_MAIN='claude';$env:FAKE_LOG=$Fixture.Log;$env:FAKE_FAIL_MATCH=$Failure;$env:FAKE_FAIL_MARKER=Join-Path $Fixture.Dir 'failure-used'
+  $gitDir=Split-Path -Parent (Get-Command git.exe).Source;$env:PATH="$($Fixture.Bin);$gitDir;$env:SystemRoot\System32";$env:FORGE_NATIVE_HOST='claude';$env:FAKE_LOG=$Fixture.Log;$env:FAKE_FAIL_MATCH=$Failure;$env:FAKE_FAIL_MARKER=Join-Path $Fixture.Dir 'failure-used'
   $args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$Fixture.Council,'--question-file',(Join-Path $Fixture.Repo 'question.txt'),'--artifact',(Join-Path $Fixture.Repo 'artifact.txt'),'--workflow-base-sha','deadbeef','--workflow-base-ref','refs/heads/main')+$Extra
   $savedPreference=$ErrorActionPreference;$ErrorActionPreference='Continue'
   Push-Location $Fixture.Repo
@@ -45,6 +40,7 @@ try {
   Assert-True ($result.Rc -eq 0) 'healthy PowerShell topology succeeds'
   Assert-True (@(Get-Content $healthy.Log).Count -eq 11) 'PowerShell dispatches eleven turns'
   Assert-True ((Get-Content -Raw $result.Receipt) -match 'turn_results=11') 'PowerShell receipt binds eleven turns'
+  Assert-True ((Get-Content -Raw $result.Receipt) -match 'main_host=claude') 'PowerShell receipt records declared main host metadata'
   Assert-True ((Get-Content -Raw (Join-Path (Split-Path $result.Receipt) 'anonymous-peer-reviews.txt')) -notmatch 'simplifier') 'PowerShell peer bundle is anonymous'
   $fallback=New-Fixture fallback;$fixtures+=$fallback.Dir;$result=Invoke-Fixture $fallback 'codex:chair:ephemeral'
   Assert-True ($result.Rc -eq 0) 'PowerShell other-chair failure reruns all-main'

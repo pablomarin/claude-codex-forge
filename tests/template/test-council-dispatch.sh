@@ -15,7 +15,6 @@ make_fixture() {
     repo="$root/repo"; lib="$repo/.forge/hooks/lib"; fakebin="$root/bin"
     mkdir -p "$lib" "$repo/.forge" "$fakebin"
     cp "$DISPATCH" "$lib/council-dispatch.sh"
-    printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "${FAKE_MAIN:-claude}"' > "$lib/host-context.sh"
     printf '%s\n' \
       $'model-council-advisor\tclaude\tqualified' $'model-council-chair\tclaude\tqualified' \
       $'model-council-advisor\tcodex\tqualified' $'model-council-chair\tcodex\tqualified' > "$repo/.forge/host-capabilities.tsv"
@@ -54,7 +53,7 @@ FAKE
 
 run_fixture() {
     local output="$FIXTURE_ROOT/run.out"
-    (cd "$FIXTURE_REPO" && env PATH="$FIXTURE_BIN:/usr/bin:/bin" FAKE_MAIN=claude FAKE_LOG="$FIXTURE_LOG" FAKE_DIR="$FIXTURE_ROOT" FAKE_FAIL_MATCH="${FAKE_FAIL_MATCH:-}" \
+    (cd "$FIXTURE_REPO" && env PATH="$FIXTURE_BIN:/usr/bin:/bin" FORGE_NATIVE_HOST=claude FAKE_LOG="$FIXTURE_LOG" FAKE_DIR="$FIXTURE_ROOT" FAKE_FAIL_MATCH="${FAKE_FAIL_MATCH:-}" \
       bash .forge/hooks/lib/council-dispatch.sh --question-file question.txt --artifact artifact.txt --workflow-base-sha deadbeef --workflow-base-ref refs/heads/main "$@") > "$output" 2>&1
     RUN_RC=$?; RUN_OUTPUT="$output"; RECEIPT=$(sed -n 's/^Council receipt: //p' "$output" | tail -1)
 }
@@ -68,6 +67,7 @@ assert_equals "$(awk -F'|' '$4=="new"{n++} END{print n+0}' "$FIXTURE_LOG")" 5 "f
 assert_equals "$(awk -F'|' '$4=="resume"{n++} END{print n+0}' "$FIXTURE_LOG")" 5 "five peer turns resume exact sessions"
 assert_equals "$(awk -F'|' '$4=="ephemeral"{n++} END{print n+0}' "$FIXTURE_LOG")" 1 "chairman is the sixth fresh session"
 assert_contains "$RECEIPT" "topology_mode=mixed" "receipt records mixed topology"
+assert_contains "$RECEIPT" "main_host=claude" "receipt records declared main host metadata"
 assert_contains "$RECEIPT" "turn_results=11" "receipt binds all turn results"
 assert_contains "$RECEIPT" "session_id.simplifier=sid-simplifier" "receipt binds exact session ids"
 peer_bundle="$(dirname "$RECEIPT")/anonymous-peer-reviews.txt"

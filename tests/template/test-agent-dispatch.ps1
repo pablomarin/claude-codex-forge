@@ -43,14 +43,8 @@ function Set-State([string]$Repository, [string]$Base, [string]$BaseRef) {
     $body = "<!-- forge:state-schema v6 -->`n# Project State`n`n## Identity`n`n| Field | Value |`n| --- | --- |`n| Worktree root | $rootPath |`n| Git common directory | $common |`n| Last active host | claude |`n| Workflow base ref | $BaseRef |`n| Workflow base SHA | $Base |`n`n## Workflow`n`n## Receipts`n| Field | Value |`n| Review iteration | 1 |`n"
     [IO.File]::WriteAllText((Join-Path $Repository '.forge/local/state.md'), $body)
 }
-function Set-Context([string]$Repository, [string]$EngineHost, [string]$Session) {
-    $env:FORGE_HOST_CONTEXT_TEST_MODE = '1'; $env:FORGE_HOST_CONTEXT_TEST_ROOT = Join-Path $Repository '.forge/local/test-host-authority'; $env:FORGE_HOST_CONTEXT_TEST_LAUNCHER = $dispatcher
-    Push-Location $Repository
-    try { $contextRc = Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$hostContext,'-Mode','issue-test','-Host',$EngineHost,'-SessionId',$Session); if ($contextRc -ne 0) { throw 'context capture failed' } }
-    finally { Pop-Location }
-}
 function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Session, [string]$Requested, [string]$Role = 'general', [string]$Fallback = 'automatic', [string]$Conversation = 'ephemeral', [string]$ExactSession = '', [string]$SessionOutput = '', [string]$PromptText = '', [string]$OutputPath = '', [string]$Artifact = 'git:working-tree') {
-    if ($Conversation -ne 'resume') { Set-Context $Repository $EngineHost $Session }
+    $env:FORGE_HOST_CONTEXT_TEST_MODE = '1'; $env:FORGE_HOST_CONTEXT_TEST_LAUNCHER = $dispatcher
     $script:DispatchSequence++; $prompt = Join-Path $Repository '.forge/local/reviews/prompt.txt'
     if ($PromptText) { [IO.File]::WriteAllText($prompt, $PromptText) }
     elseif ($Role -like 'council-*') { $question = Get-ShaTextForTest 'stable council question'; [IO.File]::WriteAllText($prompt, "question_hash=$question`nreview`n") } else { [IO.File]::WriteAllText($prompt, "review`n") }
@@ -72,6 +66,12 @@ function Get-ShaFileForTest([string]$Path) { $sha = [Security.Cryptography.SHA25
 
 try {
     Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-Command','exit 2')) 2 'PowerShell child helper preserves a nonzero exit code'
+    $hookRepo = New-Repository 'no receipt hook'; $hookAuthority = Join-Path $hookRepo '.forge/local/test-host-authority'; $env:FORGE_HOST_CONTEXT_TEST_MODE = '1'; $env:FORGE_HOST_CONTEXT_TEST_ROOT = $hookAuthority; $env:FORGE_HOST_CONTEXT_TEST_LAUNCHER = $dispatcher
+    Push-Location $hookRepo
+    try { '{"session_id":"ignored"}' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hostContext -Mode hook -Host claude | Out-Null; $hookRc = $LASTEXITCODE }
+    finally { Pop-Location }
+    Assert-Equal $hookRc 0 'PowerShell compatibility hook exits successfully'
+    Assert-True (-not (Test-Path -LiteralPath $hookAuthority)) 'PowerShell compatibility hook creates no host authority directory'
     New-Item -ItemType Directory -Path $bin -Force | Out-Null
     [IO.File]::WriteAllText($contextLauncher, @'
 param([string]$ContextPath, [string]$EngineHost, [string]$ArgumentsJsonPath)
@@ -178,8 +178,8 @@ public static class ForgeFakeEngine {
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'auto') 2 'artifact block never triggers engine fallback'
     Assert-Equal (Get-ReceiptValue $repo 'fallback') 'false' 'artifact block records no fallback'
 
-    Write-Host 'PowerShell protected host ambiguity and atomic output publication'
-    $repo = New-Repository 'ambiguous hosts'; Set-Context $repo 'claude' 'claude-live'; $env:FAKE_CODEX_BEHAVIOR = 'clean'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
+    Write-Host 'PowerShell receipt-free host switching and atomic output publication'
+    $repo = New-Repository 'ambiguous hosts'; $env:FAKE_CODEX_BEHAVIOR = 'clean'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
     Assert-Equal (Invoke-Dispatch $repo 'codex' 'codex-live' 'auto') 0 'current Codex session can launch while Claude is also active'
     $repo = New-Repository 'atomic output'; $protected = Join-Path $repo '.forge/local/protected-output'; [IO.File]::WriteAllText($protected, "protected`n"); $protectedHash = Get-ShaFileForTest $protected
     $racedOutput = Join-Path $repo '.forge/local/reviews/raced-output'; $swapControl = Join-Path $repo '.forge/local/swap-control'; [IO.File]::WriteAllLines($swapControl, @($racedOutput, $protected))
@@ -192,6 +192,7 @@ public static class ForgeFakeEngine {
     $repo = New-Repository 'exact resume'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'; $sessionOutput = Join-Path $repo '.forge/local/reviews/session.id'; $log = Join-Path $repo '.forge/local/reviews/claude.log'; $env:FAKE_CLAUDE_LOG = $log
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'claude' 'council-advisor' 'none' 'new' '' $sessionOutput) 0 'Claude council new turn succeeds'
     $exact = (Get-Content -LiteralPath $sessionOutput -Raw).Trim()
+    Assert-NotContains (Join-Path $repo ".forge/local/reviews/sessions/$exact.meta") 'context_hash=' 'PowerShell council session metadata carries no host receipt hash'
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'claude' 'council-advisor' 'none' 'resume' $exact) 0 'Claude exact-id resume succeeds'
     Assert-Contains $log "--session-id $exact" 'new turn binds exact Claude session'
     Assert-Contains $log "--resume $exact" 'second turn resumes exact Claude session'
@@ -313,6 +314,7 @@ public static class ForgeFakeEngine {
     Assert-True ([string]$sessionEntry.commandWindows -like '*codex-worktree-dispatch.ps1*' -and [string]$sessionEntry.commandWindows -like '*session-start.ps1*') 'other Codex hooks retain worktree routing'
 }
 finally {
+    Remove-Item Env:FORGE_HOST_CONTEXT_TEST_MODE,Env:FORGE_HOST_CONTEXT_TEST_ROOT,Env:FORGE_HOST_CONTEXT_TEST_LAUNCHER -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
 }
 

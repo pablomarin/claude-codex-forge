@@ -27,7 +27,7 @@ usage: council-dispatch.ps1 --question-file FILE --artifact ARTIFACT --workflow-
 Six fresh sessions and eleven turns; runtime other failure reruns the complete topology on main (same-engine-fallback).
 '@ }
 $self = Split-Path -Parent $MyInvocation.MyCommand.Path; $root = (Resolve-Path (Join-Path $self '..\..')).Path
-$agent = Join-Path $self 'agent-dispatch.ps1'; $hostContext = Join-Path $self 'host-context.ps1'; $capabilities = Join-Path $root 'host-capabilities.tsv'
+$agent = Join-Path $self 'agent-dispatch.ps1'; $capabilities = Join-Path $root 'host-capabilities.tsv'
 if (-not (Test-Path -LiteralPath $capabilities)) { $capabilities = Join-Path $root 'manifests\host-capabilities.tsv' }
 $question = ''; $artifact = ''; $baseSha = ''; $baseRef = ''; $timeout = '1200'; $overrides = @()
 for ($i=0; $i -lt $Arguments.Count; ) { switch ($Arguments[$i]) {
@@ -41,7 +41,7 @@ for ($i=0; $i -lt $Arguments.Count; ) { switch ($Arguments[$i]) {
   default { Stop-Council "unknown argument $($Arguments[$i])" }
 }}
 if (-not (Test-Path -LiteralPath $question -PathType Leaf) -or !$artifact -or !$baseSha -or !$baseRef) { Stop-Council 'question, artifact, and workflow base are required' }
-$main = (& $hostContext verify 2>$null); if ($LASTEXITCODE -ne 0 -or $main -notin @('claude','codex')) { Stop-Council 'protected main host context is required' }
+$main = $env:FORGE_NATIVE_HOST; if ($main -cnotin @('claude','codex')) { Stop-Council 'declared main host must be claude or codex' }
 $other = if ($main -eq 'claude') { 'codex' } else { 'claude' }
 $seats=@('simplifier','scalability_hawk','pragmatist','contrarian','maintainer'); $labels=@{simplifier='A';scalability_hawk='B';pragmatist='C';contrarian='D';maintainer='E'}; $personas=@{simplifier='The Simplifier';scalability_hawk='The Scalability Hawk';pragmatist='The Pragmatist';contrarian='The Contrarian';maintainer='The Maintainer'}; $engine=@{simplifier=$main;scalability_hawk=$main;pragmatist=$main;contrarian=$other;maintainer=$other;chair=$other}; $custom=$false
 foreach ($entry in $overrides) { $parts=$entry -split '=',2; if ($parts.Count -ne 2 -or $parts[0] -notin @($seats + 'chair')) { Stop-Council 'invalid seat override' }; $value=$parts[1]; if ($value -eq 'main') {$value=$main}; if ($value -eq 'other') {$value=$other}; if ($value -notin @('claude','codex')) { Stop-Council 'invalid seat engine' }; $engine[$parts[0]]=$value; $custom=$true }

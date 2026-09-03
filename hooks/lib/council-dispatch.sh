@@ -6,7 +6,6 @@ set -u
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 ROOT=$(cd "$SELF_DIR/../.." && pwd -P)
 AGENT_DISPATCH="$SELF_DIR/agent-dispatch.sh"
-HOST_CONTEXT="$SELF_DIR/host-context.sh"
 CAPABILITIES="$ROOT/host-capabilities.tsv"
 [ -f "$CAPABILITIES" ] || CAPABILITIES="$ROOT/manifests/host-capabilities.tsv"
 hash_stream() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'; else sha256sum | awk '{print $1}'; fi; }
@@ -37,8 +36,8 @@ done
 [ -n "$artifact" ] && [ -n "$base_sha" ] && [ -n "$base_ref" ] || die 'artifact and workflow base are required'
 case "$timeout" in ''|*[!0-9]*) die 'timeout must be positive' ;; esac
 
-main=$(bash "$HOST_CONTEXT" verify 2>/dev/null) || die 'protected main host context is required'
-case "$main" in claude|codex) ;; *) die 'invalid protected main host' ;; esac
+main=${FORGE_NATIVE_HOST:-}
+case "$main" in claude|codex) ;; *) die 'declared main host must be claude or codex' ;; esac
 other=claude; [ "$main" = claude ] && other=codex
 declare -a seats=(simplifier scalability_hawk pragmatist contrarian maintainer)
 engine_simplifier=$main; engine_scalability_hawk=$main; engine_pragmatist=$main

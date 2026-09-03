@@ -37,17 +37,9 @@ write_state() {
     } > "$dir/.forge/local/state.md"
 }
 
-capture_context() {
-    local dir="$1" host="$2" session="$3"
-    (cd "$dir" && FORGE_HOST_CONTEXT_TEST_MODE=1 FORGE_HOST_CONTEXT_TEST_ROOT="$dir/.forge/local/test-host-authority" \
-      FORGE_HOST_CONTEXT_TEST_LAUNCHER="$DISPATCH" bash "$HOST_CONTEXT" issue-test --host "$host" --session-id "$session") >/dev/null
-    # Deliberately workspace-authored legacy context used only by direct-call rejection rows.
-    printf 'schema_version=1\nactive_host=%s\nsession_id=%s\n' "$host" "$session" > "$dir/.forge/local/host.ctx"
-}
-
 launch_dispatch() {
     local dir="$1" host="$2"; shift 2
-    (cd "$dir" && PATH="$FAKES:$PATH" FORGE_HOST_CONTEXT_TEST_MODE=1 FORGE_HOST_CONTEXT_TEST_ROOT="$dir/.forge/local/test-host-authority" \
+    (cd "$dir" && PATH="$FAKES:$PATH" FORGE_HOST_CONTEXT_TEST_MODE=1 \
       FORGE_HOST_CONTEXT_TEST_LAUNCHER="$DISPATCH" FORGE_DISPATCH_TEST_MODE=1 \
       bash "$HOST_CONTEXT" launch --host "$host" -- "$DISPATCH" "$@")
 }
@@ -70,24 +62,37 @@ assert_receipt_value() {
     assert_equals "$got" "$want" "$key=$want"
 }
 
+start_test "host compatibility hook and launcher need no receipt authority"
+S=$(scratch_dir dispatch-no-host-receipt); make_repo "$S"; mkdir -p "$S/home"
+printf '{"session_id":"ignored","cwd":"%s"}\n' "$S" \
+  | (cd "$S" && HOME="$S/home" bash "$HOST_CONTEXT" hook --host claude)
+assert_equals "$?" "0" "legacy hook command remains a successful compatibility no-op"
+assert_file_missing "$S/home/.forge/host-contexts" "compatibility hook creates no host authority directory"
+printf 'review\n' > "$S/prompt.txt"
+run_dispatch "$S" claude ignored auto >/dev/null 2>&1
+assert_equals "$?" "0" "fixed launcher reaches review without a receipt"
+assert_receipt_value "$S" main_host claude
+assert_receipt_value "$S" first_attempted_engine codex
+assert_receipt_value "$S" actual_engine codex
+
 start_test "four main/reviewer modes and deterministic auto selection"
 for tuple in 'claude codex codex false' 'codex claude claude false' 'claude claude claude false' 'codex codex codex false'; do
     set -- $tuple; host="$1" requested="$2" actual="$3" fallback="$4"
-    S=$(scratch_dir "dispatch-$host-$requested"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" "$host" sid
+    S=$(scratch_dir "dispatch-$host-$requested"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
     if run_dispatch "$S" "$host" sid "$requested" >/dev/null 2>&1; then pass "$host main can select $requested reviewer"; else fail "$host main failed $requested reviewer"; fi
     assert_receipt_value "$S" actual_engine "$actual"
     assert_receipt_value "$S" fallback "$fallback"
 done
 for tuple in 'claude codex' 'codex claude'; do
     set -- $tuple; host="$1" actual="$2"
-    S=$(scratch_dir "dispatch-auto-$host"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" "$host" sid
+    S=$(scratch_dir "dispatch-auto-$host"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
     run_dispatch "$S" "$host" sid auto >/dev/null 2>&1
     assert_receipt_value "$S" actual_engine "$actual"
 done
 
 start_test "single-file artifacts reach the isolated reviewer without Git metadata"
 S=$(scratch_dir dispatch-file-artifact); make_repo "$S"; printf 'review one file\n' > "$S/prompt.txt"
-printf 'bounded plan artifact\n' > "$S/plan.md"; capture_context "$S" claude sid
+printf 'bounded plan artifact\n' > "$S/plan.md"
 base=$(git -C "$S" rev-parse HEAD)
 if launch_dispatch "$S" claude run --engine codex --fallback-policy none --role plan --profile review \
     --artifact file:plan.md --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base \
@@ -130,21 +135,21 @@ else
 fi
 
 start_test "launch/schema failures visibly fall back but semantic findings do not"
-S=$(scratch_dir dispatch-fallback); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-fallback); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FAKE_CODEX_BEHAVIOR=malformed FAKE_CLAUDE_BEHAVIOR=clean run_dispatch "$S" claude sid auto >"$S/stdout" 2>"$S/stderr"
 assert_receipt_value "$S" actual_engine claude
 assert_receipt_value "$S" fallback true
 assert_receipt_value "$S" fallback_reason malformed-result
 assert_contains "$S/stdout" "visible fallback" "fallback is visible on stdout"
 
-S=$(scratch_dir dispatch-findings); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-findings); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FAKE_CODEX_BEHAVIOR=findings FAKE_CLAUDE_BEHAVIOR=clean run_dispatch "$S" claude sid auto >/dev/null 2>&1
 assert_receipt_value "$S" actual_engine codex
 assert_receipt_value "$S" semantic_verdict FINDINGS
 assert_receipt_value "$S" fallback false
 
 for behavior in empty contradictory exit timeout; do
-    S=$(scratch_dir "dispatch-$behavior"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
+    S=$(scratch_dir "dispatch-$behavior"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
     set +e
     FAKE_CODEX_BEHAVIOR="$behavior" FAKE_CLAUDE_BEHAVIOR=clean run_dispatch "$S" claude sid auto general automatic >/dev/null 2>&1
     rc=$?
@@ -154,37 +159,37 @@ for behavior in empty contradictory exit timeout; do
     assert_receipt_value "$S" fallback true
 done
 
-S=$(scratch_dir dispatch-explicit-unavailable); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-explicit-unavailable); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FORGE_TEST_DISABLE_ENGINE=claude FAKE_CODEX_BEHAVIOR=clean run_dispatch "$S" claude sid claude >/dev/null 2>&1
 assert_receipt_value "$S" actual_engine codex
 assert_receipt_value "$S" fallback true
 
-S=$(scratch_dir dispatch-capability-gap); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-capability-gap); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FORGE_TEST_DISABLE_CAPABILITY=codex FAKE_CLAUDE_BEHAVIOR=clean run_dispatch "$S" claude sid auto >/dev/null 2>&1
 assert_receipt_value "$S" actual_engine claude
 assert_receipt_value "$S" fallback_reason missing-required-capability
 
-S=$(scratch_dir dispatch-identity-mismatch); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" codex sid
+S=$(scratch_dir dispatch-identity-mismatch); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FAKE_CLAUDE_BEHAVIOR=identity-mismatch FAKE_CODEX_BEHAVIOR=clean run_dispatch "$S" codex sid auto >/dev/null 2>&1
 assert_receipt_value "$S" actual_engine codex
 assert_receipt_value "$S" fallback_reason observable-identity-mismatch
 
 start_test "artifact/authorization/invariant blocks never trigger fallback; council fallback none"
-S=$(scratch_dir dispatch-artifact); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-artifact); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 set +e; FAKE_CODEX_BEHAVIOR=blocked-artifact FAKE_CLAUDE_BEHAVIOR=clean run_dispatch "$S" claude sid auto >/dev/null 2>&1; rc=$?; set -e
 assert_equals "$rc" "2" "artifact block is non-certifying"
 assert_receipt_value "$S" actual_engine codex
 assert_receipt_value "$S" fallback false
 assert_receipt_value "$S" blocked_class artifact
 
-S=$(scratch_dir dispatch-council); make_repo "$S"; question_hash=$(printf council | shasum -a 256 | awk '{print $1}'); printf 'question_hash=%s\nreview\n' "$question_hash" > "$S/prompt.txt"; capture_context "$S" claude sid; base=$(git -C "$S" rev-parse HEAD)
+S=$(scratch_dir dispatch-council); make_repo "$S"; question_hash=$(printf council | shasum -a 256 | awk '{print $1}'); printf 'question_hash=%s\nreview\n' "$question_hash" > "$S/prompt.txt"; base=$(git -C "$S" rev-parse HEAD)
 set +e; FAKE_CODEX_BEHAVIOR=blocked-engine FAKE_CLAUDE_BEHAVIOR=clean launch_dispatch "$S" claude run --engine codex --fallback-policy none --role council-advisor --profile review --seat-id advisor-1 --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/council.txt" --timeout-seconds 2 >/dev/null 2>&1; rc=$?; set -e
 assert_equals "$rc" "2" "fallback_policy none returns failure to council"
 assert_receipt_value "$S" fallback false
 assert_receipt_value "$S" attempted_engines codex
 
 start_test "council-advisor exact-id new/resume binds seat and stable question while allowing a critique prompt"
-S=$(scratch_dir dispatch-resume); make_repo "$S"; council_prompt="$S/.forge/local/reviews/council-prompt.txt"; question_hash=$(printf 'same council question' | shasum -a 256 | awk '{print $1}'); printf 'question_hash=%s\nfirst advisor prompt\n' "$question_hash" > "$council_prompt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-resume); make_repo "$S"; council_prompt="$S/.forge/local/reviews/council-prompt.txt"; question_hash=$(printf 'same council question' | shasum -a 256 | awk '{print $1}'); printf 'question_hash=%s\nfirst advisor prompt\n' "$question_hash" > "$council_prompt"
 base=$(git -C "$S" rev-parse HEAD)
 write_state "$S" "$base" refs/heads/council-base
 claude_log="$S/.forge/local/reviews/claude.log"
@@ -197,6 +202,8 @@ set -e
 assert_equals "$new_rc" "0" "Claude council first turn succeeds"
 session=$(cat "$S/.forge/local/reviews/session.id" 2>/dev/null || true)
 if [ -n "$session" ]; then pass "new council turn records an exact session id"; else fail "new council turn emitted no session id"; fi
+assert_not_contains "$S/.forge/local/reviews/sessions/$session.meta" "context_hash=" \
+  "council session metadata carries no host receipt hash"
 set +e
 FAKE_CLAUDE_LOG="$claude_log" launch_dispatch "$S" claude run --engine claude --fallback-policy none --role council-advisor --profile review --artifact git:working-tree \
   --workflow-base-sha "$base" --workflow-base-ref refs/heads/council-base --prompt-file "$council_prompt" --output "$S/.forge/local/reviews/council-resume.txt" \
@@ -211,7 +218,7 @@ assert_not_contains "$claude_log" "--tools Read,Grep,Glob,Bash" "Claude review h
 assert_not_contains "$claude_log" "--allowedTools" "Claude review does not grant shell exceptions"
 assert_contains "$claude_log" "home=$HOME user=${USER:-} logname=${LOGNAME:-${USER:-}}" "Claude child preserves the authenticated operator identity"
 
-S=$(scratch_dir dispatch-codex-resume); make_repo "$S"; council_prompt="$S/.forge/local/reviews/council-prompt.txt"; question_hash=$(printf 'same council question' | shasum -a 256 | awk '{print $1}'); printf 'question_hash=%s\nfirst advisor prompt\n' "$question_hash" > "$council_prompt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-codex-resume); make_repo "$S"; council_prompt="$S/.forge/local/reviews/council-prompt.txt"; question_hash=$(printf 'same council question' | shasum -a 256 | awk '{print $1}'); printf 'question_hash=%s\nfirst advisor prompt\n' "$question_hash" > "$council_prompt"
 base=$(git -C "$S" rev-parse HEAD); codex_log="$S/.forge/local/reviews/codex.log"
 write_state "$S" "$base" refs/heads/council-base
 set +e
@@ -252,54 +259,49 @@ assert_contains "$codex_log" "exec resume" "Codex critique uses the exact-id res
 assert_contains "$codex_log" "-a never --sandbox read-only exec resume" "Codex resume places the sandbox option at the supported global boundary"
 assert_contains "$codex_log" "$codex_session" "Codex critique resumes the captured structured thread id"
 
-start_test "stale, copied, and caller-overridden host contexts block"
-S=$(scratch_dir dispatch-context); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid-good
-base=$(git -C "$S" rev-parse HEAD)
-set +e; (cd "$S" && PATH="$FAKES:$PATH" FORGE_NATIVE_HOST=claude FORGE_NATIVE_SESSION_ID=sid-wrong FORGE_HOST_CONTEXT_FILE="$S/.forge/local/host.ctx" FORGE_DISPATCH_TEST_MODE=1 bash "$DISPATCH" run --engine auto --fallback-policy automatic --role general --profile review --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/wrong-session.txt" --timeout-seconds 2) >/dev/null 2>&1; rc=$?; set -e
-assert_equals "$rc" "2" "wrong native session id blocks"
-S2=$(scratch_dir dispatch-context-copy); make_repo "$S2"; printf 'review\n' > "$S2/prompt.txt"; mkdir -p "$S2/.forge/local"; cp "$S/.forge/local/host.ctx" "$S2/.forge/local/host.ctx"
-set +e; run_dispatch "$S2" claude sid-good auto >/dev/null 2>&1; rc=$?; set -e
-assert_equals "$rc" "2" "context copied to another worktree blocks"
-
-start_test "workspace-authored and stale wrong-host contexts cannot launch a reviewer"
-S=$(scratch_dir dispatch-context-authority); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude synthesized
+start_test "declared host metadata is required and legacy receipt variables carry no authority"
+S=$(scratch_dir dispatch-context); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 base=$(git -C "$S" rev-parse HEAD)
 set +e
-(cd "$S" && PATH="$FAKES:$PATH" FORGE_NATIVE_HOST=claude FORGE_NATIVE_SESSION_ID=synthesized FORGE_HOST_CONTEXT_FILE="$S/.forge/local/host.ctx" FORGE_DISPATCH_TEST_MODE=1 bash "$DISPATCH" run --engine auto --fallback-policy automatic --role general --profile review --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/synthesized.txt" --timeout-seconds 2) >/dev/null 2>&1
-synthesized_rc=$?
+(cd "$S" && PATH="$FAKES:$PATH" FORGE_DISPATCH_TEST_MODE=1 bash "$DISPATCH" run --engine auto --fallback-policy automatic --role general --profile review --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/missing-host.txt" --timeout-seconds 2) >/dev/null 2>&1
+missing_host_rc=$?
+(cd "$S" && PATH="$FAKES:$PATH" FORGE_NATIVE_HOST=other FORGE_DISPATCH_TEST_MODE=1 bash "$DISPATCH" run --engine auto --fallback-policy automatic --role general --profile review --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/invalid-host.txt" --timeout-seconds 2) >/dev/null 2>&1
+invalid_host_rc=$?
+(cd "$S" && PATH="$FAKES:$PATH" FORGE_NATIVE_HOST=claude FORGE_NATIVE_SESSION_ID=stale FORGE_HOST_CONTEXT_FILE="$S/missing.ctx" FORGE_HOST_CONTEXT_LAUNCHER_HASH=stale FORGE_DISPATCH_TEST_MODE=1 bash "$DISPATCH" run --engine auto --fallback-policy automatic --role general --profile review --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/legacy-env.txt" --timeout-seconds 2) >/dev/null 2>&1
+legacy_env_rc=$?
 set -e
-assert_equals "$synthesized_rc" "2" "direct dispatcher call cannot promote a workspace-authored context"
+assert_equals "$missing_host_rc" "2" "missing declared host blocks before review"
+assert_equals "$invalid_host_rc" "2" "invalid declared host blocks before review"
+assert_equals "$legacy_env_rc" "0" "legacy receipt variables cannot block or authorize routing"
 
 S=$(scratch_dir dispatch-context-launcher); make_repo "$S"
 bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" --target "$S" --scope project --platform unix >/dev/null 2>&1
 mkdir -p "$S/home"
-(cd "$S" && printf '{"thread_id":"codex-old"}' | HOME="$S/home" FORGE_HOST_CONTEXT_TTL_SECONDS=0 bash .forge/hooks/lib/host-context.sh hook --host codex) >/dev/null 2>&1
-sleep 1
+(cd "$S" && printf '{"thread_id":"codex-old"}' | HOME="$S/home" bash .forge/hooks/lib/host-context.sh hook --host codex) >/dev/null 2>&1
 (cd "$S" && printf '{"session_id":"claude-current"}' | HOME="$S/home" bash .forge/hooks/lib/host-context.sh hook --host claude) >/dev/null 2>&1
 set +e
-(cd "$S" && HOME="$S/home" bash .forge/hooks/lib/host-context.sh launch --host codex -- .forge/hooks/lib/agent-dispatch.sh) >/dev/null 2>&1
-stale_host_rc=$?
 (cd "$S" && HOME="$S/home" bash .forge/hooks/lib/host-context.sh launch --host claude -- /usr/bin/true) >/dev/null 2>&1
 wrong_launcher_rc=$?
 set -e
-assert_equals "$stale_host_rc" "2" "expired Codex receipt cannot launch after a newer Claude session starts"
-assert_equals "$wrong_launcher_rc" "2" "host receipt rejects a launcher whose hash is not bound"
-assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" "council_path" \
-    "PowerShell protected receipt binds the council dispatcher path"
-assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" "council_hash" \
-    "PowerShell protected receipt binds the council dispatcher hash"
+assert_file_missing "$S/home/.forge/host-contexts" "host switches create no shared authority state"
+assert_equals "$wrong_launcher_rc" "2" "compatibility launcher rejects a non-Forge target"
+assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" "LaunchTarget" \
+    "PowerShell compatibility launcher selects a fixed dispatcher target"
+assert_not_contains "$REPO_ROOT/hooks/lib/host-context.ps1" "receipt_hash=" \
+    "PowerShell compatibility launcher creates no receipt"
 assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" "@('-a', 'never', '--sandbox', \$sandbox, 'exec', 'resume')" \
     "PowerShell Codex resume places sandbox before the exec subcommand"
+assert_contains "$REPO_ROOT/hooks/lib/candidate-fingerprint.ps1" 'Invoke-GitTextWithIndex $captureIndex' \
+    "PowerShell candidate capture uses a private index"
 
-start_test "simultaneous native host sessions retain independent fixed launchers"
+start_test "simultaneous native host sessions require no shared authority"
 S=$(scratch_dir dispatch-context-ambiguous); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
-capture_context "$S" claude claude-live
-capture_context "$S" codex codex-live
+base=$(git -C "$S" rev-parse HEAD)
 set +e
-run_dispatch "$S" codex codex-live auto >/dev/null 2>"$S/codex.err"
-codex_live_rc=$?
-run_dispatch "$S" claude claude-live auto >/dev/null 2>"$S/claude.err"
-claude_live_rc=$?
+(launch_dispatch "$S" codex run --engine auto --fallback-policy automatic --role general --profile review --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/concurrent-codex.txt" --timeout-seconds 2 >"$S/codex.out" 2>"$S/codex.err"; echo $? > "$S/codex.rc") & codex_pid=$!
+(launch_dispatch "$S" claude run --engine auto --fallback-policy automatic --role general --profile review --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/concurrent-claude.txt" --timeout-seconds 2 >"$S/claude.out" 2>"$S/claude.err"; echo $? > "$S/claude.rc") & claude_pid=$!
+wait "$codex_pid"; wait "$claude_pid"
+codex_live_rc=$(cat "$S/codex.rc"); claude_live_rc=$(cat "$S/claude.rc")
 set -e
 assert_equals "$codex_live_rc" "0" "current Codex session can launch while Claude is also active"
 assert_equals "$claude_live_rc" "0" "current Claude session can launch while Codex is also active"
@@ -350,7 +352,7 @@ snapshot=$(awk -F= '$1=="snapshot_path" {sub(/^[^=]*=/,""); print}' "$S/fingerpr
 if [ -f "$snapshot/tracked-link" ] && [ ! -L "$snapshot/tracked-link" ]; then pass "tracked symlink is materialized as inert target bytes"; else fail "tracked symlink remained followable in snapshot"; fi
 assert_contains "$snapshot/tracked-link" "app.txt" "inert tracked-link bytes preserve the Git target"
 
-S=$(scratch_dir dispatch-race); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-race); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 candidate_before=$(hash_file "$S/app.txt")
 set +e
 FAKE_CODEX_BEHAVIOR=clean FAKE_MUTATE_REAL="$S/app.txt" run_dispatch "$S" claude sid codex >/dev/null 2>&1
@@ -369,7 +371,7 @@ set +e; (cd "$S" && bash "$FINGERPRINT" capture --artifact git:working-tree --wo
 assert_equals "$rc" "2" "untracked FIFO rejected"
 
 start_test "reviewer cannot rewrite the immutable candidate ref and certify a different range"
-S=$(scratch_dir dispatch-candidate-ref-mutation); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; printf 'candidate change\n' >> "$S/app.txt"; capture_context "$S" codex sid
+S=$(scratch_dir dispatch-candidate-ref-mutation); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; printf 'candidate change\n' >> "$S/app.txt"
 set +e
 FAKE_CLAUDE_BEHAVIOR=mutate-candidate-ref run_dispatch "$S" codex sid claude general none >/dev/null 2>&1
 rc=$?
@@ -394,7 +396,7 @@ if [ ! -e "$ignored_snapshot/.venv" ]; then pass "ignored environment is absent 
 assert_contains "$ignored_snapshot/docs/plans/plan.md" 'canonical plan' "intent-to-add makes an ignored canonical plan reviewable"
 
 start_test "Claude review is isolated from the real cwd and real Forge-local writes"
-S=$(scratch_dir dispatch-claude-isolation); make_repo "$S"; mkdir -p "$S/.claude"; printf 'AMBIENT_CANARY\n' > "$S/.claude/CLAUDE.md"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" codex sid
+S=$(scratch_dir dispatch-claude-isolation); make_repo "$S"; mkdir -p "$S/.claude"; printf 'AMBIENT_CANARY\n' > "$S/.claude/CLAUDE.md"; printf 'review\n' > "$S/prompt.txt"
 claude_log="$S/.forge/local/reviews/claude-isolation.log"
 FAKE_CLAUDE_BEHAVIOR=assert-isolated FAKE_CLAUDE_LOG="$claude_log" run_dispatch "$S" codex sid claude >/dev/null 2>&1
 assert_not_contains "$claude_log" "cwd=$(cd "$S" && pwd -P) " "Claude child cwd is a clean scratch primary"
@@ -407,23 +409,23 @@ assert_equals "$mutation_rc" "0" "real Forge-local mutation path is not exposed 
 assert_hash_equals "$S/.forge/local/state.md" "$state_before" "Claude child cannot mutate real Forge-local state"
 
 start_test "qualified identity, canary, config, and Codex auth are mandatory per attempt"
-S=$(scratch_dir dispatch-identity-required); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" codex sid
+S=$(scratch_dir dispatch-identity-required); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FAKE_CLAUDE_BEHAVIOR=identity-missing FAKE_CODEX_BEHAVIOR=clean run_dispatch "$S" codex sid claude >/dev/null 2>&1
 assert_receipt_value "$S" actual_engine codex
 assert_receipt_value "$S" fallback_reason observable-identity-missing
-S=$(scratch_dir dispatch-canary-required); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" codex sid
+S=$(scratch_dir dispatch-canary-required); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FAKE_CLAUDE_BEHAVIOR=canary-missing FAKE_CODEX_BEHAVIOR=clean run_dispatch "$S" codex sid claude >/dev/null 2>&1
 assert_receipt_value "$S" actual_engine codex
 assert_receipt_value "$S" fallback_reason isolation-canary-missing
-S=$(scratch_dir dispatch-canary-duplicate); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" codex sid
+S=$(scratch_dir dispatch-canary-duplicate); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FAKE_CLAUDE_BEHAVIOR=duplicate-canary run_dispatch "$S" codex sid claude >/dev/null 2>&1
 assert_receipt_value "$S" actual_engine claude
 assert_receipt_value "$S" fallback false
-S=$(scratch_dir dispatch-canary-conflict); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" codex sid
+S=$(scratch_dir dispatch-canary-conflict); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FAKE_CLAUDE_BEHAVIOR=conflicting-canary FAKE_CODEX_BEHAVIOR=clean run_dispatch "$S" codex sid claude >/dev/null 2>&1
 assert_receipt_value "$S" actual_engine codex
 assert_receipt_value "$S" fallback_reason isolation-canary-mismatch
-S=$(scratch_dir dispatch-codex-auth); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid; printf '{"token":"protected"}\n' > "$S/protected-auth.json"
+S=$(scratch_dir dispatch-codex-auth); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; printf '{"token":"protected"}\n' > "$S/protected-auth.json"
 set +e
 FORGE_CODEX_AUTH_FILE="$S/protected-auth.json" FAKE_CODEX_BEHAVIOR=require-auth run_dispatch "$S" claude sid codex general none >/dev/null 2>&1
 auth_rc=$?
@@ -431,7 +433,7 @@ set -e
 assert_equals "$auth_rc" "0" "ephemeral Codex attempt receives protected auth in scratch CODEX_HOME"
 
 start_test "fallback starts from a pristine independent candidate"
-S=$(scratch_dir dispatch-pristine-fallback); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-pristine-fallback); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 set +e
 FAKE_CODEX_BEHAVIOR=mutate-malformed FAKE_CLAUDE_BEHAVIOR=reject-dirty-candidate run_dispatch "$S" claude sid auto >/dev/null 2>&1
 pristine_rc=$?
@@ -439,7 +441,7 @@ set -e
 assert_equals "$pristine_rc" "0" "fallback reviewer never sees failed attempt candidate writes"
 
 start_test "review output and council session paths are confined, no-follow, and no-clobber"
-S=$(scratch_dir dispatch-output-boundary); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid; state_before=$(hash_file "$S/.forge/local/state.md"); base=$(git -C "$S" rev-parse HEAD)
+S=$(scratch_dir dispatch-output-boundary); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; state_before=$(hash_file "$S/.forge/local/state.md"); base=$(git -C "$S" rev-parse HEAD)
 set +e
 launch_dispatch "$S" claude run --engine codex --fallback-policy none --role general --profile review --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/state.md" --timeout-seconds 2 >/dev/null 2>&1
 reserved_output_rc=$?
@@ -466,7 +468,7 @@ assert_hash_equals "$S/.forge/local/state.md" "$state_before" "rejected session 
 
 start_test "council session metadata and stores reject linked reserved ancestors"
 for reserved in sessions session-stores; do
-    S=$(scratch_dir "dispatch-linked-$reserved"); make_repo "$S"; capture_context "$S" claude sid
+    S=$(scratch_dir "dispatch-linked-$reserved"); make_repo "$S"
     outside="$S/outside-$reserved"; mkdir "$outside"
     ln -s "$outside" "$S/.forge/local/reviews/$reserved"
     printf 'question_hash=%s\nlinked reserved path\n' "$(printf question | shasum -a 256 | awk '{print $1}')" > "$S/prompt.txt"
@@ -483,7 +485,7 @@ for reserved in sessions session-stores; do
 done
 
 start_test "reserved output publication atomically replaces a swapped leaf without following it"
-S=$(scratch_dir dispatch-output-race); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid; base=$(git -C "$S" rev-parse HEAD)
+S=$(scratch_dir dispatch-output-race); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; base=$(git -C "$S" rev-parse HEAD)
 protected="$S/.forge/local/protected-output"; printf 'protected\n' > "$protected"; protected_before=$(hash_file "$protected")
 raced_output="$S/.forge/local/reviews/raced-output"
 set +e
@@ -500,7 +502,7 @@ if [ -f "$raced_output" ] && [ ! -L "$raced_output" ]; then pass "published outp
 start_test "investigation launches a fresh full agent in the real worktree"
 for tuple in 'claude codex' 'codex claude'; do
     set -- $tuple; selected="$1"; host="$2"
-    S=$(scratch_dir "dispatch-full-investigation-$selected"); make_repo "$S"; capture_context "$S" "$host" sid
+    S=$(scratch_dir "dispatch-full-investigation-$selected"); make_repo "$S"
     mkdir -p "$S/.forge/memory" "$S/.forge/local/memory"
     printf 'shared durable memory\n' > "$S/.forge/memory/shared.md"
     printf 'shared local memory\n' > "$S/.forge/local/memory/session.md"
@@ -536,7 +538,7 @@ for tuple in 'claude codex' 'codex claude'; do
 done
 
 start_test "investigation role mapping, read-only channel, and dispatcher-owned reproduction are enforced"
-S=$(scratch_dir dispatch-role-profile); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid; base=$(git -C "$S" rev-parse HEAD)
+S=$(scratch_dir dispatch-role-profile); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; base=$(git -C "$S" rev-parse HEAD)
 set +e
 launch_dispatch "$S" claude run --engine codex --fallback-policy none --role general --profile investigate --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/general-investigate" --timeout-seconds 2 >/dev/null 2>&1
 role_profile_rc=$?
@@ -560,7 +562,7 @@ make_repro_fixture() {
   chmod +x "$dir/tests/repro/check.sh"
 }
 match_hash=$(printf 'MATCH\n' | shasum -a 256 | awk '{print $1}'); control_hash=$(printf 'CONTROL\n' | shasum -a 256 | awk '{print $1}')
-S=$(scratch_dir dispatch-repro-wrong-filter); make_repo "$S"; make_repro_fixture "$S"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-repro-wrong-filter); make_repo "$S"; make_repro_fixture "$S"
 cat > "$S/prompt.txt" <<EOF
 schema_version=1
 hypothesis=wrong date filter reproduces finding
@@ -577,7 +579,7 @@ set +e; FAKE_CODEX_BEHAVIOR=repro run_dispatch "$S" claude sid codex investigati
 assert_equals "$repro_wrong_rc" "0" "dispatcher completes an independently failed primary check"
 assert_receipt_value "$S" reproduction_status FAILED
 
-S=$(scratch_dir dispatch-repro-no-control); make_repo "$S"; make_repro_fixture "$S"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-repro-no-control); make_repo "$S"; make_repro_fixture "$S"
 cat > "$S/prompt.txt" <<EOF
 schema_version=1
 hypothesis=primary-only result is not independently controlled
@@ -590,7 +592,7 @@ set +e; run_dispatch "$S" claude sid codex investigation-repro none >/dev/null 2
 assert_equals "$repro_no_control_rc" "0" "missing independent control records an unverifiable result"
 assert_receipt_value "$S" reproduction_status UNVERIFIED
 
-S=$(scratch_dir dispatch-repro-independent); make_repo "$S"; make_repro_fixture "$S"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-repro-independent); make_repo "$S"; make_repro_fixture "$S"
 cat > "$S/prompt.txt" <<EOF
 schema_version=1
 hypothesis=correct filter reproduces finding
@@ -610,7 +612,7 @@ repro_receipt=$(find "$S/.forge/local/reviews" -name '*.receipt' -type f | sort 
 assert_not_contains "$repro_receipt" "primary_check_hash=primary-literal" "reproduction hashes are computed by dispatcher, not copied from child"
 
 start_test "investigation reproduction reuses the qualified no-network candidate boundary"
-S=$(scratch_dir dispatch-repro-boundary); make_repo "$S"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-repro-boundary); make_repo "$S"
 printf 'protected-auth\n' > "$S/protected-auth.json"; state_before=$(hash_file "$S/.forge/local/state.md"); auth_before=$(hash_file "$S/protected-auth.json")
 outside="$S/../repro-external-$RANDOM"; rm -f "$outside"; mkdir -p "$S/tests/repro"
 cat > "$S/tests/repro/boundary.sh" <<EOF
@@ -655,7 +657,7 @@ assert_not_contains "$C/mcp.json" "FORGE_WRITE_MCP" "ambient write-capable MCP e
 assert_contains "$C/mcp.json" '"context7"' "declared read-only query server retained"
 
 start_test "code certification needs distinct same-candidate spec and quality receipts"
-S=$(scratch_dir dispatch-pair); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-pair); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 run_dispatch "$S" claude sid codex code-spec >/dev/null 2>&1; spec=$(find "$S/.forge/local/reviews" -name '*.receipt' | sort | tail -1)
 run_dispatch "$S" claude sid codex code-quality >/dev/null 2>&1; quality=$(find "$S/.forge/local/reviews" -name '*.receipt' | sort | tail -1)
 assert_equals "$(awk -F= '$1=="review_iteration"{print $2}' "$spec")" "1" "spec receipt records the current review iteration"
@@ -695,7 +697,7 @@ assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" "host-context.ps
   "Codex hook template renders host context as a direct invocation"
 
 start_test "child review cannot mutate canonical state or authorization records"
-S=$(scratch_dir dispatch-state); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; printf 'auth\n' > "$S/.forge/local/authorization-record"; capture_context "$S" claude sid
+S=$(scratch_dir dispatch-state); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"; printf 'auth\n' > "$S/.forge/local/authorization-record"
 before=$(hash_file "$S/.forge/local/state.md"); auth_before=$(hash_file "$S/.forge/local/authorization-record")
 run_dispatch "$S" claude sid auto >/dev/null 2>&1
 assert_hash_equals "$S/.forge/local/state.md" "$before" "review leaves state byte-identical"

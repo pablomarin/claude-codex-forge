@@ -28,6 +28,17 @@ function Invoke-GitText([string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "BLOCKED[artifact]: git $($Arguments -join ' ') failed" }
     return $result
 }
+function Invoke-GitTextWithIndex([string]$Index, [string[]]$Arguments) {
+    $savedIndex = $env:GIT_INDEX_FILE
+    try {
+        $env:GIT_INDEX_FILE = $Index
+        return Invoke-GitText $Arguments
+    }
+    finally {
+        if ($null -eq $savedIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue }
+        else { $env:GIT_INDEX_FILE = $savedIndex }
+    }
+}
 function Get-StateValue([string]$Path, [string]$Field) {
     $matches = New-Object System.Collections.Generic.List[string]
     foreach ($line in [IO.File]::ReadAllLines($Path)) {
@@ -47,6 +58,17 @@ function Write-GitDiff([string]$Root, [string[]]$Arguments, [string]$Destination
     & git -C $Root @Arguments "--output=$Destination"
     if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: Git diff capture failed' }
 }
+function Write-GitDiffWithIndex([string]$Root, [string]$Index, [string[]]$Arguments, [string]$Destination) {
+    $savedIndex = $env:GIT_INDEX_FILE
+    try {
+        $env:GIT_INDEX_FILE = $Index
+        Write-GitDiff $Root $Arguments $Destination
+    }
+    finally {
+        if ($null -eq $savedIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue }
+        else { $env:GIT_INDEX_FILE = $savedIndex }
+    }
+}
 function Test-InExcludedTree([string]$Relative) {
     return $Relative -eq '.git' -or $Relative.StartsWith('.git\') -or
         $Relative -eq '.forge\local' -or $Relative.StartsWith('.forge\local\')
@@ -64,10 +86,18 @@ function Get-NoFollowTreeItems([string]$Root) {
         }
     }
 }
-function Get-UntrackedPaths([string]$Root) {
-    $paths = @(& git -c core.quotepath=false -C $Root ls-files --others --exclude-standard -- . ':(exclude).forge/local/**')
-    if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: cannot enumerate untracked paths' }
-    return @($paths | Sort-Object)
+function Get-UntrackedPaths([string]$Root, [string]$Index) {
+    $savedIndex = $env:GIT_INDEX_FILE
+    try {
+        $env:GIT_INDEX_FILE = $Index
+        $paths = @(& git -c core.quotepath=false -C $Root ls-files --others --exclude-standard -- . ':(exclude).forge/local/**')
+        if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: cannot enumerate untracked paths' }
+        return @($paths | Sort-Object)
+    }
+    finally {
+        if ($null -eq $savedIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue }
+        else { $env:GIT_INDEX_FILE = $savedIndex }
+    }
 }
 function Assert-SafeRelative([string]$Relative) {
     if (-not $Relative -or [IO.Path]::IsPathRooted($Relative) -or $Relative -match '(^|[\\/])\.\.([\\/]|$)' -or $Relative.Contains("`n") -or $Relative.Contains("`r")) {
@@ -88,14 +118,22 @@ function Get-UntrackedManifest([string]$Root, [string[]]$Paths) {
     }
     return $manifest
 }
-function Assert-NoUntrackedReparse([string]$Root) {
-    foreach ($item in Get-NoFollowTreeItems $Root) {
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { continue }
-        $relative = $item.FullName.Substring($Root.Length).TrimStart('\', '/')
-        & git -C $Root check-ignore -q -- $relative 2>$null
-        if ($LASTEXITCODE -eq 0) { continue }
-        & git -C $Root ls-files --error-unmatch -- $relative 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "BLOCKED[artifact]: untracked junction or reparse point rejected: $relative" }
+function Assert-NoUntrackedReparse([string]$Root, [string]$Index) {
+    $savedIndex = $env:GIT_INDEX_FILE
+    try {
+        $env:GIT_INDEX_FILE = $Index
+        foreach ($item in Get-NoFollowTreeItems $Root) {
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { continue }
+            $relative = $item.FullName.Substring($Root.Length).TrimStart('\', '/')
+            & git -C $Root check-ignore -q -- $relative 2>$null
+            if ($LASTEXITCODE -eq 0) { continue }
+            & git -C $Root ls-files --error-unmatch -- $relative 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "BLOCKED[artifact]: untracked junction or reparse point rejected: $relative" }
+        }
+    }
+    finally {
+        if ($null -eq $savedIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue }
+        else { $env:GIT_INDEX_FILE = $savedIndex }
     }
 }
 
@@ -288,15 +326,24 @@ try {
     & git -C $root merge-base --is-ancestor $base $head 2>$null
     if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: workflow base is not an ancestor of HEAD' }
     $worktreeIdentity = Get-ShaText "$root|$common`n"
-    $indexTree = Invoke-GitText @('-C', $root, 'write-tree')
+    $rootIndexRaw = Invoke-GitText @('-C', $root, 'rev-parse', '--git-path', 'index')
+    $rootIndex = if ([IO.Path]::IsPathRooted($rootIndexRaw)) { [IO.Path]::GetFullPath($rootIndexRaw) } else { [IO.Path]::GetFullPath((Join-Path $root $rootIndexRaw)) }
+    $rootIndexItem = Get-Item -LiteralPath $rootIndex -Force
+    if ($rootIndexItem.PSIsContainer -or (($rootIndexItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'BLOCKED[artifact]: worktree index must be a no-follow regular file' }
+    $captureIndex = New-TaskTemporaryFile 'forge-index'
+    $recheckIndex = New-TaskTemporaryFile 'forge-index-recheck'
+    Copy-Item -LiteralPath $rootIndex -Destination $captureIndex -Force
+    # Isolate even read-only capture commands because write-tree may update the
+    # cache extension and contend with another review on the live index.lock.
+    $indexTree = Invoke-GitTextWithIndex $captureIndex @('-C', $root, 'write-tree')
     $stagedPatch = New-TaskTemporaryFile 'forge-staged'
     $unstagedPatch = New-TaskTemporaryFile 'forge-unstaged'
-    Write-GitDiff $root @('diff', '--cached', '--binary', 'HEAD') $stagedPatch
-    Write-GitDiff $root @('diff', '--binary') $unstagedPatch
+    Write-GitDiffWithIndex $root $captureIndex @('diff', '--cached', '--binary', 'HEAD') $stagedPatch
+    Write-GitDiffWithIndex $root $captureIndex @('diff', '--binary') $unstagedPatch
     $stagedHash = Get-ShaFile $stagedPatch
     $unstagedHash = Get-ShaFile $unstagedPatch
-    Assert-NoUntrackedReparse $root
-    $untrackedPaths = Get-UntrackedPaths $root
+    Assert-NoUntrackedReparse $root $captureIndex
+    $untrackedPaths = Get-UntrackedPaths $root $captureIndex
     $manifest = Get-UntrackedManifest $root $untrackedPaths
     $manifestText = (@($manifest) -join "`n") + "`n"
     $untrackedHash = Get-ShaText $manifestText
@@ -401,14 +448,15 @@ try {
     }
 
     if ((Invoke-GitText @('-C', $root, 'rev-parse', 'HEAD')) -cne $head) { throw 'BLOCKED[artifact]: HEAD changed during capture' }
-    if ((Invoke-GitText @('-C', $root, 'write-tree')) -cne $indexTree) { throw 'BLOCKED[artifact]: index changed during capture' }
+    Copy-Item -LiteralPath $rootIndex -Destination $recheckIndex -Force
+    if ((Invoke-GitTextWithIndex $recheckIndex @('-C', $root, 'write-tree')) -cne $indexTree) { throw 'BLOCKED[artifact]: index changed during capture' }
     $stagedRecheck = New-TaskTemporaryFile 'forge-staged-recheck'
     $unstagedRecheck = New-TaskTemporaryFile 'forge-unstaged-recheck'
-    Write-GitDiff $root @('diff', '--cached', '--binary', 'HEAD') $stagedRecheck
-    Write-GitDiff $root @('diff', '--binary') $unstagedRecheck
+    Write-GitDiffWithIndex $root $recheckIndex @('diff', '--cached', '--binary', 'HEAD') $stagedRecheck
+    Write-GitDiffWithIndex $root $recheckIndex @('diff', '--binary') $unstagedRecheck
     if ((Get-ShaFile $stagedRecheck) -cne $stagedHash -or (Get-ShaFile $unstagedRecheck) -cne $unstagedHash) { throw 'BLOCKED[artifact]: tracked content changed during capture' }
-    Assert-NoUntrackedReparse $root
-    $pathsAfter = Get-UntrackedPaths $root
+    Assert-NoUntrackedReparse $root $recheckIndex
+    $pathsAfter = Get-UntrackedPaths $root $recheckIndex
     if ((@($pathsAfter) -join "`n") -cne (@($untrackedPaths) -join "`n")) { throw 'BLOCKED[artifact]: untracked path set changed during capture' }
     $manifestAfter = Get-UntrackedManifest $root $pathsAfter
     if ((@($manifestAfter) -join "`n") -cne (@($manifest) -join "`n")) { throw 'BLOCKED[artifact]: untracked content changed during capture' }

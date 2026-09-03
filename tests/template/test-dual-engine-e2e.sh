@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Compact Task 11 integration contract. The 17 acceptance rows map to their
-# owning suites; only the install -> host-context -> fallback seam runs here.
+# Compact Task 11 integration contract. The acceptance rows map to their
+# owning suites; only the install -> declared-host -> fallback seam runs here.
 set -u
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 # shellcheck source=lib.sh
@@ -109,8 +109,6 @@ EOF
 printf 'Review the installed seam.\n' > "$P/.forge/local/reviews/prompt.txt"
 dispatcher="$P/.forge/hooks/lib/agent-dispatch.sh"
 context="$P/.forge/hooks/lib/host-context.sh"
-(cd "$P" && printf '{"session_id":"seam-session","cwd":"%s"}\n' "$P" \
-    | HOME="$H" bash "$context" hook --host claude) >/dev/null
 before=$(hash_file "$P/.forge/local/state.md")
 (cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 FORGE_TEST_DISABLE_ENGINE=codex \
     bash "$context" launch --host claude -- "$dispatcher" run --engine auto \
@@ -125,5 +123,30 @@ assert_contains "$receipt" 'first_attempted_engine=codex' "receipt records the u
 assert_contains "$receipt" 'actual_engine=claude' "receipt records the fresh same-engine reviewer"
 assert_contains "$receipt" 'fallback=true' "receipt records degraded topology"
 assert_hash_equals "$P/.forge/local/state.md" "$before" "reviewer does not mutate canonical workflow state"
+assert_file_missing "$H/.forge/host-contexts" "installed review needs no host authority directory"
+
+(cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 FORGE_TEST_DISABLE_ENGINE=codex \
+    bash "$context" launch --host codex -- "$dispatcher" run --engine auto \
+    --fallback-policy automatic --role general --profile review --artifact git:working-tree \
+    --workflow-base-sha "$base" --workflow-base-ref "refs/heads/$branch" \
+    --prompt-file "$P/.forge/local/reviews/prompt.txt" \
+    --output "$P/.forge/local/reviews/codex-main-result.txt" --timeout-seconds 2) >/dev/null 2>&1
+assert_equals "$?" "0" "a later Codex-declared session reaches the same installed project"
+if grep -l '^main_host=codex$' "$P/.forge/local/reviews/"*.receipt >/dev/null 2>&1; then
+    pass "later review records Codex as declared routing host"
+else
+    fail "later review omitted Codex declared routing metadata"
+fi
+
+(cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 FORGE_TEST_DISABLE_ENGINE=codex \
+    bash "$context" launch --host claude -- "$dispatcher" run --engine claude --fallback-policy none --role general --profile review --artifact git:working-tree \
+    --workflow-base-sha "$base" --workflow-base-ref "refs/heads/$branch" --prompt-file "$P/.forge/local/reviews/prompt.txt" --output "$P/.forge/local/reviews/concurrent-claude.txt" --timeout-seconds 2 >"$S/concurrent-claude.log" 2>&1; echo $? > "$S/concurrent-claude.rc") & claude_pid=$!
+(cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 FORGE_TEST_DISABLE_ENGINE=codex \
+    bash "$context" launch --host codex -- "$dispatcher" run --engine claude --fallback-policy none --role general --profile review --artifact git:working-tree \
+    --workflow-base-sha "$base" --workflow-base-ref "refs/heads/$branch" --prompt-file "$P/.forge/local/reviews/prompt.txt" --output "$P/.forge/local/reviews/concurrent-codex.txt" --timeout-seconds 2 >"$S/concurrent-codex.log" 2>&1; echo $? > "$S/concurrent-codex.rc") & codex_pid=$!
+wait "$claude_pid"; wait "$codex_pid"
+assert_equals "$(cat "$S/concurrent-claude.rc")" "0" "concurrent Claude-declared review succeeds"
+assert_equals "$(cat "$S/concurrent-codex.rc")" "0" "concurrent Codex-declared review succeeds"
+assert_file_missing "$H/.forge/host-contexts" "concurrent reviews create no shared host authority"
 
 report "test-dual-engine-e2e.sh"
