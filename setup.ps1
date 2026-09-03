@@ -305,7 +305,9 @@ function Copy-TemplateFile {
 if ($Global) {
     & (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target $HOME -Scope global -Platform windows
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "GOAL_OVERLAY: BLOCKED until qualify-goal-feasibility.ps1 records both native hosts"
+    Write-Host "GLOBAL_HARNESS: MATERIALIZED"
+    Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+    Write-Host "NATIVE_GOAL_RUNTIME: PENDING qualification via qualify-goal-feasibility.ps1"
     Write-Host "Global Forge v6 materialized for Claude Code and Codex. No permanent main agent was selected."
     exit 0
 

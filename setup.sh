@@ -308,7 +308,9 @@ if [[ "$GLOBAL" == true ]]; then
     echo "INSTALLATION: MATERIALIZED"
     echo "claude RUNTIME_READY: BLOCKED pending authenticated scripts/verify-runtime.sh sentinel"
     echo "codex RUNTIME_READY: BLOCKED pending authenticated scripts/verify-runtime.sh sentinel"
-    echo "GOAL_OVERLAY: BLOCKED until scripts/qualify-goal-feasibility.sh records both native hosts"
+    echo "GLOBAL_HARNESS: MATERIALIZED"
+    echo "NORMAL_PROJECT_WORKFLOWS: READY"
+    echo "NATIVE_GOAL_RUNTIME: PENDING qualification via scripts/qualify-goal-feasibility.sh"
     echo "Global Forge v6 materialized for Claude Code and Codex. No permanent main agent was selected."
     exit 0
 

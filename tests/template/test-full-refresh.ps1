@@ -535,6 +535,7 @@ try {
     Write-AdversarialV5State $project
     $projectOperatorHome = Join-Path $scratch "unused-home"
     Write-Text (Join-Path $projectOperatorHome ".forge\bin\forge-goal-authorize.ps1") "# operator helper`n"
+    Write-Text (Join-Path $projectOperatorHome ".forge\version") "6`n"
     Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/README.md" `
         (Join-Path $project "docs\adr\README.md")
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
@@ -544,9 +545,11 @@ try {
         -not $first.Output.Contains("CODEX_HOOKS: BLOCKED linked worktree") -and
         $first.Output.Contains("VERIFY_RUNTIME: '$(Join-Path $project '.forge\bin\verify-runtime')' live --project-root '$project'")) `
         "PowerShell transaction diagnostics describe the live primary project"
-    Assert-True ($first.Output.Contains("GOAL_OVERLAY: BLOCKED pending qualify-goal-feasibility.ps1") -and
-        -not $first.Output.Contains("GOAL_OVERLAY: BLOCKED run")) `
-        "PowerShell transaction diagnostics inspect the operator home"
+    Assert-True ($first.Output.Contains("GLOBAL_HARNESS: MATERIALIZED") -and
+        $first.Output.Contains("NORMAL_PROJECT_WORKFLOWS: READY") -and
+        $first.Output.Contains("NATIVE_GOAL_RUNTIME: PENDING qualification via qualify-goal-feasibility.ps1") -and
+        -not $first.Output.Contains("GOAL_OVERLAY: BLOCKED")) `
+        "PowerShell transaction diagnostics separate global harness, project workflows, and native goal qualification"
     Assert-True ($first.Output.Contains("DELETED: docs/adr/README.md (exact released Forge seed)") -and
         -not (Test-Path -LiteralPath (Join-Path $project "docs\adr\README.md"))) `
         "PowerShell report distinguishes exact retired Forge seed deletion"
@@ -655,6 +658,19 @@ try {
     $globalPreview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R", "-DryRun") `
         -Environment @{ HOME = $globalPreviewHome; USERPROFILE = $globalPreviewHome }
     Assert-True ($globalPreview.Code -eq 0 -and $globalPreview.Output.Contains("UPGRADE: READY") -and ((Get-ProjectSnapshot $globalPreviewHome) -ceq $globalPreviewBefore)) "setup.ps1 routes global preview to the canonical Windows home without writes"
+
+    $globalAdvisoryHome = Join-Path $scratch "global-current-advisory"
+    Export-GitBlob "d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.template.md" `
+        (Join-Path $globalAdvisoryHome ".claude\CLAUDE.md")
+    Write-Text (Join-Path $globalAdvisoryHome ".claude\.forge-version") "6.0`n"
+    $globalAdvisoryBefore = Get-ProjectSnapshot $globalAdvisoryHome
+    $globalAdvisory = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R", "-DryRun") `
+        -Environment @{ HOME = $globalAdvisoryHome; USERPROFILE = $globalAdvisoryHome }
+    Assert-True ($globalAdvisory.Code -ne 0 -and
+        $globalAdvisory.Output.Contains("ROOT_POLICY_AMBIGUOUS") -and
+        -not $globalAdvisory.Output.Contains("UNSUPPORTED_LEGACY_RELEASE") -and
+        ((Get-ProjectSnapshot $globalAdvisoryHome) -ceq $globalAdvisoryBefore)) `
+        "current project advisory is not treated as Windows global release authority"
     $fixtureHome = Join-Path $scratch "home"
     [IO.Directory]::CreateDirectory($fixtureHome) | Out-Null
     $noncanonicalHome = Join-Path $fixtureHome "..\home"

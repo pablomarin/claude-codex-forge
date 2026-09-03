@@ -638,7 +638,29 @@ if ($Scope -eq "project") {
     } else {
         Write-Host "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
     }
-    if (Test-Path (Join-Path $diagnosticHome ".forge\bin\forge-goal-authorize.ps1")) { Write-Host "GOAL_OVERLAY: BLOCKED pending qualify-goal-feasibility.ps1" }
-    else { Write-Host "GOAL_OVERLAY: BLOCKED run '$RepoRoot\setup.ps1 -Global' from a separate terminal" }
+    $globalVersionPath = Join-Path $diagnosticHome ".forge\version"
+    $globalAuthorizerPath = Join-Path $diagnosticHome ".forge\bin\forge-goal-authorize.ps1"
+    $globalVersionItem = Get-Item -LiteralPath $globalVersionPath -Force -ErrorAction SilentlyContinue
+    $globalAuthorizerItem = Get-Item -LiteralPath $globalAuthorizerPath -Force -ErrorAction SilentlyContinue
+    $globalVersionReady = $false
+    if ($globalVersionItem -and -not $globalVersionItem.PSIsContainer -and
+        -not ($globalVersionItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        $globalVersionReady = ([IO.File]::ReadAllText($globalVersionPath).Trim() -ceq "6")
+    }
+    $globalAuthorizerReady = $globalAuthorizerItem -and -not $globalAuthorizerItem.PSIsContainer -and
+        -not ($globalAuthorizerItem.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    if ($globalVersionReady -and $globalAuthorizerReady) {
+        Write-Host "GLOBAL_HARNESS: MATERIALIZED"
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+        Write-Host "NATIVE_GOAL_RUNTIME: PENDING qualification via qualify-goal-feasibility.ps1"
+    } elseif ($globalVersionItem -or $globalAuthorizerItem) {
+        Write-Host "GLOBAL_HARNESS: PARTIAL canonical version stamp or goal authorization helper missing or invalid"
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+        Write-Host "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; preview repair with '$RepoRoot\setup.ps1 -Global -FullRefresh -DryRun'"
+    } else {
+        Write-Host "GLOBAL_HARNESS: NOT_INSTALLED optional"
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+        Write-Host "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; run '$RepoRoot\setup.ps1 -Global' from a separate terminal to install protected native /goal support"
+    }
     Write-Host "VERIFY_RUNTIME: '$(Join-Path $diagnosticTarget '.forge\bin\verify-runtime')' live --project-root '$diagnosticTarget'"
 }
