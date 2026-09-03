@@ -15,6 +15,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $Utf8 = New-Object System.Text.UTF8Encoding($false)
 $TemporaryFiles = New-Object System.Collections.Generic.List[string]
+$TemporaryDirectories = New-Object System.Collections.Generic.List[string]
+$CaptureObjectDirectory = $null
+$SourceObjectDirectory = $null
 
 function Get-ShaBytes([byte[]]$Bytes) {
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -30,13 +33,23 @@ function Invoke-GitText([string[]]$Arguments) {
 }
 function Invoke-GitTextWithIndex([string]$Index, [string[]]$Arguments) {
     $savedIndex = $env:GIT_INDEX_FILE
+    $savedObjects = $env:GIT_OBJECT_DIRECTORY
+    $savedAlternates = $env:GIT_ALTERNATE_OBJECT_DIRECTORIES
     try {
         $env:GIT_INDEX_FILE = $Index
+        if ($CaptureObjectDirectory) {
+            $env:GIT_OBJECT_DIRECTORY = $CaptureObjectDirectory
+            $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $SourceObjectDirectory
+        }
         return Invoke-GitText $Arguments
     }
     finally {
         if ($null -eq $savedIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue }
         else { $env:GIT_INDEX_FILE = $savedIndex }
+        if ($null -eq $savedObjects) { Remove-Item Env:GIT_OBJECT_DIRECTORY -ErrorAction SilentlyContinue }
+        else { $env:GIT_OBJECT_DIRECTORY = $savedObjects }
+        if ($null -eq $savedAlternates) { Remove-Item Env:GIT_ALTERNATE_OBJECT_DIRECTORIES -ErrorAction SilentlyContinue }
+        else { $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $savedAlternates }
     }
 }
 function Get-StateValue([string]$Path, [string]$Field) {
@@ -54,19 +67,35 @@ function New-TaskTemporaryFile([string]$Stem) {
     $TemporaryFiles.Add($path) | Out-Null
     return $path
 }
+function New-TaskTemporaryDirectory([string]$Stem) {
+    $path = Join-Path ([IO.Path]::GetTempPath()) ("$Stem-" + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $path | Out-Null
+    $TemporaryDirectories.Add($path) | Out-Null
+    return $path
+}
 function Write-GitDiff([string]$Root, [string[]]$Arguments, [string]$Destination) {
     & git -C $Root @Arguments "--output=$Destination"
     if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: Git diff capture failed' }
 }
 function Write-GitDiffWithIndex([string]$Root, [string]$Index, [string[]]$Arguments, [string]$Destination) {
     $savedIndex = $env:GIT_INDEX_FILE
+    $savedObjects = $env:GIT_OBJECT_DIRECTORY
+    $savedAlternates = $env:GIT_ALTERNATE_OBJECT_DIRECTORIES
     try {
         $env:GIT_INDEX_FILE = $Index
+        if ($CaptureObjectDirectory) {
+            $env:GIT_OBJECT_DIRECTORY = $CaptureObjectDirectory
+            $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $SourceObjectDirectory
+        }
         Write-GitDiff $Root $Arguments $Destination
     }
     finally {
         if ($null -eq $savedIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue }
         else { $env:GIT_INDEX_FILE = $savedIndex }
+        if ($null -eq $savedObjects) { Remove-Item Env:GIT_OBJECT_DIRECTORY -ErrorAction SilentlyContinue }
+        else { $env:GIT_OBJECT_DIRECTORY = $savedObjects }
+        if ($null -eq $savedAlternates) { Remove-Item Env:GIT_ALTERNATE_OBJECT_DIRECTORIES -ErrorAction SilentlyContinue }
+        else { $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $savedAlternates }
     }
 }
 function Test-InExcludedTree([string]$Relative) {
@@ -88,8 +117,14 @@ function Get-NoFollowTreeItems([string]$Root) {
 }
 function Get-UntrackedPaths([string]$Root, [string]$Index) {
     $savedIndex = $env:GIT_INDEX_FILE
+    $savedObjects = $env:GIT_OBJECT_DIRECTORY
+    $savedAlternates = $env:GIT_ALTERNATE_OBJECT_DIRECTORIES
     try {
         $env:GIT_INDEX_FILE = $Index
+        if ($CaptureObjectDirectory) {
+            $env:GIT_OBJECT_DIRECTORY = $CaptureObjectDirectory
+            $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $SourceObjectDirectory
+        }
         $paths = @(& git -c core.quotepath=false -C $Root ls-files --others --exclude-standard -- . ':(exclude).forge/local/**')
         if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: cannot enumerate untracked paths' }
         return @($paths | Sort-Object)
@@ -97,6 +132,10 @@ function Get-UntrackedPaths([string]$Root, [string]$Index) {
     finally {
         if ($null -eq $savedIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue }
         else { $env:GIT_INDEX_FILE = $savedIndex }
+        if ($null -eq $savedObjects) { Remove-Item Env:GIT_OBJECT_DIRECTORY -ErrorAction SilentlyContinue }
+        else { $env:GIT_OBJECT_DIRECTORY = $savedObjects }
+        if ($null -eq $savedAlternates) { Remove-Item Env:GIT_ALTERNATE_OBJECT_DIRECTORIES -ErrorAction SilentlyContinue }
+        else { $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $savedAlternates }
     }
 }
 function Assert-SafeRelative([string]$Relative) {
@@ -120,8 +159,14 @@ function Get-UntrackedManifest([string]$Root, [string[]]$Paths) {
 }
 function Assert-NoUntrackedReparse([string]$Root, [string]$Index) {
     $savedIndex = $env:GIT_INDEX_FILE
+    $savedObjects = $env:GIT_OBJECT_DIRECTORY
+    $savedAlternates = $env:GIT_ALTERNATE_OBJECT_DIRECTORIES
     try {
         $env:GIT_INDEX_FILE = $Index
+        if ($CaptureObjectDirectory) {
+            $env:GIT_OBJECT_DIRECTORY = $CaptureObjectDirectory
+            $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $SourceObjectDirectory
+        }
         foreach ($item in Get-NoFollowTreeItems $Root) {
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { continue }
             $relative = $item.FullName.Substring($Root.Length).TrimStart('\', '/')
@@ -134,6 +179,10 @@ function Assert-NoUntrackedReparse([string]$Root, [string]$Index) {
     finally {
         if ($null -eq $savedIndex) { Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue }
         else { $env:GIT_INDEX_FILE = $savedIndex }
+        if ($null -eq $savedObjects) { Remove-Item Env:GIT_OBJECT_DIRECTORY -ErrorAction SilentlyContinue }
+        else { $env:GIT_OBJECT_DIRECTORY = $savedObjects }
+        if ($null -eq $savedAlternates) { Remove-Item Env:GIT_ALTERNATE_OBJECT_DIRECTORIES -ErrorAction SilentlyContinue }
+        else { $env:GIT_ALTERNATE_OBJECT_DIRECTORIES = $savedAlternates }
     }
 }
 
@@ -330,11 +379,17 @@ try {
     $rootIndex = if ([IO.Path]::IsPathRooted($rootIndexRaw)) { [IO.Path]::GetFullPath($rootIndexRaw) } else { [IO.Path]::GetFullPath((Join-Path $root $rootIndexRaw)) }
     $rootIndexItem = Get-Item -LiteralPath $rootIndex -Force
     if ($rootIndexItem.PSIsContainer -or (($rootIndexItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'BLOCKED[artifact]: worktree index must be a no-follow regular file' }
+    $sourceObjectsRaw = Invoke-GitText @('-C', $root, 'rev-parse', '--git-path', 'objects')
+    $SourceObjectDirectory = if ([IO.Path]::IsPathRooted($sourceObjectsRaw)) { [IO.Path]::GetFullPath($sourceObjectsRaw) } else { [IO.Path]::GetFullPath((Join-Path $root $sourceObjectsRaw)) }
+    $sourceObjectsItem = Get-Item -LiteralPath $SourceObjectDirectory -Force
+    if (-not $sourceObjectsItem.PSIsContainer) { throw 'BLOCKED[artifact]: source Git object database is unavailable' }
     $captureIndex = New-TaskTemporaryFile 'forge-index'
     $recheckIndex = New-TaskTemporaryFile 'forge-index-recheck'
+    if ($Mode -ne 'freeze') { $CaptureObjectDirectory = New-TaskTemporaryDirectory 'forge-objects' }
     Copy-Item -LiteralPath $rootIndex -Destination $captureIndex -Force
     # Isolate even read-only capture commands because write-tree may update the
-    # cache extension and contend with another review on the live index.lock.
+    # cache extension. Capture and identity also write generated tree objects to
+    # disposable storage rather than requiring source Git-metadata write access.
     $indexTree = Invoke-GitTextWithIndex $captureIndex @('-C', $root, 'write-tree')
     $stagedPatch = New-TaskTemporaryFile 'forge-staged'
     $unstagedPatch = New-TaskTemporaryFile 'forge-unstaged'
@@ -470,4 +525,5 @@ try {
 }
 finally {
     foreach ($temporary in $TemporaryFiles) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+    foreach ($temporary in $TemporaryDirectories) { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue }
 }

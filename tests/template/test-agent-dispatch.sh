@@ -386,11 +386,14 @@ printf '.venv/\ndocs/plans/\n' > "$S/.gitignore"; git -C "$S" add .gitignore; gi
 base=$(git -C "$S" rev-parse HEAD); write_state "$S" "$base" refs/heads/ignored-base
 mkdir -p "$S/.venv/bin"; ln -s /usr/bin/python3 "$S/.venv/bin/python3"
 mkdir -p "$S/docs/plans"; printf 'canonical plan\n' > "$S/docs/plans/plan.md"; git -C "$S" add -N -f -- docs/plans/plan.md
+source_objects_before=$(find "$S/.git/objects" -type f | wc -l | tr -d ' ')
 if (cd "$S" && bash "$FINGERPRINT" capture --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/ignored-base --output "$S/fp") >/dev/null 2>&1; then
     pass "ignored environment symlinks do not block candidate capture"
 else
     fail "ignored environment symlink blocked candidate capture"
 fi
+source_objects_after=$(find "$S/.git/objects" -type f | wc -l | tr -d ' ')
+assert_equals "$source_objects_after" "$source_objects_before" "candidate capture does not write the source Git object database"
 ignored_snapshot=$(awk -F= '$1=="snapshot_path" {sub(/^[^=]*=/,""); print}' "$S/fp")
 if [ ! -e "$ignored_snapshot/.venv" ]; then pass "ignored environment is absent from candidate"; else fail "ignored environment leaked into candidate"; fi
 assert_contains "$ignored_snapshot/docs/plans/plan.md" 'canonical plan' "intent-to-add makes an ignored canonical plan reviewable"

@@ -61,6 +61,8 @@ definition genuinely changes. The existing `host-context` event commands remain 
 compatibility no-ops, while the fixed-target launcher declares `main_host` only as routing metadata.
 A session opened in the primary checkout can continue any linked worktree through its command cwd;
 no per-worktree Forge receipt, copied native session ID, trust bypass, or task-root reopen is needed.
+Review capture keeps both its index and generated Git objects in disposable storage, so inspecting an
+intent-to-add plan never requires write access to the source repository's `.git` metadata.
 
 Full-refresh ownership now distinguishes active legacy policy from non-runtime content that Forge
 seeded for projects to adopt. Customized ADR indexes, CI references, and Playwright scaffolds are

@@ -189,17 +189,34 @@ worktree_identity=$(printf '%s|%s\n' "$root" "$common" | hash_stream_fp)
 root_index=$(git -C "$root" rev-parse --git-path index 2>/dev/null) || die_fp 'cannot resolve worktree index'
 case "$root_index" in /*) ;; *) root_index="$root/$root_index" ;; esac
 regular_nofollow_fp "$root_index" || die_fp 'worktree index must be a no-follow regular file'
+source_objects=$(git -C "$root" rev-parse --git-path objects 2>/dev/null) || die_fp 'cannot resolve source Git object database'
+case "$source_objects" in /*) ;; *) source_objects="$root/$source_objects" ;; esac
+[ -d "$source_objects" ] || die_fp 'source Git object database is unavailable'
+source_objects=$(cd "$source_objects" && pwd -P)
 # Even write-tree may update the index cache extension. Give every capture a
-# private index so simultaneous reviews remain independent and never contend on
-# the live worktree's index.lock.
+# private index. Review capture and identity also use a temporary object database
+# so they never need write access to the source repository's Git metadata.
 capture_index=$(mktemp "${TMPDIR:-/tmp}/forge-index.XXXXXX") || die_fp 'cannot create private index snapshot'
 recheck_index=$(mktemp "${TMPDIR:-/tmp}/forge-index-recheck.XXXXXX") || { rm -f "$capture_index"; die_fp 'cannot create private index recheck'; }
+capture_objects=""
+if [ "$mode" != freeze ]; then
+    capture_objects=$(mktemp -d "${TMPDIR:-/tmp}/forge-objects.XXXXXX") || { rm -f "$capture_index" "$recheck_index"; die_fp 'cannot create private object database'; }
+fi
+private_git_fp() {
+    local private_index="$1"; shift
+    if [ -n "$capture_objects" ]; then
+        GIT_INDEX_FILE="$private_index" GIT_OBJECT_DIRECTORY="$capture_objects" \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES="$source_objects" git -C "$root" "$@"
+    else
+        GIT_INDEX_FILE="$private_index" git -C "$root" "$@"
+    fi
+}
 cp "$root_index" "$capture_index" || { rm -f "$capture_index" "$recheck_index"; die_fp 'cannot snapshot worktree index'; }
 manifest=$(mktemp "${TMPDIR:-/tmp}/forge-untracked.XXXXXX"); paths=$(mktemp "${TMPDIR:-/tmp}/forge-paths.XXXXXX"); paths_after=$(mktemp "${TMPDIR:-/tmp}/forge-paths-after.XXXXXX")
-trap 'rm -f "$capture_index" "$recheck_index" "$manifest" "$paths" "$paths_after"' EXIT HUP INT TERM
-index_tree=$(GIT_INDEX_FILE="$capture_index" git -C "$root" write-tree 2>/dev/null) || die_fp 'index cannot be represented as a tree'
-staged_hash=$(GIT_INDEX_FILE="$capture_index" git -C "$root" diff --cached --binary HEAD | hash_stream_fp)
-unstaged_hash=$(GIT_INDEX_FILE="$capture_index" git -C "$root" diff --binary | hash_stream_fp)
+trap 'rm -f "$capture_index" "$recheck_index" "$manifest" "$paths" "$paths_after"; [ -z "$capture_objects" ] || rm -r -- "$capture_objects" 2>/dev/null || true' EXIT HUP INT TERM
+index_tree=$(private_git_fp "$capture_index" write-tree 2>/dev/null) || die_fp 'index cannot be represented as a tree'
+staged_hash=$(private_git_fp "$capture_index" diff --cached --binary HEAD | hash_stream_fp)
+unstaged_hash=$(private_git_fp "$capture_index" diff --binary | hash_stream_fp)
 : > "$manifest"; : > "$paths"; untracked_count=0; total=0; max_file=${FORGE_CANDIDATE_MAX_FILE_BYTES:-10485760}; max_total=${FORGE_CANDIDATE_MAX_TOTAL_BYTES:-52428800}
 # Git does not enumerate every special untracked inode (notably FIFOs). Walk
 # lstat-style first and reject any untracked link/device/socket/pipe. Tracked
@@ -209,10 +226,10 @@ while IFS= read -r special; do
     # Generated environments such as .venv commonly contain symlinks. If Git
     # excludes the path, it is outside the review candidate and must not block
     # capture. Unignored special paths remain fail-closed below.
-    GIT_INDEX_FILE="$capture_index" git -C "$root" check-ignore -q -- "$rel" 2>/dev/null && continue
-    GIT_INDEX_FILE="$capture_index" git -C "$root" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 || die_fp "untracked path is not a regular file: $rel"
+    private_git_fp "$capture_index" check-ignore -q -- "$rel" 2>/dev/null && continue
+    private_git_fp "$capture_index" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 || die_fp "untracked path is not a regular file: $rel"
 done < <(find -P "$root" \( -path "$root/.git" -o -path "$root/.forge/local" \) -prune -o \( -type l -o ! -type f ! -type d \) -print 2>/dev/null)
-GIT_INDEX_FILE="$capture_index" git -C "$root" ls-files --others --exclude-standard -z -- . ':(exclude).forge/local/**' > "$paths"
+private_git_fp "$capture_index" ls-files --others --exclude-standard -z -- . ':(exclude).forge/local/**' > "$paths"
 while IFS= read -r -d '' rel; do
     scalar_fp path "$rel"; case "$rel" in /*|../*|*/../*) die_fp "untracked path escapes worktree: $rel" ;; esac
     file="$root/$rel"; regular_nofollow_fp "$file" || die_fp "untracked path is not a no-follow regular file: $rel"
@@ -226,7 +243,7 @@ LC_ALL=C sort "$manifest" -o "$manifest"
 untracked_hash=$(hash_file_fp "$manifest")
 candidate_id=$(printf '%s\n' "$base" "$head" "$index_tree" "$worktree_identity" | hash_stream_fp)
 candidate_state=dirty
-if GIT_INDEX_FILE="$capture_index" git -C "$root" diff --quiet && [ "$untracked_count" -eq 0 ]; then candidate_state=staged-clean; fi
+if private_git_fp "$capture_index" diff --quiet && [ "$untracked_count" -eq 0 ]; then candidate_state=staged-clean; fi
 artifact_kind=""; artifact_identity=""; snapshot=""
 case "$artifact" in
 git:working-tree)
@@ -265,11 +282,11 @@ elif [ "$mode" = capture ]; then
         git -C "$snapshot/repository" config core.hooksPath "$snapshot/repository/.git/forge-disabled-hooks" || die_fp 'candidate hook isolation failed'
         snapshot="$snapshot/repository"; git -C "$snapshot" checkout -q --detach "$head" || die_fp 'candidate checkout failed'
         if [ "$artifact_kind" = git-working-tree ]; then
-            if ! GIT_INDEX_FILE="$capture_index" git -C "$root" diff --cached --quiet HEAD; then
-                GIT_INDEX_FILE="$capture_index" git -C "$root" diff --cached --binary HEAD | git -C "$snapshot" apply --index --binary --whitespace=nowarn 2>/dev/null || die_fp 'staged candidate materialization failed'
+            if ! private_git_fp "$capture_index" diff --cached --quiet HEAD; then
+                private_git_fp "$capture_index" diff --cached --binary HEAD | git -C "$snapshot" apply --index --binary --whitespace=nowarn 2>/dev/null || die_fp 'staged candidate materialization failed'
             fi
-            if ! GIT_INDEX_FILE="$capture_index" git -C "$root" diff --quiet; then
-                GIT_INDEX_FILE="$capture_index" git -C "$root" diff --binary | git -C "$snapshot" apply --binary --whitespace=nowarn 2>/dev/null || die_fp 'unstaged candidate materialization failed'
+            if ! private_git_fp "$capture_index" diff --quiet; then
+                private_git_fp "$capture_index" diff --binary | git -C "$snapshot" apply --binary --whitespace=nowarn 2>/dev/null || die_fp 'unstaged candidate materialization failed'
             fi
             while IFS=$'\t' read -r rel mode_bits bytes expected; do
                 [ -n "$rel" ] || continue; source_file="$root/$rel"; regular_nofollow_fp "$source_file" || die_fp "untracked path raced: $rel"
@@ -308,10 +325,10 @@ fi
 # Recheck every source identity after materialization. A race discards certification.
 [ "$(git -C "$root" rev-parse HEAD)" = "$head" ] || die_fp 'HEAD changed during capture'
 cp "$root_index" "$recheck_index" || die_fp 'cannot recheck worktree index'
-[ "$(GIT_INDEX_FILE="$recheck_index" git -C "$root" write-tree)" = "$index_tree" ] || die_fp 'index changed during capture'
-[ "$(GIT_INDEX_FILE="$recheck_index" git -C "$root" diff --cached --binary HEAD | hash_stream_fp)" = "$staged_hash" ] || die_fp 'staged content changed during capture'
-[ "$(GIT_INDEX_FILE="$recheck_index" git -C "$root" diff --binary | hash_stream_fp)" = "$unstaged_hash" ] || die_fp 'unstaged content changed during capture'
-GIT_INDEX_FILE="$recheck_index" git -C "$root" ls-files --others --exclude-standard -z -- . ':(exclude).forge/local/**' > "$paths_after"
+[ "$(private_git_fp "$recheck_index" write-tree)" = "$index_tree" ] || die_fp 'index changed during capture'
+[ "$(private_git_fp "$recheck_index" diff --cached --binary HEAD | hash_stream_fp)" = "$staged_hash" ] || die_fp 'staged content changed during capture'
+[ "$(private_git_fp "$recheck_index" diff --binary | hash_stream_fp)" = "$unstaged_hash" ] || die_fp 'unstaged content changed during capture'
+private_git_fp "$recheck_index" ls-files --others --exclude-standard -z -- . ':(exclude).forge/local/**' > "$paths_after"
 cmp -s "$paths" "$paths_after" || die_fp 'untracked path set changed during capture'
 while IFS=$'\t' read -r rel mode_bits bytes expected; do
     file="$root/$rel"; regular_nofollow_fp "$file" || die_fp "untracked path raced: $rel"
@@ -322,8 +339,8 @@ while IFS=$'\t' read -r rel mode_bits bytes expected; do
 done < "$manifest"
 while IFS= read -r special; do
     rel=${special#"$root"/}; case "$rel" in .git|.git/*|.forge/local|.forge/local/*) continue ;; esac
-    GIT_INDEX_FILE="$recheck_index" git -C "$root" check-ignore -q -- "$rel" 2>/dev/null && continue
-    GIT_INDEX_FILE="$recheck_index" git -C "$root" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 || die_fp "untracked special path appeared during capture: $rel"
+    private_git_fp "$recheck_index" check-ignore -q -- "$rel" 2>/dev/null && continue
+    private_git_fp "$recheck_index" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 || die_fp "untracked special path appeared during capture: $rel"
 done < <(find -P "$root" \( -path "$root/.git" -o -path "$root/.forge/local" \) -prune -o \( -type l -o ! -type f ! -type d \) -print 2>/dev/null)
 
 emit="${output:-/dev/stdout}"; mkdir -p "$(dirname "$emit")"

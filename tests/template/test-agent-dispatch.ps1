@@ -285,11 +285,14 @@ public static class ForgeFakeEngine {
     & cmd.exe /d /c mklink /J "$(Join-Path $repo '.venv')" "$outside" | Out-Null
     $plan = Join-Path $repo 'docs/plans/plan.md'; New-Item -ItemType Directory -Path (Split-Path $plan -Parent) -Force | Out-Null; [IO.File]::WriteAllText($plan, "canonical plan`n")
     & git -C $repo add -N -f -- docs/plans/plan.md
+    $sourceObjectsBefore = @(Get-ChildItem -LiteralPath (Join-Path $repo '.git/objects') -File -Recurse -Force).Count
     $ignoredReceipt = Join-Path $repo '.forge/local/fp'
     Push-Location $repo
     try { $ignoredRc = Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$fingerprint,'-Mode','capture','-Artifact','git:working-tree','-WorkflowBaseSha',$base,'-WorkflowBaseRef','refs/heads/ignored-base','-Output',$ignoredReceipt) }
     finally { Pop-Location }
     Assert-Equal $ignoredRc 0 'ignored generated-environment junction does not block capture'
+    $sourceObjectsAfter = @(Get-ChildItem -LiteralPath (Join-Path $repo '.git/objects') -File -Recurse -Force).Count
+    Assert-Equal $sourceObjectsAfter $sourceObjectsBefore 'candidate capture does not write the source Git object database'
     $ignoredSnapshot = ((Get-Content -LiteralPath $ignoredReceipt | Where-Object { $_ -like 'snapshot_path=*' } | Select-Object -First 1) -replace '^snapshot_path=', '')
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $ignoredSnapshot '.venv'))) 'ignored generated environment is absent from candidate'
     Assert-Contains (Join-Path $ignoredSnapshot 'docs/plans/plan.md') 'canonical plan' 'intent-to-add makes an ignored canonical plan reviewable'
