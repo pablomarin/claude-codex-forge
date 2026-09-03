@@ -18,6 +18,18 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/host-context.sh\" hook --host codex",
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\host-context.ps1') -Mode hook -Host codex\""
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash|apply_patch",

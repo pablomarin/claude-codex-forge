@@ -17,9 +17,10 @@ the main agent for this session; there is no permanent main engine.
    tracked `hooks/lib/worktree-lifecycle.sh` or `.ps1` instead. This creates exactly `fix/<slug>`
    under `.worktrees/<slug>` and copies missing private/ignored installed harness files without
    overwriting anything.
-4. Continue from a native Claude Code or Codex session rooted in the new worktree so its normal
-   SessionStart hook creates the protected host receipt. If that receipt is absent, stop and reopen
-   the host in the worktree; never synthesize a receipt or bind an older task/session ID manually.
+4. Continue from a native Claude Code or Codex session rooted in the new worktree. Its normal
+   SessionStart hook creates and UserPromptSubmit refreshes the protected host receipt. If the host
+   adapter was absent when the session opened, install or seed it and reopen the host in the
+   worktree; never synthesize a receipt or bind an older task/session ID manually.
 5. The helper seeds only `## State` (with `### Now` cleared), `## Open Questions`, and `## Blockers`
    from the primary checkout and writes the exact baseline to
    `.forge/local/.state-seed-snapshot.md`. It never seeds workflow, goal, authorization, receipts,

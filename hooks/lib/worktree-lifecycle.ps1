@@ -95,7 +95,11 @@ function Copy-PrivateHarness([string]$Primary, [string]$Target) {
         if (-not $line) { continue }
         Copy-MissingPrivateSurface $Primary $Target (($line -split "`t")[0])
     }
-    foreach ($relative in @('.forge/version', '.forge/installed-files.tsv', 'CLAUDE.md', 'AGENTS.md', 'docs/agent-context.md', '.mcp.json')) {
+    foreach ($relative in @(
+        '.forge/version', '.forge/installed-files.tsv', 'CLAUDE.md', 'AGENTS.md',
+        'docs/agent-context.md', '.claude/settings.json', '.codex/config.toml',
+        '.codex/hooks.json', '.mcp.json'
+    )) {
         Copy-MissingPrivateSurface $Primary $Target $relative
     }
 }

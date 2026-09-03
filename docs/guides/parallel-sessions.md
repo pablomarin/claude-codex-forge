@@ -7,10 +7,12 @@ developer may resume one worktree in the other host after stopping the first ses
 
 `/new-feature` and `/fix-bug` use the installed `worktree-lifecycle` helper when started from the
 primary checkout. It creates `.worktrees/<name>/` on exactly `feat/<name>` or `fix/<name>`, copies
-missing ignored/private installed harness files without overwriting tracked content, then seeds the
-worktree-local state and its guarded fold baseline. It never copies local memory, receipts, goal
-authorization, or evidence. Each worktree therefore has its own candidate, `.forge/local/state.md`,
-and local evidence even when the harness is intentionally uncommitted.
+missing ignored/private installed harness files plus `.claude/settings.json`, `.codex/config.toml`,
+and the `.codex/hooks.json` validation mirror without overwriting existing content, then seeds the
+worktree-local state and its guarded fold baseline. Codex hook execution still routes through the
+primary checkout. The helper never copies local memory, receipts, goal authorization, or evidence.
+Each worktree therefore has its own candidate, `.forge/local/state.md`, and local evidence even when
+the harness is intentionally uncommitted.
 
 ```bash
 # Terminal 1
@@ -37,6 +39,8 @@ codex # after the Claude Code session has stopped
 The new host reads `.forge/local/state.md`, continues at the next incomplete checkpoint, and keeps
 still-valid artifact-bound evidence. It does not repeat planning merely because the host changed.
 The current host is main for the next action; reviewer selection is recomputed for that action.
+`SessionStart` creates that host's protected receipt and `UserPromptSubmit` idempotently refreshes it
+when returning to an already-open session.
 
 > **Warning:** Do not edit the same worktree from both hosts simultaneously. Forge intentionally
 > adds no locks or ownership daemon. Concurrent writes can invalidate the frozen candidate and all

@@ -2055,8 +2055,8 @@ for workflow in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
         "$(basename "$workflow") forbids stale private plan copies"
     assert_contains "$workflow" 'file-only artifact' \
         "$(basename "$workflow") rejects incomplete plan-review context"
-    assert_contains "$workflow" 'SessionStart hook creates the protected host receipt' \
-        "$(basename "$workflow") requires native worktree session binding"
+    assert_contains "$workflow" 'SessionStart hook creates and UserPromptSubmit refreshes the protected host receipt' \
+        "$(basename "$workflow") requires native worktree receipt creation and refresh"
     assert_contains "$workflow" 'never synthesize a receipt or bind an older task/session ID manually' \
         "$(basename "$workflow") forbids manual host receipt substitution"
 done

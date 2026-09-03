@@ -75,10 +75,17 @@ foreach ($id in $claudeExpected.Keys) {
 }
 foreach ($id in $codexExpected.Keys) {
     $candidates = @($rows | Where-Object { $_ -like "codex|$id|*" })
-    if ($candidates.Count -ne 1) { [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: codex managed hook changed or duplicated: $id"); exit 2 }
-    $parts = $candidates[0] -split '\|', 6
-    if ($parts[2] -cne $codexExpected[$id][0] -or $parts[3] -cne $codexExpected[$id][1] -or
-        $parts[4] -notlike "*$($codexExpected[$id][2])*" -or $parts[5] -cne 'command') {
+    $expectedEvents = if ($id -eq 'host-context') { @('SessionStart', 'UserPromptSubmit') } else { @($codexExpected[$id][0]) }
+    if ($candidates.Count -ne $expectedEvents.Count) { [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: codex managed hook changed or duplicated: $id"); exit 2 }
+    $actualEvents = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in $candidates) {
+        $parts = $candidate -split '\|', 6
+        $actualEvents.Add($parts[2])
+        if ($parts[3] -cne $codexExpected[$id][1] -or $parts[4] -notlike "*$($codexExpected[$id][2])*" -or $parts[5] -cne 'command') {
+            [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: codex managed hook changed: $id"); exit 2
+        }
+    }
+    if ((@($actualEvents | Sort-Object) -join ',') -cne (@($expectedEvents | Sort-Object) -join ',')) {
         [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: codex managed hook changed: $id"); exit 2
     }
 }

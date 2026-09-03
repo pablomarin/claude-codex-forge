@@ -51,6 +51,15 @@ now report the optional global harness, ordinary project-workflow readiness, and
 goal qualification separately, so a missing machine-global helper does not make a usable project
 look blocked.
 
+Cross-host worktree bootstrap now carries the merge-owned Claude settings and Codex configuration
+that are intentionally absent from the canonical installation ledger. The copy remains
+missing-only, preserves existing project configuration, includes `.codex/hooks.json` as the
+worktree-local validation mirror while Codex execution still routes through the primary checkout,
+and never copies receipts or local evidence. Both native adapters also refresh the protected
+session/worktree receipt on
+`UserPromptSubmit`, so returning to an already-open Claude Code or Codex session self-recovers from
+a missing or expired receipt without allowing an agent shell command to mint authority.
+
 Full-refresh ownership now distinguishes active legacy policy from non-runtime content that Forge
 seeded for projects to adopt. Customized ADR indexes, CI references, and Playwright scaffolds are
 preserved and reported instead of blocking; modified rules, hooks, workflows, settings, and adapters

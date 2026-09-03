@@ -8,6 +8,7 @@ their native events into the same policy.
 | Hook | Trigger | What happens |
 | --- | --- | --- |
 | `SessionStart` | New/resumed host session, clear, or compaction | Injects current-host, branch, state, and drift context; remote fetch remains source-gated |
+| `UserPromptSubmit` | Before each user prompt | Idempotently refreshes the protected native-host receipt for the current session and worktree |
 | `Stop` | Main host finishes a turn | Builds candidate evidence and reminds the host to keep `.forge/local/state.md` current |
 | `PreToolUse` | Before a shell command | Audits commands, blocks dangerous patterns, enforces workflow evidence, and checks protected external-mutation authority |
 | `PostToolUse` | After supported file writes | Runs the configured formatter |
@@ -18,8 +19,10 @@ their native events into the same policy.
 ## Host Routing
 
 Claude Code hooks are registered in `.claude/settings.json`; Codex hooks are registered in
-`.codex/hooks.json`. Canonical scripts stay in `.forge/hooks/` and read only the event worktree's
-`.forge/local/state.md` for current v6 state.
+`.codex/hooks.json`. The worktree lifecycle helper copies missing Claude settings, Codex config, and
+a Codex hook validation mirror without overwriting an existing destination. Codex hook execution
+still routes through the primary checkout. Canonical scripts stay in `.forge/hooks/` and read only
+the event worktree's `.forge/local/state.md` for current v6 state.
 
 Codex may register a stable router from the primary checkout. For every linked-worktree event,
 `codex-worktree-dispatch.{sh,ps1}` validates an absolute event `cwd`, resolves the event repository,

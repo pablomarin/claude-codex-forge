@@ -22,9 +22,14 @@ try {
     $baseSha = (& git -C $Primary rev-parse HEAD).Trim()
     [IO.File]::WriteAllText((Join-Path $Primary 'owned.txt'), "primary-local-change`n")
     $null = New-Item -ItemType Directory -Path (Join-Path $Primary '.forge\local') -Force
+    $null = New-Item -ItemType Directory -Path (Join-Path $Primary '.claude') -Force
+    $null = New-Item -ItemType Directory -Path (Join-Path $Primary '.codex') -Force
     Copy-Item (Join-Path $RepoRoot 'state.template.md') (Join-Path $Primary '.forge\state.template.md')
     [IO.File]::WriteAllText((Join-Path $Primary '.forge\version'), "6`n")
     [IO.File]::WriteAllText((Join-Path $Primary '.forge\instructions.md'), "policy`n")
+    [IO.File]::WriteAllText((Join-Path $Primary '.claude\settings.json'), "claude settings`n")
+    [IO.File]::WriteAllText((Join-Path $Primary '.codex\config.toml'), "codex config`n")
+    [IO.File]::WriteAllText((Join-Path $Primary '.codex\hooks.json'), "codex hooks stay primary`n")
     [IO.File]::WriteAllText((Join-Path $Primary '.forge\installed-files.tsv'), ".forge/state.template.md`tfixture`tv6`n.forge/instructions.md`tfixture`tv6`nowned.txt`tfixture`tv6`n")
     Write-State (Join-Path $Primary '.forge\local\state.md') '/fix-bug prior' 'done-primary' 'now-primary' 'next-primary'
     Push-Location $Primary
@@ -34,6 +39,9 @@ try {
     Check (Test-Path (Join-Path $Target '.forge\instructions.md')) 'private harness copied'
     Check (Test-Path (Join-Path $Target '.forge\version')) 'generated v6 stamp copied'
     Check (Test-Path (Join-Path $Target '.forge\installed-files.tsv')) 'generated ledger copied'
+    Check (Test-Path (Join-Path $Target '.claude\settings.json')) 'merge-owned Claude host adapter copied outside canonical ledger'
+    Check (Test-Path (Join-Path $Target '.codex\config.toml')) 'merge-owned Codex config copied outside canonical ledger'
+    Check (Test-Path (Join-Path $Target '.codex\hooks.json')) 'Codex hook validation mirror is copied outside canonical ledger'
     Check ((Get-Content (Join-Path $Target 'owned.txt') -Raw).Trim() -eq 'tracked-owned') 'existing worktree file not overwritten'
     Check ((Get-Content (Join-Path $Target '.forge\local\state.md') -Raw) -notmatch 'now-primary') 'Now cleared'
     Check ((Get-Content (Join-Path $Target '.forge\local\state.md') -Raw) -match [regex]::Escape("| Worktree root | $Target |")) 'worktree identity bound'
