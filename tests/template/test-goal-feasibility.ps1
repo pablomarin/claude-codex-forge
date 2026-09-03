@@ -10,7 +10,14 @@ try {
         $target = Join-Path $scratch $scope
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         if ($scope -eq "project") { & git -C $target init -q }
-        & $materializer -RepoRoot $root -Target $target -Scope $scope -Platform windows | Out-Null
+        $materializerOutput = (& $materializer -RepoRoot $root -Target $target -Scope $scope -Platform windows 6>&1 | Out-String)
+        if ($scope -eq "project") {
+            if (-not $materializerOutput.Contains("NORMAL_PROJECT_WORKFLOWS: READY") -or
+                -not $materializerOutput.Contains("NATIVE_GOAL_RUNTIME:") -or
+                $materializerOutput.Contains("GOAL_OVERLAY: BLOCKED")) {
+                throw "PowerShell project diagnostics do not separate ordinary workflows from optional native goal runtime"
+            }
+        }
         $settings = Join-Path $target ".claude\settings.json"
         $profile = Get-Content -Raw $settings | ConvertFrom-Json
         if ($profile.permissions.deny -contains "Write(~/.forge/bin/**)") { throw "$scope profile contains ignored Write-path syntax" }
@@ -24,6 +31,25 @@ try {
         $backupAfter = @(Get-ChildItem "$settings.bak.*" -ErrorAction SilentlyContinue).Count
         if ([Convert]::ToBase64String($before) -cne [Convert]::ToBase64String($after)) { throw "$scope second-run settings bytes changed" }
         if ($backupAfter -ne $backupBefore) { throw "$scope second-run created a spurious backup" }
+    }
+
+    $partialProject = Join-Path $scratch "project-partial-global"
+    $partialHome = Join-Path $scratch "partial-home"
+    New-Item -ItemType Directory -Path $partialProject -Force | Out-Null
+    & git -C $partialProject init -q
+    [IO.Directory]::CreateDirectory((Join-Path $partialHome ".forge\bin")) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $partialHome ".forge\bin\forge-goal-authorize.ps1"), "# partial helper`n")
+    $savedDiagnosticHome = $env:FORGE_DIAGNOSTIC_HOME
+    try {
+        $env:FORGE_DIAGNOSTIC_HOME = $partialHome
+        $partialOutput = (& $materializer -RepoRoot $root -Target $partialProject -Scope project -Platform windows 6>&1 | Out-String)
+    } finally {
+        $env:FORGE_DIAGNOSTIC_HOME = $savedDiagnosticHome
+    }
+    if (-not $partialOutput.Contains("GLOBAL_HARNESS: PARTIAL") -or
+        -not $partialOutput.Contains("NORMAL_PROJECT_WORKFLOWS: READY") -or
+        -not $partialOutput.Contains("NATIVE_GOAL_RUNTIME: NOT_AVAILABLE")) {
+        throw "PowerShell helper without canonical global v6 stamp was not reported as partial"
     }
 
     $markerTarget = Join-Path $scratch "marker"

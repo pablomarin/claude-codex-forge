@@ -45,6 +45,12 @@ dual-engine architecture and engineering lifecycle, shows the exact installed tr
 summaries name the complete v6 commit surface, and project-first setup no longer prevents the first
 global installation when the only existing machine artifact is Forge's advisory version stamp.
 
+Global full refresh no longer treats that project-written advisory stamp as global ownership
+authority; it proves legacy global files from their actual released bytes instead. Setup diagnostics
+now report the optional global harness, ordinary project-workflow readiness, and protected native
+goal qualification separately, so a missing machine-global helper does not make a usable project
+look blocked.
+
 Full-refresh ownership now distinguishes active legacy policy from non-runtime content that Forge
 seeded for projects to adopt. Customized ADR indexes, CI references, and Playwright scaffolds are
 preserved and reported instead of blocking; modified rules, hooks, workflows, settings, and adapters

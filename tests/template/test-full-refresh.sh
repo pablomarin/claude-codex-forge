@@ -165,6 +165,23 @@ after_global=$(snapshot_project "$S1G/.fakehome")
 assert_equals "$after_global" "$before_global" "global preview leaves HOME byte-identical"
 assert_file_missing "$S1G/.fakehome/.forge/version" "global preview writes no v6 stamp"
 
+S1GA=$(scratch_dir full-refresh-preview-global-current-advisory)
+mkdir -p "$S1GA/home/.claude" "$S1GA/invoker"
+git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.template.md \
+    > "$S1GA/home/.claude/CLAUDE.md"
+printf '6.0\n' > "$S1GA/home/.claude/.forge-version"
+S1GA_HOME=$(cd "$S1GA/home" && pwd -P)
+before_advisory=$(snapshot_project "$S1GA/home")
+(cd "$S1GA/invoker" && HOME="$S1GA_HOME" "$REPO_ROOT/setup.sh" --global -F --dry-run) \
+    > "$S1GA/preview.log" 2>&1
+assert_equals "$?" "1" "retired v5 global references still block with a current advisory stamp"
+assert_contains "$S1GA/preview.log" "ROOT_POLICY_AMBIGUOUS" \
+    "actual modified global policy remains an ownership blocker"
+assert_not_contains "$S1GA/preview.log" "UNSUPPORTED_LEGACY_RELEASE" \
+    "current project advisory is not treated as global release authority"
+assert_equals "$(snapshot_project "$S1GA/home")" "$before_advisory" \
+    "blocked current-advisory preview leaves HOME byte-identical"
+
 run_refresh "$S1P" "${S1P}.dry-run-only.log" --dry-run
 assert_equals "$?" "1" "dry-run without full refresh is rejected"
 run_refresh "$S1P" "${S1P}.dry-run-conflict.log" -f -F --dry-run
@@ -249,6 +266,7 @@ git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/READM
 mkdir -p "$S4/.fakehome/.forge/bin"
 : > "$S4/.fakehome/.forge/bin/forge-goal-authorize"
 chmod +x "$S4/.fakehome/.forge/bin/forge-goal-authorize"
+printf '6\n' > "$S4/.fakehome/.forge/version"
 write_active_v5_state "$S4" "V5_CHECKPOINT_TOKEN"
 printf 'SEED_SNAPSHOT_BYTES\n' > "$S4/.claude/local/.state-seed-snapshot.md"
 printf 'CUSTOM_EXTENSION_BYTES\n' > "$S4/.claude/developer-extension.txt"
@@ -282,10 +300,14 @@ assert_not_contains "$S4/refresh.log" "CODEX_HOOKS: BLOCKED linked worktree" \
     "transaction staging is never misreported as a linked worktree"
 assert_contains "$S4/refresh.log" "VERIFY_RUNTIME: '$S4_PHYSICAL/.forge/bin/verify-runtime' live --project-root '$S4_PHYSICAL'" \
     "runtime diagnostics name the live project rather than transaction staging"
-assert_contains "$S4/refresh.log" "GOAL_OVERLAY: BLOCKED pending scripts/qualify-goal-feasibility.sh" \
+assert_contains "$S4/refresh.log" "GLOBAL_HARNESS: MATERIALIZED" \
     "transaction diagnostics inspect the operator home"
-assert_not_contains "$S4/refresh.log" "GOAL_OVERLAY: BLOCKED run '$REPO_ROOT/setup.sh --global'" \
-    "transaction staging does not hide an installed global goal helper"
+assert_contains "$S4/refresh.log" "NORMAL_PROJECT_WORKFLOWS: READY" \
+    "optional native goal qualification does not block ordinary workflows"
+assert_contains "$S4/refresh.log" "NATIVE_GOAL_RUNTIME: PENDING qualification via scripts/qualify-goal-feasibility.sh" \
+    "transaction diagnostics distinguish pending native goal qualification"
+assert_not_contains "$S4/refresh.log" "GOAL_OVERLAY: BLOCKED" \
+    "transaction diagnostics do not report a blanket project block"
 assert_contains "$S4/refresh.log" "DELETED: docs/adr/README.md (exact released Forge seed)" \
     "exact retired seed deletion is distinguished from project content"
 assert_file_missing "$S4/docs/adr/README.md" "exact released ADR seed is retired"

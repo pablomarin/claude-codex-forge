@@ -18,6 +18,11 @@ assert_file_exists "$CAPTURE" "operator TUI capture helper installed outside pro
 CODEX_IDENTITY="$H/.forge/bin/codex.identity"
 assert_file_exists "$CODEX_IDENTITY" "global setup records the independently selected Codex identity"
 assert_file_exists "$CODEX_IDENTITY.sha256" "Codex identity has a no-write integrity sidecar"
+assert_contains "$S/global.log" 'GLOBAL_HARNESS: MATERIALIZED' "global setup reports machine harness materialized"
+assert_contains "$S/global.log" 'NORMAL_PROJECT_WORKFLOWS: READY' "global setup keeps ordinary project workflows independent"
+assert_contains "$S/global.log" 'NATIVE_GOAL_RUNTIME: PENDING qualification via scripts/qualify-goal-feasibility.sh' \
+    "global setup reports native goal qualification separately"
+assert_not_contains "$S/global.log" 'GOAL_OVERLAY: BLOCKED' "global setup avoids blanket goal-overlay blocked status"
 
 start_test "installed Claude profiles protect the complete global helper and identity boundary"
 PROFILE_PROJECT="$S/profile-project"
@@ -151,14 +156,33 @@ print("blocked")
 PY
 assert_equals "$(cat "$S/profile.out")" "blocked" "installed OS sandbox profile resolves a direct-record symlink alias into the denied tree"
 
-start_test "project setup reports global goal boundary instead of creating it"
+start_test "project setup reports optional global harness without blocking ordinary workflows"
 P="$S/project-only"
 mkdir -p "$P"
 (cd "$P" && git init -q)
 (cd "$P" && HOME="$S/empty-home" "$REPO_ROOT/setup.sh" > "$S/project.log" 2>&1)
-assert_contains "$S/project.log" 'GOAL_OVERLAY: BLOCKED' "project setup reports goal boundary blocked"
-assert_contains "$S/project.log" 'setup.sh --global' "project setup prints exact global remediation"
+assert_contains "$S/project.log" 'GLOBAL_HARNESS: NOT_INSTALLED optional' "project setup reports optional global harness absent"
+assert_contains "$S/project.log" 'NORMAL_PROJECT_WORKFLOWS: READY' "project setup reports ordinary workflows ready"
+assert_contains "$S/project.log" "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; run '$REPO_ROOT/setup.sh --global'" \
+    "project setup scopes exact global remediation to protected native goal"
+assert_not_contains "$S/project.log" 'GOAL_OVERLAY: BLOCKED' "project setup avoids blanket project block"
 assert_file_missing "$P/.forge/bin/forge-goal-authorize" "project setup does not install authorization writer"
+
+PARTIAL_PROJECT="$S/project-partial-global"
+PARTIAL_HOME="$S/partial-home"
+mkdir -p "$PARTIAL_PROJECT" "$PARTIAL_HOME/.forge/bin"
+(cd "$PARTIAL_PROJECT" && git init -q)
+: > "$PARTIAL_HOME/.forge/bin/forge-goal-authorize"
+chmod +x "$PARTIAL_HOME/.forge/bin/forge-goal-authorize"
+FORGE_DIAGNOSTIC_HOME="$PARTIAL_HOME" \
+    bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" \
+    --target "$PARTIAL_PROJECT" --scope project --platform unix > "$S/project-partial.log" 2>&1
+assert_contains "$S/project-partial.log" 'GLOBAL_HARNESS: PARTIAL' \
+    "helper without canonical global v6 stamp is reported as partial"
+assert_contains "$S/project-partial.log" 'NORMAL_PROJECT_WORKFLOWS: READY' \
+    "partial optional global harness does not block ordinary project workflows"
+assert_contains "$S/project-partial.log" 'NATIVE_GOAL_RUNTIME: NOT_AVAILABLE' \
+    "partial global harness cannot claim native goal availability"
 
 start_test "operator capture rejects arbitrary CLIs and exposes only setup-bound structural eligibility"
 OPERATOR_INPUT="$S/operator-input"

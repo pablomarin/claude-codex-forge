@@ -477,10 +477,26 @@ if [ "$MATERIALIZE_SCOPE" = project ]; then
     else
         echo "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
     fi
-    if [ -x "$MATERIALIZE_DIAGNOSTIC_HOME/.forge/bin/forge-goal-authorize" ]; then
-        echo "GOAL_OVERLAY: BLOCKED pending scripts/qualify-goal-feasibility.sh"
+    global_version="$MATERIALIZE_DIAGNOSTIC_HOME/.forge/version"
+    global_authorizer="$MATERIALIZE_DIAGNOSTIC_HOME/.forge/bin/forge-goal-authorize"
+    global_version_ready=false
+    if [ -f "$global_version" ] && [ ! -L "$global_version" ] \
+        && [ "$(tr -d '\r\n' < "$global_version")" = 6 ]; then
+        global_version_ready=true
+    fi
+    if [ "$global_version_ready" = true ] && [ -x "$global_authorizer" ] && [ ! -L "$global_authorizer" ]; then
+        echo "GLOBAL_HARNESS: MATERIALIZED"
+        echo "NORMAL_PROJECT_WORKFLOWS: READY"
+        echo "NATIVE_GOAL_RUNTIME: PENDING qualification via scripts/qualify-goal-feasibility.sh"
+    elif [ -e "$global_version" ] || [ -L "$global_version" ] \
+        || [ -e "$global_authorizer" ] || [ -L "$global_authorizer" ]; then
+        echo "GLOBAL_HARNESS: PARTIAL canonical version stamp or goal authorization helper missing or invalid"
+        echo "NORMAL_PROJECT_WORKFLOWS: READY"
+        echo "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; preview repair with '$MATERIALIZE_REPO/setup.sh --global -F --dry-run'"
     else
-        echo "GOAL_OVERLAY: BLOCKED run '$MATERIALIZE_REPO/setup.sh --global' from a separate terminal"
+        echo "GLOBAL_HARNESS: NOT_INSTALLED optional"
+        echo "NORMAL_PROJECT_WORKFLOWS: READY"
+        echo "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; run '$MATERIALIZE_REPO/setup.sh --global' from a separate terminal to install protected native /goal support"
     fi
     echo "VERIFY_RUNTIME: '$MATERIALIZE_DIAGNOSTIC_TARGET/.forge/bin/verify-runtime' live --project-root '$MATERIALIZE_DIAGNOSTIC_TARGET'"
 fi

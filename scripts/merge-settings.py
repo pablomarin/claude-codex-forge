@@ -436,7 +436,10 @@ def inventory_legacy(
     # Current v6 releases before upgrade hardening still wrote the historical
     # advisory stamp. It is inert once the canonical v6 stamp exists and must
     # not make an otherwise healthy v6 install look like an unsupported v5.
-    if version and not current_v6 and version not in releases:
+    # Project setup also writes this historical machine advisory stamp. For a
+    # global refresh it is not ownership authority; actual legacy bytes remain
+    # subject to the existing all-release fingerprint and region checks below.
+    if version and not current_v6 and version not in releases and scope != "global":
         findings.append(
             UpgradeFinding(
                 "UNSUPPORTED_LEGACY_RELEASE",
