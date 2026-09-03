@@ -1,7 +1,7 @@
 # Design: Remove Blocking Native-Host Receipts
 
 **Date:** 2026-09-03
-**Status:** Draft for developer review
+**Status:** Approved
 
 ## Problem
 
