@@ -61,7 +61,7 @@ payload = json.loads((root / "settings/codex-hooks.template.json").read_text())
 assert set(payload) <= {"description", "hooks"}, set(payload)
 allowed_events = {
     "SessionStart", "PreToolUse", "PostToolUse", "SubagentStop",
-    "PreCompact", "Stop",
+    "PreCompact", "UserPromptSubmit", "Stop",
 }
 assert set(payload["hooks"]) <= allowed_events, set(payload["hooks"])
 for event, groups in payload["hooks"].items():
@@ -2931,9 +2931,37 @@ for config in "$REPO_ROOT/settings/settings.template.json" "$REPO_ROOT/settings/
         "$(basename "$config") registers native host context"
     assert_contains "$config" '"forgeManagedId": "external-mutation-auth"' \
         "$(basename "$config") registers external mutation defense"
+    HOST_CONTEXT_EVENTS=$(python3 - "$config" <<'PY'
+import json, sys
+config = json.load(open(sys.argv[1]))
+events = []
+for event, groups in config.get("hooks", {}).items():
+    for group in groups:
+        for hook in group.get("hooks", []):
+            if hook.get("forgeManagedId") == "host-context":
+                events.append(event)
+print(" ".join(sorted(events)))
+PY
+)
+    assert_equals "$HOST_CONTEXT_EVENTS" "SessionStart UserPromptSubmit" \
+        "$(basename "$config") refreshes native host context at session and prompt boundaries"
 done
 assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" '/host-context.sh\" hook --host codex' \
     "Codex SessionStart binds the Codex host"
+CODEX_HOST_CONTEXT_EVENTS=$(python3 - "$REPO_ROOT/settings/codex-hooks.template.json" <<'PY'
+import json, sys
+config = json.load(open(sys.argv[1]))
+events = []
+for event, groups in config.get("hooks", {}).items():
+    for group in groups:
+        for hook in group.get("hooks", []):
+            if "/host-context.sh\" hook --host codex" in hook.get("command", ""):
+                events.append(event)
+print(" ".join(sorted(events)))
+PY
+)
+assert_equals "$CODEX_HOST_CONTEXT_EVENTS" "SessionStart UserPromptSubmit" \
+    "Codex refreshes native host context at session and prompt boundaries"
 assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" 'check-external-mutation-auth.sh' \
     "Codex registers external mutation defense through the native hook schema"
 assert_contains "$REPO_ROOT/settings/settings.template.json" 'host-context.sh\" hook --host claude' \

@@ -43,16 +43,19 @@ def router(script):
     return f'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh" {script}'
 
 codex_expected = {
-    "host-context": ("SessionStart", 'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/host-context.sh" hook --host codex', "host-context.ps1"),
-    "session-start": ("SessionStart", router("session-start.sh"), "session-start.ps1"),
-    "bash-safety": ("PreToolUse", router("check-bash-safety.sh"), "check-bash-safety.ps1"),
-    "workflow-gates": ("PreToolUse", router("check-workflow-gates.sh"), "check-workflow-gates.ps1"),
-    "external-mutation-auth": ("PreToolUse", router("check-external-mutation-auth.sh"), "check-external-mutation-auth.ps1"),
-    "format": ("PostToolUse", router("post-tool-format.sh"), "post-tool-format.ps1"),
-    "subagent-review-receipt": ("SubagentStop", router("check-subagent-review.sh"), "check-subagent-review.ps1"),
-    "precompact-memory": ("PreCompact", router("pre-compact-memory.sh"), "pre-compact-memory.ps1"),
-    "build-evidence": ("Stop", router("build-evidence.sh"), "build-evidence.ps1"),
-    "state-updated": ("Stop", router("check-state-updated.sh"), "check-state-updated.ps1"),
+    "host-context": [
+        ("SessionStart", 'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/host-context.sh" hook --host codex', "host-context.ps1"),
+        ("UserPromptSubmit", 'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/host-context.sh" hook --host codex', "host-context.ps1"),
+    ],
+    "session-start": [("SessionStart", router("session-start.sh"), "session-start.ps1")],
+    "bash-safety": [("PreToolUse", router("check-bash-safety.sh"), "check-bash-safety.ps1")],
+    "workflow-gates": [("PreToolUse", router("check-workflow-gates.sh"), "check-workflow-gates.ps1")],
+    "external-mutation-auth": [("PreToolUse", router("check-external-mutation-auth.sh"), "check-external-mutation-auth.ps1")],
+    "format": [("PostToolUse", router("post-tool-format.sh"), "post-tool-format.ps1")],
+    "subagent-review-receipt": [("SubagentStop", router("check-subagent-review.sh"), "check-subagent-review.ps1")],
+    "precompact-memory": [("PreCompact", router("pre-compact-memory.sh"), "pre-compact-memory.ps1")],
+    "build-evidence": [("Stop", router("build-evidence.sh"), "build-evidence.ps1")],
+    "state-updated": [("Stop", router("check-state-updated.sh"), "check-state-updated.ps1")],
 }
 codex_tokens = {
     "host-context": "host-context.sh", "session-start": "session-start.sh",
@@ -91,14 +94,15 @@ for mid, (want_event, want_command) in claude_expected.items():
     if [(event, command) for got, event, command in claude_rows if got == mid] != [(want_event, want_command)]:
         raise SystemExit(f"claude managed hook changed: {mid}")
 
-if len(codex_found) != len(codex_expected) or len({mid for mid, *_ in codex_found}) != len(codex_expected):
+if len(codex_found) != sum(len(rows) for rows in codex_expected.values()) or len({mid for mid, *_ in codex_found}) != len(codex_expected):
     raise SystemExit("codex managed hook set missing or duplicated")
-for mid, (want_event, want_command, want_windows_script) in codex_expected.items():
+for mid, wanted in codex_expected.items():
     actual = [(event, command, windows, kind) for got, event, command, windows, kind in codex_found if got == mid]
-    if len(actual) != 1:
+    if len(actual) != len(wanted):
         raise SystemExit(f"codex managed hook changed: {mid}")
-    event, command, windows, kind = actual[0]
-    if event != want_event or command != want_command or kind != "command" or want_windows_script not in windows:
+    normalized = sorted((event, command, kind, want_windows_script in windows) for event, command, windows, kind in actual for want_event, want_command, want_windows_script in wanted if event == want_event and command == want_command)
+    expected = sorted((event, command, "command", True) for event, command, _ in wanted)
+    if normalized != expected:
         raise SystemExit(f"codex managed hook changed: {mid}")
 
 encoded = json.dumps({"claude": sorted(claude_found), "codex": sorted(codex_found)}, separators=(",", ":"), ensure_ascii=True)

@@ -87,7 +87,8 @@ forge_lifecycle_bootstrap() {
     done < "$ledger"
     # These are project-owned discovery/context surfaces, so they are not all
     # manifest-owned. Copy only when present and missing in the linked worktree.
-    for rel in .forge/version .forge/installed-files.tsv CLAUDE.md AGENTS.md docs/agent-context.md .mcp.json; do
+    for rel in .forge/version .forge/installed-files.tsv CLAUDE.md AGENTS.md docs/agent-context.md \
+        .claude/settings.json .codex/config.toml .codex/hooks.json .mcp.json; do
         forge_lifecycle_copy_missing "$primary" "$target" "$rel" || return 1
     done
 }

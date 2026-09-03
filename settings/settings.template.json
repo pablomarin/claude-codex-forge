@@ -77,6 +77,18 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "forgeManagedId": "host-context",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.forge/hooks/lib/host-context.sh\" hook --host claude"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "",

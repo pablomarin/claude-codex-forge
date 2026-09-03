@@ -78,22 +78,23 @@ mkdir -p "$PRIMARY"
 BASE_SHA=$(git -C "$PRIMARY" rev-parse HEAD)
 printf 'primary-local-change\n' > "$PRIMARY/owned.txt"
 mkdir -p "$PRIMARY/.forge/hooks/lib" "$PRIMARY/.forge/local/memory" \
-    "$PRIMARY/.codex" "$PRIMARY/docs"
+    "$PRIMARY/.claude" "$PRIMARY/.codex" "$PRIMARY/docs"
 printf '6\n' > "$PRIMARY/.forge/version"
 cp "$REPO_ROOT/state.template.md" "$PRIMARY/.forge/state.template.md"
 printf 'private policy\n' > "$PRIMARY/.forge/instructions.md"
+printf 'claude settings\n' > "$PRIMARY/.claude/settings.json"
 printf 'codex config\n' > "$PRIMARY/.codex/config.toml"
+printf 'codex hooks stay primary\n' > "$PRIMARY/.codex/hooks.json"
 printf 'shared project context\n' > "$PRIMARY/docs/agent-context.md"
 printf 'must-not-copy\n' > "$PRIMARY/.forge/local/memory/private.md"
 write_state "$PRIMARY/.forge/local/state.md" "/fix-bug prior" "done-primary" "now-primary" "next-primary"
 cat > "$PRIMARY/.forge/installed-files.tsv" <<'EOF'
 .forge/state.template.md	fixture	v6
 .forge/instructions.md	fixture	v6
-.codex/config.toml	fixture	v6
 docs/agent-context.md	fixture	v6
 owned.txt	fixture	v6
 EOF
-printf '%s\n' '.forge/' '.codex/' 'docs/agent-context.md' '.worktrees/' >> "$PRIMARY/.git/info/exclude"
+printf '%s\n' '.forge/' '.claude/' '.codex/' 'docs/agent-context.md' '.worktrees/' >> "$PRIMARY/.git/info/exclude"
 
 if [ -x "$HELPER" ]; then
     (cd "$PRIMARY" && "$HELPER" create --kind fix --name bug-one --base HEAD) \
@@ -108,7 +109,9 @@ assert_equals "$(git -C "$TARGET" branch --show-current 2>/dev/null || true)" "f
 assert_file_exists "$TARGET/.forge/instructions.md" "ignored canonical harness is copied"
 assert_file_exists "$TARGET/.forge/version" "generated v6 stamp is copied"
 assert_file_exists "$TARGET/.forge/installed-files.tsv" "generated installation ledger is copied"
-assert_file_exists "$TARGET/.codex/config.toml" "ignored host adapter is copied"
+assert_file_exists "$TARGET/.claude/settings.json" "merge-owned Claude host adapter is copied outside the canonical ledger"
+assert_file_exists "$TARGET/.codex/config.toml" "merge-owned Codex config is copied outside the canonical ledger"
+assert_file_exists "$TARGET/.codex/hooks.json" "Codex hook validation mirror is copied outside the canonical ledger"
 assert_file_exists "$TARGET/docs/agent-context.md" "ignored shared project context is copied"
 assert_equals "$(cat "$TARGET/owned.txt")" "tracked-owned" "bootstrap never overwrites an existing worktree file"
 assert_file_missing "$TARGET/.forge/local/memory/private.md" "volatile local memory is never copied"

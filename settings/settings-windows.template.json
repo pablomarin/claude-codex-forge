@@ -80,6 +80,18 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "forgeManagedId": "host-context",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.forge/hooks/lib/host-context.ps1\" -Mode hook -Host claude"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "",
