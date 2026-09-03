@@ -52,7 +52,8 @@ One GitHub repo becomes the hub:
 
 Multiple developers run parallel Claude Code or Codex sessions via **auto-created git worktrees**
 (`/new-feature` and `/fix-bug` spawn them). Each worktree has its own branch, filesystem, and
-`.forge/local/` state. Forge warns against simultaneous editing of one worktree and adds no locks.
+`.forge/local/` state. Forge creates no edit lock: concurrent sessions are allowed. Developers
+coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
 
 ## Inheritance
 

@@ -7,8 +7,8 @@ their native events into the same policy.
 
 | Hook | Trigger | What happens |
 | --- | --- | --- |
-| `SessionStart` | New/resumed host session, clear, or compaction | Injects current-host, branch, state, and drift context; remote fetch remains source-gated |
-| `UserPromptSubmit` | Before each user prompt | Idempotently refreshes the protected native-host receipt for the current session and worktree |
+| `SessionStart` | New/resumed host session, clear, or compaction | Runs the stable host-context compatibility no-op, then injects branch, state, and drift context; remote fetch remains source-gated |
+| `UserPromptSubmit` | Before each user prompt | Runs the same stable host-context compatibility no-op; it creates no worktree or session authority |
 | `Stop` | Main host finishes a turn | Builds candidate evidence and reminds the host to keep `.forge/local/state.md` current |
 | `PreToolUse` | Before a shell command | Audits commands, blocks dangerous patterns, enforces workflow evidence, and checks protected external-mutation authority |
 | `PostToolUse` | After supported file writes | Runs the configured formatter |
@@ -23,6 +23,12 @@ Claude Code hooks are registered in `.claude/settings.json`; Codex hooks are reg
 a Codex hook validation mirror without overwriting an existing destination. Codex hook execution
 still routes through the primary checkout. Canonical scripts stay in `.forge/hooks/` and read only
 the event worktree's `.forge/local/state.md` for current v6 state.
+
+The retained `host-context` hook command is deliberately a compatibility no-op so existing native
+hook trust remains stable. `host-context launch` accepts only the canonical agent or council
+dispatcher and declares `FORGE_NATIVE_HOST=claude|codex` for reviewer routing. It creates no receipt,
+does not authenticate a session, and grants no authority. Candidate, review, verification, state,
+goal, authorization, and promotion evidence remain bound to the exact worktree and artifact.
 
 Codex may register a stable router from the primary checkout. For every linked-worktree event,
 `codex-worktree-dispatch.{sh,ps1}` validates an absolute event `cwd`, resolves the event repository,

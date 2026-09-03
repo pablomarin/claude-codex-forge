@@ -1416,6 +1416,32 @@ mkdir -p "$ROUTER_REPO/main"
 (cd "$ROUTER_REPO/main" && HOME="$ROUTER_REPO/home" "$REPO_ROOT/setup.sh" -p RouterMain > "$ROUTER_REPO/main-setup.log" 2>&1)
 ROUTER="$ROUTER_REPO/main/.forge/hooks/lib/codex-worktree-dispatch.sh"
 assert_file_exists "$ROUTER" "primary setup installs stable Codex router"
+ROUTER_UNIX_HOST_BEFORE=$(python3 - "$ROUTER_REPO/main/.codex/hooks.json" <<'PY'
+import json, sys
+config = json.load(open(sys.argv[1]))
+print(next(
+    hook["command"]
+    for group in config["hooks"]["SessionStart"]
+    for hook in group["hooks"]
+    if "host-context.sh" in hook.get("command", "")
+))
+PY
+)
+ROUTER_WINDOWS_HOST_BEFORE=$(python3 - "$ROUTER_REPO/main/.codex/hooks.json" <<'PY'
+import json, sys
+config = json.load(open(sys.argv[1]))
+print(next(
+    hook["commandWindows"]
+    for group in config["hooks"]["SessionStart"]
+    for hook in group["hooks"]
+    if "host-context.ps1" in hook.get("commandWindows", "")
+))
+PY
+)
+assert_equals "$ROUTER_UNIX_HOST_BEFORE" 'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/host-context.sh" hook --host codex' \
+    "primary Codex Unix host compatibility command has the stable trusted text"
+assert_equals "$ROUTER_WINDOWS_HOST_BEFORE" 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '\''.forge\hooks\lib\host-context.ps1'\'') -Mode hook -Host codex"' \
+    "primary Codex Windows host compatibility command has the stable trusted text"
 (cd "$ROUTER_REPO/main" && git worktree add -q "$ROUTER_REPO/one" -b router-one)
 (cd "$ROUTER_REPO/main" && git worktree add -q "$ROUTER_REPO/two" -b router-two)
 for wt in one two; do
@@ -1441,6 +1467,32 @@ assert_contains "$ROUTER_REPO/one-setup.log" 'CODEX_HOOKS: BLOCKED' "linked setu
 ROUTER_PRIMARY_PHYSICAL=$(cd "$ROUTER_REPO/main" && pwd -P)
 assert_contains "$ROUTER_REPO/one-setup.log" "cd '$ROUTER_PRIMARY_PHYSICAL'" "linked setup names the exact physical primary checkout"
 assert_contains "$ROUTER_REPO/one-setup.log" "$REPO_ROOT/setup.sh" "linked setup names the exact Forge installer"
+ROUTER_UNIX_HOST_AFTER=$(python3 - "$ROUTER_REPO/main/.codex/hooks.json" <<'PY'
+import json, sys
+config = json.load(open(sys.argv[1]))
+print(next(
+    hook["command"]
+    for group in config["hooks"]["SessionStart"]
+    for hook in group["hooks"]
+    if "host-context.sh" in hook.get("command", "")
+))
+PY
+)
+ROUTER_WINDOWS_HOST_AFTER=$(python3 - "$ROUTER_REPO/main/.codex/hooks.json" <<'PY'
+import json, sys
+config = json.load(open(sys.argv[1]))
+print(next(
+    hook["commandWindows"]
+    for group in config["hooks"]["SessionStart"]
+    for hook in group["hooks"]
+    if "host-context.ps1" in hook.get("commandWindows", "")
+))
+PY
+)
+assert_equals "$ROUTER_UNIX_HOST_AFTER" "$ROUTER_UNIX_HOST_BEFORE" \
+    "linked-worktree setup leaves the trusted Unix host command byte-identical"
+assert_equals "$ROUTER_WINDOWS_HOST_AFTER" "$ROUTER_WINDOWS_HOST_BEFORE" \
+    "linked-worktree setup leaves the trusted Windows host command byte-identical"
 
 start_test "manifest-owned v5 skills and agents block every project write mode"
 for surface in skill agent; do

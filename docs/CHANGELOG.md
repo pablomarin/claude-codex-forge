@@ -17,7 +17,8 @@ candidate-bound receipts now have one owner under `.forge/`. `.claude/`, `.codex
 `CLAUDE.md`, and `AGENTS.md` expose thin native adapters instead of duplicate policy trees. A
 developer can stop one host and resume the same worktree in the other at the next incomplete
 checkpoint. Forge deliberately adds no concurrent-edit lock; simultaneous same-worktree sessions
-remain unsafe.
+are allowed, with ordinary developer coordination for overlapping edits. Any candidate mutation
+makes older candidate-bound review and verification evidence stale automatically.
 
 `./setup.sh -F` and `./setup.ps1 -FullRefresh` (`-R`) are the authoritative v5-to-v6 migration.
 The manifest-driven transaction proves legacy ownership, preserves user regions/state/custom
@@ -55,10 +56,11 @@ Cross-host worktree bootstrap now carries the merge-owned Claude settings and Co
 that are intentionally absent from the canonical installation ledger. The copy remains
 missing-only, preserves existing project configuration, includes `.codex/hooks.json` as the
 worktree-local validation mirror while Codex execution still routes through the primary checkout,
-and never copies receipts or local evidence. Both native adapters also refresh the protected
-session/worktree receipt on
-`UserPromptSubmit`, so returning to an already-open Claude Code or Codex session self-recovers from
-a missing or expired receipt without allowing an agent shell command to mint authority.
+and never copies local evidence. Repository hook setup and native trust happen once unless a hook
+definition genuinely changes. The existing `host-context` event commands remain byte-stable as
+compatibility no-ops, while the fixed-target launcher declares `main_host` only as routing metadata.
+A session opened in the primary checkout can continue any linked worktree through its command cwd;
+no per-worktree Forge receipt, copied native session ID, trust bypass, or task-root reopen is needed.
 
 Full-refresh ownership now distinguishes active legacy policy from non-runtime content that Forge
 seeded for projects to adopt. Customized ADR indexes, CI references, and Playwright scaffolds are

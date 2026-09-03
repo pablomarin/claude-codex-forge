@@ -1,7 +1,8 @@
 # Parallel and Cross-Host Sessions
 
-Use one worktree per active feature. Claude Code and Codex can each lead different worktrees, and a
-developer may resume one worktree in the other host after stopping the first session.
+Use one worktree per active feature. Claude Code and Codex can each lead different worktrees, resume
+the same worktree in later sessions, or coordinate concurrent work in one worktree. Forge supplies
+artifact-bound evidence, not an edit lock.
 
 ## Isolated Features
 
@@ -24,42 +25,49 @@ cd /project && codex
 # invoke the installed workflow-new-feature skill for api
 ```
 
-Receipts are bound to both candidate identity and worktree identity. Copying a clean receipt to
-another worktree does not satisfy its gates.
+Review and verification receipts are bound to both candidate identity and worktree identity.
+Copying clean evidence to another worktree does not satisfy its gates.
 
 ## Switch Hosts Mid-Feature
 
-Stop the current host, then open the same worktree in the other host:
+Open either host in the repository -> say "get into this worktree and continue" -> work there -> close or switch hosts -> repeat without reopening at the worktree path.
+
+For example, a session that starts in the primary checkout can select the worktree for its tools:
 
 ```bash
-cd /project/.worktrees/auth
-codex # after the Claude Code session has stopped
+cd /project
+codex
+> Get into /project/.worktrees/auth and continue from .forge/local/state.md.
 ```
 
 The new host reads `.forge/local/state.md`, continues at the next incomplete checkpoint, and keeps
 still-valid artifact-bound evidence. It does not repeat planning merely because the host changed.
 The current host is main for the next action; reviewer selection is recomputed for that action.
-`SessionStart` creates that host's protected receipt and `UserPromptSubmit` idempotently refreshes it
-when returning to an already-open session.
+Opening the client directly at the linked worktree remains optional.
 
-> **Warning:** Do not edit the same worktree from both hosts simultaneously. Forge intentionally
-> adds no locks or ownership daemon. Concurrent writes can invalidate the frozen candidate and all
-> review/verification receipts; ordinary Git recovery remains the escape hatch.
+Forge creates no edit lock: concurrent sessions are allowed. Forge intentionally adds no ownership daemon, so the
+developer still coordinates overlapping edits. When any session changes the candidate,
+candidate-bound evidence becomes stale automatically; rerun the affected review and verification
+against the new candidate before certification. Ordinary Git recovery remains the escape hatch for
+an actual edit conflict.
 
 ## Codex Hooks in Linked Worktrees
 
-Claude project hooks live in each adapter surface. Codex uses one protected registry/router in the
+Claude project hooks live in each adapter surface. Codex uses one stable registry/router in the
 primary checkout because linked worktrees share the Git common directory. Initial setup from a
 linked worktree therefore prints the exact command to run in the primary checkout and does not
 mutate its sibling.
 
-After primary registration and project trust, the stable router validates the common directory and
+Repository hook setup and trust happen once unless the native host reports a genuinely new or
+changed hook definition. They are not repeated per worktree. After primary registration and project trust, the stable router validates the common directory and
 dispatches each event to the event worktree's own `.forge/hooks/` and `.forge/local/state.md`. A
 missing/stale registration or wrong-common-directory event keeps Codex `RUNTIME_READY: BLOCKED`.
 
 ## Practical Rules
 
 - Start a new feature from the primary checkout; the workflow moves into its worktree.
+- A current or later Codex or Claude Code session may continue it by setting tool cwd to that
+  worktree; no task-root reopen, copied identity, or per-worktree trust step is needed.
 - Do not create nested worktrees.
 - Use paths relative to the active worktree.
 - `quick-fix` uses the current branch and does not create a worktree.

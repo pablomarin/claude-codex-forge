@@ -2055,10 +2055,16 @@ for workflow in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
         "$(basename "$workflow") forbids stale private plan copies"
     assert_contains "$workflow" 'file-only artifact' \
         "$(basename "$workflow") rejects incomplete plan-review context"
-    assert_contains "$workflow" 'SessionStart hook creates and UserPromptSubmit refreshes the protected host receipt' \
-        "$(basename "$workflow") requires native worktree receipt creation and refresh"
-    assert_contains "$workflow" 'never synthesize a receipt or bind an older task/session ID manually' \
-        "$(basename "$workflow") forbids manual host receipt substitution"
+    assert_contains "$workflow" 'A session opened in the primary checkout may continue the linked worktree' \
+        "$(basename "$workflow") allows primary-checkout sessions to continue linked worktrees"
+    assert_contains "$workflow" 'No per-worktree Forge receipt' \
+        "$(basename "$workflow") requires no worktree receipt ceremony"
+    assert_contains "$workflow" 'task-root reopening is required' \
+        "$(basename "$workflow") requires no task-root reopening"
+    assert_contains "$workflow" 'concurrent sessions are allowed' \
+        "$(basename "$workflow") permits concurrent sessions"
+    assert_contains "$workflow" 'candidate-bound evidence becomes stale' \
+        "$(basename "$workflow") explains evidence invalidation under concurrent mutation"
 done
 
 # ---------------------------------------------------------------------------
@@ -2413,8 +2419,60 @@ assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Invoke-IndependentRep
     "PowerShell dispatcher owns independent primary/control reproduction"
 assert_contains "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" 'Reserve-OwnedReviewPath' \
     "PowerShell dispatcher confines no-clobber outputs"
-assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" 'receipt_hash=' \
-    "PowerShell host launcher uses a protected current-session receipt"
+assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" '$env:FORGE_NATIVE_HOST = $EngineHost' \
+    "PowerShell compatibility launcher declares the main host for routing"
+for legacy_variable in FORGE_NATIVE_SESSION_ID FORGE_HOST_CONTEXT_FILE FORGE_HOST_CONTEXT_LAUNCHER_HASH; do
+    assert_contains "$REPO_ROOT/hooks/lib/host-context.ps1" "Env:$legacy_variable" \
+        "PowerShell compatibility launcher removes legacy $legacy_variable metadata"
+done
+assert_not_contains "$REPO_ROOT/hooks/lib/host-context.ps1" 'receipt_hash=' \
+    "PowerShell compatibility launcher creates no receipt"
+
+start_test "linked-worktree continuation contract is receipt-free and host-neutral"
+for routing_doc in "$REPO_ROOT/commands/opinion.md" "$REPO_ROOT/skills/council/SKILL.template.md" "$REPO_ROOT/skills/council/references/peer-review-protocol.md"; do
+    assert_contains "$routing_doc" '`main_host` is routing metadata' \
+        "$(basename "$routing_doc") treats main_host only as routing metadata"
+done
+assert_contains "$REPO_ROOT/docs/reference/hooks.md" 'compatibility no-op' \
+    "hook reference documents the retained host-context event as a compatibility no-op"
+for concurrency_doc in \
+  "$REPO_ROOT/FORGE.template.md" \
+  "$REPO_ROOT/rules/critical-rules.md" \
+  "$REPO_ROOT/rules/workflow.md" \
+  "$REPO_ROOT/commands/quick-fix.md" \
+  "$REPO_ROOT/docs/explanation/harness-philosophy.md" \
+  "$REPO_ROOT/docs/guides/multi-project-isolation.md" \
+  "$REPO_ROOT/docs/guides/parallel-sessions.md"; do
+    assert_contains "$concurrency_doc" 'concurrent sessions are allowed' \
+        "$(basename "$concurrency_doc") allows concurrent sessions without a Forge lock"
+    assert_contains "$concurrency_doc" 'candidate-bound evidence becomes stale' \
+        "$(basename "$concurrency_doc") explains candidate evidence invalidation"
+done
+for active_doc in \
+  "$REPO_ROOT/FORGE.template.md" \
+  "$REPO_ROOT/rules/critical-rules.md" \
+  "$REPO_ROOT/rules/workflow.md" \
+  "$REPO_ROOT/commands/new-feature.md" \
+  "$REPO_ROOT/commands/fix-bug.md" \
+  "$REPO_ROOT/commands/quick-fix.md" \
+  "$REPO_ROOT/commands/opinion.md" \
+  "$REPO_ROOT/skills/council/SKILL.template.md" \
+  "$REPO_ROOT/skills/council/references/peer-review-protocol.md" \
+  "$REPO_ROOT/docs/explanation/harness-philosophy.md" \
+  "$REPO_ROOT/docs/guides/multi-project-isolation.md" \
+  "$REPO_ROOT/docs/guides/parallel-sessions.md" \
+  "$REPO_ROOT/docs/reference/hooks.md" \
+  "$REPO_ROOT/docs/reference/file-structure.md" \
+  "$REPO_ROOT/docs/CHANGELOG.md"; do
+    assert_not_contains "$active_doc" 'protected current host receipt is required' \
+        "$(basename "$active_doc") has no obsolete protected-receipt blocker"
+    assert_not_contains "$active_doc" 'protected main host context is required' \
+        "$(basename "$active_doc") has no obsolete protected-context blocker"
+    assert_not_contains "$active_doc" 'reopen the host in the worktree' \
+        "$(basename "$active_doc") has no worktree reopen remediation"
+    assert_not_contains "$active_doc" 'SessionStart hook creates and UserPromptSubmit refreshes the protected host receipt' \
+        "$(basename "$active_doc") has no receipt-minting contract"
+done
 
 # ---------------------------------------------------------------------------
 # Contract: v6 public documentation describes the active dual-host surface.
@@ -2552,8 +2610,10 @@ assert_contains "$MEMORY_DOC" '.forge/local/state.md' \
     "memory guide names the canonical shared state"
 assert_contains "$HOOKS_DOC" '.forge/local/reviews/' \
     "hook guide names artifact-bound receipt storage"
-assert_contains "$PARALLEL" 'Do not edit the same worktree from both hosts simultaneously' \
-    "parallel guide warns against simultaneous same-worktree edits"
+assert_contains "$PARALLEL" 'concurrent sessions are allowed' \
+    "parallel guide allows coordinated simultaneous same-worktree sessions"
+assert_contains "$PARALLEL" 'candidate-bound evidence becomes stale' \
+    "parallel guide explains automatic candidate-evidence invalidation"
 assert_contains "$HOOKS_DOC" 'primary checkout' \
     "hook guide explains Codex linked-worktree routing"
 assert_contains "$TROUBLESHOOTING_DOC" 'CODEX_HOOKS: BLOCKED' \

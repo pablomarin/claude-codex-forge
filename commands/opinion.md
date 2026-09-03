@@ -1,8 +1,9 @@
 # Forge opinion workflow — Fresh Review and Investigation
 
-Use the host-fixed launcher registered by the active Claude Code or Codex adapter. Never invent a
-`main` engine flag: the SessionStart context determines the main host. User-facing reviewer choices
-map only to `--engine auto|claude|codex`; `auto` means the other engine. A healthy explicit
+Use the fixed-target compatibility launcher registered by the active Claude Code or Codex adapter.
+It declares the current host to the dispatcher; `main_host` is routing metadata, not authenticated
+session identity or reviewer evidence. Never invent a `main` engine flag. User-facing reviewer
+choices map only to `--engine auto|claude|codex`; `auto` means the other engine. A healthy explicit
 same-engine request is a fresh independent reviewer, not a fallback.
 
 ## Inputs

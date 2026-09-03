@@ -24,8 +24,8 @@ criterion.
   candidate revision. Do not infer a successful gate from execution alone.
 - Use the canonical workflows in `.forge/workflows/`, rules in `.forge/rules/`, skills in
   `.forge/skills/`, and roles in `.forge/agents/`.
-- A host switch may resume the same branch and worktree. Warn against simultaneous editing, but do
-  not create workflow locks.
+- A host switch may resume the same branch and worktree. Forge creates no edit lock: concurrent sessions are allowed.
+  Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
 - Keep developer state, receipts, and local memories under `.forge/local/`; never overwrite them
   during setup. Keep project-owned durable memory under `.forge/memory/`.
 

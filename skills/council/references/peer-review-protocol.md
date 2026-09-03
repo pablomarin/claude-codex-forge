@@ -8,10 +8,12 @@
 
 ### Dynamic six-seat topology (CRITICAL)
 
-Use the protected host launcher with its exact council target: `host-context.sh
+Use the fixed-target compatibility launcher with its exact council target: `host-context.sh
 launch --host <host> -- .forge/hooks/lib/council-dispatch.sh ...` on Unix, or
 `host-context.ps1 -Mode launch -Host <host> -LaunchTarget council
--LaunchArgumentsJson ...` on Windows. It starts five fresh advisor sessions, resumes those exact sessions for
+-LaunchArgumentsJson ...` on Windows. `main_host` is routing metadata, not
+authenticated session identity; candidate and worktree evidence remain the
+review authority. The dispatcher starts five fresh advisor sessions, resumes those exact sessions for
 anonymous peer critique, then starts one fresh chairman session: six sessions
 and eleven turns. The healthy assignment is three advisor seats on the main
 engine, two advisor seats plus chairman on the other engine. Every seat uses
