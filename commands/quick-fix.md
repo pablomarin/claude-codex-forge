@@ -7,8 +7,9 @@ architecture decision, and has an obvious verification path. Otherwise use `/fix
 ## Steps
 
 1. Read `.forge/local/state.md`, resolve the active host, and record `Last active host`. Resume the
-   next unchecked step after a host switch. Forge creates no edit lock: concurrent sessions are allowed.
-   Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
+   next unchecked step after a host switch. Forge allows simultaneous editing and creates no edit
+   lock, so coordinate overlapping writes. If any session mutates the candidate, candidate-bound
+   evidence becomes stale.
 2. Confirm the branch is not protected. Persist the intended base ref and immutable resolved base SHA
    before the first change.
 3. State the acceptance check and affected files. If behavior changes, write and observe a failing
