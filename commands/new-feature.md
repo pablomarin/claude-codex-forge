@@ -9,8 +9,8 @@ host is the main agent for this session; there is no permanent main engine.
    `.forge/state.template.md` only when it is absent; never overwrite developer state. Use the
    host's file read/write capabilities for state, not shell commands.
 2. Resolve the active host through its installed adapter and record `Last active host`. If the host
-   changed, resume the exact next unchecked durable step. Forge allows simultaneous editing and
-   provides no edit lock, so coordinate overlapping writes.
+   changed, resume the exact next unchecked durable step. There is no Forge edit lock; concurrent sessions are allowed,
+   including simultaneous editing, so coordinate overlapping writes.
    If any session mutates the candidate, candidate-bound evidence becomes stale and must be
    regenerated before certification.
 3. From the primary checkout, create the isolated worktree with

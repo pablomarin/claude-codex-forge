@@ -9,7 +9,8 @@ the main agent for this session; there is no permanent main engine.
    `.forge/state.template.md` only when absent. Use the host's file read/write capabilities for
    state, not shell commands.
 2. Record `Last active host`. On a host switch, resume the exact next unchecked durable step.
-   Forge allows simultaneous editing and provides no edit lock, so coordinate overlapping writes.
+   Forge provides no edit lock: concurrent sessions are allowed, including simultaneous editing;
+   coordinate overlapping writes.
    If any session mutates the candidate, candidate-bound evidence becomes stale and must be
    regenerated before certification.
 3. Work outside the protected default branch in one isolated worktree. From the primary checkout,
