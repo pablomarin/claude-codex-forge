@@ -592,7 +592,8 @@ try {
     $expectedManaged = @(
         'SessionStart|host-context|powershell -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/.forge/hooks/lib/host-context.ps1" -Mode hook -Host claude',
         'SubagentStop|subagent-review-receipt|powershell -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/.forge/hooks/check-subagent-review.ps1"',
-        'PreToolUse|external-mutation-auth|powershell -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/.forge/hooks/check-external-mutation-auth.ps1"'
+        'PreToolUse|external-mutation-auth|powershell -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/.forge/hooks/check-external-mutation-auth.ps1"',
+        'UserPromptSubmit|host-context|powershell -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/.forge/hooks/lib/host-context.ps1" -Mode hook -Host claude'
     )
     $hookDetail = "legacy=$($legacyCommands.Count); managed=$($managedHooks -join ' || '); duplicates=$($duplicateLeaves.Name -join ',')"
     Assert-True ($legacyCommands.Count -eq 9 -and (Compare-Object $managedHooks $expectedManaged -CaseSensitive).Count -eq 0 -and $duplicateLeaves.Count -eq 0) "each released Windows hook registration executes through exactly one thin delegate ($hookDetail)"
