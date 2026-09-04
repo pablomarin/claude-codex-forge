@@ -5,6 +5,11 @@ if ($claude.modelUsage.PSObject.Properties.Name -ne "claude-opus-4-1") { throw "
 if ($claude.modelUsage.'claude-opus-4-1'.provider -ne "anthropic") { throw "Claude provider fixture drift" }
 $codexLines = Get-Content (Join-Path $root "tests\template\fixtures\host-events\codex-0.144.1.jsonl")
 if (($codexLines | Select-String '"model"|"provider"|"effort"').Count -ne 0) { throw "Codex fixture invents identity" }
+$verifyRuntime = Join-Path $root "scripts\verify-runtime.ps1"
+$missingHostOutput = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $verifyRuntime live -ProjectRoot $root 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 2 -or $missingHostOutput -notlike '*BLOCKED: -HostName must be claude or codex*' -or $missingHostOutput -like '*binary unavailable*') {
+    throw "PowerShell hostless live verification did not fail at the host contract: $missingHostOutput"
+}
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-task2-ps-dispatch-" + [Guid]::NewGuid().ToString("N"))
 try {
     $project = Join-Path $scratch "project"

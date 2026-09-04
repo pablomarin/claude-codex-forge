@@ -71,6 +71,10 @@ live_mode() {
     while [ "$#" -gt 0 ]; do
         case "$1" in --project-root) root="$2"; shift 2 ;; --host) host="$2"; shift 2 ;; *) return 2 ;; esac
     done
+    case "$host" in
+        claude|codex) ;;
+        *) echo "BLOCKED: --host must be claude or codex"; return 2 ;;
+    esac
     [ "${FORGE_LIVE_QUALIFICATION:-0}" = 1 ] || {
         echo "BLOCKED: live runtime qualification requires FORGE_LIVE_QUALIFICATION=1"
         return 10

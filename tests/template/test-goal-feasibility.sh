@@ -19,6 +19,10 @@ CODEX_IDENTITY="$H/.forge/bin/codex.identity"
 assert_file_exists "$CODEX_IDENTITY" "global setup records the independently selected Codex identity"
 assert_file_exists "$CODEX_IDENTITY.sha256" "Codex identity has a no-write integrity sidecar"
 assert_contains "$S/global.log" 'GLOBAL_HARNESS: MATERIALIZED' "global setup reports machine harness materialized"
+assert_contains "$S/global.log" 'pending authenticated final runtime qualification' \
+    "global setup reports the final runtime qualification boundary"
+assert_not_contains "$S/global.log" 'scripts/verify-runtime.sh sentinel' \
+    "global setup does not advertise the non-certifying verifier"
 assert_contains "$S/global.log" 'NORMAL_PROJECT_WORKFLOWS: READY' "global setup keeps ordinary project workflows independent"
 assert_contains "$S/global.log" 'NATIVE_GOAL_RUNTIME: PENDING qualification via scripts/qualify-goal-feasibility.sh' \
     "global setup reports native goal qualification separately"

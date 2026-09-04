@@ -621,7 +621,7 @@ Write-Host "INSTALLATION: MATERIALIZED"
 foreach ($engine in Get-EngineAvailability) {
     if ($engine.Availability -eq "ABSENT") { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED binary unavailable; host surface remains materialized" }
     elseif ($engine.Availability -eq "PRESENT_CAPABILITY_GAP") { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED $($engine.Diagnostic)" }
-    else { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED pending opt-in authenticated verify-runtime sentinel ($($engine.Path); $($engine.Version))" }
+    else { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED pending authenticated final runtime qualification ($($engine.Path); $($engine.Version))" }
 }
 if ($Scope -eq "project") {
     $diagnosticTarget = if ($env:FORGE_DIAGNOSTIC_TARGET) {
@@ -662,5 +662,5 @@ if ($Scope -eq "project") {
         Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
         Write-Host "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; run '$RepoRoot\setup.ps1 -Global' from a separate terminal to install protected native /goal support"
     }
-    Write-Host "VERIFY_RUNTIME: '$(Join-Path $diagnosticTarget '.forge\bin\verify-runtime')' live --project-root '$diagnosticTarget'"
+    Write-Host "RUNTIME_QUALIFICATION: final owner '$(Join-Path $RepoRoot 'scripts\qualify-runtime-final.ps1')'; live project '$diagnosticTarget'; command and required operator evidence: '$(Join-Path $RepoRoot 'docs\qualification\agent-mode-selection.md')'"
 }

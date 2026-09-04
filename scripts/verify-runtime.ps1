@@ -25,6 +25,10 @@ if ($Mode -eq "identity") {
     Write-Host "canonical_rule_count=$($rules.Count)"
     Write-Host "duplicate_rule_count=$($duplicates.Count)"
 } elseif ($Mode -eq "live") {
+    if (@("claude", "codex") -notcontains $HostName) {
+        Write-Host "BLOCKED: -HostName must be claude or codex"
+        exit 2
+    }
     if ($HostName -eq "claude" -and (Test-Path -LiteralPath (Join-Path $ProjectRoot ".claude\commands\goal.md"))) {
         Write-Host "RUNTIME_READY=BLOCKED host=claude custom native goal collision; rename .claude/commands/goal.md"
         exit 14

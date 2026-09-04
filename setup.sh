@@ -316,8 +316,6 @@ if [[ "$GLOBAL" == true ]]; then
     bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
         --repo-root "$SCRIPT_DIR" --target "$HOME" --scope global --platform unix
     echo "INSTALLATION: MATERIALIZED"
-    echo "claude RUNTIME_READY: BLOCKED pending authenticated scripts/verify-runtime.sh sentinel"
-    echo "codex RUNTIME_READY: BLOCKED pending authenticated scripts/verify-runtime.sh sentinel"
     echo "GLOBAL_HARNESS: MATERIALIZED"
     echo "NORMAL_PROJECT_WORKFLOWS: READY"
     echo "NATIVE_GOAL_RUNTIME: PENDING qualification via scripts/qualify-goal-feasibility.sh"

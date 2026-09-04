@@ -76,6 +76,12 @@ assert_equals "$?" "0" "--upgrade succeeds on an existing v6 installation"
 assert_contains "$S4/docs/agent-context.md" "PROJECT_CONTEXT_SENTINEL" \
     "--upgrade preserves agent context"
 assert_contains "$S4/.mcp.json" '"project-custom"' "--upgrade preserves custom MCP entries"
+assert_contains "$S4/upgrade.log" "RUNTIME_QUALIFICATION: final owner '$REPO_ROOT/scripts/qualify-runtime-final.sh'; live project" \
+    "manual and agent-assisted upgrade name the final runtime qualifier"
+assert_contains "$S4/upgrade.log" "$REPO_ROOT/docs/qualification/agent-mode-selection.md" \
+    "runtime qualification guidance names the required operator-evidence guide"
+assert_not_contains "$S4/upgrade.log" "VERIFY_RUNTIME:" \
+    "upgrade does not advertise the non-certifying verifier as final qualification"
 
 start_test "legacy full-refresh spelling remains a deprecated compatibility alias"
 S5=$(scratch_dir setup-flags-legacy)
