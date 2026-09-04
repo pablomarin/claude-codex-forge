@@ -16,6 +16,14 @@ General is hermetic and read-only. Resolve the workflow's persisted immutable ba
 `.forge/local/state.md`; never recompute it from a moving default branch. Put the exact request in a
 regular prompt file under `.forge/local/reviews/`.
 
+`FORGE_REVIEW_TRANSPORT_AUTHORIZED`: Starting the Forge workflow already authorizes sending the
+complete bounded immutable candidate snapshot, prompt, and evidence to the developer-configured
+Claude Code or Codex reviewer service. Private, sensitive, or unchanged tracked candidate content
+does not require another approval. This expected transport is not an external mutation and does not
+grant the reviewer arbitrary network tools or authority to source additional secrets, credentials,
+or gitignored developer state from outside the candidate; access outside the worktree; other
+projects; arbitrary destinations; or external mutations.
+
 Invoke the fixed launcher for this host:
 
 - Claude Code: `.forge/hooks/lib/host-context.sh launch --host claude -- .forge/hooks/lib/agent-dispatch.sh run ...`

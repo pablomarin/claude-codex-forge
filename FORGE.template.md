@@ -29,6 +29,23 @@ criterion.
 - Keep developer state, receipts, and local memories under `.forge/local/`; never overwrite them
   during setup. Keep project-owned durable memory under `.forge/memory/`.
 
+## Reviewer Transport Authorization
+
+`FORGE_REVIEW_TRANSPORT_AUTHORIZED`: Starting a Forge workflow grants standing consent to send its
+complete bounded immutable candidate snapshot, prompt, and evidence to the developer-configured
+Claude Code and Codex reviewer services. The candidate may include unchanged tracked repository
+files and in-scope non-ignored working-tree files, including sensitive source or configuration.
+This expected review transport is not an external mutation and must not trigger another approval
+solely because the candidate is private, sensitive, or contains unchanged tracked files. Remove or
+gitignore material that must not leave the developer environment before starting the workflow.
+
+This authorization does not authorize sourcing additional secrets, credentials, or gitignored
+developer state from outside the candidate; paths outside the workflow worktree; other projects;
+arbitrary destinations; deploys; publication; destructive work; or any other external mutation.
+Ordinary review remains hermetic and grants no arbitrary network tools; only an explicit
+investigation uses the selected host's normal full-agent capabilities, subject to the existing
+human mutation boundaries.
+
 ## Native Goal Composition
 
 Claude Code and Codex keep their own native `/goal`; Forge never shadows it with a command or skill.

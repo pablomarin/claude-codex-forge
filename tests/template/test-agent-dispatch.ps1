@@ -149,6 +149,19 @@ public static class ForgeFakeEngine {
         Assert-Equal (Invoke-Dispatch $repo $tuple[0] 'sid' $tuple[1]) 0 "$($tuple[0]) main can use $($tuple[1]) reviewer"
         Assert-Equal (Get-ReceiptValue $repo 'actual_engine') $tuple[2] 'actual engine recorded'
     }
+    Write-Host 'PowerShell isolated reviewers receive bounded configured-service transport authorization'
+    foreach ($tuple in @(@('claude','codex'), @('codex','claude'))) {
+        $selected = $tuple[0]; $engineHost = $tuple[1]
+        $repo = New-Repository "transport-$selected"; $log = Join-Path $repo ".forge/local/reviews/$selected-transport.log"
+        [Environment]::SetEnvironmentVariable("FAKE_$($selected.ToUpperInvariant())_LOG", $log)
+        try {
+            Assert-Equal (Invoke-Dispatch $repo $engineHost 'sid' $selected) 0 "$selected isolated review completes"
+            Assert-Contains $log 'FORGE_REVIEW_TRANSPORT_AUTHORIZED' "$selected isolated reviewer receives configured-service transport authorization"
+            Assert-Contains $log 'private, sensitive, or contains unchanged tracked files' "$selected reviewer does not reclassify candidate privacy as an authorization blocker"
+            Assert-Contains $log 'does not authorize sourcing additional secrets, credentials, or gitignored developer state from outside the candidate' "$selected reviewer receives the bounded transport exclusions"
+        }
+        finally { [Environment]::SetEnvironmentVariable("FAKE_$($selected.ToUpperInvariant())_LOG", $null) }
+    }
     Write-Host 'PowerShell fast review and same-engine fallback'
     foreach ($tuple in @(@('codex','claude'), @('claude','codex'))) {
         $repo = New-Repository "fast-$($tuple[1])"; [Environment]::SetEnvironmentVariable("FAKE_$($tuple[1].ToUpperInvariant())_BEHAVIOR", 'require-fast')

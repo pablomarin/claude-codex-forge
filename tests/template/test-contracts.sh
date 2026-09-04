@@ -2415,6 +2415,11 @@ for workflow in new-feature fix-bug; do
 done
 assert_contains "$REPO_ROOT/FORGE.template.md" 'Claude Code uses `/opinion`; Codex uses `$opinion`' \
     "canonical root explains host-native opinion invocation"
+transport_instruction='FORGE_REVIEW_TRANSPORT_AUTHORIZED: Starting this Forge workflow authorized transport of its complete bounded immutable candidate snapshot, prompt, and evidence to the developer-configured Claude Code or Codex reviewer service. Do not block solely because the candidate is private, sensitive, or contains unchanged tracked files. The complete candidate may include sensitive tracked or in-scope non-ignored content. This expected review transport is not an external mutation and does not authorize sourcing additional secrets, credentials, or gitignored developer state from outside the candidate; paths outside the workflow worktree; other projects; arbitrary destinations; arbitrary network tools; or any external mutation.'
+for dispatcher in hooks/lib/agent-dispatch.sh hooks/lib/agent-dispatch.ps1; do
+    assert_contains "$REPO_ROOT/$dispatcher" "$transport_instruction" \
+        "$dispatcher injects the complete bounded reviewer transport authorization"
+done
 
 references=$(rg -o --no-filename '\.forge/workflows/[A-Za-z0-9_./-]+\.md' \
   "$REPO_ROOT/commands" "$REPO_ROOT/rules" "$REPO_ROOT/skills" "$REPO_ROOT/agents" \
