@@ -613,6 +613,7 @@ case "$fallback_policy" in automatic|none) ;; *) die_dispatch invariant 'fallbac
 case "$role" in general|plan|code-spec|code-quality|investigation|investigation-repro|prd|comments|council-advisor|council-chair) ;; *) die_dispatch invariant 'unsupported role' ;; esac
 case "$profile" in review|investigate) ;; *) die_dispatch invariant 'unsupported profile' ;; esac
 case "$role:$profile" in investigation:investigate|investigation-repro:investigate) ;; investigation:*|investigation-repro:*) die_dispatch authorization 'investigation roles require the investigate profile' ;; *:review) ;; *) die_dispatch authorization 'only investigation roles may use the investigate profile' ;; esac
+case "$role:$fallback_policy" in plan:none|code-spec:none|code-quality:none) die_dispatch authorization 'certifying review roles require automatic fallback' ;; esac
 case "$conversation" in ephemeral|new|resume) ;; *) die_dispatch invariant 'unsupported conversation transport' ;; esac
 case "$timeout_seconds" in ''|*[!0-9]*) die_dispatch invariant 'timeout must be a positive integer' ;; esac; [ "$timeout_seconds" -gt 0 ] || die_dispatch invariant 'timeout must be positive'
 [ -f "$prompt_file" ] && [ ! -L "$prompt_file" ] || die_dispatch artifact 'regular prompt file required'; [ -n "$output" ] || die_dispatch invariant 'output is required'

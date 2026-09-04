@@ -87,6 +87,7 @@ suites.
 Common verification commands:
 
 ```bash
+bash tests/template/run-fast.sh
 bash tests/template/test-contracts.sh
 bash tests/template/test-platform-parity.sh
 bash tests/template/test-setup.sh
@@ -94,8 +95,9 @@ bash tests/template/run-all.sh
 git diff --check
 ```
 
-Use the narrowest relevant command while iterating. `run-all.sh` is the final integration check, not a
-loop body.
+Use the narrowest relevant command while editing, then `run-fast.sh` for the ordinary local gate.
+`run-all.sh` retains the broad engine, evidence, installer, migration, hook, state, and end-to-end
+matrices; run it once at a meaningful release or integration boundary, not as a loop body.
 
 ## Installer ownership
 

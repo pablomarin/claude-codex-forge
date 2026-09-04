@@ -166,9 +166,16 @@ public static class ForgeFakeEngine {
     Assert-Equal (Get-ReceiptValue $repo 'fallback') 'true' 'fallback is recorded'
     Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'claude' 'fallback engine is fresh main engine'
 
+    Write-Host 'PowerShell certifying review roles require automatic fallback'
+    foreach ($role in @('plan', 'code-spec', 'code-quality')) {
+        $repo = New-Repository "required-fallback-$role"; $env:FAKE_CODEX_BEHAVIOR = 'clean'
+        Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' $role 'none') 2 "$role rejects a no-fallback review invocation"
+        Assert-True ($script:LastChildStderr -like '*certifying review roles require automatic fallback*') "$role explains the automatic fallback contract"
+    }
+
     Write-Host 'PowerShell single-file artifact review'
     $repo = New-Repository 'file artifact'; [IO.File]::WriteAllText((Join-Path $repo 'plan.md'), "bounded plan artifact`n"); $env:FAKE_CODEX_BEHAVIOR = 'clean'
-    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan' 'none' 'ephemeral' '' '' '' '' 'file:plan.md') 0 'file artifact reaches the isolated reviewer without Git metadata'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan' 'automatic' 'ephemeral' '' '' '' '' 'file:plan.md') 0 'file artifact reaches the isolated reviewer without Git metadata'
     Assert-Equal (Get-ReceiptValue $repo 'artifact_kind') 'file' 'file artifact kind is recorded'
     Assert-Equal (Get-ReceiptValue $repo 'semantic_verdict') 'CLEAN' 'file artifact can certify clean'
 

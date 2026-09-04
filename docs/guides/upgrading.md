@@ -94,6 +94,12 @@ reported as `PRESERVED` and remain byte-identical. At a known cross-host alias p
 released whole-file hash is sufficient for safe replacement even when the advisory v5 stamp is
 older; any modified alias still blocks.
 
+Project-local Git hooks are user-owned and remain outside the full-refresh write set. The preview
+does inspect an active `post-checkout` hook for dependencies on retired v5 state paths such as
+`.claude/state.template.md` or the old host-local state location. It reports `LEGACY_GIT_HOOK` and
+blocks before writing when it finds one; migrate or retire the named hook manually, then rerun the
+preview. Forge never silently rewrites or deletes it.
+
 ## Read the Report
 
 Every action is classified:

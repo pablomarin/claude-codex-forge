@@ -262,7 +262,7 @@ function Invoke-CandidatePromotion {
     $patch = Join-Path ([IO.Path]::GetTempPath()) ('forge-hook-replay-' + [Guid]::NewGuid().ToString('N'))
     $runnerAdded = $false
     try {
-        & git -C $root worktree add -q --detach $runner $head
+        & git -C $root worktree add -q --detach --no-checkout $runner $head
         if ($LASTEXITCODE -ne 0) { throw 'BLOCKED[artifact]: cannot create disposable promotion worktree' }
         $runnerAdded = $true
         & git -C $runner read-tree --reset -u $tree

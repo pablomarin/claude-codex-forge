@@ -127,6 +127,8 @@ Run from a fresh `claude-codex-forge` clone.
 PowerShell uses `-Upgrade`, `-Force`, and `-DryRun`. The former Bash `-F` / `--full-refresh` and
 PowerShell `-FullRefresh` / `-R` spellings remain deprecated compatibility aliases. Project and
 global full reconciliations are separate transactions, and preview does not certify host
-`RUNTIME_READY` status.
+`RUNTIME_READY` status. A project preview also blocks on an active user-owned `post-checkout` hook
+that still references retired v5 state paths; the operator must migrate or retire that hook because
+full refresh deliberately does not mutate `.git/hooks`.
 The old `--migrate` / `-Migrate` spellings are retired, non-mutating diagnostics. Legacy
 `CONTINUITY.md` is handled by the full-refresh inventory and manual reconciliation when needed.

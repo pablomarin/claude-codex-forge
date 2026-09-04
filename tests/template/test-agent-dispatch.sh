@@ -113,7 +113,7 @@ start_test "single-file artifacts reach the isolated reviewer without Git metada
 S=$(scratch_dir dispatch-file-artifact); make_repo "$S"; printf 'review one file\n' > "$S/prompt.txt"
 printf 'bounded plan artifact\n' > "$S/plan.md"
 base=$(git -C "$S" rev-parse HEAD)
-if launch_dispatch "$S" claude run --engine codex --fallback-policy none --role plan --profile review \
+if launch_dispatch "$S" claude run --engine codex --fallback-policy automatic --role plan --profile review \
     --artifact file:plan.md --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base \
     --prompt-file "$S/prompt.txt" --output "$S/.forge/local/reviews/file-result.txt" --timeout-seconds 2 \
     >"$S/file.stdout" 2>"$S/file.stderr"; then
@@ -177,6 +177,26 @@ for behavior in empty contradictory exit timeout; do
     assert_receipt_value "$S" actual_engine claude
     assert_receipt_value "$S" fallback true
 done
+
+start_test "certifying review roles require one automatic fallback path"
+for role in plan code-spec code-quality; do
+    S=$(scratch_dir "dispatch-required-fallback-$role"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+    set +e
+    run_dispatch "$S" claude sid codex "$role" none >"$S/stdout" 2>"$S/stderr"
+    rc=$?
+    set -e
+    assert_equals "$rc" "2" "$role rejects a no-fallback review invocation"
+    assert_contains "$S/stderr" "certifying review roles require automatic fallback" \
+        "$role explains the single automatic fallback contract"
+done
+
+S=$(scratch_dir dispatch-explicit-engine-fallback); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+FAKE_CODEX_BEHAVIOR=empty FAKE_CLAUDE_BEHAVIOR=clean \
+    run_dispatch "$S" claude sid codex code-quality automatic >/dev/null 2>&1
+assert_equals "$?" "0" "an explicitly requested empty engine falls back in the same invocation"
+assert_receipt_value "$S" attempted_engines codex,claude
+assert_receipt_value "$S" actual_engine claude
+assert_receipt_value "$S" fallback true
 
 S=$(scratch_dir dispatch-explicit-unavailable); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FORGE_TEST_DISABLE_ENGINE=claude FAKE_CODEX_BEHAVIOR=clean run_dispatch "$S" claude sid claude >/dev/null 2>&1

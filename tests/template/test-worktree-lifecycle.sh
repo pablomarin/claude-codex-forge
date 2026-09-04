@@ -88,6 +88,13 @@ printf 'codex hooks stay primary\n' > "$PRIMARY/.codex/hooks.json"
 printf 'shared project context\n' > "$PRIMARY/docs/agent-context.md"
 printf 'must-not-copy\n' > "$PRIMARY/.forge/local/memory/private.md"
 write_state "$PRIMARY/.forge/local/state.md" "/fix-bug prior" "done-primary" "now-primary" "next-primary"
+mkdir -p "$PRIMARY/.git/hooks"
+cat > "$PRIMARY/.git/hooks/post-checkout" <<EOF
+#!/usr/bin/env bash
+printf 'post-checkout-ran\n' >> "$BASE/post-checkout.log"
+exit 1
+EOF
+chmod +x "$PRIMARY/.git/hooks/post-checkout"
 cat > "$PRIMARY/.forge/installed-files.tsv" <<'EOF'
 .forge/state.template.md	fixture	v6
 .forge/instructions.md	fixture	v6
@@ -104,6 +111,7 @@ else
     CREATE_RC=127
 fi
 assert_equals "$CREATE_RC" "0" "create succeeds"
+assert_file_missing "$BASE/post-checkout.log" "canonical worktree creation does not execute post-checkout hooks"
 assert_equals "$(git -C "$TARGET" branch --show-current 2>/dev/null || true)" "fix/bug-one" \
     "fix workflow uses fix/<slug>, not a host prefix"
 assert_file_exists "$TARGET/.forge/instructions.md" "ignored canonical harness is copied"
