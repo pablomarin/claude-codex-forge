@@ -85,7 +85,7 @@ promote_fp() {
     patch=$(mktemp "${TMPDIR:-/tmp}/forge-hook-replay.XXXXXX") || { rmdir "$runner"; die_fp 'cannot create replay artifact'; }
     cleanup_promote_fp() { git -C "$PROMOTE_ROOT" worktree remove --force "$runner" >/dev/null 2>&1 || true; rm -f "$patch"; }
     trap cleanup_promote_fp EXIT HUP INT TERM
-    git -C "$PROMOTE_ROOT" worktree add -q --detach "$runner" "$head" || die_fp 'cannot create disposable promotion worktree'
+    git -C "$PROMOTE_ROOT" worktree add -q --detach --no-checkout "$runner" "$head" || die_fp 'cannot create disposable promotion worktree'
     git -C "$runner" read-tree --reset -u "$tree" || die_fp 'cannot materialize frozen index tree'
     runner_index=$(git -C "$runner" rev-parse --git-path index)
     case "$runner_index" in /*) ;; *) runner_index="$runner/$runner_index" ;; esac

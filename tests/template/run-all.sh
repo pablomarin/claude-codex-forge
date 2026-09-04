@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# tests/template/run-all.sh — driver that runs every test-*.sh in sequence.
+# tests/template/run-all.sh — exhaustive release/integration driver.
+# Use run-fast.sh for ordinary local iteration.
 #
 # Exit code: 0 if every suite passed, 1 otherwise.
 # Env vars:

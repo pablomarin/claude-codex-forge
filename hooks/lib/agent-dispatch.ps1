@@ -554,6 +554,7 @@ try {
     if (($promptItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'BLOCKED[artifact]: linked prompt rejected' }
     if (($Role -in @('investigation','investigation-repro')) -and $Profile -ne 'investigate') { throw 'BLOCKED[authorization]: investigation roles require investigate profile' }
     if (($Role -notin @('investigation','investigation-repro')) -and $Profile -ne 'review') { throw 'BLOCKED[authorization]: only investigation roles may use investigate profile' }
+    if (($Role -in @('plan','code-spec','code-quality')) -and $FallbackPolicy -eq 'none') { throw 'BLOCKED[authorization]: certifying review roles require automatic fallback' }
     if ($Conversation -ne 'ephemeral' -and $Role -ne 'council-advisor') { throw 'BLOCKED[capability]: only council-advisor supports multi-turn transport' }
     if ($Conversation -ne 'ephemeral' -and $FallbackPolicy -ne 'none') { throw 'BLOCKED[capability]: multi-turn council transport forbids per-seat fallback' }
     if ($Conversation -eq 'resume' -and -not (Test-SafeSessionId $SessionId)) { throw 'BLOCKED[invariant]: exact safe session id is required' }

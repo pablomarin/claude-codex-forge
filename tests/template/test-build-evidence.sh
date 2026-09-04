@@ -934,6 +934,32 @@ assert_contains "$V2/.forge/local/evidence/promotion.receipt" "old_candidate_id=
 assert_equals "$(git -C "$V2" status --porcelain | wc -l | tr -d ' ')" "0" \
     "original worktree and index are clean after CAS"
 
+start_test "exact-tree promotion does not execute post-checkout hooks in its disposable worktree"
+make_v2_candidate_repo
+refresh_v2_final_receipts
+OLD_HEAD=$(git -C "$V2" rev-parse HEAD)
+printf 'Task 8 post-checkout isolation\n' > "$V2/.forge/local/evidence/message.txt"
+mkdir -p "$V2/.git/hooks"
+cat > "$V2/.git/hooks/post-checkout" <<EOF
+#!/bin/sh
+printf 'post-checkout-ran\n' >> "$V2/.forge/local/evidence/post-checkout.log"
+exit 1
+EOF
+chmod +x "$V2/.git/hooks/post-checkout"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" promote \
+    --candidate .forge/local/evidence/candidate.receipt --state .forge/local/state.md \
+    --message-file .forge/local/evidence/message.txt \
+    --promotion-receipt .forge/local/evidence/promotion.receipt --replay-attempt 0) \
+    > "$V2/.forge/local/evidence/post-checkout-promote.out" 2>&1
+assert_equals "$?" "0" "promotion is isolated from unrelated checkout lifecycle hooks"
+assert_file_missing "$V2/.forge/local/evidence/post-checkout.log" \
+    "disposable promotion never executes the repository post-checkout hook"
+if [ "$(git -C "$V2" rev-parse HEAD)" != "$OLD_HEAD" ]; then
+    pass "post-checkout isolation still promotes the certified tree"
+else
+    fail "post-checkout isolation did not advance the certified tree"
+fi
+
 start_test "exact-tree promotion replays one bounded auto-fix and requires every final receipt to rerun"
 make_v2_candidate_repo
 refresh_v2_final_receipts
