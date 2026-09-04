@@ -90,6 +90,25 @@ for tuple in 'claude codex' 'codex claude'; do
     assert_receipt_value "$S" actual_engine "$actual"
 done
 
+start_test "opposite-engine reviews and same-engine fallbacks use vendor fast mode"
+S=$(scratch_dir dispatch-fast-claude); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+FAKE_CLAUDE_BEHAVIOR=require-fast run_dispatch "$S" codex sid claude general none >/dev/null 2>&1
+assert_equals "$?" "0" "opposite-engine Claude review uses fast mode"
+
+S=$(scratch_dir dispatch-fast-codex); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+FAKE_CODEX_BEHAVIOR=require-fast run_dispatch "$S" claude sid codex general none >/dev/null 2>&1
+assert_equals "$?" "0" "opposite-engine Codex review uses the fast service tier"
+
+S=$(scratch_dir dispatch-fast-claude-fallback); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+FAKE_CODEX_BEHAVIOR=malformed FAKE_CLAUDE_BEHAVIOR=require-fast run_dispatch "$S" claude sid auto >/dev/null 2>&1
+assert_equals "$?" "0" "same-engine Claude fallback uses fast mode"
+assert_receipt_value "$S" fallback true
+
+S=$(scratch_dir dispatch-fast-codex-fallback); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+FAKE_CLAUDE_BEHAVIOR=malformed FAKE_CODEX_BEHAVIOR=require-fast run_dispatch "$S" codex sid auto >/dev/null 2>&1
+assert_equals "$?" "0" "same-engine Codex fallback uses the fast service tier"
+assert_receipt_value "$S" fallback true
+
 start_test "single-file artifacts reach the isolated reviewer without Git metadata"
 S=$(scratch_dir dispatch-file-artifact); make_repo "$S"; printf 'review one file\n' > "$S/prompt.txt"
 printf 'bounded plan artifact\n' > "$S/plan.md"
@@ -529,13 +548,15 @@ for tuple in 'claude codex' 'codex claude'; do
     assert_not_contains "$log" "--ignore-user-config" "$selected investigation keeps normal user configuration"
     assert_not_contains "$log" "--ignore-rules" "$selected investigation keeps normal project instructions"
     assert_not_contains "$log" "--add-dir" "$selected investigation does not use a disposable candidate"
-    if [ "$selected" = codex ]; then
-      assert_contains "$log" "-a on-request --search exec" "Codex investigation preserves native on-request approval with web search"
-      assert_contains "$log" "--sandbox danger-full-access" "Codex investigation selects the full-capability sandbox mode"
-    else
-      assert_contains "$log" "--permission-mode auto" "Claude investigation uses non-interactive safety-classified full-agent mode"
-      assert_not_contains "$log" "--sandbox" "Claude investigation is not assigned a Forge sandbox override"
-    fi
+  if [ "$selected" = codex ]; then
+    assert_contains "$log" "-a on-request --search exec" "Codex investigation preserves native on-request approval with web search"
+    assert_contains "$log" "--sandbox danger-full-access" "Codex investigation selects the full-capability sandbox mode"
+    assert_contains "$log" "-c service_tier=fast" "Codex investigation uses the fast service tier"
+  else
+    assert_contains "$log" "--permission-mode auto" "Claude investigation uses non-interactive safety-classified full-agent mode"
+    assert_not_contains "$log" "--sandbox" "Claude investigation is not assigned a Forge sandbox override"
+    assert_contains "$log" '--settings {"fastMode":true}' "Claude investigation uses fast mode"
+  fi
     assert_receipt_value "$S" investigation_mode full-agent-worktree
     assert_receipt_value "$S" investigation_replay NONE
 done
@@ -658,6 +679,7 @@ C="$S/private config"; bash "$REPO_ROOT/scripts/render-dispatch-config.sh" --eng
 assert_not_contains "$C/claude-settings.json" "FORGE_HOSTILE_HOOK" "ambient project hooks excluded"
 assert_not_contains "$C/mcp.json" "FORGE_WRITE_MCP" "ambient write-capable MCP excluded"
 assert_contains "$C/mcp.json" '"context7"' "declared read-only query server retained"
+assert_contains "$C/claude-settings.json" '"fastMode":true' "qualified Claude read-only config retains fast mode"
 
 start_test "code certification needs distinct same-candidate spec and quality receipts"
 S=$(scratch_dir dispatch-pair); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"

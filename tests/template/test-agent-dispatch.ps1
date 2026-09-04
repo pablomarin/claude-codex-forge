@@ -107,6 +107,12 @@ public static class ForgeFakeEngine {
     string log=E("FAKE_"+engine.ToUpperInvariant()+"_LOG"); if(log!="") File.AppendAllText(log,"cwd="+Directory.GetCurrentDirectory()+" home="+E("HOME")+" userprofile="+E("USERPROFILE")+" username="+E("USERNAME")+" argv="+joined+Environment.NewLine);
     string argv=E("FAKE_"+engine.ToUpperInvariant()+"_ARGV_LOG"); if(argv!="") File.WriteAllLines(argv,args.Select(x=>x==""?"<EMPTY>":x));
     if(engine=="codex" && joined.Contains("--json") && !joined.Contains("exec resume")) Console.WriteLine("{\"type\":\"thread.started\",\"thread_id\":\""+E("FORGE_DISPATCH_SESSION_ID")+"\"}");
+    if(behavior=="require-fast") {
+      bool fast=engine=="codex" && joined.Contains("-c service_tier=fast");
+      if(engine=="claude") for(int i=0;i+1<args.Length;i++) if(args[i]=="--settings") { string value=args[i+1]; fast=value.Contains("\"fastMode\":true") || (File.Exists(value) && File.ReadAllText(value).Contains("\"fastMode\": true")); }
+      if(!fast) return 63;
+      behavior="clean";
+    }
     if(behavior=="timeout") { var p=Process.Start(new ProcessStartInfo("cmd.exe","/d /c ping -n 30 127.0.0.1 >nul"){UseShellExecute=false,CreateNoWindow=true}); var pid=E("FAKE_CHILD_PID_FILE"); if(pid!="") File.WriteAllText(pid,p.Id.ToString()); Thread.Sleep(30000); return 0; }
     if(behavior=="delayed-clean") Thread.Sleep(1000);
     if(behavior=="swap-output") { var paths=File.ReadAllLines(E("FAKE_CHILD_PID_FILE")); File.Delete(paths[0]); if(!CreateHardLink(paths[0],paths[1],IntPtr.Zero)) return 71; }
@@ -131,12 +137,30 @@ public static class ForgeFakeEngine {
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'codex.exe')
     $env:PATH = "$bin;$($env:PATH)"; $env:FORGE_DISPATCH_TEST_MODE = '1'
 
+    Write-Host 'PowerShell qualified Claude read-only config retains fast mode'
+    $qualifiedConfig = Join-Path $temporary 'qualified context7 config'
+    & (Join-Path $root 'scripts/render-dispatch-config.ps1') -Engine claude -Profile review -OutputDir $qualifiedConfig -ReadOnlyServer context7 | Out-Null
+    Assert-Contains (Join-Path $qualifiedConfig 'mcp.json') '"context7"' 'PowerShell qualified config retains the declared read-only server'
+    Assert-Contains (Join-Path $qualifiedConfig 'claude-settings.json') '"fastMode":true' 'PowerShell qualified Claude config retains fast mode'
+
     Write-Host 'PowerShell four-mode selection and fallback matrix'
     foreach ($tuple in @(@('claude','codex','codex'), @('codex','claude','claude'), @('claude','claude','claude'), @('codex','codex','codex'))) {
         $repo = New-Repository ("mode-$($tuple[0])-$($tuple[1])")
         Assert-Equal (Invoke-Dispatch $repo $tuple[0] 'sid' $tuple[1]) 0 "$($tuple[0]) main can use $($tuple[1]) reviewer"
         Assert-Equal (Get-ReceiptValue $repo 'actual_engine') $tuple[2] 'actual engine recorded'
     }
+    Write-Host 'PowerShell fast review and same-engine fallback'
+    foreach ($tuple in @(@('codex','claude'), @('claude','codex'))) {
+        $repo = New-Repository "fast-$($tuple[1])"; [Environment]::SetEnvironmentVariable("FAKE_$($tuple[1].ToUpperInvariant())_BEHAVIOR", 'require-fast')
+        Assert-Equal (Invoke-Dispatch $repo $tuple[0] 'sid' $tuple[1] 'general' 'none') 0 "opposite-engine $($tuple[1]) review uses fast mode"
+        [Environment]::SetEnvironmentVariable("FAKE_$($tuple[1].ToUpperInvariant())_BEHAVIOR", $null)
+    }
+    $repo = New-Repository 'fast claude fallback'; $env:FAKE_CODEX_BEHAVIOR = 'malformed'; $env:FAKE_CLAUDE_BEHAVIOR = 'require-fast'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'auto') 0 'same-engine Claude fallback uses fast mode'
+    Assert-Equal (Get-ReceiptValue $repo 'fallback') 'true' 'Claude fast fallback is recorded'
+    $repo = New-Repository 'fast codex fallback'; $env:FAKE_CLAUDE_BEHAVIOR = 'malformed'; $env:FAKE_CODEX_BEHAVIOR = 'require-fast'
+    Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'auto') 0 'same-engine Codex fallback uses fast mode'
+    Assert-Equal (Get-ReceiptValue $repo 'fallback') 'true' 'Codex fast fallback is recorded'
     $repo = New-Repository 'fallback malformed'; $env:FAKE_CODEX_BEHAVIOR = 'malformed'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'auto') 0 'malformed other engine visibly falls back'
     Assert-Equal (Get-ReceiptValue $repo 'fallback') 'true' 'fallback is recorded'
@@ -229,9 +253,11 @@ public static class ForgeFakeEngine {
         if ($selected -eq 'codex') {
             Assert-Contains $log '-a on-request --search exec' 'Codex investigation preserves native on-request approval with web search'
             Assert-Contains $log '--sandbox danger-full-access' 'Codex investigation selects the full-capability sandbox mode'
+            Assert-Contains $log '-c service_tier=fast' 'Codex investigation uses the fast service tier'
         } else {
             Assert-Contains $log '--permission-mode auto' 'Claude investigation uses safety-classified full-agent mode'
             Assert-NotContains $log '--sandbox' 'Claude investigation has no Forge sandbox override'
+            Assert-Contains $log '--settings {"fastMode":true}' 'Claude investigation uses fast mode'
         }
         Assert-Equal (Get-ReceiptValue $repo 'investigation_mode') 'full-agent-worktree' "$selected receipt records full-agent mode"
         [Environment]::SetEnvironmentVariable("FAKE_$($selected.ToUpperInvariant())_BEHAVIOR", $null); [Environment]::SetEnvironmentVariable("FAKE_$($selected.ToUpperInvariant())_LOG", $null)

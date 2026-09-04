@@ -126,6 +126,10 @@ Setup never asks for a permanent main or reviewer. An explicit Claude or Codex o
 supported. A review that returns findings succeeded; findings do not trigger engine fallback.
 Artifact, authorization, or invariant failures block instead of trying another engine.
 
+Forge launches every reviewer, including a same-engine fallback, with the provider's fast service:
+Claude receives `{"fastMode": true}` and Codex receives `service_tier=fast`. Fast mode preserves the
+pinned model and reasoning effort but uses each provider's higher-cost accelerated inference tier.
+
 ### Review, investigation, and council are different boundaries
 
 | Mode | Boundary | Intended use |

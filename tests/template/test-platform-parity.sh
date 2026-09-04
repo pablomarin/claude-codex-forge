@@ -70,6 +70,8 @@ if [ -f "$HOSTS" ]; then
     assert_contains "$HOSTS" $'config-change\tcodex\tall\tlifecycle-check' "Codex config-change uses lifecycle fingerprint checking"
     assert_contains "$HOSTS" $'model-certifying\tcodex\tall\tcli\tcertifying\topenai\tgpt-5.6-sol\txhigh' "Codex certifying profile is fixed to gpt-5.6-sol/xhigh"
     assert_contains "$HOSTS" $'model-certifying\tclaude\tall\tcli\tcertifying\tanthropic\topus\tmax' "Claude certifying profile is fixed to opus/max"
+    assert_contains "$HOSTS" $'model-certifying\tclaude\tall\tcli\tcertifying\tanthropic\topus\tmax\t--model=opus;--effort=max;--settings={"fastMode":true}' "Claude certifying profile declares fast mode"
+    assert_contains "$HOSTS" $'model-certifying\tcodex\tall\tcli\tcertifying\topenai\tgpt-5.6-sol\txhigh\t-m=gpt-5.6-sol;-c=model_reasoning_effort=xhigh;-c=service_tier=fast' "Codex certifying profile declares the fast service tier"
     assert_contains "$HOSTS" "UNOBSERVABLE" "non-observable identity fields are declared honestly"
     assert_not_contains "$HOSTS" "override" "v1 capability map exposes no model override"
 fi
