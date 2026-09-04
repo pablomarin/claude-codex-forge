@@ -97,6 +97,20 @@ Downstream `docs/adr/` content is project-owned. Ordinary setup retires only byt
 Forge's own internal ADR index and numbered decisions, preserves customized or same-numbered project
 ADRs, and creates a neutral project index and ADR template only when those files are absent.
 
+Disposable exact-tree promotion and canonical linked-worktree creation no longer execute a
+repository's `post-checkout` hook while materializing the frozen tree. Full-refresh preview now
+detects an active user-owned `post-checkout` hook that references retired v5 state paths, blocks with
+`LEGACY_GIT_HOOK`, and leaves the hook untouched for explicit migration or retirement.
+
+Certifying `plan`, `code-spec`, and `code-quality` dispatches now require the visible automatic
+fallback policy. An empty or malformed preferred-engine result therefore triggers the one bounded
+fresh fallback in the same invocation instead of inviting repeated manual adjudication attempts.
+
+Local verification now has an explicit fast gate at `tests/template/run-fast.sh`. It retains syntax,
+platform parity, contract, lifecycle, settings-merge, and shell-safety coverage while leaving the
+broad engine, evidence, installer, migration, hook, state, and end-to-end matrices in the exhaustive
+`run-all.sh` release gate.
+
 ## 5.61 — 2026-07-27 · `/codex` plan review gains a NECESSITY axis — the loop can now argue for _less_
 
 **Found by dogfooding v5.59/v5.60 in a downstream project.** Across roughly 30 review rounds the loop caught every omission and **not once** flagged anything as unnecessary. Concretely: an approved plan carried a pre-authoring gate demanding five third-party artifacts (model source, resolved manifest node/config, tool + adapter versions, a custom strategy macro, and one more) before the team was allowed to start authoring. It survived the entire loop. When a human finally challenged it, Codex conceded immediately and cleanly — _"there is no reachable correctness failure uniquely prevented by collecting all five artifacts"_ — and reduced the ask to a single coordination question. The capability was present; only the trigger was missing.

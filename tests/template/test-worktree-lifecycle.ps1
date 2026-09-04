@@ -32,9 +32,14 @@ try {
     [IO.File]::WriteAllText((Join-Path $Primary '.codex\hooks.json'), "codex hooks stay primary`n")
     [IO.File]::WriteAllText((Join-Path $Primary '.forge\installed-files.tsv'), ".forge/state.template.md`tfixture`tv6`n.forge/instructions.md`tfixture`tv6`nowned.txt`tfixture`tv6`n")
     Write-State (Join-Path $Primary '.forge\local\state.md') '/fix-bug prior' 'done-primary' 'now-primary' 'next-primary'
+    $hookDir = Join-Path $Primary '.git\hooks'
+    $hookLog = (Join-Path $Scratch 'post-checkout.log').Replace('\', '/')
+    $null = New-Item -ItemType Directory -Path $hookDir -Force
+    [IO.File]::WriteAllText((Join-Path $hookDir 'post-checkout'), "#!/bin/sh`nprintf 'post-checkout-ran\n' >> '$hookLog'`nexit 1`n")
     Push-Location $Primary
     & powershell.exe -NoProfile -File $Helper -Action Create -Kind fix -Name bug-one -Base HEAD | Out-Null
     Pop-Location
+    Check (-not (Test-Path (Join-Path $Scratch 'post-checkout.log'))) 'canonical worktree creation does not execute post-checkout hooks'
     Check ((& git -C $Target branch --show-current) -eq 'fix/bug-one') 'exact fix branch'
     Check (Test-Path (Join-Path $Target '.forge\instructions.md')) 'private harness copied'
     Check (Test-Path (Join-Path $Target '.forge\version')) 'generated v6 stamp copied'

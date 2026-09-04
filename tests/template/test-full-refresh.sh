@@ -154,6 +154,25 @@ assert_file_missing "$S1P/.forge/local/migration-guard" "preview writes no trans
 assert_contains "$preview_log" "UPGRADE: READY" "preview has a final readiness summary"
 assert_contains "$preview_log" "ACTIVE_FORGE: unchanged" "preview does not claim mutation"
 
+start_test "full-refresh preview blocks on an active Git hook that references retired v5 state"
+S1H=$(scratch_dir full-refresh-legacy-git-hook)
+make_git_repo "$S1H"
+mkdir -p "$S1H/.git/hooks"
+cat > "$S1H/.git/hooks/post-checkout" <<'EOF'
+#!/bin/sh
+cp "$SOURCE_ROOT/.claude/state.template.md" "$TARGET_ROOT/.claude/local/state.md"
+EOF
+chmod +x "$S1H/.git/hooks/post-checkout"
+hook_before=$(shasum -a 256 "$S1H/.git/hooks/post-checkout" | awk '{print $1}')
+run_refresh "$S1H" "$S1H/preview.log" -f --dry-run
+assert_equals "$?" "1" "active incompatible Git hook blocks authoritative readiness"
+assert_contains "$S1H/preview.log" "LEGACY_GIT_HOOK" "preview identifies the incompatible local hook"
+assert_contains "$S1H/preview.log" ".git/hooks/post-checkout" "preview names the exact local hook"
+assert_contains "$S1H/preview.log" ".claude/state.template.md" "preview names the retired v5 dependency"
+assert_file_missing "$S1H/.forge/version" "blocked hook preview does not stamp v6 readiness"
+assert_equals "$(shasum -a 256 "$S1H/.git/hooks/post-checkout" | awk '{print $1}')" "$hook_before" \
+    "full refresh never rewrites the user-owned Git hook"
+
 S1G=$(scratch_dir full-refresh-preview-global)
 make_git_repo "$S1G"
 mkdir -p "$S1G/.fakehome/.claude"

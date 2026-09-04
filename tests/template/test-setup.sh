@@ -313,11 +313,13 @@ assert_contains "$LOG8b" "Your CLAUDE.md and CONTINUITY.md were preserved; run -
 assert_not_contains "$LOG8b" "were not modified" \
     "UC1: --upgrade does NOT contain legacy 'were not modified' string"
 
-# Also verify -f (force) preserves user content. -f is the big hammer that
-# SHOULD refresh .claude/* and CI templates, but MUST still leave CLAUDE.md,
-# CONTINUITY.md, and docs/CHANGELOG.md alone — they are user content.
-run_setup "$S8" "$LOG8c" -p "UpgradeTest" -t fullstack --with-playwright -f
-assert_equals "$?" "0" "-f exits 0"
+# Also verify -f (force) fails closed on unresolved continuity while preserving
+# all user content. The full-refresh inventory cannot guess whether this custom
+# legacy state has already been translated into the canonical v6 state.
+run_setup "$S8" "$LOG8c" -p "UpgradeTest" -t fullstack -f
+assert_equals "$?" "1" "-f blocks on unresolved legacy continuity"
+assert_contains "$LOG8c" "LEGACY_CONTINUITY_UNRESOLVED" \
+    "-f names the unresolved continuity blocker"
 assert_hash_equals "$S8/docs/CHANGELOG.md" "$HASH_CHANGELOG" \
     "-f does not touch CHANGELOG"
 assert_hash_equals "$S8/CLAUDE.md" "$HASH_CLAUDE" \
@@ -325,9 +327,8 @@ assert_hash_equals "$S8/CLAUDE.md" "$HASH_CLAUDE" \
 assert_hash_equals "$S8/CONTINUITY.md" "$HASH_CONTINUITY" \
     "-f does not touch CONTINUITY.md"
 
-# UC2 soft tip: -f path runs the install branch (not the --upgrade branch),
-# which does NOT emit the soft tip. Confirm legacy drift hint is absent and
-# that the -f path is silent on the reconcile tip (which is upgrade-mode-only).
+# UC2: the full-refresh blocker replaces the old drift hint and leaves the
+# project byte-identical until the owner explicitly reconciles continuity.
 assert_not_contains "$LOG8c" "Template may have drifted" \
     "UC2: -f does NOT contain legacy 'Template may have drifted' hint (5.17)"
 
@@ -1021,17 +1022,16 @@ test_forge_version_stamp() {
     assert_contains "$S/.up.log" "UPGRADE the project" "fv: older pin → UPGRADE advisory shown"
     assert_equals "$(cat "$S/.claude/.forge-version")" "$EXPECT" "fv: pin advanced after upgrade"
 
-    # -f with a NEWER pin → DOWNGRADE advisory (and -f, not just --upgrade, warns), exits 0.
+    # --upgrade with a NEWER pin → DOWNGRADE advisory, exits 0.
     printf '99.99\n' > "$S/.claude/.forge-version"
-    run_setup "$S" "$S/.dn.log" -p FV -t python -f
-    assert_equals "$?" "0" "fv: -f exits 0 (advisory only)"
-    assert_contains "$S/.dn.log" "DOWNGRADE the project" "fv: newer pin + -f → DOWNGRADE advisory shown"
+    run_setup "$S" "$S/.dn.log" -p FV -t python --upgrade
+    assert_equals "$?" "0" "fv: newer-pin --upgrade exits 0 (advisory only)"
+    assert_contains "$S/.dn.log" "DOWNGRADE the project" "fv: newer pin + --upgrade → DOWNGRADE advisory shown"
 
-    # -f with an OLDER pin → UPGRADE advisory (proves -f reaches the UPGRADE branch,
-    # not just the --upgrade path).
+    # --upgrade with another OLDER pin continues to emit the UPGRADE advisory.
     printf '0.2\n' > "$S/.claude/.forge-version"
-    run_setup "$S" "$S/.fup.log" -p FV -t python -f
-    assert_contains "$S/.fup.log" "UPGRADE the project" "fv: older pin + -f → UPGRADE advisory shown"
+    run_setup "$S" "$S/.fup.log" -p FV -t python --upgrade
+    assert_contains "$S/.fup.log" "UPGRADE the project" "fv: older pin + --upgrade → UPGRADE advisory shown"
 
     # Malformed existing pin → NO advisory (the prev pin is validated as X.Y first).
     printf 'garbage\n' > "$S/.claude/.forge-version"

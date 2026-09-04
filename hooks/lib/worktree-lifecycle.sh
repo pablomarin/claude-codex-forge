@@ -270,8 +270,10 @@ forge_lifecycle_create() {
         forge_lifecycle_fail "CREATE_BLOCKED: branch already exists: $branch"; return 1
     fi
     mkdir -p "$root/.worktrees" || return 1
-    git -C "$root" worktree add -q -b "$branch" "$target" "$resolved" || return 1
-    if ! forge_lifecycle_seed "$target" || ! forge_lifecycle_bind_identity "$target" "$base" "$resolved"; then
+    git -C "$root" worktree add -q --no-checkout -b "$branch" "$target" "$resolved" || return 1
+    if ! git -C "$target" read-tree --reset -u "$resolved" \
+        || ! forge_lifecycle_seed "$target" \
+        || ! forge_lifecycle_bind_identity "$target" "$base" "$resolved"; then
         git -C "$root" worktree remove --force "$target" >/dev/null 2>&1 || true
         git -C "$root" branch -D "$branch" >/dev/null 2>&1 || true
         return 1

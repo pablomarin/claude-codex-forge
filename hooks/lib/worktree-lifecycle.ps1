@@ -237,9 +237,11 @@ try {
             $null = & git -C $root show-ref --verify --quiet "refs/heads/$branch" 2>$null
             if ($LASTEXITCODE -eq 0) { Fail-ForgeLifecycle "CREATE_BLOCKED: branch already exists: $branch" }
             $null = New-Item -ItemType Directory -Path (Join-Path $root '.worktrees') -Force
-            & git -C $root worktree add -q -b $branch $target $resolved
+            & git -C $root worktree add -q --no-checkout -b $branch $target $resolved
             if ($LASTEXITCODE -ne 0) { Fail-ForgeLifecycle "CREATE_BLOCKED: git worktree add failed" }
             try {
+                & git -C $target read-tree --reset -u $resolved
+                if ($LASTEXITCODE -ne 0) { Fail-ForgeLifecycle "CREATE_BLOCKED: cannot materialize the resolved base" }
                 Seed-ForgeWorktree $target
                 Set-ForgeWorktreeIdentity $target $Base $resolved
             } catch {

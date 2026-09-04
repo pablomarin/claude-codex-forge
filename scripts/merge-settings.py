@@ -558,6 +558,7 @@ def inventory_legacy(
     findings.extend(root_instruction_findings(repo_root, target, scope, region_selector))
     if scope == "project":
         findings.extend(active_harness_findings(target))
+        findings.extend(legacy_git_hook_findings(target))
         findings.extend(state_source_findings(target, current_v6))
         findings.extend(continuity_file_findings(target, current_v6))
 
@@ -828,6 +829,48 @@ def active_harness_findings(target: Path) -> tuple[UpgradeFinding, ...]:
             ".agent-workflows",
             f"independent active harness authority: {signals}",
             "archive or retire the custom harness, remove its active registrations, then rerun -f --dry-run",
+        ),
+    )
+
+
+def legacy_git_hook_findings(target: Path) -> tuple[UpgradeFinding, ...]:
+    resolved = subprocess.run(
+        ["git", "-C", str(target), "rev-parse", "--git-path", "hooks/post-checkout"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if resolved.returncode or not resolved.stdout.strip():
+        return ()
+    hook = Path(resolved.stdout.strip())
+    if not hook.is_absolute():
+        hook = target / hook
+    try:
+        metadata = hook.lstat()
+    except FileNotFoundError:
+        return ()
+    executable_bits = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    if not stat.S_ISREG(metadata.st_mode) or not metadata.st_mode & executable_bits:
+        return ()
+    raw = hook.read_bytes()
+    retired = tuple(
+        token
+        for token in (".claude/state.template.md", ".claude/local/state.md")
+        if token.encode() in raw
+    )
+    if not retired:
+        return ()
+    try:
+        display = hook.resolve().relative_to(target).as_posix()
+    except ValueError:
+        display = str(hook.resolve())
+    return (
+        UpgradeFinding(
+            "LEGACY_GIT_HOOK",
+            "project",
+            display,
+            f"active user-owned Git hook references retired Forge v5 paths: {', '.join(retired)}",
+            "manually migrate or retire this Git hook, then rerun -f --dry-run",
         ),
     )
 

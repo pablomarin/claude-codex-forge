@@ -29,10 +29,34 @@ esac
 start_test "v6 canonical-layout suites are registered"
 
 RUN_ALL="$REPO_ROOT/tests/template/run-all.sh"
+RUN_FAST="$REPO_ROOT/tests/template/run-fast.sh"
 assert_contains "$RUN_ALL" 'test-dual-layout.sh' \
     "run-all registers the canonical layout suite"
 assert_contains "$RUN_ALL" 'test-platform-parity.sh' \
     "run-all registers the centralized platform parity suite"
+assert_file_exists "$RUN_FAST" "fast deterministic runner exists"
+for suite in test-lint.sh test-platform-parity.sh test-contracts.sh test-worktree-lifecycle.sh; do
+    assert_contains "$RUN_FAST" "$suite" "fast runner includes $suite"
+done
+for suite in \
+    test-fixtures.sh \
+    test-dual-layout.sh \
+    test-agent-dispatch.sh \
+    test-council-dispatch.sh \
+    test-authorized-action.sh \
+    test-build-evidence.sh \
+    test-resource-discipline.sh \
+    test-skill-pressure-schema.sh \
+    test-state-roundtrip.sh \
+    test-review-breaker.sh \
+    test-hooks.sh \
+    test-default-branch.sh \
+    test-session-start.sh \
+    test-full-refresh.sh \
+    test-setup.sh; do
+    assert_not_contains "$RUN_FAST" "$suite" "fast runner excludes slow suite $suite"
+    assert_contains "$RUN_ALL" "$suite" "exhaustive runner retains slow suite $suite"
+done
 
 # ---------------------------------------------------------------------------
 # Contract 1: verify-e2e VERDICT values must match caller branches
