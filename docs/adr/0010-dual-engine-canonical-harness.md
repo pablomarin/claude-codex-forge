@@ -59,7 +59,8 @@ identity.
 
 ### Manifest-Driven Full Refresh
 
-`./setup.sh -F` and `./setup.ps1 -FullRefresh` (`-R`) are the authoritative v5-to-v6 migration.
+`./setup.sh -f` and `./setup.ps1 -Force` are the authoritative installation and reconciliation
+commands, including v5-to-v6 migration. Routine v6 updates use `--upgrade` / `-Upgrade`.
 The manifest classifies canonical files, adapters, merge-owned entries, marker-owned regions,
 protected content, and versioned legacy fingerprints. The transaction stages and validates a
 complete result, backs up every replaced byte, publishes readiness markers last, and rolls back or

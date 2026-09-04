@@ -125,13 +125,14 @@ PY
     pass "$label has no managed v5 rule body"
 }
 
-start_test "full-refresh flags are explicit and force/full-refresh are incompatible"
+start_test "force is the authoritative full reconciliation mode"
 S1=$(scratch_dir full-refresh-flags)
 make_git_repo "$S1"
 "$REPO_ROOT/setup.sh" --help >"$S1/help" 2>&1
-assert_contains "$S1/help" "-F, --full-refresh" "Bash help documents authoritative full refresh"
-run_refresh "$S1" "$S1/conflict" -f -F
-assert_equals "$?" "1" "Bash rejects combining force and full refresh"
+assert_contains "$S1/help" "-f, --force" "Bash help documents authoritative force reconciliation"
+assert_not_contains "$S1/help" "-F, --full-refresh" "Bash help hides the deprecated uppercase alias"
+run_refresh "$S1" "$S1/conflict" -f --upgrade
+assert_equals "$?" "1" "Bash rejects combining force and upgrade"
 assert_contains "$S1/conflict" "cannot be combined" "flag conflict is explained"
 
 start_test "full-refresh preview uses the real planner without target writes"
@@ -144,7 +145,7 @@ git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/session-
 write_active_v5_state "$S1P" "DRY_RUN_STATE"
 preview_log="${S1P}.preview.log"
 before=$(snapshot_project "$S1P")
-run_refresh "$S1P" "$preview_log" -F --dry-run
+run_refresh "$S1P" "$preview_log" -f --dry-run
 assert_equals "$?" "0" "exact v5 preview is ready"
 after=$(snapshot_project "$S1P")
 assert_equals "$after" "$before" "preview leaves every target file byte-identical"
@@ -172,7 +173,7 @@ git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.
 printf '6.0\n' > "$S1GA/home/.claude/.forge-version"
 S1GA_HOME=$(cd "$S1GA/home" && pwd -P)
 before_advisory=$(snapshot_project "$S1GA/home")
-(cd "$S1GA/invoker" && HOME="$S1GA_HOME" "$REPO_ROOT/setup.sh" --global -F --dry-run) \
+(cd "$S1GA/invoker" && HOME="$S1GA_HOME" "$REPO_ROOT/setup.sh" --global -f --dry-run) \
     > "$S1GA/preview.log" 2>&1
 assert_equals "$?" "1" "retired v5 global references still block with a current advisory stamp"
 assert_contains "$S1GA/preview.log" "ROOT_POLICY_AMBIGUOUS" \
@@ -184,11 +185,11 @@ assert_equals "$(snapshot_project "$S1GA/home")" "$before_advisory" \
 
 run_refresh "$S1P" "${S1P}.dry-run-only.log" --dry-run
 assert_equals "$?" "1" "dry-run without full refresh is rejected"
-run_refresh "$S1P" "${S1P}.dry-run-conflict.log" -f -F --dry-run
-assert_equals "$?" "1" "force and full-refresh preview remain incompatible"
-run_refresh "$S1P" "${S1P}.force-v5.log" -f
-assert_equals "$?" "1" "ordinary force refuses a stamped v5 harness"
-assert_contains "${S1P}.force-v5.log" "-F --dry-run" "v5 force refusal points to read-only preview first"
+run_refresh "$S1P" "${S1P}.dry-run-conflict.log" -f --upgrade --dry-run
+assert_equals "$?" "1" "force and upgrade remain incompatible"
+run_refresh "$S1P" "${S1P}.upgrade-v5.log" --upgrade
+assert_equals "$?" "1" "ordinary upgrade refuses a stamped v5 harness"
+assert_contains "${S1P}.upgrade-v5.log" "-f --dry-run" "v5 upgrade refusal points to force preview first"
 
 start_test "state-path helper prefers validated v6 and falls back only for unmigrated v5"
 S2=$(scratch_dir state-path)
@@ -629,7 +630,7 @@ make_git_repo "$S6F"
 printf 'developer root bytes\n' > "$S6F/CLAUDE.md"
 root_before=$(hash_file "$S6F/CLAUDE.md")
 (cd "$S6F" && HOME="$S6F/.fakehome" FORGE_FULL_REFRESH_FAIL_AFTER=2 \
-    "$REPO_ROOT/setup.sh" -F) >"$S6F/failure.log" 2>&1
+    "$REPO_ROOT/setup.sh" -f) >"$S6F/failure.log" 2>&1
 assert_equals "$?" "1" "injected commit-phase failure returns nonzero"
 assert_hash_equals "$S6F/CLAUDE.md" "$root_before" "rollback restores replaced developer file"
 assert_file_missing "$S6F/.forge/version" "rollback never leaves a readiness stamp"
@@ -643,7 +644,7 @@ for failure_point in 1 @penultimate; do
     failure_root_hash=$(hash_file "$S6P/CLAUDE.md")
     failure_state_hash=$(hash_file "$S6P/.claude/local/state.md")
     (cd "$S6P" && HOME="$S6P/.fakehome" FORGE_FULL_REFRESH_FAIL_AFTER="$failure_point" \
-        "$REPO_ROOT/setup.sh" -F) > "$S6P/failure.log" 2>&1
+        "$REPO_ROOT/setup.sh" -f) > "$S6P/failure.log" 2>&1
     assert_equals "$?" "1" "failure after $failure_point live rename returns nonzero"
     assert_hash_equals "$S6P/CLAUDE.md" "$failure_root_hash" \
         "failure after $failure_point restores developer root bytes"
@@ -672,7 +673,7 @@ start_test "global refresh is explicit and confined to selected HOME"
 S8=$(scratch_dir full-refresh-global)
 mkdir -p "$S8/home" "$S8/invoker"
 S8_HOME=$(cd "$S8/home" && pwd -P)
-(cd "$S8/invoker" && HOME="$S8_HOME" "$REPO_ROOT/setup.sh" --global -F) >"$S8/global.log" 2>&1
+(cd "$S8/invoker" && HOME="$S8_HOME" "$REPO_ROOT/setup.sh" --global -f) >"$S8/global.log" 2>&1
 assert_equals "$?" "0" "explicit global full refresh succeeds"
 assert_file_exists "$S8/home/.forge/version" "global v6 stamp is under selected home"
 assert_file_exists "$S8/home/.claude/CLAUDE.md" "global Claude adapter installed"
@@ -734,7 +735,7 @@ for injection in @first @penultimate; do
     make_git_repo "$race_root"
     (cd "$race_root" && HOME="$race_root/.fakehome" \
         FORGE_FULL_REFRESH_INJECT_EDIT_RELATIVE="$injection" \
-        "$REPO_ROOT/setup.sh" -F) > "$race_root/race.log" 2>&1
+        "$REPO_ROOT/setup.sh" -f) > "$race_root/race.log" 2>&1
     assert_equals "$?" "1" "$injection concurrent edit blocks"
     assert_contains "$race_root/race.log" "concurrent edit before quarantine" \
         "$injection race is diagnosed"
@@ -751,7 +752,7 @@ printf '<!-- forge:state-schema v6 -->\nORIGINAL_CANONICAL_STATE\n' > "$S12/.for
 state_before=$(hash_file "$S12/.forge/local/state.md")
 (cd "$S12" && HOME="$S12/.fakehome" \
     FORGE_FULL_REFRESH_INJECT_DESTINATION_RACE_RELATIVE='.forge/local/state.md' \
-    "$REPO_ROOT/setup.sh" -F) > "$S12/race.log" 2>&1
+    "$REPO_ROOT/setup.sh" -f) > "$S12/race.log" 2>&1
 assert_equals "$?" "1" "destination race blocks"
 assert_contains "$S12/.forge/local/state.md" "FORGE_DESTINATION_RACE" \
     "new destination bytes are never clobbered"
@@ -895,7 +896,7 @@ sed -i.bak 's/<!-- Add your personal preferences below\. Examples: -->/GLOBAL_CU
 sed -i.bak 's#~/.claude/rules/#~/.forge/rules/#g' "$S17G/home/.claude/CLAUDE.md"
 rm -f "$S17G/home/.claude/CLAUDE.md.bak"
 S17G_HOME=$(cd "$S17G/home" && pwd -P)
-(cd "$S17G/invoker" && HOME="$S17G_HOME" "$REPO_ROOT/setup.sh" --global -F) \
+(cd "$S17G/invoker" && HOME="$S17G_HOME" "$REPO_ROOT/setup.sh" --global -f) \
     > "$S17G/refresh.log" 2>&1
 assert_equals "$?" "0" "exact global managed region with customized user bytes migrates"
 assert_contains "$S17G/home/.claude/CLAUDE.md" 'GLOBAL_CUSTOM_REGION_!@#$%^&*()' \
@@ -913,7 +914,7 @@ s18r_before=$(snapshot_project "$S18R")
 assert_equals "$?" "1" "retired Bash continuity command exits nonzero"
 assert_contains "${S18R}.migrate.log" "retired in Forge 6" \
     "retired Bash command explains the compatibility boundary"
-assert_contains "${S18R}.migrate.log" "-F --dry-run" \
+assert_contains "${S18R}.migrate.log" "-f --dry-run" \
     "retired Bash command points to read-only full-refresh preview"
 assert_equals "$(snapshot_project "$S18R")" "$s18r_before" \
     "retired Bash command changes no project bytes"
@@ -1116,7 +1117,7 @@ git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.
 python3 -c 'import sys
 p=sys.argv[1]; b=open(p,"rb").read(); b=b.replace(b"<!-- Add your personal preferences below. Examples: -->",b"Developer text mentions ## Cross-Project Conventions inline."); b=b.replace(b"~/.claude/rules/",b"~/.forge/rules/"); open(p,"wb").write(b)' "$S20G/home/.claude/CLAUDE.md"
 S20G_HOME=$(cd "$S20G/home" && pwd -P)
-(cd "$S20G/invoker" && HOME="$S20G_HOME" "$REPO_ROOT/setup.sh" --global -F) \
+(cd "$S20G/invoker" && HOME="$S20G_HOME" "$REPO_ROOT/setup.sh" --global -f) \
     > "$S20G/refresh.log" 2>&1
 assert_equals "$?" "0" "inline boundary-looking global user text remains unambiguous"
 assert_contains "$S20G/home/.claude/CLAUDE.md" 'Developer text mentions ## Cross-Project Conventions inline.' \
@@ -1130,7 +1131,7 @@ python3 -c 'import sys
 p=sys.argv[1]; b=open(p,"rb").read(); marker=b"## Personal Preferences\n"; i=b.index(marker)+len(marker); b=b[:i]+b"\n## Cross-Project Conventions\n\nAMBIGUOUS_USER_BOUNDARY\n"+b[i:]; open(p,"wb").write(b)' "$S20GA/home/.claude/CLAUDE.md"
 global_ambiguous_hash=$(hash_file "$S20GA/home/.claude/CLAUDE.md")
 S20GA_HOME=$(cd "$S20GA/home" && pwd -P)
-(cd "$S20GA/invoker" && HOME="$S20GA_HOME" "$REPO_ROOT/setup.sh" --global -F) \
+(cd "$S20GA/invoker" && HOME="$S20GA_HOME" "$REPO_ROOT/setup.sh" --global -f) \
     > "$S20GA/refresh.log" 2>&1
 assert_equals "$?" "1" "two valid global segmentations block rather than guessing"
 assert_hash_equals "$S20GA/home/.claude/CLAUDE.md" "$global_ambiguous_hash" \
@@ -1144,7 +1145,7 @@ rollback_original_hash=$(hash_file "$S21/CLAUDE.md")
 (cd "$S21" && HOME="$S21/.fakehome" \
     FORGE_FULL_REFRESH_FAIL_AFTER='@penultimate' \
     FORGE_FULL_REFRESH_INJECT_ROLLBACK_RACE_RELATIVE='CLAUDE.md' \
-    "$REPO_ROOT/setup.sh" -F) > "$S21/rollback.log" 2>&1
+    "$REPO_ROOT/setup.sh" -f) > "$S21/rollback.log" 2>&1
 assert_equals "$?" "1" "destination race during rollback fails closed"
 assert_contains "$S21/CLAUDE.md" 'FORGE_ROLLBACK_DESTINATION_RACE' \
     "concurrently-created rollback destination is never unlinked"
@@ -1176,7 +1177,7 @@ EOF
 chmod +x "$S22/fake-bin/python3"
 FORGE_FAKE_PYTHON_MARKER="$S22/root-python-invoked" \
     PATH="$S22/fake-bin:/usr/bin:/bin" HOME=/ \
-    "$REPO_ROOT/setup.sh" --global -F > "$S22/root.log" 2>&1
+    "$REPO_ROOT/setup.sh" --global -f > "$S22/root.log" 2>&1
 assert_equals "$?" "1" "filesystem root is rejected as a selected global home"
 assert_file_missing "$S22/root-python-invoked" "root rejection occurs before Python or transaction writes"
 FORGE_FAKE_PYTHON_MARKER="$S22/noncanonical-python-invoked" \
@@ -1238,10 +1239,10 @@ assert_contains "$P1/docs/adr/0099-project.md" "PROFILE_ONE_ADR_BYTES" \
 assert_equals "$(snapshot_project "$P1_SIBLING")" "$sibling_before" \
     "profile 1 migration never changes the linked sibling worktree"
 manifest_before=$(hash_file "$P1/.forge/managed-files.tsv")
-run_refresh "$P1" "${P1}.force.log" -f
-assert_equals "$?" "0" "ordinary force remains valid after profile 1 reaches v6"
+run_refresh "$P1" "${P1}.upgrade.log" --upgrade
+assert_equals "$?" "0" "routine update remains valid after profile 1 reaches v6"
 assert_hash_equals "$P1/.forge/managed-files.tsv" "$manifest_before" \
-    "ordinary v6 force keeps the managed manifest stable"
+    "routine v6 update keeps the managed manifest stable"
 p1_v6_before=$(snapshot_project "$P1")
 run_refresh "$P1" "${P1}.v6-preview.log" -F --dry-run
 assert_equals "$?" "0" "v6 full-refresh preview reports ready without remigration"

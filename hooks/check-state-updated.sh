@@ -499,7 +499,7 @@ CHANGELOG_IN_BRANCH=$(git diff --name-only "$BRANCH_BASE" HEAD 2>/dev/null | gre
 # every Stop event in repos that never had CONTINUITY.md.
 if [ ! -f "$STATE_MD" ] && [ -f "CONTINUITY.md" ]; then
     echo "ℹ check-state-updated: Forge state.md not found, but CONTINUITY.md exists." >&2
-    echo "  Run setup -F --dry-run, resolve every reported blocker, then run setup -F." >&2
+    echo "  Run setup -f --dry-run, resolve every reported blocker, then run setup -f." >&2
     # Continue to CHANGELOG check — gates are independent.
 fi
 

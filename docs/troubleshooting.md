@@ -8,11 +8,11 @@ This is expected when Forge finds protected user content or existing host adapte
 authoritative preview first:
 
 ```bash
-~/claude-codex-forge/setup.sh -F --dry-run
+~/claude-codex-forge/setup.sh -f --dry-run
 ```
 
 ```powershell
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
+& $HOME\claude-codex-forge\setup.ps1 -Force -DryRun
 ```
 
 Resolve every named blocker, then rerun without the dry-run flag. Full refresh reconciles only
@@ -200,8 +200,8 @@ migration path. Current hooks read **only** `.forge/local/state.md`; they never 
 full refresh without `--dry-run`:
 
 ```bash
-~/claude-codex-forge/setup.sh -F --dry-run
-~/claude-codex-forge/setup.sh -F
+~/claude-codex-forge/setup.sh -f --dry-run
+~/claude-codex-forge/setup.sh -f
 ```
 
 Preview preserves every target byte. Existing `.forge/local/state.md` content is preserved unless
@@ -406,8 +406,8 @@ The Forge ships a PTY shim (since v5.22) that works around this. If you're hitti
    ls .forge/hooks/lib/codex-pty-helper.py # required on Unix
    ```
 
-   If any are missing, preview with `setup.sh -F --dry-run` (or
-   `setup.ps1 -FullRefresh -DryRun`) from your local Forge checkout. Execute the same full-refresh
+   If any are missing, preview with `setup.sh -f --dry-run` (or
+   `setup.ps1 -Force -DryRun`) from your local Forge checkout. Execute the same full-refresh
    command without the dry-run flag only after `UPGRADE: READY`; it reconciles ownership-proven
    canonical files and generated adapters.
 

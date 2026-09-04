@@ -14,17 +14,17 @@ automation, offline use, or troubleshooting:
 ```bash
 git -C ~/claude-codex-forge pull
 cd /path/to/project
-~/claude-codex-forge/setup.sh -F --dry-run
+~/claude-codex-forge/setup.sh -f --dry-run
 # Resolve every named blocker. When the preview says UPGRADE: READY:
-~/claude-codex-forge/setup.sh -F
+~/claude-codex-forge/setup.sh -f
 ```
 
 ```powershell
 git -C $HOME\claude-codex-forge pull
 Set-Location C:\path\to\project
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
+& $HOME\claude-codex-forge\setup.ps1 -Force -DryRun
 # Resolve every named blocker. When the preview says UPGRADE: READY:
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh
+& $HOME\claude-codex-forge\setup.ps1 -Force
 ```
 
 The command must run at the canonical repository root. Unix full refresh requires Python 3. The
@@ -32,9 +32,10 @@ preview uses the same planner and staging validation as execution but creates no
 report, stamp, or project/global file. Execution repeats discovery under the transaction guard, so
 a stale preview never authorizes changed bytes.
 
-`-f` / `-Force` refreshes an existing v6 install only. `-F` / `-FullRefresh` previews or executes a
-v5/mixed-to-v6 migration. If ordinary force detects legacy machinery, it points you back to the
-read-only preview instead of layering v6 beside v5.
+`--upgrade` / `-Upgrade` updates an existing v6 installation while preserving project-owned
+configuration. `-f` / `--force` / `-Force` previews or executes the transactional full
+installation and reconciliation path from any state. The former `-F` / `--full-refresh` and
+`-FullRefresh` / `-R` spellings remain deprecated compatibility aliases and are no longer needed.
 
 If you do not know which harness or version is present, run the preview. It is the safe inventory
 command and writes no project files.
@@ -153,17 +154,17 @@ A project refresh never changes home-directory configuration. Refresh the global
 separately when setup reports it stale, previewing first:
 
 ```bash
-~/claude-codex-forge/setup.sh --global -F --dry-run
-~/claude-codex-forge/setup.sh --global -F
+~/claude-codex-forge/setup.sh --global -f --dry-run
+~/claude-codex-forge/setup.sh --global -f
 ```
 
 ```powershell
-& $HOME\claude-codex-forge\setup.ps1 -Global -FullRefresh -DryRun
-& $HOME\claude-codex-forge\setup.ps1 -Global -FullRefresh
+& $HOME\claude-codex-forge\setup.ps1 -Global -Force -DryRun
+& $HOME\claude-codex-forge\setup.ps1 -Global -Force
 ```
 
-Do not combine full refresh with force, incremental upgrade, continuity migration, or Playwright
-scaffolding flags.
+Do not combine full reconciliation with the routine update, retired continuity migration, or
+Playwright scaffolding flags.
 
 Full refresh changes only the current worktree. It does not edit sibling worktrees or guess which
 sibling branch should receive the migration. Commit the successful harness migration, merge or
@@ -198,7 +199,7 @@ original file and reports `LEGACY_CONTINUITY_UNRESOLVED` unless exact prior migr
 proves that its state already landed in the canonical v6 destination. Forge does not guess how a
 mixed narrative file should be split.
 
-Run `setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun`. If blocked, move durable facts to
+Run `setup.sh -f --dry-run` or `setup.ps1 -Force -DryRun`. If blocked, move durable facts to
 project instructions, architecture decisions to `docs/adr/`, and current local state to
 `.forge/local/state.md`. Then archive or remove `CONTINUITY.md` and rerun preview. The retired
 `--migrate` / `-Migrate` spelling changes nothing and exits nonzero with this same direction.

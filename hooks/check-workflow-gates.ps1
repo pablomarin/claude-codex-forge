@@ -130,7 +130,7 @@ $forgeVersion = if (Test-Path -LiteralPath $forgeVersionPath -PathType Leaf) { (
 if ($forgeVersion -eq "6" -and (Test-Path -LiteralPath $configCheck)) {
     $null = '{}' | & $configCheck -Mode boundary -Root (Get-Location).Path 2>$null
     if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -F and inspect the diff before shipping.")
+        [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -f and inspect the diff before shipping.")
         exit 2
     }
 }
@@ -166,7 +166,7 @@ if (-not (Test-Path $stateFile)) {
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Breadcrumb wording byte-equivalent to bash variant for AC-4 parity.
     [Console]::Error.WriteLine("ℹ check-workflow-gates: Forge state.md not found.")
-    [Console]::Error.WriteLine("  Run setup -FullRefresh -DryRun, resolve every reported blocker, then run setup -FullRefresh.")
+    [Console]::Error.WriteLine("  Run setup -Force -DryRun, resolve every reported blocker, then run setup -Force.")
     Exit-ForgeAllow
 }
 
@@ -196,7 +196,7 @@ if (-not $cmdLine) { Exit-ForgeAllow }
 $cmd = ($cmdLine -split '\|')[2].Trim()
 if (-not $cmd -or $cmd -eq "none" -or $cmd -eq ([char]0x2014).ToString() -or $cmd -eq "-") { Exit-ForgeAllow }
 if (-not $stateIsV6) {
-    [Console]::Error.WriteLine("WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup -FullRefresh -DryRun, resolve blockers, then setup -FullRefresh.")
+    [Console]::Error.WriteLine("WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup -Force -DryRun, resolve blockers, then setup -Force.")
     exit 2
 }
 

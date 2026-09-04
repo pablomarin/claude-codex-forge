@@ -827,7 +827,7 @@ def active_harness_findings(target: Path) -> tuple[UpgradeFinding, ...]:
             "project",
             ".agent-workflows",
             f"independent active harness authority: {signals}",
-            "archive or retire the custom harness, remove its active registrations, then rerun -F --dry-run",
+            "archive or retire the custom harness, remove its active registrations, then rerun -f --dry-run",
         ),
     )
 
@@ -883,7 +883,7 @@ def state_source_findings(target: Path, current_v6: bool = False) -> tuple[Upgra
             "project",
             ".forge/local/state.md",
             f"state conflict: multiple plausible state sources: {sources}{receipt_problem}",
-            "choose one authoritative state, archive the others, then rerun -F --dry-run",
+            "choose one authoritative state, archive the others, then rerun -f --dry-run",
         ),
     )
 
@@ -945,7 +945,7 @@ def continuity_file_findings(
             "project",
             relative.as_posix(),
             f"unresolved legacy continuity content sha256={sha256_path(continuity)}; {evidence_problem}",
-            "move relevant facts to project instructions, decisions to docs/adr, and active state to .forge/local/state.md; archive or remove CONTINUITY.md; then rerun -F --dry-run",
+            "move relevant facts to project instructions, decisions to docs/adr, and active state to .forge/local/state.md; archive or remove CONTINUITY.md; then rerun -f --dry-run",
         ),
     )
 

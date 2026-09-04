@@ -39,19 +39,29 @@ param(
 $ScriptDir = $PSScriptRoot
 
 if ($Migrate) {
-    [Console]::Error.WriteLine("ERROR: -Migrate was retired in Forge 6; no files changed. Run .\setup.ps1 -FullRefresh -DryRun.")
+    [Console]::Error.WriteLine("ERROR: -Migrate was retired in Forge 6; no files changed. Run .\setup.ps1 -Force -DryRun.")
     exit 1
 }
 
-if ($DryRun -and -not $FullRefresh) {
-    [Console]::Error.WriteLine("ERROR: DryRun requires FullRefresh.")
+$DeprecatedFullRefresh = $FullRefresh
+$AuthoritativeRefresh = $Force -or $FullRefresh
+
+if ($DryRun -and -not $AuthoritativeRefresh) {
+    [Console]::Error.WriteLine("ERROR: DryRun requires Force.")
     exit 1
 }
 
-if ($FullRefresh -and ($Force -or $Upgrade -or $WithPlaywright)) {
-    [Console]::Error.WriteLine("ERROR: FullRefresh and Force/Upgrade/WithPlaywright cannot be combined.")
+if ($AuthoritativeRefresh -and ($Upgrade -or $WithPlaywright)) {
+    [Console]::Error.WriteLine("ERROR: Force cannot be combined with Upgrade or WithPlaywright.")
     exit 1
 }
+
+if ($DeprecatedFullRefresh) {
+    [Console]::Error.WriteLine("DEPRECATED: -FullRefresh/-R is an alias for -Force; use -Force.")
+}
+
+$FullRefresh = $AuthoritativeRefresh
+$Force = $false
 
 function Write-NativeGoalCollisions {
     param([string]$Root)
@@ -63,7 +73,7 @@ function Write-NativeGoalCollisions {
     }
 }
 
-# Upgrade implies force for hooks/commands/rules
+# Upgrade refreshes Forge-owned hooks/commands/rules in an existing v6 install.
 if ($Upgrade) { $Force = $true }
 
 # Colors function
@@ -85,9 +95,9 @@ function Show-Usage {
     Write-Host "  -h, -Help           Show this help message"
     Write-Host "  -p, -Project NAME   Project name (default: directory name)"
     Write-Host "  -t, -Tech STACK     Tech stack: python, typescript, fullstack (default: fullstack)"
-    Write-Host "  -f, -Force          Overwrite existing files"
-    Write-Host "  -R, -FullRefresh    Authoritative transactional v5 -> v6 harness refresh"
-    Write-Host "      -DryRun         Preview full refresh without writing target files (requires -FullRefresh)"
+    Write-Host "  -u, -Upgrade        Update an existing v6 install; preserve project configuration"
+    Write-Host "  -f, -Force          Authoritative transactional full installation/reconciliation"
+    Write-Host "      -DryRun         Preview -Force without writing target files"
     Write-Host "  -g, -Global         Set up global memory system (~/.claude/)"
     Write-Host "  -w, -WithPlaywright Install Playwright framework templates (requires -Tech fullstack or typescript)"
     Write-Host ""
@@ -95,11 +105,11 @@ function Show-Usage {
     Write-Host "  .\setup.ps1                          # Setup with defaults"
     Write-Host "  .\setup.ps1 -p `"My Project`"          # Custom project name"
     Write-Host "  .\setup.ps1 -t python                # Python-only project"
-    Write-Host "  .\setup.ps1 -f                       # Force overwrite existing files"
-    Write-Host "  .\setup.ps1 -R                       # Ownership-aware full harness refresh"
-    Write-Host "  .\setup.ps1 -FullRefresh -DryRun     # Read-only full refresh preview"
+    Write-Host "  .\setup.ps1 -Upgrade                 # Update an existing v6 install"
+    Write-Host "  .\setup.ps1 -Force -DryRun           # Preview full reconciliation"
+    Write-Host "  .\setup.ps1 -Force                   # Execute full reconciliation"
     Write-Host "  .\setup.ps1 -Global                  # Set up global memory (run once per machine)"
-    Write-Host "  .\setup.ps1 -Global -f               # Force overwrite global settings"
+    Write-Host "  .\setup.ps1 -Global -Upgrade         # Update an existing global v6 install"
     Write-Host "  .\setup.ps1 -Tech fullstack -WithPlaywright  # Install Playwright framework templates"
 }
 
@@ -133,7 +143,7 @@ function Test-V6PreflightNoLegacy {
         return
     }
     if ($Scope -eq "project" -and (Test-Path -LiteralPath (Join-Path $Root "CONTINUITY.md"))) {
-        throw "BLOCKED: legacy CONTINUITY.md requires authoritative preview; run .\setup.ps1 -FullRefresh -DryRun"
+        throw "BLOCKED: legacy CONTINUITY.md requires authoritative preview; run .\setup.ps1 -Force -DryRun"
     }
     $manifest = Join-Path $ScriptDir "manifests\legacy-v5.tsv"
     if (-not (Test-Path $manifest)) { throw "BLOCKED: legacy v5 inventory is unavailable" }
@@ -182,11 +192,11 @@ function Test-V6PreflightNoLegacy {
             }
         } else { continue }
         if ($Upgrade) {
-            if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: & '$ScriptDir\setup.ps1' -Global -FullRefresh -DryRun" }
-            throw "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: & '$ScriptDir\setup.ps1' -FullRefresh -DryRun"
+            if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: & '$ScriptDir\setup.ps1' -Global -Force -DryRun" }
+            throw "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: & '$ScriptDir\setup.ps1' -Force -DryRun"
         }
-        if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness detected. Preview first: & '$ScriptDir\setup.ps1' -Global -FullRefresh -DryRun" }
-        throw "BLOCKED: legacy Forge harness detected. Preview first: & '$ScriptDir\setup.ps1' -FullRefresh -DryRun"
+        if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness detected. Preview first: & '$ScriptDir\setup.ps1' -Global -Force -DryRun" }
+        throw "BLOCKED: legacy Forge harness detected. Preview first: & '$ScriptDir\setup.ps1' -Force -DryRun"
     }
 }
 
@@ -217,8 +227,9 @@ function Get-ForgeVersion {
 $ForgeVersion = Get-ForgeVersion
 
 # Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
-# install / -Force / -Upgrade / -Global run — NOT -Migrate (exited above, installs no
-# machinery). Placed before the -Global branch so both modes hit it. Fail-open via
+# ordinary install / -Upgrade / -Global run. The authoritative -Force path and
+# retired -Migrate command exit above without reaching this code. Placed before
+# the -Global branch so both ordinary modes hit it. Fail-open via
 # try/catch + $HOME guard so a stamp-write failure never aborts setup.
 if ($HOME) {
     try {
@@ -276,7 +287,7 @@ function Copy-TemplateFile {
     if ((Test-Path $Destination) -and (-not $Force)) {
         Write-Host "  " -NoNewline
         Write-Color "o" "Blue"
-        Write-Host " $Description already exists (use -f to overwrite)"
+        Write-Host " $Description already exists (use -Upgrade to refresh)"
         return
     }
 
@@ -712,7 +723,7 @@ try {
 } catch {}
 $hadForgeMachinery = Test-Path ".claude/settings.json"
 
-# Setup-time advisory warning: -Force OR -Upgrade rewrites machinery + advances the pin,
+# Setup-time advisory warning: -Upgrade rewrites machinery + advances the pin,
 # so warn if it differs. Numeric [version] compare (NOT string — 5.50 vs 5.9). Advisory.
 $forgeDriftWarn = ""
 if ($ForgeVersion -ne "unknown" -and ($prevForgeVersion -match '^\d+\.\d+$') -and $prevForgeVersion -ne $ForgeVersion -and ($Upgrade -or $Force)) {
@@ -1094,7 +1105,7 @@ if ($WithPlaywright) {
         if ((Test-Path $dest) -and (-not $Force)) {
             Write-Host "  " -NoNewline
             Write-Color "o" "Blue"
-            Write-Host " $desc already exists (use -Force to overwrite)"
+            Write-Host " $desc already exists (use -Upgrade to refresh)"
             return
         }
         # Pattern: literal placeholder (no regex metachars in __PLAYWRIGHT_DIR__).
@@ -1144,7 +1155,7 @@ if ($WithPlaywright) {
 
 Write-Host ""
 
-# Create CHANGELOG only if it doesn't exist — NEVER overwrite on -Force / -Upgrade.
+# Create CHANGELOG only if it doesn't exist — NEVER overwrite on -Upgrade.
 # docs\CHANGELOG.md is user content (each project's own release history). Same
 # policy as CLAUDE.md and CONTINUITY.md: templates initialize the file on first
 # install and never touch it afterward.
@@ -1192,7 +1203,7 @@ else {
 # that block is user-owned bytes and is never subject to project-name rewriting.
 
 # Forge version pin (project) — WRITE LATE, after all .claude/ copies succeeded, and
-# only when machinery was actually (re)written this run (-Force / -Upgrade, or no
+# only when machinery was actually (re)written this run (-Upgrade, or no
 # machinery existed before). Never advance the pin on a skipped non-force rerun.
 if ((Test-Path ".claude/settings.json") -and ($script:ForgeCopyErrors -eq 0) -and ($Force -or $Upgrade -or (-not $hadForgeMachinery))) {
     # Machinery (re)written this run AND every copy succeeded ($script:ForgeCopyErrors
@@ -1262,18 +1273,18 @@ if ($Upgrade) {
         Write-Host "  Forge 6 does not rewrite this mixed-content legacy file automatically."
         Write-Host "  Preview the authoritative upgrade inventory before changing anything:"
         Write-Host ""
-        Write-Host "    .\setup.ps1 -FullRefresh -DryRun"
+        Write-Host "    .\setup.ps1 -Force -DryRun"
         Write-Host ""
         Write-Host "  Move durable facts to project instructions, decisions to docs/adr/, and"
         Write-Host "  active state to .forge/local/state.md; then archive or remove CONTINUITY.md."
         Write-Host ""
     }
     if ($hadClaude -and $hadContinuity) {
-        Write-Color "Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved; run -FullRefresh -DryRun to reconcile legacy continuity." "Green"
+        Write-Color "Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved; run -Force -DryRun to reconcile legacy continuity." "Green"
     } elseif ($hadClaude) {
         Write-Color "Upgrade done! Your CLAUDE.md was preserved (user content)." "Green"
     } elseif ($hadContinuity) {
-        Write-Color "Upgrade done! Your CONTINUITY.md was preserved; run -FullRefresh -DryRun to reconcile legacy continuity." "Green"
+        Write-Color "Upgrade done! Your CONTINUITY.md was preserved; run -Force -DryRun to reconcile legacy continuity." "Green"
     } else {
         Write-Color "Upgrade done!" "Green"
     }

@@ -146,7 +146,7 @@ CONFIG_CHECK="$HOOK_DIR/check-config-change.sh"
 FORGE_VERSION=$(head -1 .forge/version 2>/dev/null | tr -d '[:space:]')
 if [ "$FORGE_VERSION" = 6 ] && [ -f "$CONFIG_CHECK" ]; then
     if ! printf '{}' | bash "$CONFIG_CHECK" --verify-boundary "$(pwd)" >/dev/null 2>&1; then
-        echo "FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -F and inspect the diff before shipping." >&2
+        echo "FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -f and inspect the diff before shipping." >&2
         exit 2
     fi
 fi
@@ -175,7 +175,7 @@ if [ ! -f "$STATE_FILE" ]; then
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Emit friendly breadcrumb on stderr, exit 0 (don't gate — nothing to enforce).
     echo "ℹ check-workflow-gates: Forge state.md not found." >&2
-    echo "  Run setup -F --dry-run, resolve every reported blocker, then run setup -F." >&2
+    echo "  Run setup -f --dry-run, resolve every reported blocker, then run setup -f." >&2
     forge_allow
 fi
 
@@ -202,7 +202,7 @@ WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -iE '\|\s*Command\s*\|' | head -1 |
 # Legacy workflow prose remains readable for migration context, but v5 review,
 # goal, and authorization lines can never certify a v6 ship action.
 if [ "$STATE_IS_V6" != true ]; then
-    echo "WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup -F --dry-run, resolve blockers, then setup -F." >&2
+    echo "WORKFLOW GATE: legacy Forge state cannot certify shipping; run setup -f --dry-run, resolve blockers, then setup -f." >&2
     exit 2
 fi
 
