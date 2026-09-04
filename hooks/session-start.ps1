@@ -31,7 +31,7 @@ if ($LASTEXITCODE -eq 0 -and $top) { $projectRoot = $top }
 $configCheck = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "check-config-change.ps1"
 if (Test-Path -LiteralPath $configCheck) {
     $null = '{}' | & $configCheck -Mode boundary -Root $projectRoot 2>$null
-    if ($LASTEXITCODE -ne 0) { $context += " (FORGE_CONFIG_TAMPERED: managed config changed; run setup -F and inspect the diff before shipping)" }
+    if ($LASTEXITCODE -ne 0) { $context += " (FORGE_CONFIG_TAMPERED: managed config changed; run setup -f and inspect the diff before shipping)" }
 }
 
 $hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path

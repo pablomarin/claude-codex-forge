@@ -20,7 +20,8 @@ checkpoint. Forge deliberately adds no concurrent-edit lock; simultaneous same-w
 are allowed, with ordinary developer coordination for overlapping edits. Any candidate mutation
 makes older candidate-bound review and verification evidence stale automatically.
 
-`./setup.sh -F` and `./setup.ps1 -FullRefresh` (`-R`) are the authoritative v5-to-v6 migration.
+`./setup.sh -f` and `./setup.ps1 -Force` are the authoritative full installation and v5-to-v6
+migration commands.
 The manifest-driven transaction proves legacy ownership, preserves user regions/state/custom
 configuration, backs up rewritten bytes, publishes the v6 stamp last, and rolls back or requires an
 explicit recovery journal on uncertainty. Reports distinguish `CREATED`, `REWRITTEN`, `DELETED`,
@@ -63,6 +64,13 @@ A session opened in the primary checkout can continue any linked worktree throug
 no per-worktree Forge receipt, copied native session ID, trust bypass, or task-root reopen is needed.
 Review capture keeps both its index and generated Git objects in disposable storage, so inspecting an
 intent-to-add plan never requires write access to the source repository's `.git` metadata.
+
+Setup flags now use words instead of capitalization to select risk level: `--upgrade` / `-Upgrade`
+is the routine v6 update that preserves custom settings, MCP entries, and project-owned content;
+`-f` / `--force` / `-Force` runs the ownership-aware transactional reconciliation and accepts
+`--dry-run` / `-DryRun`. The confusing uppercase `-F`, `--full-refresh`, `-FullRefresh`, and `-R`
+spellings remain warning-only compatibility aliases for one transition period but are no longer
+advertised.
 
 Full-refresh ownership now distinguishes active legacy policy from non-runtime content that Forge
 seeded for projects to adopt. Customized ADR indexes, CI references, and Playwright scaffolds are

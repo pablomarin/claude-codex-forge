@@ -10,7 +10,7 @@ and `AGENTS.md` adapters point both hosts at them.
 
 Put shared project facts in one team-owned tracked document, for example `docs/agent-context.md`:
 
-**Why this matters:** When you run the authoritative `setup.sh -F`, user text outside bounded Forge
+**Why this matters:** When you run the authoritative `setup.sh -f`, user text outside bounded Forge
 marker blocks is preserved while canonical `.forge/` content and generated host adapters are
 reconciled with ownership checks.
 

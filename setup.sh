@@ -26,10 +26,9 @@ usage() {
     echo "  -h, --help          Show this help message"
     echo "  -p, --project NAME  Project name (default: directory name)"
     echo "  -t, --tech STACK    Tech stack: python, typescript, fullstack (default: fullstack)"
-    echo "  -f, --force         Overwrite existing files (destructive)"
-    echo "  -F, --full-refresh  Authoritative transactional v5 -> v6 harness refresh"
-    echo "      --dry-run       Preview full refresh without writing target files (requires -F)"
-    echo "  -u, --upgrade       Smart upgrade: merge new hooks/permissions into existing settings"
+    echo "  -u, --upgrade       Update an existing v6 install; preserve project configuration"
+    echo "  -f, --force         Authoritative transactional full installation/reconciliation"
+    echo "      --dry-run       Preview --force without writing target files"
     echo "  -g, --global        Set up global memory system (~/.claude/)"
     echo "  -w, --with-playwright  Install Playwright framework templates (requires -t fullstack or typescript)"
     echo "  --playwright-dir DIR   Scaffold Playwright into DIR instead of repo root (monorepo layouts)"
@@ -39,12 +38,11 @@ usage() {
     echo "  $0                          # Setup with defaults"
     echo "  $0 -p \"My Project\"          # Custom project name"
     echo "  $0 -t python                # Python-only project"
-    echo "  $0 -f                       # Force overwrite existing files"
-    echo "  $0 -F                       # Ownership-aware full harness refresh"
-    echo "  $0 -F --dry-run             # Read-only full refresh preview"
-    echo "  $0 --upgrade                # Upgrade: add new hooks/rules, merge settings"
+    echo "  $0 --upgrade                # Update an existing v6 install"
+    echo "  $0 --force --dry-run        # Preview full reconciliation"
+    echo "  $0 --force                  # Execute full reconciliation"
     echo "  $0 --global                 # Set up global memory (run once per machine)"
-    echo "  $0 --global -f              # Force overwrite global settings"
+    echo "  $0 --global --upgrade       # Update an existing global v6 install"
     echo "  $0 -t fullstack --with-playwright  # Install Playwright framework templates"
 }
 
@@ -57,6 +55,7 @@ DRY_RUN=false
 UPGRADE=false
 GLOBAL=false
 WITH_PLAYWRIGHT=false
+DEPRECATED_FULL_REFRESH=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -73,11 +72,17 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -f|--force)
-            FORCE=true
+            FULL_REFRESH=true
             shift
             ;;
-        -F|--full-refresh)
+        -F)
             FULL_REFRESH=true
+            DEPRECATED_FULL_REFRESH="DEPRECATED: -F is an alias for -f; use -f or --force."
+            shift
+            ;;
+        --full-refresh)
+            FULL_REFRESH=true
+            DEPRECATED_FULL_REFRESH="DEPRECATED: --full-refresh is an alias for --force; use --force."
             shift
             ;;
         --dry-run)
@@ -90,7 +95,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --migrate)
-            echo "ERROR: --migrate was retired in Forge 6; no files changed. Run $0 -F --dry-run." >&2
+            echo "ERROR: --migrate was retired in Forge 6; no files changed. Run $0 -f --dry-run." >&2
             exit 1
             ;;
         -g|--global)
@@ -114,13 +119,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ "$DRY_RUN" = true ] && [ "$FULL_REFRESH" != true ]; then
-    echo -e "${RED}ERROR: --dry-run requires --full-refresh.${NC}" >&2
+    echo -e "${RED}ERROR: --dry-run requires --force.${NC}" >&2
     exit 1
 fi
 
-if [ "$FULL_REFRESH" = true ] && { [ "$FORCE" = true ] || [ "$UPGRADE" = true ] || [ "$WITH_PLAYWRIGHT" = true ]; }; then
-    echo -e "${RED}ERROR: --full-refresh cannot be combined with --force, --upgrade, or --with-playwright.${NC}" >&2
+if [ "$FULL_REFRESH" = true ] && { [ "$UPGRADE" = true ] || [ "$WITH_PLAYWRIGHT" = true ]; }; then
+    echo -e "${RED}ERROR: --force cannot be combined with --upgrade or --with-playwright.${NC}" >&2
     exit 1
+fi
+
+if [ -n "$DEPRECATED_FULL_REFRESH" ]; then
+    echo "$DEPRECATED_FULL_REFRESH" >&2
 fi
 
 report_native_goal_collisions() {
@@ -165,7 +174,7 @@ v6_preflight_no_legacy() {
         return 0
     fi
     if [ "$scope" = project ] && { [ -e "$root/CONTINUITY.md" ] || [ -L "$root/CONTINUITY.md" ]; }; then
-        echo "BLOCKED: legacy CONTINUITY.md requires authoritative preview; run $SCRIPT_DIR/setup.sh -F --dry-run" >&2
+        echo "BLOCKED: legacy CONTINUITY.md requires authoritative preview; run $SCRIPT_DIR/setup.sh -f --dry-run" >&2
         return 1
     fi
     [ -f "$manifest" ] || { echo "BLOCKED: legacy v5 inventory is unavailable" >&2; return 1; }
@@ -215,15 +224,15 @@ v6_preflight_no_legacy() {
         esac
         if [ "$UPGRADE" = true ]; then
             if [ "$scope" = global ]; then
-                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: '$SCRIPT_DIR/setup.sh' --global -F --dry-run" >&2
+                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: '$SCRIPT_DIR/setup.sh' --global -f --dry-run" >&2
             else
-                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: '$SCRIPT_DIR/setup.sh' -F --dry-run" >&2
+                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: '$SCRIPT_DIR/setup.sh' -f --dry-run" >&2
             fi
         else
             if [ "$scope" = global ]; then
-                echo "BLOCKED: legacy Forge harness detected. Preview first: '$SCRIPT_DIR/setup.sh' --global -F --dry-run" >&2
+                echo "BLOCKED: legacy Forge harness detected. Preview first: '$SCRIPT_DIR/setup.sh' --global -f --dry-run" >&2
             else
-                echo "BLOCKED: legacy Forge harness detected. Preview first: '$SCRIPT_DIR/setup.sh' -F --dry-run" >&2
+                echo "BLOCKED: legacy Forge harness detected. Preview first: '$SCRIPT_DIR/setup.sh' -f --dry-run" >&2
             fi
         fi
         return 1
@@ -252,8 +261,9 @@ forge_version() {
 FORGE_VERSION="$(forge_version)"
 
 # Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
-# install / -f / --upgrade / --global invocation — NOT --migrate (which exited above
-# and installs no machinery). Placed before the --global branch so both modes hit it.
+# ordinary install / --upgrade / --global invocation. The authoritative --force
+# path and retired --migrate command exit above without reaching this code.
+# Placed before the --global branch so both ordinary modes hit it.
 # Fail-open: the brace group silences a failed redirection too, and HOME is guarded,
 # so a stamp-write failure can never abort setup under `set -e`.
 if [[ -n "${HOME:-}" ]]; then
@@ -291,7 +301,7 @@ copy_file() {
     fi
 
     if [[ -f "$dest" ]] && [[ "$FORCE" != true ]]; then
-        echo -e "  ${BLUE}○${NC} $desc already exists (use -f to overwrite)"
+        echo -e "  ${BLUE}○${NC} $desc already exists (use --upgrade to refresh)"
         return 0
     fi
 
@@ -694,7 +704,7 @@ if [[ -f "CONTINUITY.md" ]]; then had_continuity_md=true; else had_continuity_md
 prev_forge_version=$(cat .claude/.forge-version 2>/dev/null || echo "")
 if [[ -f .claude/settings.json ]]; then had_forge_machinery=true; else had_forge_machinery=false; fi
 
-# Setup-time advisory warning: a -f OR --upgrade run rewrites the machinery and will
+# Setup-time advisory warning: an --upgrade run rewrites the machinery and will
 # advance the pin, so warn if it differs from the project's existing pin. Advisory
 # only — setup continues. Printed here (before the rewrite) AND echoed in the upgrade
 # summary below so it isn't lost in scrollback.
@@ -946,7 +956,7 @@ EOF
         local src="$1" dest="$2" desc="$3"
         [[ ! -f "$src" ]] && return 0
         if [[ -f "$dest" ]] && [[ "$FORCE" != true ]]; then
-            echo -e "  ${BLUE}○${NC} $desc already exists (use -f to overwrite)"
+            echo -e "  ${BLUE}○${NC} $desc already exists (use --upgrade to refresh)"
             return 0
         fi
         # Read → literal-substitute → write. $(<file) strips trailing newlines;
@@ -988,7 +998,7 @@ fi
 
 echo ""
 
-# Create CHANGELOG only if it doesn't exist — NEVER overwrite on -f / --upgrade.
+# Create CHANGELOG only if it doesn't exist — NEVER overwrite on --upgrade.
 # docs/CHANGELOG.md is user content (each project's own release history). Same
 # policy as CLAUDE.md and CONTINUITY.md: templates initialize the file on first
 # install and never touch it afterward.
@@ -1029,8 +1039,9 @@ fi
 
 # Forge version pin (project) — WRITE LATE, after all .claude/ copies have succeeded,
 # so a mid-copy abort under `set -e` never leaves the pin ahead of the actual files.
-# Only stamp when the machinery was actually (re)written this run: -f / --upgrade
-# (rewritten), OR no machinery existed before (genuine fresh install). On a plain
+# Only stamp when the machinery was actually (re)written this run: --upgrade
+# (rewritten), OR no machinery existed before (genuine fresh install). The --force
+# transaction owns its own late stamp. On a plain
 # non-force rerun that SKIPPED existing files, leave the pin untouched — never lie.
 if [[ -f .claude/settings.json ]] \
    && { [[ "$FORCE" == true ]] || [[ "$UPGRADE" == true ]] || [[ "$had_forge_machinery" == false ]]; }; then
@@ -1097,18 +1108,18 @@ if [[ "$UPGRADE" == true ]]; then
         echo "  Forge 6 does not rewrite this mixed-content legacy file automatically."
         echo "  Preview the authoritative upgrade inventory before changing anything:"
         echo ""
-        echo "    ./setup.sh -F --dry-run"
+        echo "    ./setup.sh -f --dry-run"
         echo ""
         echo "  Move durable facts to project instructions, decisions to docs/adr/, and"
         echo "  active state to .forge/local/state.md; then archive or remove CONTINUITY.md."
         echo ""
     fi
     if [[ "$had_claude_md" == true ]] && [[ "$had_continuity_md" == true ]]; then
-        echo -e "${GREEN}Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved; run -F --dry-run to reconcile legacy continuity.${NC}"
+        echo -e "${GREEN}Upgrade done! Your CLAUDE.md and CONTINUITY.md were preserved; run -f --dry-run to reconcile legacy continuity.${NC}"
     elif [[ "$had_claude_md" == true ]]; then
         echo -e "${GREEN}Upgrade done! Your CLAUDE.md was preserved (user content).${NC}"
     elif [[ "$had_continuity_md" == true ]]; then
-        echo -e "${GREEN}Upgrade done! Your CONTINUITY.md was preserved; run -F --dry-run to reconcile legacy continuity.${NC}"
+        echo -e "${GREEN}Upgrade done! Your CONTINUITY.md was preserved; run -f --dry-run to reconcile legacy continuity.${NC}"
     else
         echo -e "${GREEN}Upgrade done!${NC}"
     fi

@@ -36,9 +36,9 @@ Do not layer v6 beside the old managed harness. Pull Forge and run the authorita
 ```bash
 git -C ~/claude-codex-forge pull
 cd /path/to/project
-~/claude-codex-forge/setup.sh -F --dry-run
+~/claude-codex-forge/setup.sh -f --dry-run
 # After UPGRADE: READY
-~/claude-codex-forge/setup.sh -F
+~/claude-codex-forge/setup.sh -f
 ```
 
 Windows PowerShell:
@@ -46,9 +46,9 @@ Windows PowerShell:
 ```powershell
 git -C $HOME\claude-codex-forge pull
 Set-Location C:\path\to\project
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
+& $HOME\claude-codex-forge\setup.ps1 -Force -DryRun
 # After UPGRADE: READY
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh
+& $HOME\claude-codex-forge\setup.ps1 -Force
 ```
 
 Preview is read-only. The transaction preserves user-owned content, migrates active state, removes
@@ -60,13 +60,13 @@ only proven Forge-owned legacy files, and reports all ambiguous ownership togeth
 Global files have their own transaction and are never changed by project setup:
 
 ```bash
-~/claude-codex-forge/setup.sh --global -F --dry-run
-~/claude-codex-forge/setup.sh --global -F
+~/claude-codex-forge/setup.sh --global -f --dry-run
+~/claude-codex-forge/setup.sh --global -f
 ```
 
 ```powershell
-& $HOME\claude-codex-forge\setup.ps1 -Global -FullRefresh -DryRun
-& $HOME\claude-codex-forge\setup.ps1 -Global -FullRefresh
+& $HOME\claude-codex-forge\setup.ps1 -Global -Force -DryRun
+& $HOME\claude-codex-forge\setup.ps1 -Global -Force
 ```
 
 ## Linked Worktree

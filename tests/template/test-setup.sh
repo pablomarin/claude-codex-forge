@@ -186,36 +186,36 @@ HASH_PWCFG_BEFORE=$(hash_file "$S6/frontend/playwright.config.ts")
 echo "# USER EDIT SENTINEL" >> "$S6/docs/ci-templates/e2e.yml"
 HASH_YML_EDITED=$(hash_file "$S6/docs/ci-templates/e2e.yml")
 
-# Rerun without -f
+# Rerun without --upgrade
 run_setup "$S6" "$LOG6b" -p "IdemTest" -t fullstack --with-playwright
 assert_equals "$?" "0" "rerun exits 0"
 
 assert_hash_equals "$S6/docs/ci-templates/e2e.yml" "$HASH_YML_EDITED" \
-    "CI template preserves user edit on rerun (no -f)"
+    "CI template preserves user edit on rerun (no --upgrade)"
 assert_hash_equals "$S6/docs/ci-templates/README.md" "$HASH_MD_BEFORE" \
     "CI template README unchanged on rerun"
 assert_hash_equals "$S6/frontend/playwright.config.ts" "$HASH_PWCFG_BEFORE" \
     "playwright.config.ts unchanged on rerun"
 
 # ===========================================================================
-# Test 7: -f force refresh overwrites user edits
+# Test 7: --upgrade refreshes Forge-managed scaffold files
 # ===========================================================================
-start_test "Test 7: -f forces CI template refresh"
+start_test "Test 7: --upgrade refreshes the CI template"
 
 LOG6c="$S6/.setup.3.log"
-run_setup "$S6" "$LOG6c" -p "IdemTest" -t fullstack --with-playwright -f
-assert_equals "$?" "0" "setup with -f exits 0"
+run_setup "$S6" "$LOG6c" -p "IdemTest" -t fullstack --with-playwright --upgrade
+assert_equals "$?" "0" "setup with --upgrade exits 0"
 
-# After -f, user sentinel should be gone (template refreshed from source)
+# After --upgrade, user sentinel should be gone (template refreshed from source)
 assert_not_contains "$S6/docs/ci-templates/e2e.yml" "USER EDIT SENTINEL" \
-    "-f refreshes CI template (user edit overwritten)"
+    "--upgrade refreshes CI template (user edit overwritten)"
 assert_hash_equals "$S6/docs/ci-templates/e2e.yml" "$HASH_YML_BEFORE" \
-    "CI template hash matches original after -f"
+    "CI template hash matches original after --upgrade"
 
 # ===========================================================================
 # Test 8: --upgrade smoke — the actual downstream pain path
 # Also exercises the "user content is never clobbered" invariant: CLAUDE.md,
-# CONTINUITY.md, AND docs/CHANGELOG.md must survive -f and --upgrade intact.
+# CONTINUITY.md, AND docs/CHANGELOG.md must survive --upgrade intact.
 # ===========================================================================
 start_test "Test 8: --upgrade smoke on existing install"
 
@@ -306,9 +306,9 @@ assert_contains "$LOG8b" "CLAUDE.template.md" \
     "UC1: --upgrade references CLAUDE.template.md"
 assert_not_contains "$LOG8b" "CONTINUITY.template.md" \
     "UC1: --upgrade does NOT reference CONTINUITY.template.md (deleted in PR #2)"
-assert_contains "$LOG8b" "./setup.sh -F --dry-run" \
+assert_contains "$LOG8b" "./setup.sh -f --dry-run" \
     "UC1: --upgrade points legacy CONTINUITY.md to full-refresh preview"
-assert_contains "$LOG8b" "Your CLAUDE.md and CONTINUITY.md were preserved; run -F --dry-run" \
+assert_contains "$LOG8b" "Your CLAUDE.md and CONTINUITY.md were preserved; run -f --dry-run" \
     "UC1: --upgrade final summary = both-preserved preview variant"
 assert_not_contains "$LOG8b" "were not modified" \
     "UC1: --upgrade does NOT contain legacy 'were not modified' string"
@@ -369,7 +369,7 @@ assert_not_contains "$LOG8m" "./setup.sh --migrate" \
     "Test 8b: migrated install does NOT nag './setup.sh --migrate'"
 assert_not_contains "$LOG8m" "run --migrate to move content" \
     "Test 8b: migrated install banner drops the 'run --migrate' suffix"
-assert_contains "$LOG8m" "./setup.sh -F --dry-run" \
+assert_contains "$LOG8m" "./setup.sh -f --dry-run" \
     "Test 8b: prior sentinel still routes through full-refresh preview"
 assert_not_contains "$LOG8m" "already migrated" \
     "Test 8b: ordinary setup does not certify migration from a sentinel alone"
@@ -407,7 +407,7 @@ assert_not_contains "$LOG8p" "content landed" \
 assert_not_contains "$LOG8p" "already migrated" \
     "Test 8c: state.md-only marker does NOT report 'already migrated'"
 # ...and we route to the same read-only inventory.
-assert_contains "$LOG8p" "./setup.sh -F --dry-run" \
+assert_contains "$LOG8p" "./setup.sh -f --dry-run" \
     "Test 8c: state.md-only marker routes to full-refresh preview"
 
 # ===========================================================================
@@ -440,7 +440,7 @@ assert_equals "$?" "0" "Test 8d: --upgrade on date-less sentinel exits 0"
 # A prefix-only marker receives the same conservative preview direction.
 assert_not_contains "$LOG8d" "./setup.sh --migrate" \
     "Test 8d: date-less sentinel does NOT nag './setup.sh --migrate'"
-assert_contains "$LOG8d" "./setup.sh -F --dry-run" \
+assert_contains "$LOG8d" "./setup.sh -f --dry-run" \
     "Test 8d: date-less sentinel routes to full-refresh preview"
 assert_not_contains "$LOG8d" "already migrated" \
     "Test 8d: date-less sentinel is not treated as certification"
@@ -576,12 +576,12 @@ assert_file_exists "$S10a/CONTINUITY.md" \
 # Preview direction must fire because legacy CONTINUITY.md is present.
 assert_contains "$S10a/.upgrade.log" "Legacy CONTINUITY.md detected" \
     "Scenario A: migration prompt fires (for legacy CONTINUITY)"
-assert_contains "$S10a/.upgrade.log" "./setup.sh -F --dry-run" \
+assert_contains "$S10a/.upgrade.log" "./setup.sh -f --dry-run" \
     "Scenario A: legacy continuity points to full-refresh preview"
 assert_not_contains "$S10a/.upgrade.log" "CONTINUITY.template.md" \
     "Scenario A: log does NOT reference CONTINUITY.template.md (deleted in PR #2)"
 # Final summary: only-CONTINUITY preview variant.
-assert_contains "$S10a/.upgrade.log" "Your CONTINUITY.md was preserved; run -F --dry-run" \
+assert_contains "$S10a/.upgrade.log" "Your CONTINUITY.md was preserved; run -f --dry-run" \
     "Scenario A: final summary = only-CONTINUITY preview variant"
 assert_not_contains "$S10a/.upgrade.log" "Your CLAUDE.md and CONTINUITY.md were preserved" \
     "Scenario A: final summary is NOT the both-preserved variant"
@@ -745,14 +745,14 @@ test_gitignore_has_claude_local() {
 test_gitignore_idempotent() {
     local scratch; scratch=$(scratch_dir gitignore-idempotent)
     ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
-    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" --upgrade -p TestProj -t fullstack >/dev/null 2>&1 )
     local count
     count=$(grep -cxF ".claude/local/" "$scratch/.gitignore" 2>/dev/null || echo 0)
-    assert_equals "$count" "1" ".claude/local/ entry is idempotent (one occurrence after -f rerun)"
+    assert_equals "$count" "1" ".claude/local/ entry is idempotent (one occurrence after --upgrade rerun)"
 }
 
 # Verify downstream ADR ownership: Forge-internal decisions are not installed,
-# exact old Forge seeds are retired, and project decisions survive -f.
+# exact old Forge seeds are retired, and project decisions survive setup.
 test_adrs_install() {
     local scratch; scratch=$(scratch_dir adrs-install)
     mkdir -p "$scratch/docs/adr" "$scratch/.fakehome"
@@ -764,7 +764,7 @@ test_adrs_install() {
     local custom_hash
     custom_hash=$(hash_file "$scratch/docs/adr/0006-write-tool-creates-missing-parents.md")
 
-    ( cd "$scratch" && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
 
     assert_file_exists "$scratch/docs/adr/template.md" \
         "fresh v6 setup provides a project ADR template"
@@ -779,7 +779,7 @@ test_adrs_install() {
     assert_file_missing "$scratch/docs/adr/0001-volatile-state-not-auto-loaded.md" \
         "byte-exact Forge-internal ADR seed is retired"
     assert_hash_equals "$scratch/docs/adr/0006-write-tool-creates-missing-parents.md" "$custom_hash" \
-        "same-numbered project ADR survives -f byte-for-byte"
+        "same-numbered project ADR survives setup byte-for-byte"
 }
 
 # Verify CONTINUITY.template.md is NOT installed (legacy file should not be generated
@@ -798,23 +798,24 @@ test_no_continuity_installed() {
     fi
 }
 
-# Verify -f preserves an existing CONTINUITY.md byte-for-byte.
-test_f_preserves_existing_continuity() {
+# Verify --upgrade preserves an existing CONTINUITY.md byte-for-byte.
+test_upgrade_preserves_existing_continuity() {
     local scratch; scratch=$(scratch_dir f-preserves-continuity)
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
     echo "user content" > "$scratch/CONTINUITY.md"
     local before; before=$(hash_file "$scratch/CONTINUITY.md")
-    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" --upgrade -p TestProj -t fullstack >/dev/null 2>&1 )
     if [ -f "$scratch/CONTINUITY.md" ]; then
         local after; after=$(hash_file "$scratch/CONTINUITY.md")
-        assert_equals "$before" "$after" "existing CONTINUITY.md byte-preserved through -f"
+        assert_equals "$before" "$after" "existing CONTINUITY.md byte-preserved through --upgrade"
     else
-        fail "CONTINUITY.md was deleted by -f (should be preserved)"
+        fail "CONTINUITY.md was deleted by --upgrade (should be preserved)"
     fi
 }
 
-# Compatibility guard: -f must never overwrite an existing populated legacy
+# Compatibility guard: --upgrade must never overwrite an existing populated legacy
 # .claude/local/state.md, even though fresh v6 setup no longer creates it.
-test_f_preserves_existing_state_md() {
+test_upgrade_preserves_existing_state_md() {
     local scratch; scratch=$(scratch_dir f-preserves-state-md)
     # Initial install creates state.md.
     ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -p TestProj -t fullstack >/dev/null 2>&1 )
@@ -822,13 +823,13 @@ test_f_preserves_existing_state_md() {
     mkdir -p "$scratch/.claude/local"
     echo "## USER WORKFLOW STATE SENTINEL" > "$scratch/.claude/local/state.md"
     local before; before=$(hash_file "$scratch/.claude/local/state.md")
-    # Re-run with -f. state.md must NOT be overwritten.
-    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" -f -p TestProj -t fullstack >/dev/null 2>&1 )
+    # Re-run with --upgrade. state.md must NOT be overwritten.
+    ( cd "$scratch" && mkdir -p .fakehome && HOME="$scratch/.fakehome" bash "$REPO_ROOT/setup.sh" --upgrade -p TestProj -t fullstack >/dev/null 2>&1 )
     if [ -f "$scratch/.claude/local/state.md" ]; then
         local after; after=$(hash_file "$scratch/.claude/local/state.md")
-        assert_equals "$before" "$after" "existing .claude/local/state.md byte-preserved through -f"
+        assert_equals "$before" "$after" "existing .claude/local/state.md byte-preserved through --upgrade"
     else
-        fail ".claude/local/state.md was deleted by -f (should be preserved)"
+        fail ".claude/local/state.md was deleted by --upgrade (should be preserved)"
     fi
 }
 
@@ -1093,8 +1094,8 @@ test_gitignore_has_claude_local
 test_gitignore_idempotent
 test_adrs_install
 test_no_continuity_installed
-test_f_preserves_existing_continuity
-test_f_preserves_existing_state_md
+test_upgrade_preserves_existing_continuity
+test_upgrade_preserves_existing_state_md
 test_fresh_install_banner_no_continuity_ref
 test_copy_file_self_copy_guard
 test_copy_file_normal_copy_still_works
@@ -1289,15 +1290,15 @@ payload["hooks"]["CustomEvent"] = [{"projectOwned": "KEEP-CUSTOM-EVENT"}]
 path.write_text(json.dumps(payload, indent=2) + "\n")
 PY
 (cd "$ROOT_CASE" && PATH="$V6_BASE/both/bin:/usr/bin:/bin" HOME="$ROOT_CASE/.fakehome" \
-    "$REPO_ROOT/setup.sh" -f -p "Managed compatibility cleanup" -t fullstack \
+    "$REPO_ROOT/setup.sh" --upgrade -p "Managed compatibility cleanup" -t fullstack \
     > "$ROOT_CASE/setup-compat-cleanup.log" 2>&1)
-assert_equals "$?" "0" "managed v6 force refresh accepts byte-proven compatibility files"
+assert_equals "$?" "0" "managed v6 upgrade accepts byte-proven compatibility files"
 assert_file_missing "$ROOT_CASE/.codex/hooks/session-start.sh" \
-    "managed refresh retires the exact legacy Codex hook copy"
+    "managed update retires the exact legacy Codex hook copy"
 assert_file_missing "$ROOT_CASE/.agents/skills/ui-design/references/polish-checklist.md" \
-    "managed refresh retires the exact duplicated skill reference"
+    "managed update retires the exact duplicated skill reference"
 assert_hash_equals "$ROOT_CASE/.codex/hooks/check-workflow-gates.ps1" "$V6_CUSTOM_COMPAT_HASH" \
-    "managed refresh preserves an unregistered customized compatibility file"
+    "managed update preserves an unregistered customized compatibility file"
 python3 - "$ROOT_CASE/.codex/hooks.json" <<'PY'
 import json
 import sys
@@ -1311,7 +1312,7 @@ assert all(".codex/hooks/session-start.sh" not in command for command in command
 assert any("/.forge/hooks/lib/codex-worktree-dispatch.sh" in command and command.endswith(" session-start.sh") for command in commands), commands
 PY
 assert_equals "$?" "0" \
-    "managed refresh removes only the proven legacy registration and preserves user JSON"
+    "managed update removes only the proven legacy registration and preserves user JSON"
 
 python3 - "$ROOT_CASE" <<'PY'
 import json
@@ -1331,17 +1332,17 @@ payload.setdefault("hooks", {})["PreToolUse"] = [{
 path.write_text(json.dumps(payload, indent=2) + "\n")
 PY
 (cd "$ROOT_CASE" && PATH="$V6_BASE/both/bin:/usr/bin:/bin" HOME="$ROOT_CASE/.fakehome" \
-    "$REPO_ROOT/setup.sh" -f -p "Managed compatibility cleanup" -t fullstack \
+    "$REPO_ROOT/setup.sh" --upgrade -p "Managed compatibility cleanup" -t fullstack \
     > "$ROOT_CASE/setup-compat-blocked.log" 2>&1)
-assert_equals "$?" "1" "managed refresh blocks a customized compatibility hook while it is registered"
+assert_equals "$?" "1" "managed update blocks a customized compatibility hook while it is registered"
 assert_contains "$ROOT_CASE/setup-compat-blocked.log" \
     "referenced legacy cross-host hook is missing, modified, or ambiguous" \
-    "managed refresh explains the active customized compatibility blocker"
+    "managed update explains the active customized compatibility blocker"
 assert_hash_equals "$ROOT_CASE/.codex/hooks/check-workflow-gates.ps1" "$V6_CUSTOM_COMPAT_HASH" \
-    "blocked managed refresh preserves the customized hook bytes"
+    "blocked managed update preserves the customized hook bytes"
 
-start_test "Task 2 preflight blocks v5 before every project write mode"
-for mode in default force upgrade; do
+start_test "Task 2 preflight blocks v5 before ordinary project write modes"
+for mode in default upgrade; do
     legacy="$V6_BASE/legacy-$mode"
     mkdir -p "$legacy/.git" "$legacy/.claude"
     printf '{"hooks":{}}\n' > "$legacy/.claude/settings.json"
@@ -1349,7 +1350,6 @@ for mode in default force upgrade; do
     before=$(hash_file "$legacy/.claude/settings.json")
     case "$mode" in
         default) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" >setup.log 2>&1) ;;
-        force) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" -f >setup.log 2>&1) ;;
         upgrade) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" --upgrade >setup.log 2>&1) ;;
     esac
     rc=$?
@@ -1357,7 +1357,7 @@ for mode in default force upgrade; do
     assert_contains "$legacy/setup.log" 'Preview first' "$mode points to preview before mutation"
     assert_contains "$legacy/setup.log" '--dry-run' "$mode remediation is explicitly read-only"
     assert_contains "$legacy/setup.log" 'setup.sh' "$mode remediation identifies the Forge installer"
-    assert_contains "$legacy/setup.log" '-F' "$mode remediation uses authoritative -F"
+    assert_contains "$legacy/setup.log" '-f' "$mode remediation uses authoritative -f"
     assert_hash_equals "$legacy/.claude/settings.json" "$before" "$mode leaves v5 settings byte-preserved"
     assert_file_missing "$legacy/.forge/version" "$mode writes no v6 version beside v5"
 done
@@ -1388,15 +1388,14 @@ assert_equals "$CLAUDE_GLOBAL_MARKERS" "1" "global Claude Forge block remains bo
 assert_equals "$CODEX_GLOBAL_MARKERS" "1" "global Codex Forge block remains bounded and unique"
 assert_equals "$CODEX_CONFIG_MARKERS" "1" "global Codex config block remains bounded and unique"
 
-start_test "Task 2 preflight blocks global v5 before every write mode"
-for mode in default force upgrade; do
+start_test "Task 2 preflight blocks global v5 before ordinary write modes"
+for mode in default upgrade; do
     global_legacy="$GLOBAL_CASE/legacy-$mode"
     mkdir -p "$global_legacy/.claude"
     printf '{"user_setting":"KEEP-GLOBAL-V5"}\n' > "$global_legacy/.claude/settings.json"
     global_before=$(hash_file "$global_legacy/.claude/settings.json")
     case "$mode" in
         default) HOME="$global_legacy" "$REPO_ROOT/setup.sh" --global > "$global_legacy/setup.log" 2>&1 ;;
-        force) HOME="$global_legacy" "$REPO_ROOT/setup.sh" --global -f > "$global_legacy/setup.log" 2>&1 ;;
         upgrade) HOME="$global_legacy" "$REPO_ROOT/setup.sh" --global --upgrade > "$global_legacy/setup.log" 2>&1 ;;
     esac
     rc=$?
@@ -1404,7 +1403,7 @@ for mode in default force upgrade; do
     assert_contains "$global_legacy/setup.log" 'Preview first' "$mode global mode points to preview before mutation"
     assert_contains "$global_legacy/setup.log" '--dry-run' "$mode global remediation is explicitly read-only"
     assert_contains "$global_legacy/setup.log" '--global' "$mode global remediation preserves global scope"
-    assert_contains "$global_legacy/setup.log" '-F' "$mode global remediation uses authoritative -F"
+    assert_contains "$global_legacy/setup.log" '-f' "$mode global remediation uses authoritative -f"
     assert_hash_equals "$global_legacy/.claude/settings.json" "$global_before" "$mode global mode preserves v5 settings bytes"
     assert_file_missing "$global_legacy/.forge/version" "$mode global mode writes no v6 surface"
 done
@@ -1494,9 +1493,9 @@ assert_equals "$ROUTER_UNIX_HOST_AFTER" "$ROUTER_UNIX_HOST_BEFORE" \
 assert_equals "$ROUTER_WINDOWS_HOST_AFTER" "$ROUTER_WINDOWS_HOST_BEFORE" \
     "linked-worktree setup leaves the trusted Windows host command byte-identical"
 
-start_test "manifest-owned v5 skills and agents block every project write mode"
+start_test "manifest-owned v5 skills and agents block ordinary project write modes"
 for surface in skill agent; do
-    for mode in default force upgrade; do
+    for mode in default upgrade; do
         legacy="$V6_BASE/manifest-legacy-$surface-$mode"
         mkdir -p "$legacy/.git"
         case "$surface" in
@@ -1506,14 +1505,13 @@ for surface in skill agent; do
         before=$(find "$legacy/.claude" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)
         case "$mode" in
             default) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" >setup.log 2>&1) ;;
-            force) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" -f >setup.log 2>&1) ;;
             upgrade) (cd "$legacy" && HOME="$legacy/home" "$REPO_ROOT/setup.sh" --upgrade >setup.log 2>&1) ;;
         esac
         rc=$?
         [ "$rc" -ne 0 ] && pass "$surface-only $mode preflight exits nonzero" || fail "$surface-only $mode preflight materialized v6 beside legacy policy"
         assert_contains "$legacy/setup.log" 'Preview first' "$surface-only $mode points to preview before mutation"
         assert_contains "$legacy/setup.log" '--dry-run' "$surface-only $mode remediation is explicitly read-only"
-        assert_contains "$legacy/setup.log" '-F' "$surface-only $mode remediation is executable"
+        assert_contains "$legacy/setup.log" '-f' "$surface-only $mode remediation is executable"
         after=$(find "$legacy/.claude" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)
         assert_equals "$after" "$before" "$surface-only $mode preflight performs no write"
         assert_file_missing "$legacy/.forge/version" "$surface-only $mode writes no v6 version"

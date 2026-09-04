@@ -492,7 +492,7 @@ if [ "$MATERIALIZE_SCOPE" = project ]; then
         || [ -e "$global_authorizer" ] || [ -L "$global_authorizer" ]; then
         echo "GLOBAL_HARNESS: PARTIAL canonical version stamp or goal authorization helper missing or invalid"
         echo "NORMAL_PROJECT_WORKFLOWS: READY"
-        echo "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; preview repair with '$MATERIALIZE_REPO/setup.sh --global -F --dry-run'"
+        echo "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; preview repair with '$MATERIALIZE_REPO/setup.sh --global -f --dry-run'"
     else
         echo "GLOBAL_HARNESS: NOT_INSTALLED optional"
         echo "NORMAL_PROJECT_WORKFLOWS: READY"

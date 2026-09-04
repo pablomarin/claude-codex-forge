@@ -399,7 +399,7 @@ if ($branchChangedOutput) {
 # (signals user upgraded but hasn't migrated) — avoid spamming every Stop event.
 if ((-not $stateMd -or -not (Test-Path $stateMd)) -and (Test-Path "CONTINUITY.md")) {
     [Console]::Error.WriteLine("ℹ check-state-updated: Forge state.md not found, but CONTINUITY.md exists.")
-    [Console]::Error.WriteLine("  Run setup -FullRefresh -DryRun, resolve every reported blocker, then run setup -FullRefresh.")
+    [Console]::Error.WriteLine("  Run setup -Force -DryRun, resolve every reported blocker, then run setup -Force.")
     # Continue to CHANGELOG check — gates are independent.
 }
 

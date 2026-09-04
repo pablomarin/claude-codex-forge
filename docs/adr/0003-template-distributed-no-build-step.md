@@ -8,7 +8,7 @@ refresh rather than the legacy force/upgrade path.
 
 ## Context
 
-Forge is consumed by downstream projects via `git clone claude-codex-forge && ./setup.sh -p MyProject`. Setup is a one-time install that copies templates (markdown, JSON, bash, PowerShell) into the target repo's `.claude/`, root, and `docs/` directories. Subsequent harness upgrades happen via `./setup.sh -f` or `--upgrade` from a fresh `claude-codex-forge` clone. The toolkit has no compiler, no transpilation, no package step.
+Forge is consumed by downstream projects via `git clone claude-codex-forge && ./setup.sh -p MyProject`. Setup is a one-time install that copies templates (markdown, JSON, bash, PowerShell) into the target repo's `.claude/`, root, and `docs/` directories. Subsequent routine harness updates happen via `./setup.sh --upgrade` from a fresh `claude-codex-forge` clone; `./setup.sh -f` performs a full ownership-aware reconciliation. The toolkit has no compiler, no transpilation, no package step.
 
 ## Considered Options
 
@@ -18,7 +18,7 @@ Forge is consumed by downstream projects via `git clone claude-codex-forge && ./
 
 ## Decision
 
-Forge ships as a git repository with templates and shell installers. The user clones it, runs `setup.sh` (or `setup.ps1`), and consumes the outputs. Upgrades use the same installer with `-f` or `--upgrade`. The repository structure IS the distribution.
+Forge ships as a git repository with templates and shell installers. The user clones it, runs `setup.sh` (or `setup.ps1`), and consumes the outputs. Routine updates use `--upgrade`; full installation, repair, or migration uses `--force`. The repository structure IS the distribution.
 
 ## Consequences
 
@@ -26,5 +26,5 @@ Forge ships as a git repository with templates and shell installers. The user cl
 - ✅ Auditable: users can `cat setup.sh` before running.
 - ✅ Forking and customization is trivial (just edit the templates).
 - ⚠️ Schema validation is best-effort. JSON and markdown templates have no compile-time check; lint runs in `tests/template/test-lint.sh` post-install.
-- ⚠️ No semantic versioning of templates. Drift is detected via `setup.sh -f` summary block (PR #523) but not formally versioned.
+- ⚠️ No semantic versioning of templates. Drift is detected during `setup.sh --upgrade` but not formally versioned.
 - 🔮 If Forge grows beyond what shell installers can manage cleanly, this ADR may be superseded by one introducing a structured build step.

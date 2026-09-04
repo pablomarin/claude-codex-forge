@@ -33,8 +33,8 @@ Install or upgrade Forge in this repository using the Forge checkout at <path-to
 
 1. Inspect the repository and choose the correct installer mode:
    - fresh project: normal project setup;
-   - existing Forge v6: managed refresh;
-   - Forge v5, Claude-only, Codex-only, mixed, custom, or unknown: full refresh.
+   - existing Forge v6: routine update;
+   - Forge v5, Claude-only, Codex-only, mixed, custom, or unknown: full reconciliation.
 2. Run the read-only full-refresh preview first for Forge v5, Claude-only, Codex-only, mixed, custom, or unknown harnesses.
 3. Preserve the exact installer output and explain every result or blocker in plain language.
 4. Do not bypass ownership blockers or guess which project content may be removed.
@@ -55,8 +55,8 @@ ready.
 | Repository state | Deterministic installer action |
 | --- | --- |
 | fresh project | `setup.sh -p "My Project"` or `setup.ps1 -Project "My Project"` |
-| existing Forge v6 | `setup.sh -f` or `setup.ps1 -Force` |
-| Forge v5, Claude-only, Codex-only, mixed, custom, or unknown | Preview with `setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun`; execute only after `UPGRADE: READY` |
+| existing Forge v6 | `setup.sh --upgrade` or `setup.ps1 -Upgrade` |
+| Forge v5, Claude-only, Codex-only, mixed, custom, or unknown | Preview with `setup.sh -f --dry-run` or `setup.ps1 -Force -DryRun`; execute only after `UPGRADE: READY` |
 | global harness | `setup.sh --global` or `setup.ps1 -Global`; approve home-directory changes separately |
 
 ## Direct CLI path

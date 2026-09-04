@@ -48,8 +48,8 @@ The project command depends on what is already in the repository:
 | Repository state | Next command |
 | --- | --- |
 | Fresh repository with no agent harness | Continue to the normal project installation below |
-| Existing Forge v6 | Use the managed-refresh command in the [README setup table](../README.md#setup-refresh-and-team-upgrades); full refresh is not required |
-| Forge v5, Claude-only, Codex-only, mixed, or another/custom harness | `setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun` |
+| Existing Forge v6 | Use the routine update command in the [README setup table](../README.md#setup-refresh-and-team-upgrades); full reconciliation is not required |
+| Forge v5, Claude-only, Codex-only, mixed, or another/custom harness | `setup.sh -f --dry-run` or `setup.ps1 -Force -DryRun` |
 | Unknown | Run the same full-refresh preview; it is read-only |
 
 Never use normal fresh setup to layer v6 over an existing harness. A full-refresh preview inventories
@@ -91,15 +91,15 @@ This path covers Forge v5, a repository with only `.claude/` or `CLAUDE.md`, a r
 Codex/`AGENTS.md` surfaces, a mixture of both, and independently developed agent harnesses:
 
 ```bash
-~/claude-codex-forge/setup.sh -F --dry-run
+~/claude-codex-forge/setup.sh -f --dry-run
 # Resolve every named blocker. When the preview says UPGRADE: READY:
-~/claude-codex-forge/setup.sh -F
+~/claude-codex-forge/setup.sh -f
 ```
 
 ```powershell
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh -DryRun
+& $HOME\claude-codex-forge\setup.ps1 -Force -DryRun
 # Resolve every named blocker. When the preview says UPGRADE: READY:
-& $HOME\claude-codex-forge\setup.ps1 -FullRefresh
+& $HOME\claude-codex-forge\setup.ps1 -Force
 ```
 
 The preview writes nothing. The migration proves ownership before replacing or deleting legacy

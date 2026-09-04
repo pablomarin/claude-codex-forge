@@ -31,10 +31,11 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 ├─────────────────────────────────────────────────────────────┤
 │ cd ~/claude-codex-forge && git pull                         │
 │ cd /your/project                                            │
-│ ~/claude-codex-forge/setup.sh -F                            │
+│ ~/claude-codex-forge/setup.sh --upgrade                     │
+│ # Unknown/v5/mixed: setup.sh -f --dry-run, then -f          │
 │                                                             │
-│ → Reconciles canonical .forge + generated host adapters    │
-│ → Preserves user text outside bounded Forge marker blocks  │
+│ → Updates canonical .forge + generated host adapters       │
+│ → Preserves custom settings, MCP, and project-owned text   │
 ├─────────────────────────────────────────────────────────────┤
 │ DAILY WORKFLOW (Hooks enforce this!)                        │
 ├─────────────────────────────────────────────────────────────┤

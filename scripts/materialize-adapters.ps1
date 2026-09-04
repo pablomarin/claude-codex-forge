@@ -656,7 +656,7 @@ if ($Scope -eq "project") {
     } elseif ($globalVersionItem -or $globalAuthorizerItem) {
         Write-Host "GLOBAL_HARNESS: PARTIAL canonical version stamp or goal authorization helper missing or invalid"
         Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
-        Write-Host "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; preview repair with '$RepoRoot\setup.ps1 -Global -FullRefresh -DryRun'"
+        Write-Host "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; preview repair with '$RepoRoot\setup.ps1 -Global -Force -DryRun'"
     } else {
         Write-Host "GLOBAL_HARNESS: NOT_INSTALLED optional"
         Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"

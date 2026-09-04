@@ -724,8 +724,8 @@ fi
 # Breadcrumb must name the no-write full-refresh preview. Without this, AC-4
 # byte-parity could break (one platform changes the wording, the other
 # doesn't) before AC-13 catches it.
-if echo "$out_hc" | grep -qF "setup -F --dry-run"; then
-    pass "breadcrumb names full-refresh preview ('setup -F --dry-run')"
+if echo "$out_hc" | grep -qF "setup -f --dry-run"; then
+    pass "breadcrumb names full-refresh preview ('setup -f --dry-run')"
 else
     fail "breadcrumb does NOT name full-refresh preview (got: $out_hc)"
 fi
@@ -2442,7 +2442,7 @@ V5_GATE_CMD=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["h
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V5I" \
     | (cd "$V5I" && CLAUDE_PROJECT_DIR="$V5I" sh -c "$V5_GATE_CMD") > "$V5I/gate.out" 2>&1
 assert_equals "$?" "2" "legacy reviewer, goal, and authorization lines cannot authorize shipping"
-assert_contains "$V5I/gate.out" '-F --dry-run' "legacy ship block directs the developer to full-refresh preview"
+assert_contains "$V5I/gate.out" '-f --dry-run' "legacy ship block directs the developer to full-refresh preview"
 
 start_test "installed v6 boundaries reject an aliased canonical state path"
 V6BAD=$(scratch_dir v6-installed-invalid-state)

@@ -509,7 +509,7 @@ start_test "installed SessionStart fingerprints managed config and reports tampe
 CFG=$(scratch_dir session-config-boundary)
 (cd "$CFG" && git init -q --initial-branch=main \
     && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init \
-    && HOME="$CFG/home" "$REPO_ROOT/setup.sh" -F > "$CFG/setup.log" 2>&1)
+    && HOME="$CFG/home" "$REPO_ROOT/setup.sh" -f > "$CFG/setup.log" 2>&1)
 printf '{"source":"resume","host":"codex","cwd":"%s"}' "$CFG" \
     | (cd "$CFG" && HOME="$CFG/home" CLAUDE_PROJECT_DIR="$CFG" bash .forge/hooks/session-start.sh) \
     > "$CFG/config-first.out" 2> "$CFG/config-first.err"

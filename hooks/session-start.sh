@@ -27,7 +27,7 @@ TOP=$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel 2>/dev/null || true)
 CONFIG_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/check-config-change.sh"
 if [ -f "$CONFIG_CHECK" ]; then
     if ! printf '{}' | bash "$CONFIG_CHECK" --verify-boundary "$PROJECT_ROOT" >/dev/null 2>&1; then
-        CONTEXT="$CONTEXT (FORGE_CONFIG_TAMPERED: managed config changed; run setup -F and inspect the diff before shipping)"
+        CONTEXT="$CONTEXT (FORGE_CONFIG_TAMPERED: managed config changed; run setup -f and inspect the diff before shipping)"
     fi
 fi
 

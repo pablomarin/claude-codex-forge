@@ -206,16 +206,16 @@ try {
         (Join-Path $previewProject ".claude\hooks\session-start.ps1")
     Write-V5State $previewProject "WINDOWS_DRY_RUN_STATE"
     $previewBefore = Get-ProjectSnapshot $previewProject
-    $preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R", "-DryRun") -WorkingDirectory $previewProject `
+    $preview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Force", "-DryRun") -WorkingDirectory $previewProject `
         -Environment @{ HOME = (Join-Path $scratch "preview-home"); USERPROFILE = (Join-Path $scratch "preview-home") }
     if ($preview.Code -ne 0 -or -not $preview.Output.Contains("UPGRADE: READY")) {
-        throw "FAIL: setup.ps1 -FullRefresh -DryRun uses the real planner (code=$($preview.Code); output=$($preview.Output.Trim()))"
+        throw "FAIL: setup.ps1 -Force -DryRun uses the real planner (code=$($preview.Code); output=$($preview.Output.Trim()))"
     }
-    Assert-True $true "setup.ps1 -FullRefresh -DryRun uses the real planner"
+    Assert-True $true "setup.ps1 -Force -DryRun uses the real planner"
     Assert-True ((Get-ProjectSnapshot $previewProject) -ceq $previewBefore) "PowerShell preview leaves every target file byte-identical"
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $previewProject ".forge\version"))) "PowerShell preview writes no v6 stamp"
     $dryRunOnly = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-DryRun") -WorkingDirectory $previewProject
-    Assert-True ($dryRunOnly.Code -ne 0) "PowerShell rejects -DryRun without -FullRefresh"
+    Assert-True ($dryRunOnly.Code -ne 0) "PowerShell rejects -DryRun without -Force"
 
     $multiBlocker = New-Project "multi-blocker"
     Write-Text (Join-Path $multiBlocker ".claude\.forge-version") "5.61`n"
@@ -620,7 +620,7 @@ try {
     Write-Text (Join-Path $retiredContinuity "CONTINUITY.md") "# CONTINUITY`n`n- preserve me`n"
     $retiredBefore = Get-ProjectSnapshot $retiredContinuity
     $retiredResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Migrate") -WorkingDirectory $retiredContinuity
-    Assert-True ($retiredResult.Code -ne 0 -and $retiredResult.Output.Contains("retired in Forge 6") -and $retiredResult.Output.Contains("-FullRefresh -DryRun") -and ((Get-ProjectSnapshot $retiredContinuity) -ceq $retiredBefore)) "retired PowerShell continuity command is inert and points to preview"
+    Assert-True ($retiredResult.Code -ne 0 -and $retiredResult.Output.Contains("retired in Forge 6") -and $retiredResult.Output.Contains("-Force -DryRun") -and ((Get-ProjectSnapshot $retiredContinuity) -ceq $retiredBefore)) "retired PowerShell continuity command is inert and points to preview"
 
     $unresolvedContinuity = New-Project "continuity-unresolved"
     Write-V5State $unresolvedContinuity "WINDOWS_CONTINUITY_UNRESOLVED"

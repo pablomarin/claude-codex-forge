@@ -798,8 +798,8 @@ assert_contains "$SETUP_PS1" "$BOTH_VARIANT"           "setup.ps1 has both-prese
 assert_contains "$SETUP_PS1" "$CLAUDE_VARIANT"         "setup.ps1 has only-CLAUDE final variant"
 assert_contains "$SETUP_PS1" "$CONTINUITY_VARIANT"     "setup.ps1 has only-CONTINUITY final variant"
 assert_not_contains "$SETUP_PS1" "$LEGACY_STRING"      "setup.ps1 removed legacy 'were not modified'"
-assert_contains "$SETUP_SH" '-F --dry-run' "setup.sh points preserved continuity to preview"
-assert_contains "$SETUP_PS1" '-FullRefresh -DryRun' "setup.ps1 points preserved continuity to preview"
+assert_contains "$SETUP_SH" '-f --dry-run' "setup.sh points preserved continuity to preview"
+assert_contains "$SETUP_PS1" '-Force -DryRun' "setup.ps1 points preserved continuity to preview"
 
 # ---------------------------------------------------------------------------
 # Contract: Forge version stamp + advisory drift warning (v5.51) — parity.
@@ -2504,9 +2504,9 @@ assert_contains "$COMMANDS_DOC" 'Codex: `$opinion investigate`' \
     "commands reference gives Codex investigation invocation"
 assert_contains "$COMMANDS_DOC" '`review` is reserved by both supported hosts' \
     "commands reference explains why Forge uses opinion instead of review"
-assert_contains "$README" './setup.sh -F' \
+assert_contains "$README" './setup.sh -f' \
     "README leads legacy installs to authoritative Unix full refresh"
-assert_contains "$README" './setup.ps1 -FullRefresh' \
+assert_contains "$README" './setup.ps1 -Force' \
     "README leads legacy installs to authoritative Windows full refresh"
 assert_contains "$UPGRADING" 'PRESERVED_COMPAT_BLOCKED' \
     "upgrade guide explains compatibility blockers"
@@ -2515,17 +2515,17 @@ assert_contains "$UPGRADING" 'scripts/recover-full-refresh.sh' \
 
 start_test "v6 upgrade docs lead with preview and one-active-Forge outcomes"
 for upgrade_doc in "$README" "$GETTING_STARTED" "$REPO_ROOT/docs/guides/setup-scenarios.md" "$UPGRADING"; do
-    assert_contains "$upgrade_doc" 'setup.sh -F --dry-run' \
+    assert_contains "$upgrade_doc" 'setup.sh -f --dry-run' \
         "$(basename "$upgrade_doc") shows the Unix no-write preview"
-    assert_contains "$upgrade_doc" 'setup.ps1 -FullRefresh -DryRun' \
+    assert_contains "$upgrade_doc" 'setup.ps1 -Force -DryRun' \
         "$(basename "$upgrade_doc") shows the Windows no-write preview"
 done
 for report_doc in "$README" "$UPGRADING"; do
     assert_contains "$report_doc" 'UPGRADE: READY' "$(basename "$report_doc") explains a ready preview"
     assert_contains "$report_doc" 'UPGRADE: BLOCKED' "$(basename "$report_doc") explains a blocked preview"
     assert_contains "$report_doc" 'ACTIVE_FORGE: v6' "$(basename "$report_doc") explains successful convergence"
-    assert_contains "$report_doc" '`-f`' "$(basename "$report_doc") distinguishes the v6 force refresh"
-    assert_contains "$report_doc" '`-F`' "$(basename "$report_doc") distinguishes authoritative migration"
+    assert_contains "$report_doc" '`--upgrade`' "$(basename "$report_doc") identifies routine v6 updates"
+    assert_contains "$report_doc" '`-f`' "$(basename "$report_doc") identifies authoritative reconciliation"
 done
 assert_contains "$UPGRADING" 'current worktree' \
     "upgrade guide scopes full refresh to the current worktree"
@@ -2543,9 +2543,9 @@ assert_contains "$SETUP_SH" '--migrate was retired in Forge 6' \
     "Bash keeps an inert retired-command diagnostic"
 assert_contains "$SETUP_PS1" '-Migrate was retired in Forge 6' \
     "PowerShell keeps an inert retired-command diagnostic"
-assert_contains "$SETUP_SH" '-F --dry-run' \
+assert_contains "$SETUP_SH" '-f --dry-run' \
     "Bash retired command points to full-refresh preview"
-assert_contains "$SETUP_PS1" '-FullRefresh -DryRun' \
+assert_contains "$SETUP_PS1" '-Force -DryRun' \
     "PowerShell retired command points to full-refresh preview"
 if [ ! -e "$REPO_ROOT/scripts/migrate-continuity.sh" ] && [ ! -e "$REPO_ROOT/scripts/migrate-continuity.ps1" ]; then
     pass "functional continuity migration helpers are removed"
@@ -2664,15 +2664,15 @@ if printf '%s\n' "$README_ACTIVE" | grep -qF '`/codex`'; then
 else
     pass "README live sections have no retired /codex command (historical rows preserved)"
 fi
-STALE_SETUP=$(grep -nHE 'setup\.sh (-f|--upgrade)|setup\.ps1[^[:cntrl:]]*-(Force|Upgrade)' \
+STALE_SETUP=$(grep -nHE 'setup\.sh[^[:cntrl:]]*( -F([[:space:]`]|$)|--full-refresh)|setup\.ps1[^[:cntrl:]]*(-FullRefresh|[[:space:]]-R([[:space:]`]|$))' \
     "${ACTIVE_V6_DOCS[@]}" 2>/dev/null || true)
-if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh --upgrade|setup\.ps1[^[:cntrl:]]*-Upgrade'; then
-    STALE_SETUP="README live sections contain an obsolete upgrade instruction${STALE_SETUP:+$'\n'$STALE_SETUP}"
+if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh[^[:cntrl:]]*( -F([[:space:]`]|$)|--full-refresh)|setup\.ps1[^[:cntrl:]]*(-FullRefresh|[[:space:]]-R([[:space:]`]|$))'; then
+    STALE_SETUP="README live sections contain a deprecated full-refresh instruction${STALE_SETUP:+$'\n'$STALE_SETUP}"
 fi
 if [ -z "$STALE_SETUP" ]; then
-    pass "active v6 docs use authoritative full refresh rather than old force/upgrade commands"
+    pass "active v6 docs use the canonical force and upgrade commands"
 else
-    fail "active v6 docs contain obsolete force/upgrade commands: $STALE_SETUP"
+    fail "active v6 docs contain deprecated full-refresh commands: $STALE_SETUP"
 fi
 assert_not_contains "$README" 'Per-developer Workflow / Done / Now / Next state lives in gitignored `.claude/local/state.md`' \
     "README no longer assigns shared state ownership to .claude"

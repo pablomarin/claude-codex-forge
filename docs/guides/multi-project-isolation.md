@@ -51,7 +51,7 @@ Before printing `Prerequisites OK`, `setup.sh` checks whether repo-root version 
 | `.nvmrc`                           | Pinned Node version (e.g. `20.11.0` or `20`). Preflight verifies `node --version` matches, or that `fnm`/`nvm`/`volta` can provide it.                             |
 | root `package.json` `engines.node` | Declared constraint (e.g. `">=20"`). Preflight checks `node --version` satisfies the minimum; warns otherwise.                                                     |
 
-**If a declared runtime is missing or mismatched, preflight prints a warning with install guidance and continues.** It does NOT set a non-zero exit code. It does NOT stop `setup.sh`; the authoritative `-F` full refresh runs the same preflight.
+**If a declared runtime is missing or mismatched, preflight prints a warning with install guidance and continues.** It does NOT set a non-zero exit code. It does NOT stop `setup.sh`; the authoritative `-f` force reconciliation runs the same preflight.
 
 **If neither `.python-version` / `.nvmrc` / root `package.json` exists, preflight is silent** — the check doesn't run, so there's no noise for projects that don't pin versions.
 
@@ -71,7 +71,7 @@ Intentionally narrow for v1:
 
 ### `setup.sh` says my Python version is missing but I just installed it
 
-Some version managers require a shell restart before their shims are on `PATH`. Close and reopen the terminal, then rerun `setup.sh -F`. If you use `uv`, run `uv python install <version>` — it's immediate.
+Some version managers require a shell restart before their shims are on `PATH`. Close and reopen the terminal, then rerun `setup.sh -f`. If you use `uv`, run `uv python install <version>` — it's immediate.
 
 ### I don't use version managers and setup.sh warns anyway
 
@@ -89,4 +89,4 @@ Not via a flag — the warning is useful most of the time and silent when you ha
 
 - [Parallel Development](parallel-sessions.md) — worktree isolation for multiple host sessions on one project
 - [Getting Started](../getting-started.md) — overall install steps with prerequisites
-- [Upgrading](upgrading.md) — authoritative `setup.sh -F` refresh mechanics
+- [Upgrading](upgrading.md) — authoritative `setup.sh -f` reconciliation mechanics
