@@ -30,6 +30,17 @@ bash "$VERIFY" identity --host codex --fixture "$FIXTURES/codex-0.144.1.jsonl" \
 rc=$?
 [ "$rc" -ne 0 ] && pass "unsupported model exits nonzero" || fail "unsupported model was accepted"
 
+start_test "live verification rejects a missing host before opt-in or binary lookup"
+bash "$VERIFY" live --project-root "$REPO_ROOT" > /tmp/forge-runtime-host.$$ 2>&1
+rc=$?
+assert_equals "$rc" "2" "hostless live verification exits with an argument error"
+assert_contains /tmp/forge-runtime-host.$$ "BLOCKED: --host must be claude or codex" \
+    "hostless live verification names the missing host contract"
+assert_not_contains /tmp/forge-runtime-host.$$ "FORGE_LIVE_QUALIFICATION" \
+    "host validation precedes authenticated opt-in"
+assert_not_contains /tmp/forge-runtime-host.$$ "binary unavailable" \
+    "hostless verification never misreports binary availability"
+
 start_test "root and nested discovery enumerate each canonical rule once"
 S=$(scratch_dir runtime-discovery)
 mkdir -p "$S/project/nested/deeper" "$S/project/.forge/rules"
@@ -188,5 +199,5 @@ for failure in cross-seat canary; do
     assert_contains "$LIVE/fail-$failure.json" '"status":"BLOCKED"' "$failure produces a truthful BLOCKED live receipt"
 done
 
-rm -f /tmp/forge-runtime-claude.$$ /tmp/forge-runtime-codex.$$ /tmp/forge-runtime-bad.$$
+rm -f /tmp/forge-runtime-claude.$$ /tmp/forge-runtime-codex.$$ /tmp/forge-runtime-bad.$$ /tmp/forge-runtime-host.$$
 report "test-runtime-identity.sh"

@@ -463,7 +463,7 @@ detect_engines | while IFS=$'\t' read -r engine availability binary version diag
             echo "$engine RUNTIME_READY: BLOCKED $diagnostic"
             ;;
         *)
-            echo "$engine RUNTIME_READY: BLOCKED pending opt-in authenticated verify-runtime sentinel ($binary; $version)"
+            echo "$engine RUNTIME_READY: BLOCKED pending authenticated final runtime qualification ($binary; $version)"
             ;;
     esac
 done
@@ -498,5 +498,5 @@ if [ "$MATERIALIZE_SCOPE" = project ]; then
         echo "NORMAL_PROJECT_WORKFLOWS: READY"
         echo "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; run '$MATERIALIZE_REPO/setup.sh --global' from a separate terminal to install protected native /goal support"
     fi
-    echo "VERIFY_RUNTIME: '$MATERIALIZE_DIAGNOSTIC_TARGET/.forge/bin/verify-runtime' live --project-root '$MATERIALIZE_DIAGNOSTIC_TARGET'"
+    echo "RUNTIME_QUALIFICATION: final owner '$MATERIALIZE_REPO/scripts/qualify-runtime-final.sh'; live project '$MATERIALIZE_DIAGNOSTIC_TARGET'; command and required operator evidence: '$MATERIALIZE_REPO/docs/qualification/agent-mode-selection.md'"
 fi

@@ -299,8 +299,10 @@ assert_contains "$S4/refresh.log" "CODEX_HOOKS: MATERIALIZED primary worktree re
     "transaction diagnostics classify the real primary checkout"
 assert_not_contains "$S4/refresh.log" "CODEX_HOOKS: BLOCKED linked worktree" \
     "transaction staging is never misreported as a linked worktree"
-assert_contains "$S4/refresh.log" "VERIFY_RUNTIME: '$S4_PHYSICAL/.forge/bin/verify-runtime' live --project-root '$S4_PHYSICAL'" \
-    "runtime diagnostics name the live project rather than transaction staging"
+assert_contains "$S4/refresh.log" "RUNTIME_QUALIFICATION: final owner '$REPO_ROOT/scripts/qualify-runtime-final.sh'; live project '$S4_PHYSICAL'" \
+    "runtime qualification names the final owner and live project rather than transaction staging"
+assert_not_contains "$S4/refresh.log" "VERIFY_RUNTIME:" \
+    "runtime qualification does not advertise the non-certifying verifier"
 assert_contains "$S4/refresh.log" "GLOBAL_HARNESS: MATERIALIZED" \
     "transaction diagnostics inspect the operator home"
 assert_contains "$S4/refresh.log" "NORMAL_PROJECT_WORKFLOWS: READY" \

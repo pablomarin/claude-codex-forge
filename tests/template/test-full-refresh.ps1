@@ -543,8 +543,9 @@ try {
     Assert-True ($first.Code -eq 0) "setup.ps1 -R translates a project under Windows PowerShell 5.1: $($first.Output.Trim())"
     Assert-True ($first.Output.Contains("CODEX_HOOKS: MATERIALIZED primary worktree registration") -and
         -not $first.Output.Contains("CODEX_HOOKS: BLOCKED linked worktree") -and
-        $first.Output.Contains("VERIFY_RUNTIME: '$(Join-Path $project '.forge\bin\verify-runtime')' live --project-root '$project'")) `
-        "PowerShell transaction diagnostics describe the live primary project"
+        $first.Output.Contains("RUNTIME_QUALIFICATION: final owner '$(Join-Path $root 'scripts\qualify-runtime-final.ps1')'; live project '$project'") -and
+        -not $first.Output.Contains("VERIFY_RUNTIME:")) `
+        "PowerShell transaction diagnostics name the final qualifier and live primary project"
     Assert-True ($first.Output.Contains("GLOBAL_HARNESS: MATERIALIZED") -and
         $first.Output.Contains("NORMAL_PROJECT_WORKFLOWS: READY") -and
         $first.Output.Contains("NATIVE_GOAL_RUNTIME: PENDING qualification via qualify-goal-feasibility.ps1") -and
