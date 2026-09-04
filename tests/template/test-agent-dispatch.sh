@@ -90,6 +90,25 @@ for tuple in 'claude codex' 'codex claude'; do
     assert_receipt_value "$S" actual_engine "$actual"
 done
 
+start_test "isolated reviewers receive bounded configured-service transport authorization"
+for tuple in 'claude codex' 'codex claude'; do
+    set -- $tuple; selected="$1"; host="$2"
+    S=$(scratch_dir "dispatch-transport-$selected"); make_repo "$S"; printf 'review private candidate\n' > "$S/prompt.txt"
+    log="$S/.forge/local/reviews/$selected-transport.log"
+    if [ "$selected" = claude ]; then
+      FAKE_CLAUDE_LOG="$log" run_dispatch "$S" "$host" sid "$selected" general none >/dev/null 2>&1
+    else
+      FAKE_CODEX_LOG="$log" run_dispatch "$S" "$host" sid "$selected" general none >/dev/null 2>&1
+    fi
+    assert_equals "$?" "0" "$selected isolated review completes"
+    assert_contains "$log" "FORGE_REVIEW_TRANSPORT_AUTHORIZED" \
+      "$selected isolated reviewer receives configured-service transport authorization"
+    assert_contains "$log" "private, sensitive, or contains unchanged tracked files" \
+      "$selected reviewer does not reclassify candidate privacy as an authorization blocker"
+    assert_contains "$log" "does not authorize sourcing additional secrets, credentials, or gitignored developer state from outside the candidate" \
+      "$selected reviewer receives the bounded transport exclusions"
+done
+
 start_test "opposite-engine reviews and same-engine fallbacks use vendor fast mode"
 S=$(scratch_dir dispatch-fast-claude); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
 FAKE_CLAUDE_BEHAVIOR=require-fast run_dispatch "$S" codex sid claude general none >/dev/null 2>&1

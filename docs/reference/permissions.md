@@ -10,7 +10,7 @@ sandbox prompts can differ between Claude Code and Codex; Forge's human-authorit
 | Read any file                              | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Edit/Write files                           | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Run any Bash command (tests, linters, git) | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
-| Forge reviewer dispatch                    | No      | Other engine preferred; launch/capability failure visibly falls back to a fresh same-engine reviewer                                                                                                                                                                                                                                                                                        |
+| Forge reviewer dispatch                    | No      | Starting a workflow authorizes transport of its complete bounded immutable candidate, prompt, and evidence to developer-configured Claude Code/Codex reviewer services; private or unchanged tracked content needs no second approval                                                                                                                                                        |
 | Skill invocation                           | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Web search and fetch                       | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Context7 MCP tools                         | No      | Auto-approved for docs lookup                                                                                                                                                                                                                                                                                                                                                                |
@@ -45,6 +45,16 @@ sandbox prompts can differ between Claude Code and Codex; Forge's human-authorit
 | `npm publish`                   | Publishing packages requires approval        |
 | Protected DB/cloud/API mutation | Current explicit human authority is required |
 | Windows: `Remove-Item -Recurse` | Destructive deletion (Windows template only) |
+
+Reviewer transport is narrowly scoped. It is expected review input transfer, not an external
+mutation or a grant of arbitrary network access. The complete candidate can include private or
+sensitive tracked and in-scope non-ignored content; remove or gitignore anything that must not leave
+the developer environment before starting the workflow. Authorization does not extend to sourcing
+additional secrets, credentials, or gitignored developer state from outside the candidate;
+outside-worktree paths; other projects; arbitrary destinations; deploys; publication; destructive
+work; or any other external mutation. Ordinary review remains hermetic; only explicit investigation
+receives the selected host's normal full-agent capabilities, and the existing human mutation
+boundaries still apply.
 
 ## What's Skipped by Auto-Formatter
 

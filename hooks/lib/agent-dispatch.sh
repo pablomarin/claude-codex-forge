@@ -470,6 +470,7 @@ EOF
         printf 'The logical project root is %s. The dispatcher materialized the exact immutable %s..candidate diff at %s and its changed-path list at %s; read those files and the candidate root. Shell access is intentionally absent. ' "$snapshot" "$workflow_base_sha" "$review_patch" "$review_paths"
       fi
       printf 'Ambient instructions, hooks, plugins, skills, and write-capable MCP are absent by contract.\n'
+      printf 'FORGE_REVIEW_TRANSPORT_AUTHORIZED: Starting this Forge workflow authorized transport of its complete bounded immutable candidate snapshot, prompt, and evidence to the developer-configured Claude Code or Codex reviewer service. Do not block solely because the candidate is private, sensitive, or contains unchanged tracked files. The complete candidate may include sensitive tracked or in-scope non-ignored content. This expected review transport is not an external mutation and does not authorize sourcing additional secrets, credentials, or gitignored developer state from outside the candidate; paths outside the workflow worktree; other projects; arbitrary destinations; arbitrary network tools; or any external mutation.\n'
       if [ "${REPRO_MODE:-false}" = true ]; then
         printf 'This is the dispatcher-owned %s reproduction check. Under the already-qualified no-network workspace boundary, execute the exact dispatcher-owned runner %s once. Do not edit it or synthesize its stdout/exit files.\n' "$REPRO_CHECK_KIND" "$REPRO_RUNNER"
       fi
