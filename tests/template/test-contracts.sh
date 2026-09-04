@@ -38,6 +38,14 @@ assert_file_exists "$RUN_FAST" "fast deterministic runner exists"
 for suite in test-lint.sh test-platform-parity.sh test-contracts.sh test-worktree-lifecycle.sh; do
     assert_contains "$RUN_FAST" "$suite" "fast runner includes $suite"
 done
+
+PS_GOAL_TEST="$REPO_ROOT/tests/template/test-goal-feasibility.ps1"
+assert_contains "$PS_GOAL_TEST" 'setup\.ps1.*-Force.*-DryRun' \
+    "PowerShell legacy-harness test expects the canonical preview command"
+assert_not_contains "$PS_GOAL_TEST" 'setup\.ps1.*-FullRefresh.*-DryRun' \
+    "PowerShell legacy-harness test does not require the retired preview alias"
+assert_not_contains "$PS_GOAL_TEST" 'foreach ($mode in @("default", "force", "upgrade"))' \
+    "PowerShell ordinary-mode preflight test does not treat authoritative force as a preflight"
 for suite in \
     test-fixtures.sh \
     test-dual-layout.sh \

@@ -67,35 +67,33 @@ try {
     }
 
     foreach ($surface in @("skills", "agents")) {
-        foreach ($mode in @("default", "force", "upgrade")) {
+        foreach ($mode in @("default", "upgrade")) {
             $legacy = Join-Path $scratch "legacy-$surface-$mode"
             New-Item -ItemType Directory -Path (Join-Path $legacy ".claude\$surface\custom") -Force | Out-Null
             $leaf = if ($surface -eq "skills") { Join-Path $legacy ".claude\skills\custom\SKILL.md" } else { Join-Path $legacy ".claude\agents\custom\agent.md" }
             [IO.File]::WriteAllText($leaf, "legacy")
             $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $setup)
-            if ($mode -eq "force") { $arguments += "-Force" }
             if ($mode -eq "upgrade") { $arguments += "-Upgrade" }
             $stdout = Join-Path $legacy "stdout.log"; $stderr = Join-Path $legacy "stderr.log"
             $process = Start-Process powershell.exe -ArgumentList $arguments -WorkingDirectory $legacy -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
             if ($process.ExitCode -eq 0) { throw "$surface-only $mode PowerShell preflight succeeded" }
-            if ((Get-Content -Raw $stderr) -notmatch 'BLOCKED: legacy Forge harness.*setup\.ps1.*-FullRefresh.*-DryRun') { throw "$surface-only $mode did not print preview-first remediation" }
+            if ((Get-Content -Raw $stderr) -notmatch 'BLOCKED: legacy Forge harness.*setup\.ps1.*-Force.*-DryRun') { throw "$surface-only $mode did not print preview-first remediation" }
             if (Test-Path (Join-Path $legacy ".forge\version")) { throw "$surface-only $mode wrote v6 material" }
         }
     }
 
-    foreach ($mode in @("default", "force", "upgrade")) {
+    foreach ($mode in @("default", "upgrade")) {
         $legacy = Join-Path $scratch "legacy-exact-settings-$mode"
         New-Item -ItemType Directory -Path (Join-Path $legacy ".claude") -Force | Out-Null
         $settings = Join-Path $legacy ".claude\settings.json"
         [IO.File]::WriteAllText($settings, '{"hooks":{}}')
         $before = [Convert]::ToBase64String([IO.File]::ReadAllBytes($settings))
         $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $setup)
-        if ($mode -eq "force") { $arguments += "-Force" }
         if ($mode -eq "upgrade") { $arguments += "-Upgrade" }
         $stdout = Join-Path $legacy "stdout.log"; $stderr = Join-Path $legacy "stderr.log"
         $process = Start-Process powershell.exe -ArgumentList $arguments -WorkingDirectory $legacy -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
         if ($process.ExitCode -eq 0) { throw "exact settings-only $mode PowerShell preflight succeeded" }
-        if ((Get-Content -Raw $stderr) -notmatch 'BLOCKED: legacy Forge harness.*setup\.ps1.*-FullRefresh.*-DryRun') { throw "exact settings-only $mode did not print preview-first remediation" }
+        if ((Get-Content -Raw $stderr) -notmatch 'BLOCKED: legacy Forge harness.*setup\.ps1.*-Force.*-DryRun') { throw "exact settings-only $mode did not print preview-first remediation" }
         if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($settings)) -cne $before) { throw "exact settings-only $mode mutated v5 bytes" }
         if (Test-Path (Join-Path $legacy ".forge\version")) { throw "exact settings-only $mode wrote v6 material" }
     }
