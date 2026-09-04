@@ -7,12 +7,25 @@ clean_json() {
   printf '{"result":"schema_version=1\\nverdict=CLEAN\\nmax_severity=NONE\\nblocked_class=none\\nforge_canary_hash=%s\\nforge_config_hash=%s\\nforge_qualification_revision=%s","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"firstParty"}}}\n' \
     "${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}"
 }
+fast_mode_enabled() {
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--settings" ] && [ "$#" -gt 1 ]; then
+      case "$2" in
+        *'"fastMode":true'*|*'"fastMode": true'*) return 0 ;;
+      esac
+      [ -f "$2" ] && grep -Eq '"fastMode"[[:space:]]*:[[:space:]]*true' "$2" && return 0
+    fi
+    shift
+  done
+  return 1
+}
 qualified_json() {
   body=$(printf '%s\n' "$@" "forge_canary_hash=${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "forge_config_hash=${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "forge_qualification_revision=${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}" | awk '{gsub(/\\/,"\\\\"); gsub(/\"/,"\\\""); printf "%s%s", separator, $0; separator="\\n"}')
   printf '{"result":"%s","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"firstParty"}}}\n' "$body"
 }
 case "${FAKE_CLAUDE_BEHAVIOR:-clean}" in
   clean) clean_json ;;
+  require-fast) fast_mode_enabled "$@" || exit 63; clean_json ;;
   findings) qualified_json 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|reachable defect' ;;
   blocked-artifact) qualified_json 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=artifact' ;;
   blocked-engine) qualified_json 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=engine' ;;

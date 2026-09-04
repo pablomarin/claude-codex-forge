@@ -13,7 +13,7 @@ case "$profile" in review|investigate) ;; *) die 'profile must be review or inve
 mkdir -p "$output/home" "$output/primary" "$output/codex-home"
 git -C "$output/primary" init -q 2>/dev/null || die 'cannot create clean primary repository'
 case "$readonly_server" in "") mcp='{}' ;; context7) mcp='{"context7":{"type":"http","url":"https://mcp.context7.com/mcp","readOnly":true}}' ;; *) die 'only the qualified read-only context7 server is available' ;; esac
-if [ -z "$readonly_server" ]; then cp "$TEMPLATE_DIR/claude-review-settings.template.json" "$output/claude-settings.json"; else printf '{"enabledPlugins":{},"hooks":{},"permissions":{"allow":[],"deny":[]},"mcpServers":%s}\n' "$mcp" > "$output/claude-settings.json"; fi
+if [ -z "$readonly_server" ]; then cp "$TEMPLATE_DIR/claude-review-settings.template.json" "$output/claude-settings.json"; else printf '{"fastMode":true,"enabledPlugins":{},"hooks":{},"permissions":{"allow":[],"deny":[]},"mcpServers":%s}\n' "$mcp" > "$output/claude-settings.json"; fi
 printf '{"mcpServers":%s}\n' "$mcp" > "$output/mcp.json"
 cp "$TEMPLATE_DIR/codex-review-overrides.template.tsv" "$output/codex-overrides.tsv"
 printf 'config_hash='

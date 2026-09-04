@@ -356,11 +356,11 @@ attempt_full_investigation_dispatch() {
       printf '\nRequired envelope:\nschema_version=1\nverdict=CLEAN|FINDINGS|BLOCKED\nmax_severity=NONE|P0|P1|P2|P3\nblocked_class=none|engine|capability|artifact|authorization|invariant\n'
     } > "$scratch/prompt.txt"
     if [ "$selected" = claude ]; then
-      engine_args=(-p --permission-mode auto --model "$model" --effort "$effort" --output-format json --no-session-persistence "$(cat "$scratch/prompt.txt")")
+      engine_args=(-p --settings '{"fastMode":true}' --permission-mode auto --model "$model" --effort "$effort" --output-format json --no-session-persistence "$(cat "$scratch/prompt.txt")")
       run_with_timeout_dispatch "$timeout_seconds" "$raw" "$stderr_file" "$root" "$binary" "${engine_args[@]}"
       rc=$?; cp "$raw" "$bound_output"
     else
-      engine_args=(-a on-request --search exec -C "$root" --sandbox danger-full-access -m "$model" -c "model_reasoning_effort=$effort" --output-last-message "$bound_output" --ephemeral "$(cat "$scratch/prompt.txt")")
+      engine_args=(-a on-request --search exec -C "$root" --sandbox danger-full-access -m "$model" -c "model_reasoning_effort=$effort" -c service_tier=fast --output-last-message "$bound_output" --ephemeral "$(cat "$scratch/prompt.txt")")
       run_with_timeout_dispatch "$timeout_seconds" "$raw" "$stderr_file" "$root" "$binary" "${engine_args[@]}"
       rc=$?
     fi
@@ -403,7 +403,7 @@ EOF
     if [ "${FORGE_DISPATCH_TEST_MODE:-0}" != 1 ]; then
       help=$($binary --help 2>&1 || true); [ "$selected" != codex ] || help="$help $($binary exec --help 2>&1 || true)"
       if [ "$selected" = claude ]; then
-        if [ "$role" = investigation ]; then required='-p --permission-mode --model --effort --output-format --no-session-persistence'
+        if [ "$role" = investigation ]; then required='-p --settings --permission-mode --model --effort --output-format --no-session-persistence'
         else required='-p --safe-mode --strict-mcp-config --mcp-config --settings --setting-sources --tools --permission-mode --add-dir --model --effort --output-format'; fi
         case "$conversation" in ephemeral) required="$required --no-session-persistence" ;; new) required="$required --session-id" ;; resume) required="$required --resume" ;; esac
       else
@@ -498,9 +498,9 @@ EOF
         mkdir -p "$codex_home"; cp "$auth_source" "$codex_home/auth.json" || { ATTEMPT_CLASS=authorization; ATTEMPT_REASON=codex-auth-copy-failed; return 2; }; chmod 600 "$codex_home/auth.json" 2>/dev/null || true
       fi
       if [ "$conversation" = resume ]; then
-        codex_args=(-a never --sandbox "$sandbox" exec resume --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use --ignore-user-config --ignore-rules --json -m "$model" -c "model_reasoning_effort=$effort" --output-last-message "$bound_output" "$session_id" "$(cat "$scratch/prompt.txt")")
+        codex_args=(-a never --sandbox "$sandbox" exec resume --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use --ignore-user-config --ignore-rules --json -m "$model" -c "model_reasoning_effort=$effort" -c service_tier=fast --output-last-message "$bound_output" "$session_id" "$(cat "$scratch/prompt.txt")")
       else
-        codex_args=(-a never exec --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use -C "$primary" --add-dir "$snapshot" --ignore-user-config --ignore-rules --sandbox "$sandbox" -m "$model" -c "model_reasoning_effort=$effort" --output-last-message "$bound_output")
+        codex_args=(-a never exec --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use -C "$primary" --add-dir "$snapshot" --ignore-user-config --ignore-rules --sandbox "$sandbox" -m "$model" -c "model_reasoning_effort=$effort" -c service_tier=fast --output-last-message "$bound_output")
         [ "$readonly_server" != context7 ] || codex_args+=(-c 'mcp_servers.context7.url=https://mcp.context7.com/mcp' -c 'mcp_servers.context7.read_only=true')
         if [ "$conversation" = ephemeral ]; then codex_args+=(--ephemeral); else codex_args+=(--json); fi
         codex_args+=("$(cat "$scratch/prompt.txt")")

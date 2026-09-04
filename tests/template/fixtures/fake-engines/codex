@@ -23,6 +23,7 @@ qualified_envelope() {
 }
 case "${FAKE_CODEX_BEHAVIOR:-clean}" in
   clean) clean_envelope ;;
+  require-fast) case " $joined " in *' -c service_tier=fast '*) clean_envelope ;; *) exit 63 ;; esac ;;
   findings) qualified_envelope 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|reachable defect' ;;
   blocked-artifact) qualified_envelope 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=artifact' ;;
   blocked-engine) qualified_envelope 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=engine' ;;

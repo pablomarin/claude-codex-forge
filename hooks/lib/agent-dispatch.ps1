@@ -281,12 +281,12 @@ function Invoke-FullInvestigation([string]$Selected, [string]$Executable, [strin
     $prompt = "You are a fresh full-capability $Selected investigation agent in the real project worktree $root. Use the normal user and project configuration, shared Forge state and memory, installed tools, MCP servers, network, databases, and APIs available to this host. Forge adds no tool, sandbox, configuration, or write restriction for this investigation. You may inspect and edit the worktree as needed. Return ONLY the Forge line envelope below.`n" + [IO.File]::ReadAllText($PromptFile) + "`nRequired envelope:`nschema_version=1`nverdict=CLEAN|FINDINGS|BLOCKED`nmax_severity=NONE|P0|P1|P2|P3`nblocked_class=none|engine|capability|artifact|authorization|invariant`n"
     $bound = Join-Path $Scratch 'bound.out'
     if ($Selected -eq 'claude') {
-        $arguments = @('-p', '--permission-mode', 'auto', '--model', $Model, '--effort', $Effort, '--output-format', 'json', '--no-session-persistence', $prompt)
+        $arguments = @('-p', '--settings', '{"fastMode":true}', '--permission-mode', 'auto', '--model', $Model, '--effort', $Effort, '--output-format', 'json', '--no-session-persistence', $prompt)
         $process = Invoke-BoundProcess $Executable $arguments $root @{} $TimeoutSeconds $true
         Copy-Item -LiteralPath $process.Stdout -Destination $bound -Force
     }
     else {
-        $arguments = @('-a', 'on-request', '--search', 'exec', '-C', $root, '--sandbox', 'danger-full-access', '-m', $Model, '-c', "model_reasoning_effort=$Effort", '--output-last-message', $bound, '--ephemeral', $prompt)
+        $arguments = @('-a', 'on-request', '--search', 'exec', '-C', $root, '--sandbox', 'danger-full-access', '-m', $Model, '-c', "model_reasoning_effort=$Effort", '-c', 'service_tier=fast', '--output-last-message', $bound, '--ephemeral', $prompt)
         $process = Invoke-BoundProcess $Executable $arguments $root @{} $TimeoutSeconds $true
     }
     if ($process.Exit -eq 124) { return @{ Rc = 1; Class = 'engine'; Reason = 'timeout'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 124; InvestigationMode = 'full-agent-worktree' } }
@@ -316,7 +316,7 @@ function Invoke-Engine([string]$Selected) {
     if (-not $env:FORGE_DISPATCH_TEST_MODE) {
         $help = (& $command.Source --help 2>&1) -join "`n"
         if ($Selected -eq 'codex') { $help += "`n" + ((& $command.Source exec --help 2>&1) -join "`n") }
-        $required = if ($Role -eq 'investigation' -and $Selected -eq 'claude') { @('-p', '--permission-mode', '--model', '--effort', '--output-format', '--no-session-persistence') } elseif ($Role -eq 'investigation') { @('-a', '--search', 'exec', '--sandbox', '--output-last-message', '--ephemeral', '-C', '-m', '-c') } elseif ($Selected -eq 'claude') { @('-p', '--safe-mode', '--strict-mcp-config', '--mcp-config', '--settings', '--setting-sources', '--tools', '--permission-mode', '--add-dir', '--model', '--effort', '--output-format') } else { @('-a', 'exec', '--sandbox', '--add-dir', '--ignore-user-config', '--ignore-rules', '--disable', '--output-last-message', '-C', '-m', '-c') }
+        $required = if ($Role -eq 'investigation' -and $Selected -eq 'claude') { @('-p', '--settings', '--permission-mode', '--model', '--effort', '--output-format', '--no-session-persistence') } elseif ($Role -eq 'investigation') { @('-a', '--search', 'exec', '--sandbox', '--output-last-message', '--ephemeral', '-C', '-m', '-c') } elseif ($Selected -eq 'claude') { @('-p', '--safe-mode', '--strict-mcp-config', '--mcp-config', '--settings', '--setting-sources', '--tools', '--permission-mode', '--add-dir', '--model', '--effort', '--output-format') } else { @('-a', 'exec', '--sandbox', '--add-dir', '--ignore-user-config', '--ignore-rules', '--disable', '--output-last-message', '-C', '-m', '-c') }
         if ($Conversation -eq 'ephemeral') { $required += $(if ($Selected -eq 'claude') { '--no-session-persistence' } else { '--ephemeral' }) }
         elseif ($Conversation -eq 'new') { $required += $(if ($Selected -eq 'claude') { '--session-id' } else { '--json' }) }
         else { $required += $(if ($Selected -eq 'claude') { '--resume' } else { @('resume', '--json') }) }
@@ -444,10 +444,10 @@ function Invoke-Engine([string]$Selected) {
         }
         $disabled = @('--disable', 'hooks', '--disable', 'plugins', '--disable', 'plugin_sharing', '--disable', 'apps', '--disable', 'remote_plugin', '--disable', 'in_app_browser', '--disable', 'browser_use', '--disable', 'computer_use')
         if ($Conversation -eq 'resume') {
-            $arguments = @('-a', 'never', '--sandbox', $sandbox, 'exec', 'resume') + $disabled + @('--ignore-user-config', '--ignore-rules', '--json', '-m', $model, '-c', "model_reasoning_effort=$effort", '--output-last-message', $bound, $SessionId, $prompt)
+            $arguments = @('-a', 'never', '--sandbox', $sandbox, 'exec', 'resume') + $disabled + @('--ignore-user-config', '--ignore-rules', '--json', '-m', $model, '-c', "model_reasoning_effort=$effort", '-c', 'service_tier=fast', '--output-last-message', $bound, $SessionId, $prompt)
         }
         else {
-            $arguments = @('-a', 'never', 'exec') + $disabled + @('-C', $primary, '--add-dir', $snapshot, '--ignore-user-config', '--ignore-rules', '--sandbox', $sandbox, '-m', $model, '-c', "model_reasoning_effort=$effort", '--output-last-message', $bound)
+            $arguments = @('-a', 'never', 'exec') + $disabled + @('-C', $primary, '--add-dir', $snapshot, '--ignore-user-config', '--ignore-rules', '--sandbox', $sandbox, '-m', $model, '-c', "model_reasoning_effort=$effort", '-c', 'service_tier=fast', '--output-last-message', $bound)
             if ($ReadOnlyServer -eq 'context7') { $arguments += @('-c', 'mcp_servers.context7.url=https://mcp.context7.com/mcp', '-c', 'mcp_servers.context7.read_only=true') }
             if ($Conversation -eq 'ephemeral') { $arguments += '--ephemeral' } else { $arguments += '--json' }
             $arguments += $prompt
