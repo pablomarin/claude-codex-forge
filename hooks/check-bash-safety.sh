@@ -89,11 +89,6 @@ elif echo "$COMMAND" | grep -qE 'pnpm\s+(add|install|i)\s+(-g|--global)|pnpm\s+(
 elif echo "$COMMAND" | grep -qE '(^|\s)pip3?\s+install\s+[^-]' 2>/dev/null && ! echo "$COMMAND" | grep -qE 'pip3?\s+install\s+(-r\s|-e\s|\.\s*$)|uv\s+pip' 2>/dev/null; then
     REASON="Unscoped pip install detected (supply chain risk — use venv or uv)"
 
-# Native SessionStart hooks own protected host receipts. An agent-issued Bash
-# command cannot substitute a borrowed or fabricated task/session identifier.
-elif echo "$COMMAND" | grep -qE '(^|[[:space:]])([^[:space:]]*/)?host-context\.(sh|ps1)[[:space:]].*(hook|-[Mm]ode[[:space:]]+hook)([[:space:]]|$)' 2>/dev/null; then
-    REASON="Native host receipts may be issued only by the host SessionStart hook"
-
 # 8. Workflow-safety (NOT security): block Bash read-utilities that read
 #    .claude/local/state.md inline. Bash is not a read-only tool in Claude Code,
 #    so a Bash read of this sensitive file trips CC's sensitive-file access prompt

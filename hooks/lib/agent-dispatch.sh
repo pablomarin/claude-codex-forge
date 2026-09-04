@@ -6,7 +6,6 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 FORGE_ROOT=$(cd "$SELF_DIR/../.." && pwd -P)
 CAPABILITIES_FILE="$FORGE_ROOT/host-capabilities.tsv"
 [ -f "$CAPABILITIES_FILE" ] || CAPABILITIES_FILE="$FORGE_ROOT/manifests/host-capabilities.tsv"
-HOST_CONTEXT="$SELF_DIR/host-context.sh"
 FINGERPRINT="$SELF_DIR/candidate-fingerprint.sh"
 RENDER_CONFIG="$FORGE_ROOT/bin/render-dispatch-config"
 [ -x "$RENDER_CONFIG" ] || RENDER_CONFIG="$FORGE_ROOT/../scripts/render-dispatch-config.sh"
@@ -82,7 +81,6 @@ prepare_session_dispatch() {
     [ "$(strict_kv_dispatch "$SESSION_META" seat_id)" = "$seat_id" ] || die_dispatch invariant 'cross-seat council resume rejected'
     [ "$(strict_kv_dispatch "$SESSION_META" question_hash)" = "$question_hash" ] || die_dispatch invariant 'council resume question mismatch'
     [ "$(strict_kv_dispatch "$SESSION_META" active_host)" = "$active_host" ] || die_dispatch invariant 'council resume host mismatch'
-    [ "$(strict_kv_dispatch "$SESSION_META" context_hash)" = "$context_hash" ] || die_dispatch invariant 'council resume context mismatch'
     [ "$(strict_kv_dispatch "$SESSION_META" artifact_hash)" = "$artifact_hash" ] || die_dispatch artifact 'council resume candidate mismatch'
     [ "$(strict_kv_dispatch "$SESSION_META" worktree_identity)" = "$worktree_identity" ] || die_dispatch invariant 'council resume worktree mismatch'
     [ "$(strict_kv_dispatch "$SESSION_META" qualification_revision)" = "$qualification_revision" ] || die_dispatch capability 'council resume qualification changed'
@@ -102,8 +100,8 @@ write_session_metadata_dispatch() {
     SESSION_META="$meta_dir/$SESSION_FINAL_ID.meta"; [ ! -e "$SESSION_META" ] && [ ! -L "$SESSION_META" ] || return 2
     tmp="$SESSION_META.tmp.$$"; umask 077
     {
-      printf 'schema_version=1\ncompleted=false\nsession_id=%s\nengine=%s\nrole=%s\nseat_id=%s\nquestion_hash=%s\nactive_host=%s\ncontext_hash=%s\nartifact_hash=%s\nworktree_identity=%s\nturn_prompt_hash=%s\nconfig_hash=%s\ncanary_hash=%s\nseat_hash=%s\nqualification_revision=%s\nstore_id=%s\nsnapshot_path=%s\nsnapshot_manifest_hash=%s\n' \
-        "$SESSION_FINAL_ID" "$actual" "$role" "$seat_id" "$question_hash" "$active_host" "$context_hash" "$artifact_hash" "$worktree_identity" "$prompt_hash" "$ATTEMPT_CONFIG_HASH" "$ATTEMPT_CANARY_HASH" "$ATTEMPT_SEAT_HASH" "$qualification_revision" "$invocation_id" "$ATTEMPT_SNAPSHOT" "$snapshot_hash"
+      printf 'schema_version=1\ncompleted=false\nsession_id=%s\nengine=%s\nrole=%s\nseat_id=%s\nquestion_hash=%s\nactive_host=%s\nartifact_hash=%s\nworktree_identity=%s\nturn_prompt_hash=%s\nconfig_hash=%s\ncanary_hash=%s\nseat_hash=%s\nqualification_revision=%s\nstore_id=%s\nsnapshot_path=%s\nsnapshot_manifest_hash=%s\n' \
+        "$SESSION_FINAL_ID" "$actual" "$role" "$seat_id" "$question_hash" "$active_host" "$artifact_hash" "$worktree_identity" "$prompt_hash" "$ATTEMPT_CONFIG_HASH" "$ATTEMPT_CANARY_HASH" "$ATTEMPT_SEAT_HASH" "$qualification_revision" "$invocation_id" "$ATTEMPT_SNAPSHOT" "$snapshot_hash"
     } > "$tmp" || return 2
     chmod 600 "$tmp" 2>/dev/null || true; mv "$tmp" "$SESSION_META" || return 2
     output_tmp="$meta_dir/$SESSION_FINAL_ID.session-id.$$"; printf '%s\n' "$SESSION_FINAL_ID" > "$output_tmp" || return 2; chmod 600 "$output_tmp" 2>/dev/null || true
@@ -651,8 +649,11 @@ esac
 if [ "$role" != investigation ]; then
   [ "$(awk -F= '$1=="requires_read_only_channel" && $2=="true" {n++} END {print n+0}' "$prompt_file")" -eq 0 ] || [ -n "$readonly_server" ] || die_dispatch authorization 'required read-only investigation channel was not selected'
 fi
-if ! active_host=$(bash "$HOST_CONTEXT" verify 2>/dev/null); then write_early_receipt invariant host-context-mismatch; printf 'BLOCKED[invariant]: host context mismatch; receipt=%s\n' "$receipt" >&2; exit 2; fi
-context_hash=$(strict_kv_dispatch "$FORGE_HOST_CONTEXT_FILE" receipt_hash)
+active_host=${FORGE_NATIVE_HOST:-}
+case "$active_host" in
+  claude|codex) ;;
+  *) write_early_receipt invariant declared-main-host-missing; printf 'BLOCKED[invariant]: declared main host must be claude or codex; receipt=%s\n' "$receipt" >&2; exit 2 ;;
+esac
 case "$engine" in auto) [ "$active_host" = claude ] && first=codex || first=claude ;; *) first="$engine" ;; esac
 [ "$first" = claude ] && second=codex || second=claude
 

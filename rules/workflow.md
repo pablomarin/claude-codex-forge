@@ -46,8 +46,9 @@ trigger implementation loops or authorize fake evidence.
 
 Read `.forge/local/state.md` before every workflow action. Record the current phase, next unchecked
 step, last active host, intended base ref, and immutable resolved base SHA. A host switch resumes
-that exact next step in the same branch/worktree. Warn that simultaneous editing can overwrite work;
-do not introduce locks, leases, or a permanent session owner.
+that exact next step in the same branch/worktree. Forge creates no edit lock: concurrent sessions are allowed.
+Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
+Do not introduce locks, leases, or a permanent session owner.
 
 Developer state, review receipts, verification receipts, and local memories live under
 `.forge/local/`; project-owned durable memory lives under `.forge/memory/`. Use the active host's

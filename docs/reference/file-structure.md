@@ -39,7 +39,7 @@ your-project/
 │   │   │   ├── codex-worktree-dispatch.sh # Trusted linked-worktree router (.ps1)
 │   │   │   ├── codex-pty.sh            # PTY shim wrapping codex exec (.ps1)
 │   │   │   ├── codex-pty-helper.py     # Unix pty.fork helper
-│   │   │   ├── host-context.sh         # Current-host adapter (.ps1)
+│   │   │   ├── host-context.sh         # Fixed-target routing metadata adapter (.ps1)
 │   │   │   ├── state-path.sh           # Canonical state resolver (.ps1)
 │   │   │   └── worktree-lifecycle.sh   # Private harness seed/fold helper (.ps1)
 │   │   ├── session-start.sh              # Branch/drift context (.ps1)

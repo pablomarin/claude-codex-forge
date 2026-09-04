@@ -8,8 +8,11 @@ the main agent for this session; there is no permanent main engine.
 1. Read `.forge/instructions.md`, `.forge/rules/`, and `.forge/local/state.md`. Initialize state from
    `.forge/state.template.md` only when absent. Use the host's file read/write capabilities for
    state, not shell commands.
-2. Record `Last active host`. On a host switch, resume the exact next unchecked durable step. Warn
-   about simultaneous editing; do not create a lock or lease.
+2. Record `Last active host`. On a host switch, resume the exact next unchecked durable step.
+   Forge provides no edit lock: concurrent sessions are allowed, including simultaneous editing;
+   coordinate overlapping writes.
+   If any session mutates the candidate, candidate-bound evidence becomes stale and must be
+   regenerated before certification.
 3. Work outside the protected default branch in one isolated worktree. From the primary checkout,
    create it with `.forge/hooks/lib/worktree-lifecycle.sh create --kind fix --name <slug> --base
    <ref-or-sha>` (PowerShell: `worktree-lifecycle.ps1 -Action Create -Kind fix -Name <slug> -Base
@@ -17,10 +20,11 @@ the main agent for this session; there is no permanent main engine.
    tracked `hooks/lib/worktree-lifecycle.sh` or `.ps1` instead. This creates exactly `fix/<slug>`
    under `.worktrees/<slug>` and copies missing private/ignored installed harness files without
    overwriting anything.
-4. Continue from a native Claude Code or Codex session rooted in the new worktree. Its normal
-   SessionStart hook creates and UserPromptSubmit refreshes the protected host receipt. If the host
-   adapter was absent when the session opened, install or seed it and reopen the host in the
-   worktree; never synthesize a receipt or bind an older task/session ID manually.
+4. Continue work in the linked worktree from the current or a later Claude Code or Codex session.
+   A session opened in the primary checkout may continue the linked worktree by using it as the
+   working directory; opening the client at the worktree path remains optional. The installed
+   adapter declares the current host for reviewer routing. No per-worktree Forge receipt, copied
+   session identity, hook-trust bypass, or task-root reopening is required.
 5. The helper seeds only `## State` (with `### Now` cleared), `## Open Questions`, and `## Blockers`
    from the primary checkout and writes the exact baseline to
    `.forge/local/.state-seed-snapshot.md`. It never seeds workflow, goal, authorization, receipts,

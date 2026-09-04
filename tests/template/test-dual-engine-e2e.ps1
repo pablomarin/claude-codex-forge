@@ -87,7 +87,6 @@ public static class ForgeTask11Fake {
     $env:FORGE_DISPATCH_TEST_MODE='1';$env:FORGE_TEST_DISABLE_ENGINE='codex'
     Push-Location $project
     try {
-        "{`"session_id`":`"seam-session`",`"cwd`":`"$($project.Replace('\','\\'))`"}" | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $context -Mode hook -Host claude | Out-Null
         $before = Get-Hash $state
         $arguments = @('-Mode','run','-Engine','auto','-FallbackPolicy','automatic','-Role','general','-Profile','review','-Artifact','git:working-tree','-WorkflowBaseSha',$base,'-WorkflowBaseRef',"refs/heads/$branch",'-PromptFile',$prompt,'-Output',$result,'-TimeoutSeconds','2')
         $argumentsJson = Join-Path $reviews 'launch-arguments.json'; [IO.File]::WriteAllText($argumentsJson, ($arguments | ConvertTo-Json -Compress))
@@ -106,6 +105,7 @@ $argumentsJson = [IO.File]::ReadAllText($ArgumentsJsonPath)
     Assert-True ((Get-ReceiptValue $receipt.FullName 'actual_engine') -ceq 'claude') 'receipt records Claude fallback'
     Assert-True ((Get-ReceiptValue $receipt.FullName 'fallback') -ceq 'true') 'receipt records degraded selection'
     Assert-True ((Get-Hash $state) -ceq $before) 'reviewer leaves canonical state unchanged'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $testHome '.forge\host-contexts'))) 'installed PowerShell review needs no host authority directory'
 }
 finally {
     $env:PATH=$originalPath

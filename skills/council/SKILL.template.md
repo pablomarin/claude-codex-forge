@@ -66,9 +66,10 @@ Read `references/advisors.md` to get the five advisor personas. Engine assignmen
 is runtime data: invoke `.forge/hooks/lib/host-context.sh launch --host <host> --
 .forge/hooks/lib/council-dispatch.sh ...` on Unix, or use `host-context.ps1
 -Mode launch -Host <host> -LaunchTarget council -LaunchArgumentsJson ...` on
-Windows, with the question, candidate, and workflow base. The protected receipt
-binds both dispatchers by exact path and hash. It
-uses three main-engine advisors, two other-engine advisors, and an other-engine
+Windows, with the question, candidate, and workflow base. This is a fixed-target
+compatibility launcher: `main_host` is routing metadata, not authenticated
+session identity. Candidate and worktree evidence provide the review binding.
+The dispatcher uses three main-engine advisors, two other-engine advisors, and an other-engine
 chairman when healthy. It creates five fresh advisor sessions, resumes each for
 one anonymous peer-review turn, and creates a fresh chairman session.
 

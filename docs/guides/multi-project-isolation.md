@@ -24,8 +24,9 @@ The `post-tool-format.sh` hook that ships with this harness walks up from any ed
 
 Each active feature gets its own worktree under `.worktrees/<name>/` with its own filesystem state.
 Claude Code and Codex sessions can work in separate worktrees without cross-contamination. Forge
-warns against simultaneous edits in one worktree and does not add locks. Each worktree reuses the
-same `.venv/` / `node_modules/` via symlinks from the main worktree.
+creates no edit lock: concurrent sessions are allowed. Coordinate overlapping writes; if any session
+mutates the candidate, candidate-bound evidence becomes stale. Each worktree reuses the same
+`.venv/` / `node_modules/` via symlinks from the main worktree.
 
 ## What the harness does NOT switch for you
 

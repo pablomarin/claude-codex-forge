@@ -28,7 +28,6 @@ if (-not (Test-Path -LiteralPath $Capabilities)) { $Capabilities = Join-Path $Fo
 $Renderer = Join-Path $ForgeRoot 'bin/render-dispatch-config.ps1'
 if (-not (Test-Path -LiteralPath $Renderer)) { $Renderer = Join-Path $ForgeRoot 'scripts/render-dispatch-config.ps1' }
 $Fingerprint = Join-Path $LibraryRoot 'candidate-fingerprint.ps1'
-$HostContext = Join-Path $LibraryRoot 'host-context.ps1'
 
 function Get-ShaBytes([byte[]]$Bytes) {
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -575,9 +574,8 @@ try {
     else { if ($SeatId) { throw 'BLOCKED[invariant]: SeatId is reserved for council roles' }; $QuestionHash = Get-ShaFile $PromptFile; $SeatId = $Role }
     if ($Role -ne 'investigation' -and (Get-Content -LiteralPath $PromptFile) -contains 'requires_read_only_channel=true' -and -not $ReadOnlyServer) { throw 'BLOCKED[authorization]: required read-only investigation channel was not selected' }
     $invocationId = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + "-$PID-" + [Guid]::NewGuid().ToString('N').Substring(0, 8)
-    $activeHost = (& $HostContext -Mode verify)
-    if ($LASTEXITCODE -ne 0 -or -not $activeHost) { throw 'BLOCKED[invariant]: host context mismatch' }
-    $contextHash = Get-Value $env:FORGE_HOST_CONTEXT_FILE 'receipt_hash' $true
+    $activeHost = $env:FORGE_NATIVE_HOST
+    if ($activeHost -cnotin @('claude','codex')) { throw 'BLOCKED[invariant]: declared main host must be claude or codex' }
     $first = if ($Engine -eq 'auto') { if ($activeHost -eq 'claude') { 'codex' } else { 'claude' } } else { $Engine }
     $second = if ($first -eq 'claude') { 'codex' } else { 'claude' }
     $FingerprintReceipt = Join-Path $reviews "$invocationId.candidate"
@@ -598,7 +596,7 @@ try {
         $null = Ensure-ReservedReviewDirectory $reviews 'sessions' $false
         $SessionMeta = Join-Path $reviews "sessions/$SessionId.meta"
         Assert-NoFollowSessionMetadata $SessionMeta
-        if ((Get-Value $SessionMeta 'completed' $true) -ne 'false' -or (Get-Value $SessionMeta 'session_id' $true) -cne $SessionId -or (Get-Value $SessionMeta 'engine' $true) -cne $first -or (Get-Value $SessionMeta 'role' $true) -cne $Role -or (Get-Value $SessionMeta 'seat_id' $true) -cne $SeatId -or (Get-Value $SessionMeta 'question_hash' $true) -cne $QuestionHash -or (Get-Value $SessionMeta 'active_host' $true) -cne $activeHost -or (Get-Value $SessionMeta 'context_hash' $true) -cne $contextHash -or (Get-Value $SessionMeta 'artifact_hash' $true) -cne $ArtifactHash -or (Get-Value $SessionMeta 'worktree_identity' $true) -cne $worktreeIdentity -or (Get-Value $SessionMeta 'qualification_revision' $true) -cne $QualificationRevision) { throw 'BLOCKED[invariant]: stale, cross-seat, or cross-candidate council resume' }
+        if ((Get-Value $SessionMeta 'completed' $true) -ne 'false' -or (Get-Value $SessionMeta 'session_id' $true) -cne $SessionId -or (Get-Value $SessionMeta 'engine' $true) -cne $first -or (Get-Value $SessionMeta 'role' $true) -cne $Role -or (Get-Value $SessionMeta 'seat_id' $true) -cne $SeatId -or (Get-Value $SessionMeta 'question_hash' $true) -cne $QuestionHash -or (Get-Value $SessionMeta 'active_host' $true) -cne $activeHost -or (Get-Value $SessionMeta 'artifact_hash' $true) -cne $ArtifactHash -or (Get-Value $SessionMeta 'worktree_identity' $true) -cne $worktreeIdentity -or (Get-Value $SessionMeta 'qualification_revision' $true) -cne $QualificationRevision) { throw 'BLOCKED[invariant]: stale, cross-seat, or cross-candidate council resume' }
         $storeId = Get-Value $SessionMeta 'store_id' $true
         if (-not (Test-SafeSessionId $storeId)) { throw 'BLOCKED[invariant]: unsafe council session store id' }
         $SessionStore = Ensure-ReservedReviewDirectory $reviews "session-stores/$storeId" $false
@@ -650,7 +648,7 @@ try {
         $sessionDirectory = Ensure-ReservedReviewDirectory $reviews 'sessions' $true
         $SessionMeta = Join-Path $sessionDirectory "$($result.Session).meta"
         if (Test-Path -LiteralPath $SessionMeta) { throw 'BLOCKED[invariant]: session metadata already exists' }
-        $meta = "schema_version=1`ncompleted=false`nsession_id=$($result.Session)`nengine=$($result.Engine)`nrole=$Role`nseat_id=$SeatId`nquestion_hash=$QuestionHash`nactive_host=$activeHost`ncontext_hash=$contextHash`nartifact_hash=$ArtifactHash`nworktree_identity=$worktreeIdentity`nturn_prompt_hash=$PromptHash`nconfig_hash=$($result.ConfigHash)`ncanary_hash=$($result.CanaryHash)`nseat_hash=$($result.SeatHash)`nqualification_revision=$QualificationRevision`nstore_id=$invocationId`nsnapshot_path=$($result.Snapshot)`nsnapshot_manifest_hash=$(Get-SnapshotStateHash $result.SnapshotBefore)`n"
+        $meta = "schema_version=1`ncompleted=false`nsession_id=$($result.Session)`nengine=$($result.Engine)`nrole=$Role`nseat_id=$SeatId`nquestion_hash=$QuestionHash`nactive_host=$activeHost`nartifact_hash=$ArtifactHash`nworktree_identity=$worktreeIdentity`nturn_prompt_hash=$PromptHash`nconfig_hash=$($result.ConfigHash)`ncanary_hash=$($result.CanaryHash)`nseat_hash=$($result.SeatHash)`nqualification_revision=$QualificationRevision`nstore_id=$invocationId`nsnapshot_path=$($result.Snapshot)`nsnapshot_manifest_hash=$(Get-SnapshotStateHash $result.SnapshotBefore)`n"
         [IO.File]::WriteAllText($SessionMeta, $meta, $Utf8)
         $sessionSource = Join-Path $sessionDirectory "$($result.Session).session-id.$PID"
         [IO.File]::WriteAllText($sessionSource, "$($result.Session)`n", $Utf8)

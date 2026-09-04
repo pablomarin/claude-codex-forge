@@ -37,10 +37,7 @@
       "Bash(*.forge/goal-captures*:*)",
       "Bash(*.forge/goal-authorizations*:*)",
       "Bash(*forge-goal-authorize*:*)",
-      "Bash(*forge-goal-capture*:*)",
-      "Read(~/.forge/host-contexts/**)",
-      "Edit(~/.forge/host-contexts/**)",
-      "Bash(*.forge/host-contexts*:*)"
+      "Bash(*forge-goal-capture*:*)"
     ],
     "ask": [
       "Bash(gh pr create:*)",
@@ -56,7 +53,7 @@
     "allowUnsandboxedCommands": false,
     "filesystem": {
       "denyRead": ["~/.forge/goal-captures"],
-      "denyWrite": ["~/.forge/bin", "~/.forge/goal-captures", "~/.forge/goal-authorizations", "~/.forge/host-contexts"]
+      "denyWrite": ["~/.forge/bin", "~/.forge/goal-captures", "~/.forge/goal-authorizations"]
     }
   },
   "hooks": {
