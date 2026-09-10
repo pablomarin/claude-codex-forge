@@ -27,10 +27,13 @@
 **Files:**
 
 - Modify: `tests/template/test-build-evidence.sh`
+- Modify: `tests/template/test-contracts.sh`
 - Modify: `hooks/lib/verification-receipt.sh`
 - Modify: `hooks/lib/verification-receipt.ps1`
 - Modify: `agents/verify-e2e.md`
 - Modify: `rules/testing.md`
+- Modify: `commands/new-feature.md`
+- Modify: `commands/fix-bug.md`
 
 **Interfaces:**
 
@@ -55,6 +58,10 @@ assert_equals "$?" "0" "candidate-bound E2E N/A receipt is written"
 After writing the other current receipts, assert `verification-receipt check` emits
 `E2E_VALID:true` and `SHIP_READY:true`. Add negative cases for an empty `N/A_REASON`, a
 `VERDICT: N/A` verify-app report, and `--result N/A` with nonzero exit status; each must exit 2.
+
+In `tests/template/test-contracts.sh`, extend the caller/verdict matrix so the canonical E2E agent,
+`new-feature.md`, and `fix-bug.md` all recognize exactly `PASS`, `FAIL`, `PARTIAL`, and `N/A`, and
+require each caller to handle `N/A` as a concrete non-user-facing scope decision rather than PASS.
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
@@ -110,7 +117,9 @@ N/A_REASON: internal-only change with no supported user journey
 
 In `rules/testing.md`, replace the prose-only N/A certification claim with the requirement that the
 checklist reason and candidate-bound E2E N/A report/receipt agree. Keep the existing narrow
-eligibility examples.
+eligibility examples. In `commands/new-feature.md` and `commands/fix-bug.md`, branch explicitly on
+`VERDICT: N/A`, copy its concrete reason into the checklist, and still create the candidate-bound
+E2E receipt during finalization.
 
 - [ ] **Step 6: Run focused GREEN verification**
 
@@ -123,16 +132,22 @@ bash tests/template/test-build-evidence.sh
 Then run:
 
 ```bash
+bash tests/template/test-contracts.sh
+```
+
+Then run:
+
+```bash
 bash tests/template/test-lint.sh
 ```
 
-Expected: both suites exit 0. If `pwsh` is unavailable, record PowerShell execution as CI-owned;
+Expected: all three suites exit 0. If `pwsh` is unavailable, record PowerShell execution as CI-owned;
 static paired-file and syntax contracts must still pass.
 
 - [ ] **Step 7: Commit the E2E evidence contract**
 
 ```bash
-git add tests/template/test-build-evidence.sh hooks/lib/verification-receipt.sh hooks/lib/verification-receipt.ps1 agents/verify-e2e.md rules/testing.md
+git add tests/template/test-build-evidence.sh tests/template/test-contracts.sh hooks/lib/verification-receipt.sh hooks/lib/verification-receipt.ps1 agents/verify-e2e.md rules/testing.md commands/new-feature.md commands/fix-bug.md
 git commit -m "fix: bind e2e n-a to v6 candidates"
 ```
 
