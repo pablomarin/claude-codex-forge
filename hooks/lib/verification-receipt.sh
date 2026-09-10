@@ -49,7 +49,13 @@ vr_fresh() {
 vr_report_verdict() {
     local report="$1" kind="$2" verdict
     verdict=$(sed -n '1{s/\r$//;s/^VERDICT: //p;}' "$report")
-    case "$kind:$verdict" in verify-app:PASS|verify-app:FAIL|verify-app:BLOCKED|e2e:PASS|e2e:FAIL|e2e:PARTIAL) printf '%s\n' "$verdict" ;; *) return 1 ;; esac
+    case "$kind:$verdict" in verify-app:PASS|verify-app:FAIL|verify-app:BLOCKED|e2e:PASS|e2e:FAIL|e2e:PARTIAL|e2e:N/A) printf '%s\n' "$verdict" ;; *) return 1 ;; esac
+}
+vr_e2e_na_reason() {
+    local report="$1" reason
+    reason=$(sed -n '3{s/\r$//;s/^N\/A_REASON: //p;}' "$report")
+    [ -n "$(printf '%s' "$reason" | tr -d '[:space:]')" ] || return 1
+    printf '%s\n' "$reason"
 }
 vr_candidate_current() {
     local receipt="$1" tmp key expected actual base base_ref helper
@@ -114,7 +120,7 @@ vr_validate_review() {
     return 0
 }
 vr_validate_verifier() {
-    local receipt="$1" kind="$2" candidate="$3" key report candidate_id report_verdict
+    local receipt="$1" kind="$2" candidate="$3" key report candidate_id report_verdict result actual_verdict
     [ -f "$receipt" ] && [ ! -L "$receipt" ] || return 1
     for key in schema_version receipt_kind invocation_id started_at ended_at candidate_id worktree_identity git_head workflow_base_sha index_tree command_hash profile exit_status report_path report_hash report_verdict result; do
         vr_kv "$receipt" "$key" >/dev/null 2>&1 || return 1
@@ -123,16 +129,21 @@ vr_validate_verifier() {
     [ "$(vr_kv "$receipt" receipt_kind)" = "$kind" ] || return 1
     vr_fresh "$(vr_kv "$receipt" ended_at)" || return 1
     [ "$(vr_kv "$receipt" exit_status)" = 0 ] || return 1
-    [ "$(vr_kv "$receipt" result)" = PASS ] || return 1
-    [ "$(vr_kv "$receipt" report_verdict)" = PASS ] || return 1
     candidate_id=$(vr_kv "$candidate" candidate_id) || return 1
     for key in candidate_id worktree_identity git_head workflow_base_sha index_tree; do
         [ "$(vr_kv "$receipt" "$key")" = "$(vr_kv "$candidate" "$key")" ] || return 1
     done
     report=$(vr_owned_path "$(vr_kv "$receipt" report_path)" true) || return 1
     [ "$(vr_hash_file "$report")" = "$(vr_kv "$receipt" report_hash)" ] || return 1
-    report_verdict=$(vr_report_verdict "$report" "$kind") || return 1
-    [ "$report_verdict" = "$(vr_kv "$receipt" report_verdict)" ] || return 1
+    actual_verdict=$(vr_report_verdict "$report" "$kind") || return 1
+    report_verdict=$(vr_kv "$receipt" report_verdict)
+    result=$(vr_kv "$receipt" result)
+    [ "$actual_verdict" = "$report_verdict" ] || return 1
+    case "$kind:$result:$report_verdict" in
+        verify-app:PASS:PASS|e2e:PASS:PASS) ;;
+        e2e:N/A:N/A) vr_e2e_na_reason "$report" >/dev/null || return 1 ;;
+        *) return 1 ;;
+    esac
     return 0
 }
 
@@ -151,7 +162,7 @@ if [ "$mode" = write ]; then
         --started-at) started="${2:-}"; shift 2 ;; --ended-at) ended="${2:-}"; shift 2 ;;
         *) vr_die "unknown write argument $1" ;; esac; done
     case "$kind" in verify-app|e2e) ;; *) vr_die 'kind must be verify-app or e2e' ;; esac
-    case "$result" in PASS|FAIL|BLOCKED|PARTIAL) ;; *) vr_die 'invalid verifier result' ;; esac
+    case "$result" in PASS|FAIL|BLOCKED|PARTIAL|N/A) ;; *) vr_die 'invalid verifier result' ;; esac
     case "$status" in ''|*[!0-9]*) vr_die 'numeric exit status is required' ;; esac
     vr_scalar command "$command_text"; vr_scalar profile "$profile"
     candidate=$(vr_owned_path "$candidate" true) || vr_die 'candidate receipt must be Forge-local'
@@ -159,6 +170,10 @@ if [ "$mode" = write ]; then
     report=$(vr_owned_path "$report" true) || vr_die 'report must be a Forge-local regular file'
     report_verdict=$(vr_report_verdict "$report" "$kind") || vr_die 'report must begin with a canonical VERDICT header for its verifier kind'
     [ "$report_verdict" = "$result" ] || vr_die 'report verdict and requested receipt result differ'
+    if [ "$result" = N/A ]; then
+        [ "$kind" = e2e ] && [ "$status" = 0 ] || vr_die 'N/A is valid only for a successful E2E scope decision'
+        vr_e2e_na_reason "$report" >/dev/null || vr_die 'E2E N/A report requires a concrete line-3 N/A_REASON'
+    fi
     output=$(vr_owned_path "$output" false) || vr_die 'receipt output must be Forge-local'
     [ -n "$started" ] || started=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     [ -n "$ended" ] || ended=$(date -u '+%Y-%m-%dT%H:%M:%SZ')

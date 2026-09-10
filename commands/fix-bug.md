@@ -126,7 +126,7 @@ For user-facing behavior, design Actor/Scenario/Intent/Interface/Setup/Steps/Ver
 use cases and a Surface coverage decision. Run `verify-e2e` in feature mode while fixes are allowed.
 Parse its `VERDICT:` and `SUGGESTED_PATH:` headers, create the suggested local evidence directory,
 and persist the unchanged leading header with the report. Handle `VERDICT: FAIL`, `VERDICT: PARTIAL`,
-`VERDICT: PASS`, `SURFACE_COVERAGE_WARNING`,
+`VERDICT: PASS`, `VERDICT: N/A`, `SURFACE_COVERAGE_WARNING`,
 `FAIL_BUG`, `FAIL_INFRA`, `FAIL_INVALID_USE_CASE`, and `FAIL_STALE` explicitly.
 
 ## 6. Finalize One Exact Candidate
@@ -164,6 +164,7 @@ mutation and pause. Only a human-created authorization record bound to the activ
 permits push and `gh pr create`. Reviewer engine fallback is automatic; PR creation is not.
 
 If E2E truly does not apply, use the canonical checklist form
-`- [x] E2E verified — N/A: <concrete supported reason>`.
+`- [x] E2E verified — N/A: <concrete supported reason>` and persist the matching
+candidate-bound `VERDICT: N/A` report and E2E receipt. A prose N/A alone cannot certify V6.
 
 Stop after the PR is open. Do not merge.

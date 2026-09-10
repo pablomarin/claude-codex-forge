@@ -124,7 +124,7 @@ external mutation requiring new human authority.
 Design or refine feature E2E cases and run `verify-e2e` in feature mode while fixes are still
 allowed. Parse its `VERDICT:` and `SUGGESTED_PATH:` headers, create the suggested local evidence
 directory, and persist the unchanged leading header with the report. Handle `VERDICT: FAIL`,
-`VERDICT: PARTIAL`, and `VERDICT: PASS` explicitly. Resolve
+`VERDICT: PARTIAL`, `VERDICT: PASS`, and `VERDICT: N/A` explicitly. Resolve
 `FAIL_BUG`, `FAIL_INFRA`, `FAIL_INVALID_USE_CASE`, and `FAIL_STALE` before final freeze. A sanctioned
 setup path that is broken is a product/infrastructure failure, not permission to seed through a DB
 or undocumented interface.
@@ -173,7 +173,8 @@ title/body/base/head and pause for human authorization. The developer creates th
 record bound to the active objective nonce and candidate. Only then push and run `gh pr create`.
 
 If E2E truly does not apply, use the canonical checklist form
-`- [x] E2E verified — N/A: <concrete supported reason>`.
+`- [x] E2E verified — N/A: <concrete supported reason>` and persist the matching
+candidate-bound `VERDICT: N/A` report and E2E receipt. A prose N/A alone cannot certify V6.
 
 PR creation is a new external mutation and never council-authorized. Ordinary reviewer fallback is
 automatic. Stop after the PR is open; do not merge.

@@ -171,6 +171,11 @@ SURFACE_COVERAGE_WARNING: Project exposes <SET>. UCs cover <COVERED>. Missing su
 
 ### Step 3: Health check
 
+If the reviewed change is proven to have no supported user-facing behavior, do not invent a user
+journey or report PASS. Return `VERDICT: N/A` with the normal `SUGGESTED_PATH` header and a third
+line `N/A_REASON: <concrete reason>`. The reason must name the internal-only scope; missing access,
+missing use cases, broken setup, or an untested user surface is not N/A.
+
 - **API:** `curl -fsS $API_URL/health` (or documented health endpoint)
 - **UI:** Navigate to root URL via Playwright MCP, verify page loads
 
@@ -200,11 +205,13 @@ For each use case:
 
 You do NOT write files. Return the report as your response using the exact format below. The invoking agent (main) writes it to disk at the path you suggest.
 
-**Your response MUST start with a two-line header followed by the full markdown report:**
+**Your response MUST start with the header below followed by the full markdown report. Omit the
+`N/A_REASON` line unless the verdict is N/A:**
 
 ```
-VERDICT: PASS | FAIL | PARTIAL
+VERDICT: PASS | FAIL | PARTIAL | N/A
 SUGGESTED_PATH: .forge/local/evidence/<task-id>/e2e-report.md
+N/A_REASON: <concrete internal-only reason; N/A only>
 ---
 # E2E Verification Report
 
@@ -215,7 +222,7 @@ SUGGESTED_PATH: .forge/local/evidence/<task-id>/e2e-report.md
 - **Mode:** feature | regression | smoke
 - **Timestamp:** [ISO 8601]
 - **Duration:** [e.g., 3m 42s]
-- **Verdict:** PASS | FAIL | PARTIAL
+- **Verdict:** PASS | FAIL | PARTIAL | N/A
 
 ## Results
 

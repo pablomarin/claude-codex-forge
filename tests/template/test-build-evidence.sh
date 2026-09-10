@@ -861,6 +861,49 @@ printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"
     | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$V2/.forge/local/evidence/gate-valid.out" 2>&1
 assert_equals "$?" "0" "ship hook accepts the complete current receipt set"
 
+start_test "receipt-v2: candidate-bound E2E N/A is explicit, justified, and verifier-specific"
+printf 'VERDICT: N/A\nSUGGESTED_PATH: .forge/local/evidence/receipt-v2/e2e-report.md\nN/A_REASON: internal harness-only change with no user surface\n' \
+    > "$V2/.forge/local/evidence/e2e-na.report"
+rm -f "$V2/.forge/local/evidence/e2e.receipt"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+    --candidate .forge/local/evidence/candidate.receipt --command 'e2e scope decision' \
+    --profile regression --report .forge/local/evidence/e2e-na.report --result N/A \
+    --exit-status 0 --output .forge/local/evidence/e2e.receipt) >/dev/null 2>&1
+assert_equals "$?" "0" "candidate-bound E2E N/A receipt is written"
+assert_contains "$V2/.forge/local/evidence/e2e.receipt" 'result=N/A' \
+    "E2E receipt stores the explicit N/A result"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check \
+    --state .forge/local/state.md) > "$V2/.forge/local/evidence/check-na.out" 2>&1
+assert_equals "$?" "0" "justified E2E N/A satisfies the structured receipt set"
+assert_contains "$V2/.forge/local/evidence/check-na.out" 'E2E_VALID:true' \
+    "candidate-bound E2E N/A is valid"
+assert_contains "$V2/.forge/local/evidence/check-na.out" 'SHIP_READY:true' \
+    "candidate-bound E2E N/A can certify the unchanged candidate"
+
+printf 'VERDICT: N/A\nSUGGESTED_PATH: .forge/local/evidence/receipt-v2/e2e-report.md\nN/A_REASON: \n' \
+    > "$V2/.forge/local/evidence/e2e-na-empty.report"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+    --candidate .forge/local/evidence/candidate.receipt --command 'empty e2e scope decision' \
+    --profile regression --report .forge/local/evidence/e2e-na-empty.report --result N/A \
+    --exit-status 0 --output .forge/local/evidence/e2e-na-empty.receipt) >/dev/null 2>&1
+assert_equals "$?" "2" "E2E N/A without a concrete reason is rejected"
+
+printf 'VERDICT: N/A\nSUGGESTED_PATH: .forge/local/evidence/receipt-v2/verify-app-report.md\nN/A_REASON: verify-app is never optional\n' \
+    > "$V2/.forge/local/evidence/verify-app-na.report"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind verify-app \
+    --candidate .forge/local/evidence/candidate.receipt --command 'invalid verify-app n-a' \
+    --profile focused --report .forge/local/evidence/verify-app-na.report --result N/A \
+    --exit-status 0 --output .forge/local/evidence/verify-app-na.receipt) >/dev/null 2>&1
+assert_equals "$?" "2" "verify-app cannot use N/A"
+
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+    --candidate .forge/local/evidence/candidate.receipt --command 'failed e2e scope decision' \
+    --profile regression --report .forge/local/evidence/e2e-na.report --result N/A \
+    --exit-status 1 --output .forge/local/evidence/e2e-na-failed.receipt) >/dev/null 2>&1
+assert_equals "$?" "2" "E2E N/A requires a successful scope decision"
+refresh_v2_final_receipts
+assert_equals "$?" "0" "PASS receipts are restored for later mutation tests"
+
 start_test "receipt-v2: semantic/process/identity/iteration mutations fail closed in one compact matrix"
 for mutation in duplicate-invocation wrong-role findings stale-output copied-worktree stale-iteration; do
     cp "$V2/.forge/local/reviews/spec.receipt" "$V2/.forge/local/reviews/spec.saved"
