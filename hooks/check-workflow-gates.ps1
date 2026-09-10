@@ -325,43 +325,6 @@ if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $st
     }
 }
 
-# Receipt-v2 compatibility switch. An explicit Candidate receipt linkage means
-# all final evidence must bind to one current staged-clean candidate. Genuine
-# unconverted workflows continue through the legacy checklist evidence below.
-$ReceiptV2Active = $false
-$receiptCandidate = ""
-$receiptCandidateRows = @()
-foreach ($line in (($content -replace "`r", "") -split "`n")) {
-    $parts = $line -split '\|'
-    if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') {
-        $receiptCandidateRows += $parts[2].Trim()
-    }
-}
-if ($receiptCandidateRows.Count -eq 1) { $receiptCandidate = [string]$receiptCandidateRows[0] }
-if ($receiptCandidate -and -not $receiptCandidate.Contains('<')) {
-    $ReceiptV2Active = $true
-    $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
-    if (-not (Test-Path -LiteralPath $verificationReceipt)) {
-        $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1'
-    }
-    $vrOut = @()
-    $vrStatus = 2
-    if (Test-Path -LiteralPath $verificationReceipt) {
-        . $verificationReceipt
-        $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateFile
-        $vrOut = @($vrResponse.Lines)
-        if ($vrResponse.Error) { $vrOut += $vrResponse.Error }
-        $vrStatus = $vrResponse.Status
-    }
-    if ($vrStatus -ne 0) {
-        [Console]::Error.WriteLine('WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean.')
-        foreach ($line in $vrOut) { [Console]::Error.WriteLine([string]$line) }
-        if (-not $vrOut) { [Console]::Error.WriteLine('verification-receipt helper unavailable') }
-        [Console]::Error.WriteLine('Freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E.')
-        exit 2
-    }
-}
-
 # ---------------------------------------------------------------------------
 # No-code carve-out (git commit only) — closes the integrity hole (mirrors .sh)
 # See check-workflow-gates.sh for the full rationale + scope decision. When a
@@ -458,6 +421,22 @@ if ($unchecked.Count -gt 0) {
     [Console]::Error.WriteLine('                         - [x] E2E verified — N/A: <specific reason>')
     [Console]::Error.WriteLine("  See .forge/rules/testing.md for the canonical gate vocabulary.")
     exit 2
+}
+
+# A concrete candidate path selects receipt-native diagnostics below, avoiding
+# duplicate legacy evidence errors. This flag does NOT activate enforcement;
+# every active canonical v6 workflow validates receipts before the final allow.
+$ReceiptV2Active = $false
+$receiptCandidateRows = @()
+foreach ($line in (($content -replace "`r", "") -split "`n")) {
+    $parts = $line -split '\|'
+    if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') {
+        $receiptCandidateRows += $parts[2].Trim()
+    }
+}
+if ($receiptCandidateRows.Count -eq 1) {
+    $receiptCandidate = [string]$receiptCandidateRows[0]
+    if ($receiptCandidate -and -not $receiptCandidate.Contains('<')) { $ReceiptV2Active = $true }
 }
 
 # ---------------------------------------------------------------------------
@@ -731,6 +710,30 @@ if (-not $ReceiptV2Active -and $codePassLine -and $headShaCode) {
             exit 2
         }
     }
+}
+
+# Strict v6 boundary: receipt linkage never controls whether enforcement runs.
+# Placeholder, absent, and stale receipt sets all fail closed here after any
+# more-specific checklist diagnostic has had a chance to guide the developer.
+$verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
+if (-not (Test-Path -LiteralPath $verificationReceipt)) {
+    $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1'
+}
+$vrOut = @()
+$vrStatus = 2
+if (Test-Path -LiteralPath $verificationReceipt) {
+    . $verificationReceipt
+    $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateFile
+    $vrOut = @($vrResponse.Lines)
+    if ($vrResponse.Error) { $vrOut += $vrResponse.Error }
+    $vrStatus = $vrResponse.Status
+}
+if ($vrStatus -ne 0) {
+    [Console]::Error.WriteLine('WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean.')
+    foreach ($line in $vrOut) { [Console]::Error.WriteLine([string]$line) }
+    if (-not $vrOut) { [Console]::Error.WriteLine('verification-receipt helper unavailable') }
+    [Console]::Error.WriteLine('Initialize the v6 receipt paths and Review iteration, freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E.')
+    exit 2
 }
 
 Exit-ForgeAllow

@@ -325,25 +325,6 @@ if [ -n "$BRK_HEAD" ] && [ -f "$RS" ] && [ -f "$STATE_FILE" ]; then
     fi
 fi
 
-# Receipt-v2 compatibility switch. An explicit Candidate receipt linkage means
-# this workflow has migrated its final gates: all review/verify/E2E receipts
-# must validate against the same current staged-clean candidate. Workflows not
-# yet converted by Task 9 continue through the legacy checklist evidence below.
-RECEIPT_V2_ACTIVE=false
-RECEIPT_CANDIDATE=$(tr -d '\r' < "$STATE_FILE" | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
-case "$RECEIPT_CANDIDATE" in ''|*'<'*) ;; *)
-    RECEIPT_V2_ACTIVE=true
-    VR="$HOOK_DIR/lib/verification-receipt.sh"
-    [ -f "$VR" ] || VR="$_TOPLEVEL/hooks/lib/verification-receipt.sh"
-    if [ ! -f "$VR" ] || ! VR_OUT=$(bash "$VR" check --state "$STATE_FILE" 2>&1); then
-        echo "WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean." >&2
-        printf '%s\n' "${VR_OUT:-verification-receipt helper unavailable}" >&2
-        echo "Freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E." >&2
-        exit 2
-    fi
-    ;;
-esac
-
 # ---------------------------------------------------------------------------
 # No-code carve-out (git commit only) — closes the integrity hole
 #
@@ -474,6 +455,13 @@ if [ -n "$UNCHECKED" ]; then
     echo "  See .forge/rules/testing.md for the canonical gate vocabulary." >&2
     exit 2
 fi
+
+# A concrete candidate path selects receipt-native diagnostics below, avoiding
+# duplicate legacy evidence errors. This flag does NOT activate enforcement;
+# every active canonical v6 workflow validates receipts before the final allow.
+RECEIPT_V2_ACTIVE=false
+RECEIPT_CANDIDATE=$(tr -d '\r' < "$STATE_FILE" | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
+case "$RECEIPT_CANDIDATE" in ''|*'<'*) ;; *) RECEIPT_V2_ACTIVE=true ;; esac
 
 # ---------------------------------------------------------------------------
 # Evidence-based gate for E2E verified
@@ -815,6 +803,18 @@ if [ "$RECEIPT_V2_ACTIVE" != true ] && [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_S
             exit 2
         fi
     done
+fi
+
+# Strict v6 boundary: receipt linkage never controls whether enforcement runs.
+# Placeholder, absent, and stale receipt sets all fail closed here after any
+# more-specific checklist diagnostic has had a chance to guide the developer.
+VR="$HOOK_DIR/lib/verification-receipt.sh"
+[ -f "$VR" ] || VR="$_TOPLEVEL/hooks/lib/verification-receipt.sh"
+if [ ! -f "$VR" ] || ! VR_OUT=$(bash "$VR" check --state "$STATE_FILE" 2>&1); then
+    echo "WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean." >&2
+    printf '%s\n' "${VR_OUT:-verification-receipt helper unavailable}" >&2
+    echo "Initialize the v6 receipt paths and Review iteration, freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E." >&2
+    exit 2
 fi
 
 forge_allow

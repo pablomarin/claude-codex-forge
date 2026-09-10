@@ -182,7 +182,7 @@ CHECKLIST_ALL_CHECKED='- [x] Code review loop (2 iterations) — PASS
 
 S1=$(scratch_dir hooks-allchecked)
 rc=$(run_hook_sh "$S1" 'git commit -m "ship it"' "$CHECKLIST_ALL_CHECKED")
-assert_equals "$rc" "0" ".sh passes when all gates are [x]"
+assert_equals "$rc" "2" "checked legacy gates cannot replace the strict receipt set"
 
 # ===========================================================================
 # Test 2: E2E verified unchecked → hook blocks (exit 2)
@@ -218,7 +218,7 @@ CHECKLIST_E2E_NA='- [x] Code review loop (1 iterations) — PASS
 
 S3=$(scratch_dir hooks-e2e-na)
 rc=$(run_hook_sh "$S3" 'git commit -m "shipit"' "$CHECKLIST_E2E_NA")
-assert_equals "$rc" "0" ".sh passes when E2E verified is [x] with N/A"
+assert_equals "$rc" "2" "legacy E2E N/A cannot replace a candidate-bound N/A receipt"
 
 # ===========================================================================
 # Test 4: multiple gates unchecked → stderr enumerates all of them
@@ -293,7 +293,7 @@ CHECKLIST_NEAR_MISS='- [x] Code review loop (1 iterations) — PASS
 
 S7=$(scratch_dir hooks-near-miss)
 rc=$(run_hook_sh "$S7" 'git push' "$CHECKLIST_NEAR_MISS")
-assert_equals "$rc" "0" "non-gate items don't trigger the gate"
+assert_equals "$rc" "2" "non-gate items do not trigger, but missing receipts still block"
 
 # ===========================================================================
 # Test 7b: a literal `- [ ]` inside an already-[x] gate line's PROSE must NOT
@@ -311,12 +311,12 @@ CHECKLIST_PROSE_BRACKET='- [x] Code review loop — N/A: docs-only checkpoint. R
 
 S7b=$(scratch_dir hooks-prose-bracket)
 rc=$(run_hook_sh "$S7b" 'git commit -m "docs checkpoint"' "$CHECKLIST_PROSE_BRACKET")
-assert_equals "$rc" "0" "prose '- [ ]' inside [x] lines does not re-arm the gate (.sh)"
+assert_equals "$rc" "2" "prose '- [ ]' does not re-arm gates, but missing receipts still block (.sh)"
 
 if command -v pwsh >/dev/null 2>&1; then
     S7bps=$(scratch_dir hooks-prose-bracket-ps)
     rc=$(run_hook_ps "$S7bps" 'git commit -m "docs checkpoint"' "$CHECKLIST_PROSE_BRACKET")
-    assert_equals "$rc" "0" "prose '- [ ]' inside [x] lines does not re-arm the gate (.ps1 parity)"
+    assert_equals "$rc" "2" "prose '- [ ]' does not re-arm gates, but missing receipts still block (.ps1 parity)"
 fi
 
 # ===========================================================================
@@ -329,7 +329,7 @@ start_test "PowerShell parity (.ps1 matches .sh on the same fixtures)"
 if command -v pwsh >/dev/null 2>&1; then
     S8a=$(scratch_dir hooks-ps-allchecked)
     rc=$(run_hook_ps "$S8a" 'git commit -m x' "$CHECKLIST_ALL_CHECKED")
-    assert_equals "$rc" "0" ".ps1 passes when all gates [x]"
+    assert_equals "$rc" "2" ".ps1 requires receipts even when all legacy gates are [x]"
 
     S8b=$(scratch_dir hooks-ps-e2e-unchecked)
     rc=$(run_hook_ps "$S8b" 'git commit -m x' "$CHECKLIST_E2E_UNCHECKED")
@@ -341,7 +341,7 @@ if command -v pwsh >/dev/null 2>&1; then
 
     S8c=$(scratch_dir hooks-ps-e2e-na)
     rc=$(run_hook_ps "$S8c" 'git commit -m x' "$CHECKLIST_E2E_NA")
-    assert_equals "$rc" "0" ".ps1 passes when E2E verified [x] — N/A"
+    assert_equals "$rc" "2" ".ps1 requires a candidate-bound E2E N/A receipt"
 else
     printf "  %s·%s skipped: pwsh not installed\n" "$C_DIM" "$C_RESET"
 fi
@@ -418,7 +418,7 @@ mkdir -p "$S9/tests/e2e/reports"
 # Create a report file AFTER branch-off (its mtime is > branch-off-ts)
 echo "# E2E report" > "$S9/tests/e2e/reports/2026-04-19-10-00-feature.md"
 rc=$(run_hook_sh "$S9" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD9")")
-assert_equals "$rc" "0" "fresh report present → hook passes"
+assert_equals "$rc" "2" "a fresh legacy report cannot replace the strict receipt set"
 
 # ===========================================================================
 # Test 10: [x] E2E verified without N/A + no report → exit 2
@@ -463,7 +463,7 @@ S12=$(echo "$result" | cut -d'|' -f1)
 HEAD12=$(echo "$result" | cut -d'|' -f2)
 # No reports directory — N/A should bypass the evidence check entirely
 rc=$(run_hook_sh "$S12" 'git commit -m x' "$(checklist_e2e_checked_na "$HEAD12")")
-assert_equals "$rc" "0" "N/A form skips evidence check even without a report"
+assert_equals "$rc" "2" "legacy N/A skips only legacy report freshness, not strict receipts"
 
 # ===========================================================================
 # Test 13: No merge-base (repo without main) → skip evidence check gracefully
@@ -483,7 +483,7 @@ HEAD13=$(cd "$S13" && git rev-parse HEAD)
 # rather than fail. User gets no protection here — documented as a
 # degraded env, not a policy violation.
 rc=$(run_hook_sh "$S13" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD13")")
-assert_equals "$rc" "0" "degraded env (no main/master) → hook passes with warning"
+assert_equals "$rc" "2" "degraded merge-base cannot bypass strict receipts"
 
 # ===========================================================================
 # Test 14: On main itself → skip evidence check (trunk-based workflow)
@@ -506,7 +506,7 @@ HEAD14=$(cd "$S14" && git rev-parse HEAD)
 # [x] E2E verified without N/A + no reports. Without the HEAD==branch-off
 # fix, this would block. With the fix, it should pass (skip evidence).
 rc=$(run_hook_sh "$S14" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD14")")
-assert_equals "$rc" "0" "on main directly → evidence check skipped (trunk-based workflow supported)"
+assert_equals "$rc" "2" "trunk mode skips legacy freshness only, not strict receipts"
 
 # ===========================================================================
 # Test 15: check-state-updated.sh master-default repo — CHANGELOG gate fires
@@ -960,8 +960,8 @@ printf '{"tool_input":{"command":"git commit -m test"}}' > "$S_GATE2/.hook-input
 (cd "$S_GATE2" && bash "$HOOK_SH" < "$S_GATE2/.hook-input.json") > "$S_GATE2/.hook-stdout" 2> "$S_GATE2/.hook-stderr"
 rc_gate2=$?
 
-assert_equals "$rc_gate2" "0" \
-    "check-workflow-gates: stray '- [ ] Code review loop' in Done does not block ship"
+assert_equals "$rc_gate2" "2" \
+    "stray Done checklist does not poison parsing, but missing receipts block ship"
 
 # ===========================================================================
 # PowerShell parity for the regression cases (skipped if pwsh not installed)
@@ -1151,7 +1151,7 @@ EOF
 )
 
 EXIT=$(cat "$scratch/.exit")
-assert_equals "$EXIT" "0" "gh pr create ALLOWED when nonce + HEAD match (exit 0)"
+assert_equals "$EXIT" "2" "matching PR authorization cannot replace final receipts"
 
 # ---------------------------------------------------------------------------
 # Test L2-3: /goal session active + ## PR authorization with stale HEAD → blocked (exit 2)
@@ -1236,7 +1236,7 @@ EOF
 )
 
 EXIT=$(cat "$scratch/.exit")
-assert_equals "$EXIT" "0" "PR-auth guard skipped when no /forge-goal session active"
+assert_equals "$EXIT" "2" "inactive PR-auth guard still leaves strict receipts enforced"
 
 # ---------------------------------------------------------------------------
 # Test L2-5 (P1.2 fix): empty /goal session nonce row → treated as INACTIVE
@@ -1278,7 +1278,7 @@ EOF
 )
 
 EXIT=$(cat "$scratch/.exit")
-assert_equals "$EXIT" "0" "PR-auth guard INACTIVE when /goal session nonce is empty (exit 0)"
+assert_equals "$EXIT" "2" "empty goal nonce skips PR auth only; strict receipts still apply"
 
 # ---------------------------------------------------------------------------
 # Test L2-6 (P1.4 fix): stale-duplicate auth lines → guard uses LAST one
@@ -1329,7 +1329,7 @@ EOF
 )
 
 EXIT=$(cat "$scratch/.exit")
-assert_equals "$EXIT" "0" "guard uses LAST auth line (matching nonce+HEAD) and ALLOWS when last line is valid"
+assert_equals "$EXIT" "2" "last valid auth line clears PR auth only; strict receipts still apply"
 
 # ---------------------------------------------------------------------------
 # Test L2-7 (P2 fix): nonce mismatch in auth line → guard blocks (exit 2)
@@ -1698,7 +1698,7 @@ echo '{"tool_input":{"command":"git commit -m test"}}' \
 rc=$?
 cd "$REPO_ROOT"
 
-assert_equals "$rc" "0" "Plan review PASS with valid evidence is allowed"
+assert_equals "$rc" "2" "legacy plan evidence cannot replace the strict receipt set"
 
 # ---------------------------------------------------------------------------
 # Test 18: [x] Plan review loop PASS + WRONG plan_sha → exit 2
@@ -1759,7 +1759,7 @@ echo '{"tool_input":{"command":"gh pr create --title test"}}' \
 rc=$?
 cd "$REPO_ROOT"
 
-assert_equals "$rc" "0" "Code review PASS with valid HEAD evidence is allowed"
+assert_equals "$rc" "2" "legacy code evidence cannot replace the strict receipt set"
 
 # ---------------------------------------------------------------------------
 # Test 21: [x] Code review loop PASS + STALE HEAD evidence → exit 2
@@ -1817,7 +1817,7 @@ echo '{"tool_input":{"command":"git commit -m test"}}' \
     | bash "$HOOK_SH" 2>"$S22/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
-assert_equals "$rc" "0" "Plan review loop N/A skips per-iter evidence check"
+assert_equals "$rc" "2" "legacy plan N/A cannot replace the strict receipt set"
 
 # ---------------------------------------------------------------------------
 # Test 23 (v5.40): N/A escape on Code review loop → exit 0 (no evidence needed).
@@ -1847,7 +1847,7 @@ echo '{"tool_input":{"command":"git commit -m test"}}' \
     | bash "$HOOK_SH" 2>"$S23/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
-assert_equals "$rc" "0" "Code review loop N/A skips per-iter evidence check"
+assert_equals "$rc" "2" "legacy code N/A cannot replace the strict receipt set"
 
 # ---------------------------------------------------------------------------
 # Test 23b (FIX 5): malformed plan clean line — plan= present but NO plan_sha=
@@ -1946,7 +1946,7 @@ EOF
 echo '{"tool_input":{"command":"git commit -m test"}}' \
     | (cd "$S23D" && bash "$HOOK_SH") 2>"$S23D/.hook-stderr"
 rc=$?
-assert_equals "$rc" "0" "no git repo → code-review evidence check skipped, checklist gates still pass"
+assert_equals "$rc" "2" "no git repo cannot satisfy strict candidate-bound receipts"
 
 # Negative companion: in the same degraded env, an UNCHECKED required gate must
 # still BLOCK — proves the checklist gate is independent of git availability.
@@ -2118,7 +2118,7 @@ echo '{"tool_input":{"command":"git commit -m x"}}' \
     | bash "$HOOK_SH" 2>"$S23H/.hook-stderr"
 rc=$?
 cd "$REPO_ROOT"
-assert_equals "$rc" "0" "plain single git commit with gates satisfied → exit 0 (not flagged as compound)"
+assert_equals "$rc" "2" "plain commit reaches strict receipt enforcement after compound parsing"
 
 # ---------------------------------------------------------------------------
 # Test 24: PowerShell parity for the 6 workflow-gate-evidence fixtures.
@@ -2152,11 +2152,8 @@ else
         # correctly (fixtures may end at EOF without a trailing `## State`).
         checklist=$(awk '/^### Checklist/{p=1; next} /^## /{p=0} p' .claude/local/state.md)
         rc_ps=$(run_hook_ps "$SP" 'git commit -m x' "$checklist")
-        # Mirror expected exit codes from the .sh tests
-        case "$fixture" in
-            *-evidence-ok) expected=0 ;;
-            *) expected=2 ;;
-        esac
+        # Legacy evidence may improve diagnostics, but cannot replace v6 receipts.
+        expected=2
         assert_equals "$rc_ps" "$expected" ".ps1 parity for $fixture (expected $expected)"
         cd "$REPO_ROOT"
     done
@@ -2210,6 +2207,90 @@ _run_carveout_sh() {
     (cd "$dir" && bash "$HOOK_SH" < "$dir/.hook-input.json") >/dev/null 2>"$dir/.hook-stderr"
     echo "$dir|$?"
 }
+
+_run_strict_v6_receipt_sh() {
+    local label="$1" cmd="$2" receipt_mode="$3" staged_path="${4:-}"
+    local dir head
+    dir=$(scratch_dir "$label")
+    (
+        cd "$dir" || exit 1
+        git init -q --initial-branch=main >/dev/null 2>&1
+        git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1
+        head=$(git rev-parse HEAD)
+        mkdir -p .forge/local
+        cat > .forge/local/state.md <<EOF
+<!-- forge:state-schema v6 -->
+## Workflow
+
+| Field     | Value             |
+| --------- | ----------------- |
+| Command   | /new-feature test |
+| Phase     | 5 — Quality Gates |
+| Next step | ship              |
+
+### Checklist
+
+- [x] Code review loop (1 iterations) — PASS
+- [x] Code review iteration 1 — codex clean — head=\`$head\`
+- [x] Code review iteration 1 — pr-toolkit clean — head=\`$head\`
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: hook fixture has no user-facing behavior
+EOF
+        case "$receipt_mode" in
+            placeholder)
+                cat >> .forge/local/state.md <<'EOF'
+
+### Receipts
+
+| Field | Value |
+| --- | --- |
+| Candidate receipt | <not frozen> |
+| Code-spec receipt | <not run> |
+| Code-quality receipt | <not run> |
+| Verify-app receipt | <not run> |
+| E2E receipt | <not run> |
+EOF
+                ;;
+            missing)
+                cat >> .forge/local/state.md <<'EOF'
+
+### Receipts
+
+| Field | Value |
+| --- | --- |
+| Candidate receipt | .forge/local/evidence/candidate.receipt |
+| Code-spec receipt | .forge/local/reviews/current/spec.receipt |
+| Code-quality receipt | .forge/local/reviews/current/quality.receipt |
+| Verify-app receipt | .forge/local/evidence/verify-app.receipt |
+| E2E receipt | .forge/local/evidence/e2e.receipt |
+EOF
+                ;;
+            none) ;;
+        esac
+        if [ -n "$staged_path" ]; then
+            mkdir -p "$(dirname "$staged_path")"
+            printf 'fixture\n' > "$staged_path"
+            git add -- "$staged_path" >/dev/null 2>&1
+        fi
+        printf '{"tool_input":{"command":"%s"}}' "$cmd" > .hook-input.json
+        bash "$REPO_ROOT/hooks/check-workflow-gates.sh" < .hook-input.json > .hook-stdout 2> .hook-stderr
+    )
+    echo "$dir|$?"
+}
+
+start_test "strict v6 receipts: legacy PASS rows cannot certify placeholder or absent receipts"
+R=$(_run_strict_v6_receipt_sh strict-placeholder 'git push' placeholder)
+assert_equals "${R##*|}" "2" "active canonical v6 blocks placeholder receipt rows"
+assert_contains "${R%|*}/.hook-stderr" "final receipt set" "placeholder failure names the receipt boundary"
+R=$(_run_strict_v6_receipt_sh strict-absent 'git push' none)
+assert_equals "${R##*|}" "2" "active canonical v6 blocks a missing Receipts section"
+
+start_test "strict v6 receipts: docs-only direct commit precedes receipt enforcement; push does not"
+R=$(_run_strict_v6_receipt_sh strict-docs-commit 'git commit -m docs' missing docs/receipt-design.md)
+assert_equals "${R##*|}" "0" "docs-only direct commit is allowed with missing receipt artifacts"
+R=$(_run_strict_v6_receipt_sh strict-docs-push 'git push' missing docs/receipt-design.md)
+assert_equals "${R##*|}" "2" "push remains strict for the same missing receipt artifacts"
 
 # --- carve-out: docs-only commit skips the gates (exit 0) ---
 start_test "carve-out: docs-only staged commit → exit 0 (gates skipped, no N/A dance)"

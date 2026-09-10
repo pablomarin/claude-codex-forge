@@ -1938,7 +1938,7 @@ EOF
     )
 
     BASH_EXIT=$(cat "$scratch/.bash_exit")
-    assert_equals "$BASH_EXIT" "0" "Bash guard uses LAST auth line (matching) and ALLOWS (exit 0)"
+    assert_equals "$BASH_EXIT" "2" "matching last auth line cannot replace strict final receipts"
 else
     pass "git not available — stale-duplicate contract test skipped"
 fi
