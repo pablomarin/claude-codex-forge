@@ -95,9 +95,9 @@ concurrently when the host supports it, so this does not require serially doubli
 
 `verify-app` and E2E remain separate candidate-bound receipts. The E2E report and receipt schemas
 will gain an explicit `N/A` result for a concretely justified non-user-facing change. The report
-must begin with `VERDICT: N/A`, and the receipt must bind that report, justification, and current
-candidate. A checked prose box alone is not certification. `verify-app` remains PASS-only for a
-successful ship decision.
+must begin with `VERDICT: N/A`, retain `SUGGESTED_PATH` on line 2, and record `N/A_REASON` on line
+3. The receipt must bind that report, justification, and current candidate. A checked prose box
+alone is not certification. `verify-app` remains PASS-only for a successful ship decision.
 
 ### Executable state-transition protocol
 

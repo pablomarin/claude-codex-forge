@@ -38,7 +38,9 @@
 **Interfaces:**
 
 - Consumes: candidate receipt schema version 2 and verifier report files under `.forge/local/`.
-- Produces: `verification-receipt write --kind e2e --result N/A` and its PowerShell equivalent; report header `VERDICT: N/A` followed by `N/A_REASON: ` and a concrete reason.
+- Produces: `verification-receipt write --kind e2e --result N/A` and its PowerShell equivalent;
+  report lines `VERDICT: N/A`, `SUGGESTED_PATH: .forge/local/evidence/task/e2e-report.md`, and
+  `N/A_REASON: ` followed by a concrete reason.
 - Preserves: `verify-app` successful certification requires `PASS`; E2E `PASS` remains unchanged.
 
 - [ ] **Step 1: Add failing Bash receipt tests**
@@ -46,7 +48,7 @@
 Extend the receipt-v2 fixture in `tests/template/test-build-evidence.sh` with these behaviors:
 
 ```bash
-printf 'VERDICT: N/A\nN/A_REASON: internal harness-only change with no user surface\n' \
+printf 'VERDICT: N/A\nSUGGESTED_PATH: .forge/local/evidence/receipt-v2/e2e-report.md\nN/A_REASON: internal harness-only change with no user surface\n' \
     > "$V2/.forge/local/evidence/e2e-na.report"
 (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
     --candidate .forge/local/evidence/candidate.receipt --command 'e2e scope decision' \
@@ -78,7 +80,7 @@ Expected: FAIL because `N/A` is not an accepted receipt result or E2E report ver
 In `hooks/lib/verification-receipt.sh`:
 
 - extend `vr_report_verdict` to accept only `e2e:N/A` in addition to existing pairs;
-- add a reader that requires the second line to match `^N/A_REASON: .+[^[:space:]]$` for N/A;
+- add a reader that requires the third line to match `^N/A_REASON: .+[^[:space:]]$` for N/A;
 - allow `N/A` only when `kind=e2e` and `exit-status=0`;
 - keep verify-app PASS-only in `vr_validate_verifier`;
 - allow E2E validation when result and report verdict are both `PASS`, or both `N/A` with a valid
@@ -112,6 +114,7 @@ scope and require this exact leading report shape:
 
 ```text
 VERDICT: N/A
+SUGGESTED_PATH: .forge/local/evidence/task/e2e-report.md
 N/A_REASON: internal-only change with no supported user journey
 ```
 
