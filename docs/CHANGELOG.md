@@ -2,6 +2,30 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.1 — 2026-09-10
+
+**Reviewer consent is now user-originated at the native host boundary.** Review-capable Claude Code
+and Codex entry points disclose the bounded immutable candidate, prompt, evidence, and configured
+reviewer services before invocation. Explicit invocation authorizes ordinary reviewer transport;
+when Forge infers a workflow from prose, it asks once before the first review and reuses that answer
+only within the current workflow segment. A fresh session requires a fresh user signal. Investigation
+keeps its separate full-agent disclosure, and Forge still grants no blanket network or external-
+mutation authority. This corrects 6.0's ineffective assumption that agent-authored standing-consent
+text could authorize the outer Codex Desktop Auto-review gate.
+
+**Claude workflow commands are shaped for host analysis without weakening safety controls.** Routine
+build, package, parity, staging, boundary, and freeze work now uses literal, single-purpose shell
+calls and fresh outputs instead of opaque multi-line programs or delete-and-rebuild chains. Genuine
+multi-step logic moves to a reviewable helper, while recursive deletion remains a distinct host-
+approved action. No broad Bash allow rule, permission bypass, or approval hook was added.
+
+The README badge and version history now publish 6.1, and the release contract requires the top
+numeric changelog release, README badge, and first README history row to stay synchronized. The
+installer continues reading this top changelog heading for downstream drift detection. Deterministic
+source, dispatcher, materialization, and installer tests are green; the physical Codex Desktop
+consent journeys, Claude Desktop command-shaping journeys, and Windows PowerShell runtime remain
+explicit qualification gates rather than inferred passes.
+
 ## 6.0 — 2026-08-27
 
 **Breaking harness release: Claude Code and Codex are now equal hosts over one canonical Forge.**

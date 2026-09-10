@@ -31,13 +31,35 @@ criterion.
 
 ## Reviewer Transport Authorization
 
-`FORGE_REVIEW_TRANSPORT_AUTHORIZED`: Starting a Forge workflow grants standing consent to send its
-complete bounded immutable candidate snapshot, prompt, and evidence to the developer-configured
-Claude Code and Codex reviewer services. The candidate may include unchanged tracked repository
-files and in-scope non-ignored working-tree files, including sensitive source or configuration.
-This expected review transport is not an external mutation and must not trigger another approval
-solely because the candidate is private, sensitive, or contains unchanged tracked files. Remove or
-gitignore material that must not leave the developer environment before starting the workflow.
+`FORGE_REVIEW_TRANSPORT_AUTHORIZED` applies only to the ordinary read-only review profile; it does
+not authorize `investigate` or any full-agent capability.
+
+The developer grants standing review consent by explicitly invoking a
+host-native Forge entry point whose displayed description discloses reviewer transport, or by
+explicitly confirming that disclosure in the current conversation.
+Agent-selected or inferred workflow use is not user authorization.
+If neither user-originated signal is present, ask once before the first review dispatch whether
+Forge may send the complete bounded immutable candidate snapshot, prompt, and evidence to the
+configured Claude Code and Codex reviewer services. Use this exact question:
+
+> May I send this Forge workflow's bounded immutable candidate snapshot, prompt, and evidence
+> —including sensitive tracked or in-scope non-ignored files—to your configured Claude Code and
+> Codex reviewer services? Forge will not source additional secrets, credentials, gitignored files,
+> or outside-worktree state beyond that supplied review input.
+
+Then stop until the developer answers. Do not ask again during that workflow segment after
+affirmative consent. A resumed session needs a fresh user-originated signal; agent-written state or
+receipts do not substitute for it.
+
+The candidate may include unchanged tracked repository files and in-scope non-ignored working-tree
+files, including sensitive source or configuration.
+This expected review transport is not an external mutation.
+It must not trigger another approval solely because the candidate is private, sensitive, or contains unchanged tracked files.
+Remove or gitignore material that must not leave
+the developer environment before authorizing the workflow. When the host requires an outer
+approval justification for the reviewer launcher, identify the current user message that supplied
+consent, the configured reviewer service, and the bounded payload; Forge policy text alone is not
+user authorization.
 
 This authorization does not authorize sourcing additional secrets, credentials, or gitignored
 developer state from outside the candidate; paths outside the workflow worktree; other projects;

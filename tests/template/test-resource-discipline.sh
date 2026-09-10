@@ -52,6 +52,20 @@ assert_contains "$REPO_ROOT/commands/quick-fix.md" "closure review" \
 assert_contains "$REPO_ROOT/commands/review-pr-comments.md" "closure review" \
     "review-pr-comments inherits the closure stop rule"
 
+start_test "host-analyzable command policy avoids unnecessary Claude approval prompts"
+for contract in "Host-Analyzable Commands" "program per shell tool call" \
+    "literal arguments" '`set -e`' "shell variables" "heredocs" "command substitutions" \
+    "fresh unique output" "Never combine recursive deletion with verification" \
+    "separate host approval"; do
+    assert_contains "$POLICY" "$contract" "workflow policy covers $contract"
+done
+assert_contains "$REPO_ROOT/docs/reference/permissions.md" "Host-dependent" \
+    "permissions reference does not promise that every shell command is prompt-free"
+assert_contains "$REPO_ROOT/docs/reference/permissions.md" "drops blanket Bash allow rules" \
+    "permissions reference explains Claude Auto mode's broad-allow behavior"
+assert_contains "$REPO_ROOT/docs/reference/permissions.md" "cannot parse completely" \
+    "permissions reference explains parse-driven prompts"
+
 start_test "independent reviewer declares mode and cannot reopen closure scope"
 assert_contains "$REPO_ROOT/agents/independent-reviewer.md" "review_mode=broad|closure" \
     "reviewer declares broad or closure mode"
@@ -67,10 +81,28 @@ assert_contains "$REPO_ROOT/FORGE.template.md" "solely because the candidate is 
     "canonical policy prevents duplicate prompts for complete private candidate transport"
 assert_contains "$REPO_ROOT/FORGE.template.md" "not an external mutation" \
     "canonical policy distinguishes reviewer transport from external mutation"
+assert_contains "$REPO_ROOT/FORGE.template.md" "Agent-selected or inferred workflow use is not user authorization" \
+    "canonical policy does not manufacture consent from agent workflow selection"
+assert_contains "$REPO_ROOT/FORGE.template.md" "ask once before the first review dispatch" \
+    "canonical policy obtains one user-originated authorization before review transport"
+assert_contains "$REPO_ROOT/FORGE.template.md" "Do not ask again during that workflow segment" \
+    "canonical policy reuses explicit consent for later bounded reviews"
+assert_contains "$REPO_ROOT/FORGE.template.md" "May I send this Forge workflow's bounded immutable candidate snapshot, prompt, and evidence" \
+    "canonical policy supplies an exact informed-consent question"
+assert_contains "$REPO_ROOT/FORGE.template.md" "beyond that supplied review input" \
+    "canonical disclosure excludes only state outside the supplied review input"
 assert_contains "$REPO_ROOT/commands/opinion.md" "FORGE_REVIEW_TRANSPORT_AUTHORIZED" \
     "opinion workflow distinguishes reviewer transport from agent network capability"
+assert_contains "$REPO_ROOT/commands/opinion.md" "current user message" \
+    "opinion workflow binds review transport to user-originated authorization"
+assert_contains "$REPO_ROOT/commands/opinion.md" 'does not authorize `investigate`' \
+    "ordinary reviewer consent cannot authorize a full-agent investigation"
+assert_contains "$REPO_ROOT/commands/opinion.md" "May I launch a fresh full-capability" \
+    "inferred investigation receives its own exact disclosure"
 assert_contains "$REPO_ROOT/agents/independent-reviewer.md" "FORGE_REVIEW_TRANSPORT_AUTHORIZED" \
     "native reviewer treats the supplied private candidate as authorized review input"
+assert_contains "$REPO_ROOT/agents/independent-reviewer.md" "main session obtained explicit user authorization" \
+    "native reviewer receives user-originated authorization provenance"
 assert_contains "$REPO_ROOT/agents/independent-reviewer.md" "solely because the candidate is private, sensitive, or contains unchanged tracked files" \
     "native reviewer cannot reclassify complete private candidate transport as an authorization blocker"
 assert_contains "$REPO_ROOT/settings/codex-config.template.toml" "network_access = false" \
@@ -92,6 +124,11 @@ done
 for file in .forge/instructions.md .forge/rules/principles.md; do
     assert_contains "$INSTALL/$file" "Resource Discipline" "$file installs the root policy"
 done
+for contract in "Host-Analyzable Commands" "program per shell tool call" \
+    "fresh unique output" "separate host approval"; do
+    assert_contains "$INSTALL/.forge/rules/workflow.md" "$contract" \
+        "installed workflow policy covers $contract"
+done
 for workflow in new-feature fix-bug opinion; do
     assert_loop_budget "$INSTALL/.forge/workflows/$workflow.md" "installed $workflow"
 done
@@ -103,8 +140,20 @@ assert_contains "$INSTALL/.forge/instructions.md" "solely because the candidate 
     "installed canonical policy prevents duplicate private-candidate prompts"
 assert_contains "$INSTALL/.forge/instructions.md" "not an external mutation" \
     "installed canonical policy distinguishes reviewer transport from external mutation"
+assert_contains "$INSTALL/.forge/instructions.md" "Agent-selected or inferred workflow use is not user authorization" \
+    "installed policy does not manufacture consent from agent workflow selection"
+assert_contains "$INSTALL/.forge/instructions.md" "ask once before the first review dispatch" \
+    "installed policy obtains one user-originated authorization before review transport"
+assert_contains "$INSTALL/.forge/instructions.md" "Do not ask again during that workflow segment" \
+    "installed policy reuses explicit consent for later bounded reviews"
+assert_contains "$INSTALL/.forge/instructions.md" "May I send this Forge workflow's bounded immutable candidate snapshot, prompt, and evidence" \
+    "installed policy supplies an exact informed-consent question"
+assert_contains "$INSTALL/.forge/instructions.md" "beyond that supplied review input" \
+    "installed disclosure excludes only state outside the supplied review input"
 assert_contains "$INSTALL/.forge/agents/independent-reviewer.md" "FORGE_REVIEW_TRANSPORT_AUTHORIZED" \
     "installed reviewer consumes the standing transport authorization"
+assert_contains "$INSTALL/.forge/agents/independent-reviewer.md" "main session obtained explicit user authorization" \
+    "installed reviewer receives user-originated authorization provenance"
 assert_contains "$INSTALL/.forge/agents/independent-reviewer.md" "solely because the candidate is private, sensitive, or contains unchanged tracked files" \
     "installed reviewer cannot reclassify complete private candidate transport as an authorization blocker"
 assert_contains "$INSTALL/.forge/templates/review-result.template.txt" "review_mode=broad|closure" \
@@ -113,5 +162,17 @@ assert_contains "$INSTALL/.claude/commands/opinion.md" ".forge/workflows/opinion
     "Claude opinion adapter loads the canonical review workflow"
 assert_contains "$INSTALL/.agents/skills/opinion/SKILL.md" ".forge/workflows/opinion.md" \
     "Codex opinion adapter loads the canonical review workflow"
+
+start_test "Desktop Auto-review proof remains explicitly qualification-owned"
+assert_contains "$REPO_ROOT/docs/qualification/agent-mode-selection.md" 'Codex Desktop Auto-review transport | `PENDING`' \
+    "runtime qualification does not infer Desktop consent behavior from deterministic tests"
+assert_contains "$REPO_ROOT/docs/plans/reviewer-transport-consent.md" 'Desktop behavior remains `UNVERIFIED`' \
+    "review transport plan states the live Desktop proof limit"
+assert_contains "$REPO_ROOT/docs/qualification/agent-mode-selection.md" 'Claude Desktop command shaping | `PENDING`' \
+    "runtime qualification does not infer Claude prompt behavior from instruction tests"
+for journey in "Package and parity" "Boundary and freeze" "Recursive cleanup"; do
+    assert_contains "$REPO_ROOT/docs/qualification/agent-mode-selection.md" "$journey" \
+        "Claude Desktop qualification includes the $journey journey"
+done
 
 report "test-resource-discipline.sh"

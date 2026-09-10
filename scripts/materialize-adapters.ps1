@@ -262,9 +262,20 @@ function Render-Adapter {
     param([string]$Template, [string]$Destination, [string]$CanonicalPath, [string]$Revision)
     $name = [IO.Path]::GetFileNameWithoutExtension($Destination)
     if ([IO.Path]::GetFileName($Destination) -eq "SKILL.md") { $name = Split-Path (Split-Path $Destination -Parent) -Leaf }
+    $description = "Forge adapter for $name"
+    if ($CanonicalPath -in @(
+        '.forge/workflows/opinion.md',
+        '.forge/workflows/new-feature.md',
+        '.forge/workflows/fix-bug.md',
+        '.forge/workflows/quick-fix.md',
+        '.forge/workflows/review-pr-comments.md',
+        '.forge/skills/council/SKILL.template.md'
+    )) {
+        $description += '. Invoking it authorizes only ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services. Investigation is excluded; investigate launches a separate full agent in the real worktree with normal config, tools, network, and write access under host approvals.'
+    }
     $text = [IO.File]::ReadAllText($Template)
     $text = $text.Replace("{{CANONICAL_PATH}}", $CanonicalPath).Replace("{{CANONICAL_REVISION}}", $Revision).Replace("{{REVISION}}", $Revision)
-    $text = $text.Replace("{{NAME}}", $name).Replace("{{DESCRIPTION}}", "Forge adapter for $name").Replace("{{TOOLS}}", "Read, Grep, Glob, Bash").Replace("{{MODEL}}", "inherit")
+    $text = $text.Replace("{{NAME}}", $name).Replace("{{DESCRIPTION}}", $description).Replace("{{TOOLS}}", "Read, Grep, Glob, Bash").Replace("{{MODEL}}", "inherit")
     $parent = Split-Path -Parent $Destination
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     [IO.File]::WriteAllText($Destination, $text, $Utf8NoBom)

@@ -29,10 +29,12 @@ report after the bytes freeze; this tracked document does not self-certify a lat
 | Codex CLI identity | `PASS` | `codex-cli 0.144.1`; physical binary SHA-256 `29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a` |
 | Codex authentication | `PASS` | `codex login status` returned `Logged in using ChatGPT` |
 | Codex guarded dispatch | `PASS` | Authenticated opinion, full-agent investigation, exact-id resume, and both mixed-council topologies passed in a disposable project |
+| Codex Desktop Auto-review transport | `PENDING` | Deterministic tests prove installed disclosure and user-provenance policy, not whether the Desktop approval reviewer recognizes or reuses that consent |
 | Codex native `/goal` | `BLOCKED` | No sealed physical operator TUI capture; `codex exec` and fake output are not substitutes |
 | Claude Code identity | `PASS` | `2.1.237 (Claude Code)`; physical binary SHA-256 `338901351d4ff17495738c67fc3e12a32c1b506738ac5e012eb782d3d8b5be43` |
 | Claude authentication | `PASS` | Physical operator login completed; `claude auth status` returned `loggedIn: true`, `authMethod: claude.ai` |
 | Claude guarded dispatch | `PASS` | Authenticated opinion, full-agent investigation, exact-id resume, and both mixed-council topologies passed in a disposable project |
+| Claude Desktop command shaping | `PENDING` | Deterministic tests prove installed instructions, not whether the current Auto-mode classifier accepts the resulting literal, single-purpose shell calls |
 | Claude native `/goal` | `BLOCKED` | Not invoked: the live oracle requires a separate operator-issued goal authorization receipt |
 | Live Windows/native qualification | `PENDING` | Requires Windows PowerShell 5.1 plus authenticated host execution on the release candidate |
 
@@ -53,6 +55,44 @@ the intentionally different mode: a fresh selected-engine process with normal us
 skills, MCP, state, memory, network, and worktree access. Forge does not add a declared-channel or
 disposable-candidate restriction there. `investigation-repro` remains the separate isolated path for
 certifying a reproduction.
+
+## Codex Desktop consent qualification
+
+This boundary remains `PENDING` until a physical operator records all three journeys against the
+same release candidate and Codex Desktop version:
+
+1. Explicitly invoke a disclosed review-capable Forge entry point. Confirm the first and second
+   ordinary review launch without an additional disclosure prompt.
+2. Start the same workflow from ordinary prose. Confirm Forge asks the canonical disclosure once,
+   then—after an affirmative user reply—the first and second ordinary review launch without another
+   disclosure prompt.
+3. Start a fresh Desktop task without an explicit disclosed entry invocation. Confirm prior task
+   consent is not reused and Forge asks the canonical disclosure again before review.
+
+Record the Desktop version, exact candidate SHA, task identifiers, and pass/fail outcome outside the
+repository. Do not store candidate content, credentials, or private transcript text in the receipt.
+Fake engines, isolated child CLI runs, generated adapter text, and agent-authored receipts cannot
+satisfy this qualification.
+
+## Claude Desktop command-shaping qualification
+
+This boundary remains `PENDING` until a physical operator runs the same release candidate through
+the representative downstream work and records these journeys:
+
+1. **Package and parity:** create a fresh uniquely named package, validate it, and compare extracted
+   content through separate literal calls. Confirm the non-destructive calls do not recreate the
+   opaque multi-line permission prompts.
+2. **Boundary and freeze:** run repository-boundary validation and candidate freeze as separate
+   calls after packaging. Confirm neither call inherits unrelated deletion, redirection, heredoc,
+   variable, or pipeline syntax.
+3. **Recursive cleanup:** first prefer a fresh output or temporary directory. If an exact generated
+   tree truly must be recursively deleted, confirm deletion is isolated from all verification work
+   and receives its separate host approval; the qualification must not classify that real safety
+   prompt as a regression.
+
+Record the Claude Desktop and Claude Code versions, exact candidate SHA, tool-call descriptions, and
+pass/fail outcome outside the repository without preserving private command payloads. Instruction
+and materialization tests cannot prove a live Auto-mode classifier decision.
 
 ## Final qualification command
 

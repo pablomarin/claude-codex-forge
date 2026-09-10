@@ -16,13 +16,19 @@ General is hermetic and read-only. Resolve the workflow's persisted immutable ba
 `.forge/local/state.md`; never recompute it from a moving default branch. Put the exact request in a
 regular prompt file under `.forge/local/reviews/`.
 
-`FORGE_REVIEW_TRANSPORT_AUTHORIZED`: Starting the Forge workflow already authorizes sending the
-complete bounded immutable candidate snapshot, prompt, and evidence to the developer-configured
-Claude Code or Codex reviewer service. Private, sensitive, or unchanged tracked candidate content
-does not require another approval. This expected transport is not an external mutation and does not
-grant the reviewer arbitrary network tools or authority to source additional secrets, credentials,
-or gitignored developer state from outside the candidate; access outside the worktree; other
-projects; arbitrary destinations; or external mutations.
+For the ordinary review profile, `FORGE_REVIEW_TRANSPORT_AUTHORIZED` requires verifying that a
+current user message in this
+workflow segment either explicitly invoked this host-native entry point after its displayed
+transport disclosure or affirmatively accepted the canonical one-time disclosure. Agent-selected
+workflow use and agent-written state are not consent. If that user-originated signal is absent,
+apply the canonical reviewer transport preflight and stop for the answer. After consent, send the complete bounded
+immutable candidate snapshot, prompt, and evidence to the developer-configured Claude Code or Codex
+reviewer service without another approval solely because the candidate is private, sensitive, or
+contains unchanged tracked content. This expected transport is not an external mutation and does
+not grant the reviewer arbitrary network tools or authority to source additional secrets,
+credentials, or gitignored developer state from outside the candidate; access outside the
+worktree; other projects; arbitrary destinations; or external mutations.
+This standing review consent does not authorize `investigate`.
 
 Invoke the fixed launcher for this host:
 
@@ -61,6 +67,17 @@ row. An unsupported or false claimed-current-behavior edge is a P1 finding; expl
 inferred Gate-1 briefing edges are exempt.
 
 ## Investigation
+
+Ordinary reviewer transport consent does not authorize `investigate`. An explicit user-authored
+`/opinion investigate` or `$opinion investigate` invocation authorizes the separately disclosed
+full-agent launch. If the main agent inferred investigation from ordinary prose, ask exactly:
+
+> May I launch a fresh full-capability reviewer agent in the real worktree? It will inherit the
+> normal user/project configuration, Forge state and memory, tools, MCP servers, network, databases,
+> APIs, and worktree write access. Individual external or destructive mutations still require their
+> existing host approvals.
+
+Stop until the developer answers. Do not substitute ordinary review consent for this authorization.
 
 Use `--profile investigate --role investigation`. This launches a fresh full-capability process of
 the selected engine in the real worktree. It inherits the normal user/project configuration,
