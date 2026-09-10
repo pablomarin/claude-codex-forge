@@ -2751,22 +2751,22 @@ assert_contains "$REPO_ROOT/state.template.md" 'fresh same-engine reviewer' \
 start_test "release version is synchronized across installer source and README"
 assert_contains "$REPO_ROOT/docs/adr/README.md" '0010-dual-engine-canonical-harness.md' \
     "ADR index includes the dual-engine decision"
-EXPECTED_FORGE_VERSION='6.1'
+EXPECTED_FORGE_VERSION='6.2'
 FIRST_CHANGELOG_RELEASE=$(grep -m1 '^## ' "$REPO_ROOT/docs/CHANGELOG.md")
 FIRST_CHANGELOG_VERSION=$(printf '%s\n' "$FIRST_CHANGELOG_RELEASE" | sed -E 's/^## ([0-9]+\.[0-9]+).*/\1/')
 README_BADGE_VERSION=$(sed -n 's/.*badge\/version-\([0-9][0-9.]*\)-blue.*/\1/p' "$README" | head -1)
 README_HISTORY_VERSION=$(sed -n '/^## Version history/,$p' "$README" \
     | sed -n 's/^| \([0-9][0-9.]*\)[[:space:]]*|.*/\1/p' | head -1)
-assert_equals "$FIRST_CHANGELOG_RELEASE" '## 6.1 — 2026-09-10' \
-    "6.1 is the top changelog release"
+assert_equals "$FIRST_CHANGELOG_RELEASE" '## 6.2 — 2026-09-10' \
+    "6.2 is the top changelog release"
 assert_equals "$FIRST_CHANGELOG_VERSION" "$EXPECTED_FORGE_VERSION" \
     "top changelog release carries the expected version"
 assert_equals "$README_BADGE_VERSION" "$EXPECTED_FORGE_VERSION" \
     "README badge matches the release version"
 assert_equals "$README_HISTORY_VERSION" "$EXPECTED_FORGE_VERSION" \
     "first README history row matches the release version"
-assert_contains "$README" 'Review authorization and permission-prompt correction' \
-    "README 6.1 history describes the user-visible release"
+assert_contains "$README" 'Strict V6 structured receipts with cross-host continuation' \
+    "README 6.2 history describes strict receipts and host continuation"
 
 start_test "Forge source repository uses one contributor guide with thin host adapters"
 assert_file_exists "$REPO_ROOT/CONTRIBUTING.md" \

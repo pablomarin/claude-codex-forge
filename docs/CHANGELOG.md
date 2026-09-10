@@ -2,6 +2,33 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.2 — 2026-09-10
+
+**Active V6 workflows now enforce one structured, candidate-bound evidence path.** Canonical V6
+state selects receipt evaluation immediately across ship gates, Stop evidence, and convergence
+accounting; an absent or placeholder candidate path can no longer fall through to checked legacy
+rows. The direct documentation-only commit carveout remains narrow, while push and PR creation
+always require the complete current receipt set.
+
+**The workflow state machine is explicit again for both main engines.** Feature, bug-fix, and quick
+fix workflows create task-local receipt paths at activation, initialize review iteration `0`, keep
+plan approval before production implementation, freeze one staged-clean candidate, increment the
+iteration before paired `code-spec` and `code-quality` review, and invalidate final evidence after
+candidate mutation. E2E may be N/A only through a successful, reasoned report and receipt bound to
+that candidate; verify-app remains PASS-only.
+
+**Same-worktree continuation remains host-neutral.** Codex can resume work started in Claude, and
+Claude can resume work started in Codex, while preserving the workflow base SHA, review iteration,
+next step, and unchanged candidate linkage. `Last active host` and receipt `main_host` remain routing
+and audit metadata rather than leases.
+
+Existing 6.0 and 6.1 projects receive this contract through `setup.sh --upgrade` or
+`setup.ps1 -Upgrade`. Forge V5, mixed, custom, and unknown trees still require the read-only
+`setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun` preview and explicit blocker resolution
+before materialization. Deterministic Bash, static parity, and installer tests qualify this source;
+Windows PowerShell runtime execution remains a CI/live qualification boundary where `pwsh` is not
+installed locally.
+
 ## 6.1 — 2026-09-10
 
 **Reviewer consent is now user-originated at the native host boundary.** Review-capable Claude Code
