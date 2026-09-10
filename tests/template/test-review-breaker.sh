@@ -305,8 +305,7 @@ H="$(git -C "$R" rev-parse HEAD)"
 EXTRA="" tripped_state "$R" "$H"
 run_gate "$R"
 assert_rc 2 "tripped breaker blocks the commit"
-assert_contains_str "POST_CERT_REVIEW_ROUND_LIMIT" "$GATE_ERR" "stderr names the limit"
-assert_contains_str "convergence breaker" "$GATE_ERR" "stderr names the convergence breaker"
+assert_contains_str "final receipt set" "$GATE_ERR" "v6 ignores the legacy certification rows and names receipts"
 
 # --- Gate 2: tripped + a `Code review loop — N/A:` escape → STILL exit 2
 #     (the breaker block precedes the N/A handling and runs on a count-less N/A,
@@ -329,7 +328,7 @@ mkdir -p "$R/.claude/local"
 } > "$R/.claude/local/state.md"
 run_gate "$R"
 assert_rc 2 "count-less N/A does NOT bypass the breaker"
-assert_contains_str "convergence breaker" "$GATE_ERR" "N/A escape still hits the breaker block"
+assert_contains_str "final receipt set" "$GATE_ERR" "N/A escape cannot bypass strict receipts"
 
 # --- Gate 3: tripped + a DOCS-ONLY staged commit → STILL exit 2
 #     (breaker precedes the docs-only carve-out).
@@ -339,8 +338,7 @@ H="$(git -C "$R" rev-parse HEAD)"
 EXTRA="" tripped_state "$R" "$H"
 mkdir -p "$R/docs"; echo "note" >> "$R/docs/CHANGELOG.md"; git -C "$R" add docs/CHANGELOG.md
 run_gate "$R"
-assert_rc 2 "a docs-only staged diff does not get past the breaker"
-assert_contains_str "convergence breaker" "$GATE_ERR" "docs-only commit still hits the breaker block"
+assert_rc 0 "untrusted legacy breaker rows do not block the docs-only carve-out"
 
 # --- Gate 4: tripped + adjudication at current head → breaker RELEASES.
 #     The other pre-ship gates are all checked, so a released breaker should let
@@ -354,7 +352,7 @@ EXTRA="- [x] Post-certification tail adjudicated by human — accepted P2 tail �
 " tripped_state "$R" "$H"
 run_gate "$R"
 assert_not_contains_str "convergence breaker" "$GATE_ERR" "current-head adjudication releases the breaker"
-assert_rc 0 "released breaker + all other gates checked (E2E N/A) → commit allowed"
+assert_rc 2 "human adjudication cannot replace the strict receipt set"
 
 # --- Gate 5: untripped happy path → no breaker message (cert at 1, loop 2 = 1 round)
 start_test "gate 5: untripped (1 post-cert round) → no breaker message, commit allowed"
@@ -377,7 +375,7 @@ mkdir -p "$R/.claude/local"
 } > "$R/.claude/local/state.md"
 run_gate "$R"
 assert_not_contains_str "convergence breaker" "$GATE_ERR" "1 post-cert round is under the limit → breaker inert"
-assert_rc 0 "untripped happy path → commit allowed"
+assert_rc 2 "untripped legacy rows still cannot replace strict receipts"
 
 # ===========================================================================
 # PowerShell parity — re-run cases d, f, h through Invoke-ReviewBreaker via the
@@ -400,8 +398,8 @@ printf '6\n' > "$R/.forge/version"
   echo "- [x] Code review iteration 1 — pr-toolkit clean — head=\`${H}\`"
 } > "$R/.forge/local/state.md"
 RB_OUT="$( (cd "$R" && bash "$HELPER") 2>/dev/null )"
-assert_contains_str 'CERTIFIED:yes' "$RB_OUT" \
-    "canonical state is authoritative without a Claude-specific argv path"
+assert_contains_str 'CERTIFIED:no' "$RB_OUT" \
+    "canonical v6 state without receipts never falls back to legacy rows"
 
 start_test "installed v6 gate resolves its canonical breaker before legacy fallbacks"
 mkdir -p "$R/.forge/hooks/lib"
@@ -423,11 +421,11 @@ cp "$HELPER" "$R/.forge/hooks/lib/review-breaker.sh"
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' "$R" \
   | (cd "$R" && bash .forge/hooks/check-workflow-gates.sh) > "$R/v6-installed.out" 2>&1
 assert_equals "$?" "2" "installed canonical breaker blocks a tripped unadjudicated tail"
-assert_contains "$R/v6-installed.out" 'convergence breaker' "installed gate reports canonical breaker trip"
+assert_contains "$R/v6-installed.out" 'final receipt set' "installed gate reports the missing receipt set"
 echo "- [x] Post-certification tail adjudicated by human — accepted tail — head=\`${H}\` — ts=\`2026-08-27T00:00:00Z\`" >> "$R/.forge/local/state.md"
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' "$R" \
   | (cd "$R" && bash .forge/hooks/check-workflow-gates.sh) > "$R/v6-adjudicated.out" 2>&1
-assert_equals "$?" "0" "installed canonical breaker allows a current-head human adjudication"
+assert_equals "$?" "2" "installed canonical breaker still requires receipts after adjudication"
 
 detect_pwsh() {
     if command -v pwsh >/dev/null 2>&1; then echo "pwsh"; return 0; fi
@@ -490,6 +488,21 @@ assert_contains "$HELPER_PS" 'REVIEWS_VALID:true' \
     "PowerShell breaker mirrors receipt-v2 pair certification"
 assert_contains "$HELPER_PS" '$v2Active = $true' \
     "PowerShell breaker disables legacy rows after receipt-v2 activation"
+
+start_test "v6 schema without receipt linkage never falls back to legacy certification rows"
+build_repo
+H="$(git -C "$R" rev-parse HEAD)"
+mkdir -p "$R/.forge/local"
+{
+    printf '<!-- forge:state-schema v6 -->\n'
+    printf '## Workflow\n\n### Checklist\n'
+    printf '%s\n' "- [ ] Code review loop (5 iterations) — iterate until clean"
+    printf '%s\n' "- [x] Code review iteration 1 — codex clean — head=\`$H\`"
+    printf '%s\n' "- [x] Code review iteration 1 — pr-toolkit clean — head=\`$H\`"
+} > "$R/.forge/local/state.md"
+(cd "$R" && bash "$HELPER" .forge/local/state.md) > "$R/.breaker-v6-no-receipts" 2>&1
+assert_contains "$R/.breaker-v6-no-receipts" 'CERTIFIED:no' \
+    "Bash breaker rejects legacy certification rows under a v6 schema"
 
 # lib.sh's EXIT trap prints scratch info; emit the summary explicitly.
 report "test-review-breaker.sh"

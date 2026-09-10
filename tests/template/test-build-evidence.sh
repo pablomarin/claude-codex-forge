@@ -330,7 +330,7 @@ assert_contains "$OUT" '"pr_authorization":{"authorized":false' "authorized=fals
 # Task 7: pr_ready, all_gates_green, progress_fingerprint
 # ---------------------------------------------------------------------------
 
-start_test "build-evidence.sh computes pr_ready=true when all conditions met"
+start_test "build-evidence.sh refuses legacy all-green state without receipts"
 
 scratch=$(scratch_dir bevidence-prready)
 mkdir -p "$scratch/.claude/local" "$scratch/bin"
@@ -396,9 +396,8 @@ STUB
 )
 
 OUT="$scratch/.out"
-assert_contains "$OUT" '"pr_ready":true' "pr_ready=true with full state"
-# all-green.md has ALL 8 items checked → DONE_COUNT==TOTAL_COUNT==8 AND pr_ready=true
-assert_contains "$OUT" '"all_gates_green":true' "all_gates_green=true (all items checked + pr_ready)"
+assert_contains "$OUT" '"pr_ready":false' "legacy all-green rows cannot certify active v6"
+assert_contains "$OUT" '"all_gates_green":false' "missing receipts keep the aggregate gate false"
 
 start_test "build-evidence.sh computes pr_ready=false when E2E report missing"
 
@@ -589,8 +588,8 @@ bev_scope_repo; bev_install_helper "$R"
 H="$(git -C "$R" rev-parse HEAD)"
 bev_breaker_state "$R" "$H" ""
 bev_run_fullgreen "$R"
-assert_contains "$GATE_OUT" '"breaker":"tripped"' "loop 5 − cert 1 = 4 > 3 → tripped"
-assert_contains "$GATE_OUT" '"post_cert_rounds":4' "post_cert_rounds = 4"
+assert_contains "$GATE_OUT" '"breaker":"ok"' "v6 legacy rows cannot establish breaker certification"
+assert_contains "$GATE_OUT" '"post_cert_rounds":0' "uncertified v6 evidence has zero post-cert rounds"
 assert_contains "$GATE_OUT" '"pr_ready":false' "tripped breaker suppresses pr_ready even with all gates green"
 
 # --- Breaker + adjudication at CURRENT head → pr_ready no longer suppressed
@@ -600,8 +599,8 @@ H="$(git -C "$R" rev-parse HEAD)"
 bev_breaker_state "$R" "$H" \
     "- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${H}\` — ts=\`2026-06-06T00:00:00Z\`"
 bev_run_fullgreen "$R"
-assert_contains "$GATE_OUT" '"breaker":"tripped"' "breaker still reports tripped (raw count)"
-assert_contains "$GATE_OUT" '"pr_ready":true' "current-head adjudication clears the breaker suppression"
+assert_contains "$GATE_OUT" '"breaker":"ok"' "legacy rows remain uncertified despite adjudication"
+assert_contains "$GATE_OUT" '"pr_ready":false' "adjudication cannot replace candidate-bound receipts"
 
 # --- Breaker + adjudication at STALE head → still suppressed
 start_test "bev breaker: adjudication at STALE head keeps pr_ready false"
@@ -611,12 +610,12 @@ STALE="0000000000000000000000000000000000000000"
 bev_breaker_state "$R" "$H" \
     "- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${STALE}\` — ts=\`2026-06-06T00:00:00Z\`"
 bev_run_fullgreen "$R"
-assert_contains "$GATE_OUT" '"breaker":"tripped"' "breaker reports tripped"
+assert_contains "$GATE_OUT" '"breaker":"ok"' "stale legacy rows remain uncertified"
 assert_contains "$GATE_OUT" '"pr_ready":false' "stale-head adjudication does not clear the breaker"
 
 # --- Helper absent: no installed helper, no source fallback (scratch repo outside
 #     the forge tree) → fields 0/ok, legacy reviewer_gate still computes clean.
-start_test "bev breaker: helper absent → post_cert_rounds 0 / breaker ok, legacy pair still clean"
+start_test "bev breaker: helper absent → active v6 remains non-certifying"
 bev_scope_repo   # NOTE: bev_install_helper intentionally NOT called.
 # Scratch repo lives in $TMPDIR, outside the forge tree: $TOPLEVEL is the scratch
 # repo, so neither .claude/hooks/lib/review-breaker.sh nor the hooks/lib/ source
@@ -637,7 +636,7 @@ GATE_OUT="$R/.bev.out"
 ( cd "$R" && run_evidence ) >"$GATE_OUT" 2>&1
 assert_contains "$GATE_OUT" '"post_cert_rounds":0' "helper absent → post_cert_rounds 0 (fail-open)"
 assert_contains "$GATE_OUT" '"breaker":"ok"' "helper absent → breaker ok (fail-open)"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":true' "helper absent → legacy pair still computes clean"
+assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "helper absence cannot restore legacy v6 certification"
 
 # --- PowerShell parity smoke (only runs if pwsh is on PATH) ---
 if command -v pwsh >/dev/null 2>&1; then
@@ -860,6 +859,20 @@ assert_contains "$V2/.forge/local/evidence/evidence.out" '"verification_gate":{"
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
     | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$V2/.forge/local/evidence/gate-valid.out" 2>&1
 assert_equals "$?" "0" "ship hook accepts the complete current receipt set"
+
+start_test "receipt-v2: host switch preserves an unchanged candidate and its receipts"
+sed -i.bak 's/| Last active host | claude |/| Last active host | codex |/' "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check \
+    --state .forge/local/state.md) > "$V2/.forge/local/evidence/host-switch-check.out" 2>&1
+assert_equals "$?" "0" "Codex can resume Claude receipts when candidate bytes are unchanged"
+assert_contains "$V2/.forge/local/evidence/host-switch-check.out" 'SHIP_READY:true' \
+    "host metadata is not a candidate lease"
+sed -i.bak 's/| Last active host | codex |/| Last active host | claude |/' "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check \
+    --state .forge/local/state.md) >/dev/null 2>&1
+assert_equals "$?" "0" "switching back to Claude preserves the same receipt set"
 
 start_test "receipt-v2: candidate-bound E2E N/A is explicit, justified, and verifier-specific"
 printf 'VERDICT: N/A\nSUGGESTED_PATH: .forge/local/evidence/receipt-v2/e2e-report.md\nN/A_REASON: internal harness-only change with no user surface\n' \

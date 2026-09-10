@@ -128,17 +128,11 @@ function Invoke-ReviewBreaker {
         }
     }
 
-    # --- certification: receipt-v2 first, legacy rows only when unconverted ---
+    # --- certification: a v6 schema marker always selects receipt-v2 ---
     $CERT_N = $null
     $CERT_HEAD = ''
     $v2Active = $false
-    $candidateRows = @()
-    foreach ($ln in $lines) {
-        $parts = $ln -split '\|'
-        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') { $candidateRows += $parts[2].Trim() }
-    }
-    $candidateReceipt = if ($candidateRows.Count -eq 1) { [string]$candidateRows[0] } else { '' }
-    if ($candidateReceipt -and -not $candidateReceipt.Contains('<')) {
+    if ($lines.Count -gt 0 -and $lines[0] -eq '<!-- forge:state-schema v6 -->') {
         $v2Active = $true
         $verificationReceipt = Join-Path $PSScriptRoot 'verification-receipt.ps1'
         if (Test-Path -LiteralPath $verificationReceipt) {

@@ -186,7 +186,7 @@ function Parse-GoalSession {
 # Scoped to ## Workflow block (checklist under ### Checklist).
 # ---------------------------------------------------------------------------
 function Parse-Workflow {
-    $result = @{ phase = ""; next_step = ""; total = 0; done = 0 }
+    $result = @{ command = ""; phase = ""; next_step = ""; total = 0; done = 0 }
     $lines = Read-StateMdLines
     $inWorkflow = $false
     $inChecklist = $false
@@ -198,8 +198,14 @@ function Parse-Workflow {
         if ($line -match '^### Checklist') { $inChecklist = $true; continue }
         if ($line -match '^### ' -and $line -notmatch '^### Checklist') { $inChecklist = $false; continue }
 
-        # Markdown table: | Phase | <value> |
-        if ($line -match '^\|\s*Phase\s*\|') {
+        # Markdown table: | Command | <value> |
+        if ($line -match '^\|\s*Command\s*\|') {
+            $parts = $line -split '\|'
+            if ($parts.Count -ge 3) {
+                $result.command = $parts[2].Trim()
+            }
+        }
+        elseif ($line -match '^\|\s*Phase\s*\|') {
             $parts = $line -split '\|'
             if ($parts.Count -ge 3) {
                 $result.phase = $parts[2].Trim()
@@ -541,6 +547,7 @@ $GoalNonce = $goalSession.nonce
 $GoalCmd = $goalSession.workflow_command
 
 $wf = Parse-Workflow
+$ActiveWorkflowCmd = $wf.command
 $Phase = $wf.phase
 $NextStep = $wf.next_step
 $TotalCount = $wf.total
@@ -551,19 +558,22 @@ $RgClean = if ($rg.clean) { "true" } else { "false" }
 $RgIter = $rg.matched_iteration
 $RgHead = $rg.matched_head
 
-# An explicit Candidate receipt activates receipt-v2. Genuine unconverted
-# workflows retain the legacy checklist reader; migrated evidence cannot use it
-# because migration removes those rows and receipt linkages.
+# Every active canonical v6 workflow is receipt-v2, including its initial
+# placeholder state. Receipt linkage is evidence to validate, not an activation
+# switch. Inactive v6 state and genuine pre-migration state remain readable.
 $CandidateClean = "false"
 $VerifyAppClean = "false"
 $E2eReceiptClean = "false"
 $ShipReceiptsClean = "false"
 $ReceiptGateOk = $true
 $CandidateId = ""
-$receiptCandidate = Get-ReceiptStateValue "Candidate receipt"
-if (-not [string]::IsNullOrEmpty($receiptCandidate) -and -not $receiptCandidate.Contains('<')) {
+$WorkflowActive = (-not [string]::IsNullOrEmpty($ActiveWorkflowCmd)) -and
+    $ActiveWorkflowCmd -ne 'none' -and $ActiveWorkflowCmd -ne ([char]0x2014).ToString() -and $ActiveWorkflowCmd -ne '-'
+if ($StateIsV6 -and $WorkflowActive) {
     $ReceiptGateOk = $false
-    if ($StateIsV6 -and (Test-Path -LiteralPath $VerificationReceiptPs1)) {
+    $RgClean = "false"
+    $E2eFresh = "false"
+    if (Test-Path -LiteralPath $VerificationReceiptPs1) {
         . $VerificationReceiptPs1
         $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateMd
         $vrOut = @($vrResponse.Lines)

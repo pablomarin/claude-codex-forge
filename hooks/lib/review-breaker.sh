@@ -63,12 +63,11 @@ NA_COUNTLESS=0
 echo "$CHECKLIST" | grep -E 'Code review loop' | grep -E 'N/A:' \
     | grep -qvE '\([0-9]+ iterations\)' && NA_COUNTLESS=1
 
-# Certification: receipt-v2 uses the first iteration whose distinct code-spec
-# and code-quality receipts validate for one immutable candidate. Workflows not
-# yet converted retain the v5 Codex/PR-toolkit row reader through v6.0.
+# Certification: a v6 schema marker always selects receipt-v2, even before a
+# candidate path exists. Legacy rows remain readable only for pre-v6 state.
 CERT_N=""; CERT_HEAD=""; V2_ACTIVE=false
-V2_CANDIDATE=$(tr -d '\r' < "$STATE" | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
-case "$V2_CANDIDATE" in ''|*'<'*) ;; *)
+V2_SCHEMA=$(sed -n '1{s/\r$//;p;}' "$STATE")
+case "$V2_SCHEMA" in '<!-- forge:state-schema v6 -->')
     V2_ACTIVE=true
     VR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/verification-receipt.sh"
     [ -f "$VR" ] || VR="hooks/lib/verification-receipt.sh"
