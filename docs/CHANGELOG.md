@@ -35,13 +35,22 @@ opinion launches a fresh full-capability engine in the real worktree with normal
 memory, tools, MCP, and network, then requires independent primary/control reproduction. Both hosts compose their native `/goal` over the same persistent
 objective, nonce, resume, evidence, budget, and human-only PR authorization contract.
 
-Starting a Forge workflow now explicitly grants standing consent to transport its complete bounded
-immutable candidate, prompt, and evidence to developer-configured Claude Code and Codex reviewer
-services. Private, sensitive, or unchanged tracked candidate content no longer causes a duplicate
-disclosure prompt. The authorization does not extend to sourcing additional secrets, credentials,
-or gitignored developer state from outside the candidate; outside-worktree paths; other projects;
-arbitrary destinations; or any external mutation. Ordinary review remains hermetic and
-investigation retains its existing full-agent boundary.
+Native Forge entry points now expose informed standing consent for ordinary reviewer transport in
+their installed descriptions. When Forge infers a workflow from ordinary prose, canonical policy
+asks once before the first review; agent-written policy no longer pretends to be user authorization.
+The intended result is no duplicate prompt for later bounded reviews in the same workflow segment,
+but Codex Desktop Auto-review recognition remains `PENDING` until the physical-operator journeys in
+`docs/qualification/agent-mode-selection.md` pass. Investigation is explicitly excluded from this
+consent and retains its separate full-agent disclosure and host approvals. The authorization does
+not extend to sourcing additional secrets, credentials, or gitignored developer state from outside
+the candidate; outside-worktree paths; other projects; arbitrary destinations; or any external
+mutation. Ordinary review remains hermetic.
+
+Claude workflow guidance now also avoids self-inflicted permission prompts from opaque compound
+shell programs. Routine build, package, parity, staging, boundary, and freeze actions use literal,
+single-purpose calls; fresh output paths replace delete-and-rebuild patterns where practical; and
+recursive deletion is never chained into verification. Forge adds no broad Bash allow or approval
+hook: a genuinely destructive cleanup remains a separate host-controlled action.
 
 Review loops now default to one broad review, one repair, and one closure. P3 or speculative notes do
 not keep a loop open; reachable P0/P1 security, correctness, or data-loss risks still block. The v6

@@ -42,6 +42,29 @@ boundary it can affect, while exact-candidate receipts still require the same fi
 Environment-only Windows, authenticated, and manual gates remain honest final gates; they do not
 trigger implementation loops or authorize fake evidence.
 
+## Host-Analyzable Commands
+
+Shell approval is a host security control; Forge instructions cannot override it. Use one primary
+program per shell tool call with literal arguments for routine build, test, packaging, parity,
+boundary, staging, and fingerprint work. Run from the active worktree and use a command's own path
+or output flags instead of wrapping several phases in one shell program.
+
+Do not introduce `set -e`, shell variables, brace expansion, control flow, or heredocs. Do not
+introduce command substitutions, generated command strings, redirects, pipelines, or chains merely
+to combine actions.
+Use the host's structured read/write tools for file content. When genuine multi-step logic is
+needed, put it in a bounded, reviewable project script and invoke that script separately with
+literal arguments; do not hide the same shell program behind `bash -c`, `sh -c`, or an interpreter
+string.
+
+Prefer a fresh unique output or temporary directory over deleting and rebuilding an existing one.
+Keep package creation, parity comparison, staging, repository-boundary validation, and candidate
+freeze as separate calls. Never combine recursive deletion with verification, packaging, staging,
+boundary checking, or freezing. If an exact generated path truly must be removed, resolve it first
+and perform the real destructive action as a separate host approval; do not bypass, weaken, or
+obfuscate that gate. A host may still request approval after these precautions, which is an honest
+runtime result rather than permission to claim the workflow is prompt-free.
+
 ## Durable State and Host Switching
 
 Read `.forge/local/state.md` before every workflow action. Record the current phase, next unchecked

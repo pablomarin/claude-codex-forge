@@ -91,5 +91,37 @@ The focused contract suite must fail unless:
 
 ## User-journey coverage
 
-This is agent workflow policy, not a product UI/API/CLI journey. E2E is N/A; deterministic contract
-and downstream materialization tests own the supported behavior.
+Deterministic contract and downstream materialization tests own the installed disclosure and
+user-provenance policy. They do not prove the Codex Desktop approval reviewer displays, accepts, or
+reuses that consent. Desktop behavior remains `UNVERIFIED` until a physical operator completes the
+explicit-entry, inferred-workflow/second-review, and fresh-session journeys documented in
+`docs/qualification/agent-mode-selection.md`.
+
+## 2026-09-10 follow-up correction
+
+A real Codex Desktop replay proved the original repair covered only the inner reviewer. The outer
+Auto-review gate evaluates the sandbox/network crossing before `agent-dispatch` starts, so the
+dispatcher-injected sentence is not visible at the decision point. Auto-review also correctly
+rejects an agent-authored policy statement as user authorization for sensitive disclosure.
+
+The corrected boundary makes consent user-originated. Native workflow adapters disclose the
+bounded payload and configured Claude Code/Codex destinations before explicit invocation. If the
+main agent inferred the workflow from ordinary prose, it asks once before the first review and
+reuses that affirmative answer only in the current workflow segment. A fresh session needs a fresh
+user signal. Forge keeps `network_access = false` and installs no broad approval rule, so unrelated
+network access, investigations, and external mutations remain governed by their existing host
+controls.
+
+## Claude shell-prompt follow-up
+
+The downstream replay also exposed unrelated Claude permission prompts around ad hoc multi-line
+packaging programs. Those commands combined variables, heredocs, redirects, pipelines, deletion,
+parity, staging, boundary checks, and freeze work in one tool call. Claude Code correctly could not
+statically approve the whole program, while Forge's explicit `rm -rf` ask rail independently made
+recursive cleanup prompt.
+
+The bounded fix is command shaping, not a wider permission grant: canonical workflow policy now
+requires literal, single-purpose shell calls, reviewed scripts for genuine multi-step logic, fresh
+unique outputs instead of pre-delete/rebuild cycles, and a separate host approval for any real
+recursive deletion. Deterministic tests prove that source and installed policy carry this rule; a
+live Claude session remains the user-visible qualification boundary.

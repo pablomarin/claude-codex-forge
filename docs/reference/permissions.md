@@ -3,14 +3,14 @@
 Permission boundaries enforced by the canonical `.forge/` policy and each host adapter. Exact
 sandbox prompts can differ between Claude Code and Codex; Forge's human-authority boundaries do not.
 
-## Permissions (No Prompts Needed)
+## Routine permission behavior
 
 | Action                                     | Prompt? | Why                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Read any file                              | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Edit/Write files                           | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
-| Run any Bash command (tests, linters, git) | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
-| Forge reviewer dispatch                    | No      | Starting a workflow authorizes transport of its complete bounded immutable candidate, prompt, and evidence to developer-configured Claude Code/Codex reviewer services; private or unchanged tracked content needs no second approval                                                                                                                                                        |
+| Run an ordinary shell command              | Host-dependent | Claude Code recognizes some read-only commands directly. In Auto mode it drops blanket Bash allow rules and evaluates other actions; commands it cannot parse completely can still prompt. Forge therefore requires small, literal, single-purpose calls but does not promise that every shell command is prompt-free                                                                         |
+| Forge reviewer dispatch                    | No after informed entry | Explicitly invoking a disclosed native Forge entry point authorizes its bounded reviewer transport. If Forge inferred the workflow from ordinary prose, it asks once before the first review; private or unchanged tracked content needs no per-review approval after consent                                                                                                               |
 | Skill invocation                           | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Web search and fetch                       | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Context7 MCP tools                         | No      | Auto-approved for docs lookup                                                                                                                                                                                                                                                                                                                                                                |
@@ -24,6 +24,16 @@ sandbox prompts can differ between Claude Code and Codex; Forge's human-authorit
 | `sudo`, `su`                               | Denied  | Privilege escalation                                                                                                                                                                                                                                                                                                                                                                         |
 | `chmod 777`, `dd`, `mkfs`                  | Denied  | Dangerous system commands                                                                                                                                                                                                                                                                                                                                                                    |
 | `rm -rf /`, `rm -rf ~`                     | Denied  | Catastrophic deletion                                                                                                                                                                                                                                                                                                                                                                        |
+
+Claude Code evaluates every subcommand in a compound Bash or PowerShell call, and a matching ask
+rule still wins over an allow rule. Auto mode also drops blanket `Bash`/`PowerShell` allows before
+classification. Forge therefore does not add a broad exception for the screenshots' packaging and
+cleanup commands. Its canonical workflow rule instead separates build, parity, staging, boundary,
+and freeze operations; uses literal arguments; avoids ad hoc shell programs when a structured file
+tool or reviewed script fits; and prefers fresh unique outputs over pre-delete/rebuild cycles.
+Recursive deletion remains a distinct destructive action that can legitimately require approval.
+See Anthropic's current [permission rules](https://code.claude.com/docs/en/permissions#bash) and
+[Auto-mode decision order](https://code.claude.com/docs/en/permission-modes#how-the-classifier-evaluates-actions).
 
 ## What's Denied (permissions deny list)
 
@@ -49,12 +59,19 @@ sandbox prompts can differ between Claude Code and Codex; Forge's human-authorit
 Reviewer transport is narrowly scoped. It is expected review input transfer, not an external
 mutation or a grant of arbitrary network access. The complete candidate can include private or
 sensitive tracked and in-scope non-ignored content; remove or gitignore anything that must not leave
-the developer environment before starting the workflow. Authorization does not extend to sourcing
+the developer environment before authorizing the workflow. An explicit invocation of a native entry
+point carries the disclosure in its displayed description. Agent-inferred workflow selection does
+not manufacture user consent; it requires one affirmative answer in the current conversation, and a
+new session requires a new user-originated signal. Authorization does not extend to sourcing
 additional secrets, credentials, or gitignored developer state from outside the candidate;
 outside-worktree paths; other projects; arbitrary destinations; deploys; publication; destructive
 work; or any other external mutation. Ordinary review remains hermetic; only explicit investigation
 receives the selected host's normal full-agent capabilities, and the existing human mutation
 boundaries still apply.
+
+The installed contract and materialization tests do not prove Codex Desktop Auto-review behavior.
+That host boundary remains `PENDING` until the physical-operator journeys in
+`docs/qualification/agent-mode-selection.md` pass on the release candidate.
 
 ## What's Skipped by Auto-Formatter
 

@@ -147,6 +147,47 @@ for workflow in $converted; do
     assert_file_exists "$codex_path" "Codex adapter installed: $workflow"
 done
 
+start_test "review-capable native workflow entries disclose transport before user invocation"
+review_transport_disclosure='Invoking it authorizes only ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services. Investigation is excluded; investigate launches a separate full agent in the real worktree with normal config, tools, network, and write access under host approvals.'
+for adapter in \
+    .claude/commands/opinion.md \
+    .claude/commands/new-feature.md \
+    .claude/commands/fix-bug.md \
+    .claude/commands/quick-fix.md \
+    .claude/commands/review-pr-comments.md \
+    .claude/skills/council/SKILL.md \
+    .agents/skills/opinion/SKILL.md \
+    .agents/skills/workflow-new-feature/SKILL.md \
+    .agents/skills/workflow-fix-bug/SKILL.md \
+    .agents/skills/workflow-quick-fix/SKILL.md \
+    .agents/skills/workflow-review-pr-comments/SKILL.md \
+    .agents/skills/council/SKILL.md; do
+    assert_contains "$INSTALL/$adapter" "$review_transport_disclosure" \
+        "$adapter gives the user informed reviewer-transport notice before invocation"
+done
+assert_contains "$REPO_ROOT/scripts/materialize-adapters.ps1" "$review_transport_disclosure" \
+    "PowerShell materializer mirrors the informed reviewer-transport disclosure"
+for canonical_path in \
+    .forge/workflows/opinion.md \
+    .forge/workflows/new-feature.md \
+    .forge/workflows/fix-bug.md \
+    .forge/workflows/quick-fix.md \
+    .forge/workflows/review-pr-comments.md \
+    .forge/skills/council/SKILL.template.md; do
+    assert_contains "$REPO_ROOT/scripts/materialize-adapters.sh" "$canonical_path" \
+        "Bash disclosure selector includes $canonical_path"
+    assert_contains "$REPO_ROOT/scripts/materialize-adapters.ps1" "$canonical_path" \
+        "PowerShell disclosure selector includes $canonical_path"
+done
+for adapter in \
+    .claude/commands/prd/discuss.md \
+    .claude/commands/finish-branch.md \
+    .agents/skills/workflow-prd-discuss/SKILL.md \
+    .agents/skills/workflow-finish-branch/SKILL.md; do
+    assert_not_contains "$INSTALL/$adapter" "$review_transport_disclosure" \
+        "$adapter does not claim ordinary-review transport consent"
+done
+
 assert_file_exists "$INSTALL/.forge/agents/forge-v6-producer.md" "canonical producer agent installed"
 assert_file_exists "$INSTALL/.claude/agents/forge-v6-producer.md" "Claude producer agent installed"
 assert_file_exists "$INSTALL/.codex/agents/forge-v6-producer.toml" "Codex producer agent installed"
