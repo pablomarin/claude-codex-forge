@@ -2,6 +2,30 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.1 — 2026-09-10
+
+**Reviewer consent is now user-originated at the native host boundary.** Review-capable Claude Code
+and Codex entry points disclose the bounded immutable candidate, prompt, evidence, and configured
+reviewer services before invocation. Explicit invocation authorizes ordinary reviewer transport;
+when Forge infers a workflow from prose, it asks once before the first review and reuses that answer
+only within the current workflow segment. A fresh session requires a fresh user signal. Investigation
+keeps its separate full-agent disclosure, and Forge still grants no blanket network or external-
+mutation authority. This corrects 6.0's ineffective assumption that agent-authored standing-consent
+text could authorize the outer Codex Desktop Auto-review gate.
+
+**Claude workflow commands are shaped for host analysis without weakening safety controls.** Routine
+build, package, parity, staging, boundary, and freeze work now uses literal, single-purpose shell
+calls and fresh outputs instead of opaque multi-line programs or delete-and-rebuild chains. Genuine
+multi-step logic moves to a reviewable helper, while recursive deletion remains a distinct host-
+approved action. No broad Bash allow rule, permission bypass, or approval hook was added.
+
+The README badge and version history now publish 6.1, and the release contract requires the top
+numeric changelog release, README badge, and first README history row to stay synchronized. The
+installer continues reading this top changelog heading for downstream drift detection. Deterministic
+source, dispatcher, materialization, and installer tests are green; the physical Codex Desktop
+consent journeys, Claude Desktop command-shaping journeys, and Windows PowerShell runtime remain
+explicit qualification gates rather than inferred passes.
+
 ## 6.0 — 2026-08-27
 
 **Breaking harness release: Claude Code and Codex are now equal hosts over one canonical Forge.**
@@ -35,22 +59,13 @@ opinion launches a fresh full-capability engine in the real worktree with normal
 memory, tools, MCP, and network, then requires independent primary/control reproduction. Both hosts compose their native `/goal` over the same persistent
 objective, nonce, resume, evidence, budget, and human-only PR authorization contract.
 
-Native Forge entry points now expose informed standing consent for ordinary reviewer transport in
-their installed descriptions. When Forge infers a workflow from ordinary prose, canonical policy
-asks once before the first review; agent-written policy no longer pretends to be user authorization.
-The intended result is no duplicate prompt for later bounded reviews in the same workflow segment,
-but Codex Desktop Auto-review recognition remains `PENDING` until the physical-operator journeys in
-`docs/qualification/agent-mode-selection.md` pass. Investigation is explicitly excluded from this
-consent and retains its separate full-agent disclosure and host approvals. The authorization does
-not extend to sourcing additional secrets, credentials, or gitignored developer state from outside
-the candidate; outside-worktree paths; other projects; arbitrary destinations; or any external
-mutation. Ordinary review remains hermetic.
-
-Claude workflow guidance now also avoids self-inflicted permission prompts from opaque compound
-shell programs. Routine build, package, parity, staging, boundary, and freeze actions use literal,
-single-purpose calls; fresh output paths replace delete-and-rebuild patterns where practical; and
-recursive deletion is never chained into verification. Forge adds no broad Bash allow or approval
-hook: a genuinely destructive cleanup remains a separate host-controlled action.
+Starting a Forge workflow now explicitly grants standing consent to transport its complete bounded
+immutable candidate, prompt, and evidence to developer-configured Claude Code and Codex reviewer
+services. Private, sensitive, or unchanged tracked candidate content no longer causes a duplicate
+disclosure prompt. The authorization does not extend to sourcing additional secrets, credentials,
+or gitignored developer state from outside the candidate; outside-worktree paths; other projects;
+arbitrary destinations; or any external mutation. Ordinary review remains hermetic and
+investigation retains its existing full-agent boundary.
 
 Review loops now default to one broad review, one repair, and one closure. P3 or speculative notes do
 not keep a loop open; reachable P0/P1 security, correctness, or data-loss risks still block. The v6
