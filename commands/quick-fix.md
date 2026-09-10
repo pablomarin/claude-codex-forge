@@ -11,17 +11,22 @@ architecture decision, and has an obvious verification path. Otherwise use `/fix
    including simultaneous editing. Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
 2. Confirm the branch is not protected. Persist the intended base ref and immutable resolved base SHA
    before the first change.
-3. State the acceptance check and affected files. If behavior changes, write and observe a failing
+   Follow `.forge/rules/workflow.md`: create the task-local evidence directories, populate every receipt path,
+   and initialize `| Review iteration | 0 |` at activation.
+3. State the acceptance check and affected files before production implementation. If behavior changes, write and observe a failing
    test first; documentation-only corrections use a direct rendered/static check instead.
 4. Make the smallest change and run the owning focused check.
 5. Update applicable solution/changelog material. Run the Forge-owned simplification phase only
    when code changed.
 6. Force-stage only explicitly approved ignored artifacts, then `git add -A`; freeze the staged-clean
    candidate.
-7. Run a fresh `code-quality` review, `verify-app`, and applicable E2E read-only against that same
-   candidate. User-facing changes require the feature/regression journey matrix; non-user-facing
+7. At finalization, increment `Review iteration` before reviewer dispatch. Run distinct fresh `code-spec` and
+   `code-quality` reviews concurrently when useful, then `verify-app` and applicable E2E read-only
+   against that same candidate. Both review receipts must name the same candidate and iteration.
+   User-facing changes require the feature/regression journey matrix; non-user-facing
    changes may record E2E N/A with a concrete supported reason.
-8. Any mutation invalidates affected evidence. Restage, refreeze, and rerun the affected final gates.
+8. Any candidate mutation invalidates final review and verifier receipts. Restage, refreeze,
+   increment the iteration before review, and rerun the affected final gates.
 9. Promote the exact candidate and commit. Update `.forge/local/state.md` and verified memory.
 10. Show any push/PR mutation and pause for explicit human authorization. Stop after the requested
     external action; do not merge unless separately authorized.

@@ -99,6 +99,10 @@ evidence is missing, report the result as unverified or blocked rather than succ
 State what you verified, not what you assume. Read files before making claims about them, run the
 owning check before claiming behavior works, and distinguish fact from inference. Bind review and
 verification receipts to the final candidate fingerprint; mutation invalidates earlier evidence.
+Every active canonical V6 shipping action requires the current structured receipt set. Missing,
+placeholder, stale, mixed-candidate, or non-clean receipts block shipping; legacy prose cannot certify
+an active V6 workflow. A direct documentation-only commit retains its narrow carve-out, but push and
+PR creation always enforce the receipt boundary.
 
 ## Protected Content
 

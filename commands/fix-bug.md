@@ -56,6 +56,10 @@ the main agent for this session; there is no permanent main engine.
    - [ ] PR open
    ```
 
+8. Follow the canonical state-transition protocol in `.forge/rules/workflow.md`: create the
+   task-local evidence directories, populate every receipt path, and initialize the table with
+   `| Review iteration | 0 |`. These fields are required at activation, not deferred until review.
+
 ## 1. Systematic Diagnosis
 
 Follow four phases without editing production code early:
@@ -111,6 +115,9 @@ Plan-stage spec-loss is P1 when it could produce the wrong fix; this does **not*
 
 ## 4. TDD Fix
 
+Do not begin this phase before production implementation is authorized by clean plan evidence for
+the current plan candidate.
+
 1. Write the smallest regression test that fails for the proven root cause; observe the RED.
 2. Implement the smallest production change that makes it GREEN.
 3. Run the owning tests and a direct control proving unrelated supported behavior remains intact.
@@ -136,9 +143,11 @@ and persist the unchanged leading header with the report. Handle `VERDICT: FAIL`
 3. Run the Forge-owned simplification phase and apply justified changes.
 4. Force-stage only explicitly approved ignored artifacts, then `git add -A`.
 5. Freeze the staged-clean candidate.
-6. Read-only against that exact candidate: run distinct fresh `code-spec` and `code-quality`
+6. At finalization, increment `Review iteration` before any reviewer dispatch. Read-only against that exact
+   candidate: run distinct fresh `code-spec` and `code-quality`
    reviews, `verify-app`, and the complete feature/regression E2E matrix. Persist reports with their
    leading `VERDICT:` lines and write candidate-bound receipts under `.forge/local/`.
+   Both review receipts must name the same candidate and the incremented iteration.
 7. Promote the exact tree through candidate promotion, then commit.
 
 Before each final code-review iteration: use one broad review, one repair pass, and one closure
@@ -149,7 +158,8 @@ unchanged-candidate concerns do not keep the loop open; a concrete material P2 s
 certification. Run focused owning checks during repair and one complete aggregate after final bytes
 freeze.
 
-A mutation invalidates only evidence whose boundary it can affect; any mutation in the exact-
+A mutation invalidates only evidence whose boundary it can affect. Any candidate mutation
+invalidates final review and verifier receipts; any mutation in the exact-
 candidate boundary requires a new freeze and fresh candidate-bound final receipts. Do not restart
 unrelated focused verification mechanically. Intermediate reviews never satisfy the ship gate.
 Human-readable reports and receipts remain local evidence, not tracked post-verification source.

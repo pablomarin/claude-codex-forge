@@ -42,6 +42,8 @@ assert_contains "$REPO_ROOT/state.template.md" '| Quality review receipt' \
     "state names the per-task quality-review receipt"
 assert_contains "$REPO_ROOT/state.template.md" '| Review iteration' \
     "state binds the receipt pair to one iteration"
+assert_contains "$REPO_ROOT/state.template.md" '| Review iteration       | 0' \
+    "state initializes review iteration at zero"
 assert_contains "$REPO_ROOT/state.template.md" '| Candidate receipt' \
     "state links the immutable staged-clean candidate"
 assert_contains "$REPO_ROOT/state.template.md" '| Verify app receipt' \
@@ -52,6 +54,10 @@ assert_contains "$REPO_ROOT/state.template.md" '| Promotion receipt' \
     "state links exact-tree promotion evidence"
 assert_contains "$REPO_ROOT/state.template.md" '| Council receipt' \
     "state names the council receipt"
+for retained in "base SHA" "review iteration" "next step" "candidate linkage"; do
+    assert_contains "$REPO_ROOT/state.template.md" "$retained" \
+        "cross-host continuation retains $retained"
+done
 
 start_test "Forge memory has isolated local and reviewable durable layers"
 MEM="$(scratch_dir forge-memory)"
@@ -150,7 +156,7 @@ fixture
 EOF
 printf '{"cwd":"%s","tool_input":{"command":"git push"}}' "$MW_MAIN" \
     | (cd "$MW_MAIN" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$MW_MAIN/gate.out" 2>&1
-assert_equals "$?" "0" "main worktree can satisfy only its own local gate state"
+assert_equals "$?" "2" "main worktree legacy rows cannot replace its local receipt set"
 printf '{"cwd":"%s","tool_input":{"command":"git push"}}' "$MW_PEER" \
     | (cd "$MW_PEER" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$MW_PEER/gate.out" 2>&1
 assert_equals "$?" "2" "peer worktree cannot borrow the main worktree local gate state"

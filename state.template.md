@@ -19,7 +19,8 @@
 
 The worktree root and Git common directory are resolved physical paths. The workflow
 base ref and SHA remain immutable for one workflow. Switching between Claude and Codex
-changes only `Last active host`; it never restarts completed gates.
+changes only `Last active host`; it retains the base SHA, review iteration, next step, and
+unchanged candidate linkage, and it never restarts completed gates.
 
 ## Workflow
 
@@ -88,7 +89,7 @@ surface to user.
 
 | Field                  | Value |
 | ---------------------- | ----- |
-| Review iteration       | <integer> |
+| Review iteration       | 0 |
 | Candidate receipt      | .forge/local/evidence/<task-id>/candidate.receipt |
 | Spec review receipt    | .forge/local/reviews/<task-id>/spec.receipt |
 | Quality review receipt | .forge/local/reviews/<task-id>/quality.receipt |
@@ -99,6 +100,9 @@ surface to user.
 
 Each action receipt records `host=<claude|codex>`. Receipt paths are worktree-local;
 they cannot satisfy gates in a sibling worktree.
+Populate every receipt path when the workflow activates. `Review iteration` starts at `0` and is
+incremented before each final paired-review dispatch; a populated candidate path is progress, not
+an evidence-mode switch.
 
 ## State
 
@@ -152,7 +156,7 @@ Claude or Codex of the active workflow; the ship hook gates commit/push/PR on th
 2. Record distinct `code-spec` and `code-quality` review receipts for the same review iteration and candidate. Engine choice is neutral: same-engine reviews and a visible fallback are valid when each receipt records requested engine, actual engine, and fallback reason.
 3. Persist candidate-bound `verify-app` and `e2e` receipts only after their reports are written under `.forge/local/evidence/` and hashed by `verification-receipt`.
 4. Any staged, unstaged, or in-scope untracked mutation invalidates the complete final receipt set. Freeze the new candidate and rerun both review lenses plus both verifiers; never relabel an old receipt.
-5. Genuine unmigrated v5 fixtures retain the legacy checklist reader during dual-read. Once receipt-v2 linkage is present, legacy clean rows cannot certify the workflow.
+5. Genuine unmigrated v5 fixtures retain the legacy checklist reader during dual-read. Every active canonical V6 workflow is receipt-native immediately; legacy clean rows cannot certify it.
 6. Exact-tree promotion revalidates the receipt set before hook execution and compare-and-swap, then records `Promotion receipt`; the real branch is not advanced early.
 7. **Convergence breaker (v5.54):** after the first receipt-certified iteration, more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
    - `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\``

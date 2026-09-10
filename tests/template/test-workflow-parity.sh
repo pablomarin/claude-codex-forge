@@ -55,6 +55,11 @@ if [[ "$stage" == development || "$stage" == complete ]]; then
             assert_contains "$file" "$contract" "$workflow preserves $contract"
         done
         assert_contains "$file" "do not" "$workflow warns without adding a lock"
+        for transition in "Review iteration | 0" "populate every receipt path" \
+            "before production implementation" 'increment `Review iteration` before' \
+            "same candidate" "Any candidate mutation"; do
+            assert_contains "$file" "$transition" "$workflow makes the $transition transition explicit"
+        done
     done
     for workflow in new-feature fix-bug; do
         file="$REPO_ROOT/commands/$workflow.md"
@@ -65,6 +70,8 @@ if [[ "$stage" == development || "$stage" == complete ]]; then
     assert_contains "$REPO_ROOT/commands/new-feature.md" "same-engine reviewer" "new-feature has automatic reviewer fallback"
     assert_contains "$REPO_ROOT/commands/fix-bug.md" "same-engine fallback" "fix-bug has automatic reviewer fallback"
     assert_contains "$REPO_ROOT/commands/quick-fix.md" "falls back automatically" "quick-fix has automatic reviewer fallback"
+    assert_contains "$REPO_ROOT/commands/quick-fix.md" "code-spec" "quick-fix requires the spec review lens"
+    assert_contains "$REPO_ROOT/commands/quick-fix.md" "code-quality" "quick-fix requires the quality review lens"
 fi
 
 if [[ "$stage" == complete ]]; then

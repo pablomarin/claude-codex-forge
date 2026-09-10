@@ -55,6 +55,10 @@ host is the main agent for this session; there is no permanent main engine.
    - [ ] PR open
    ```
 
+8. Follow the canonical state-transition protocol in `.forge/rules/workflow.md`: create the
+   task-local evidence directories, populate every receipt path, and initialize the table with
+   `| Review iteration | 0 |`. These fields are required at activation, not deferred until review.
+
 ## 1. Requirements
 
 Run `/prd:discuss <feature>` and `/prd:create <feature>`. Do not design implementation details in
@@ -107,6 +111,9 @@ the exit requirement of no P0/P1/P2 for the approved plan revision.
 
 ## 4. Implement with TDD
 
+Do not begin this phase before production implementation is authorized by clean plan evidence for
+the current plan candidate.
+
 Execute plan tasks in dependency order by invoking the active host's exact `forge-v6-producer`
 agent type. Supply the bounded acceptance criteria, immutable workflow base SHA, and host runtime
 agent/task ID in every handoff. Every task follows RED → GREEN → refactor and produces the
@@ -141,11 +148,13 @@ Run this order exactly:
 5. Force-stage only the workflow's explicit approved ignored artifacts, then run `git add -A`.
 6. Freeze a staged-clean candidate with `candidate-fingerprint`; record its receipt under
    `.forge/local/evidence/<task-id>/`.
-7. Against that exact candidate, read-only and without mutation:
+7. At finalization, increment `Review iteration` before any reviewer dispatch. Against that exact candidate,
+   read-only and without mutation:
    - dispatch distinct fresh `code-spec` and `code-quality` reviews and verify the pair;
    - run `verify-app`, persist its report with leading `VERDICT:`, and write its receipt;
    - run the complete feature/regression E2E matrix, persist its report with leading `VERDICT:`, and
      write its receipt.
+   Both review receipts must name the same candidate and the incremented iteration.
 8. Promote the exact tree through the candidate promotion helper, then commit.
 
 Before each final code-review iteration: use one broad review, one repair pass, and one closure
@@ -157,7 +166,7 @@ certification. Run focused owning checks during repair and one complete aggregat
 freeze.
 
 Human-readable reports and receipts remain local under `.forge/local/`; they are not post-verification
-source commits. A mutation invalidates only evidence whose boundary it can affect; any mutation in
+source commits. Any candidate mutation invalidates final review and verifier receipts. A mutation in
 the exact-candidate boundary returns to step 5 and requires fresh candidate-bound final receipts.
 Do not restart unrelated focused verification mechanically. Intermediate reviews never satisfy the
 ship gate.

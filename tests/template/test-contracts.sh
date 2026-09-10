@@ -1962,6 +1962,19 @@ for f in state.template.md rules/workflow.md commands/opinion.md; do
             || { fail "$f missing structured review lens: $token"; ok=0; }
     done
 done
+
+start_test "active v6 policy selects strict receipts by schema, never candidate population"
+assert_contains "$REPO_ROOT/FORGE.template.md" "Every active canonical V6 shipping action requires" \
+    "root policy requires strict active-v6 receipts"
+assert_contains "$REPO_ROOT/FORGE.template.md" "legacy prose cannot certify" \
+    "root policy rejects legacy prose certification"
+for active_source in "$REPO_ROOT/hooks/check-workflow-gates.sh" \
+    "$REPO_ROOT/hooks/check-workflow-gates.ps1" "$REPO_ROOT/hooks/build-evidence.sh" \
+    "$REPO_ROOT/hooks/build-evidence.ps1" "$REPO_ROOT/hooks/lib/review-breaker.sh" \
+    "$REPO_ROOT/hooks/lib/review-breaker.ps1" "$REPO_ROOT/rules/workflow.md"; do
+    assert_not_contains "$active_source" "Candidate receipt activates receipt-v2" \
+        "$(basename "$active_source") has no candidate-population activation switch"
+done
 for f in state.template.md rules/workflow.md hooks/build-evidence.sh hooks/build-evidence.ps1; do
     grep -qiF "candidate" "$REPO_ROOT/$f" \
         || { fail "$f missing candidate binding"; ok=0; }

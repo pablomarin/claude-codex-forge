@@ -79,6 +79,29 @@ file capabilities for local evidence. Never infer a clean gate from a successful
 
 ## Plan, Review, and Evidence
 
+### Canonical V6 state transitions
+
+Every development workflow follows this state machine; receipt population records progress and
+never activates a mode:
+
+1. **Activate:** resolve and persist the immutable workflow base ref/SHA, create one task-local
+   `.forge/local/` evidence directory, populate every receipt path, and set `Review iteration` to
+   `0`. The active V6 schema selects structured evidence immediately.
+2. **Plan before code:** for planned feature and bug work, obtain clean candidate-bound plan evidence
+   before production implementation. Quick fixes must record their acceptance check before editing.
+3. **Exercise early:** run preliminary E2E while mutation is still allowed, or record why no
+   supported user journey exists; this is not final certification.
+4. **Freeze:** finish TDD, documentation, and simplification; stage the intended tree and freeze one
+   staged-clean candidate.
+5. **Review:** increment `Review iteration` before dispatch, then run distinct fresh `code-spec` and
+   `code-quality` lenses against the same candidate and iteration.
+6. **Verify:** run `verify-app` and E2E against that same candidate and write their structured
+   receipts. E2E N/A requires its candidate-bound report and reason.
+7. **Invalidate on change:** Any candidate mutation invalidates the final review and verifier
+   receipts. Restage, freeze a new candidate, increment the iteration before review, and rerun the
+   affected final gates.
+8. **Promote:** revalidate the complete receipt set and promote only the exact certified tree.
+
 - Research current documentation before design when a library, API, or provider is involved.
 - Compare viable approaches and send genuine ambiguity to `/council`.
 - Freeze the exact staged-clean candidate before final review or verification.
@@ -89,8 +112,8 @@ file capabilities for local evidence. Never infer a clean gate from a successful
   or access is `BLOCKED`/`UNVERIFIED`, never PASS.
 - Any candidate mutation invalidates affected receipts and restarts from staging/freeze.
 
-The compatibility reader may consume genuine unmigrated v5 state. Once a workflow is migrated,
-new evidence uses the current structured receipts; legacy prose never certifies a migrated gate.
+The compatibility reader may consume genuine unmigrated v5 state. Every active canonical V6
+workflow uses the current structured receipts; legacy prose never certifies a migrated gate.
 
 ## Autonomous Goal Composition
 
