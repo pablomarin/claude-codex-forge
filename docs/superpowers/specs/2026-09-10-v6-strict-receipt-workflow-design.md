@@ -71,10 +71,12 @@ the canonical `.forge/local/state.md` path is V6 state, and a non-empty `Command
 
 For every active V6 shipping action, the hook will invoke the platform-native
 `verification-receipt` checker unconditionally. It will no longer inspect `Candidate receipt` to
-decide whether receipt-v2 is active. Failure to resolve the helper or validate any required state
-field or receipt blocks with a remediation that tells the operator to initialize receipt paths,
-freeze a staged-clean candidate, set the review iteration before dispatch, and rerun both review
-lenses and both verifiers.
+decide whether receipt-v2 is active. The Stop-hook evidence builder and convergence breaker will
+use the same schema-based classification: active canonical V6 state never consults legacy clean
+rows, even before receipt paths are populated. Failure to resolve the helper or validate any
+required state field or receipt blocks with a remediation that tells the operator to initialize
+receipt paths, freeze a staged-clean candidate, set the review iteration before dispatch, and
+rerun both review lenses and both verifiers.
 
 The existing direct documentation-only `git commit` carve-out remains before final receipt
 validation. It permits a checkpoint commit without mutating workflow state. `git push` and
@@ -199,6 +201,9 @@ Tests will be written before implementation and will cover both Bash and PowerSh
 
 - `hooks/check-workflow-gates.sh` and `.ps1`: remove optional V6 receipt activation and enforce the
   current receipt set after the documentation-only carve-out.
+- `hooks/build-evidence.sh` and `.ps1`, plus `hooks/lib/review-breaker.sh` and `.ps1`: derive V6
+  receipt mode from canonical state rather than candidate-path population, so Stop evidence and
+  convergence accounting cannot revive legacy clean rows.
 - `rules/workflow.md`: own the exact final-evidence state-transition protocol.
 - `commands/new-feature.md`, `commands/fix-bug.md`, and `commands/quick-fix.md`: invoke the protocol
   at explicit phase boundaries; make quick-fix final review parity explicit.
