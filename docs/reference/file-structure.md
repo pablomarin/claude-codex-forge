@@ -41,6 +41,7 @@ your-project/
 │   │   │   ├── codex-pty-helper.py     # Unix pty.fork helper
 │   │   │   ├── host-context.sh         # Fixed-target routing metadata adapter (.ps1)
 │   │   │   ├── state-path.sh           # Canonical state resolver (.ps1)
+│   │   │   ├── workflow-state.sh        # Bounded cross-engine state transitions (.ps1)
 │   │   │   └── worktree-lifecycle.sh   # Private harness seed/fold helper (.ps1)
 │   │   ├── session-start.sh              # Branch/drift context (.ps1)
 │   │   ├── check-workflow-gates.sh       # Candidate evidence gates (.ps1)

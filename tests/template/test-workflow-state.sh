@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# Behavioral contract for the bounded cross-engine workflow-state command.
+
+set -u
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+# shellcheck source=lib.sh
+source "$REPO_ROOT/tests/template/lib.sh"
+
+init_counters
+
+GROUP="all"
+if [ "${1:-}" = "--group" ]; then
+    GROUP="${2:-}"
+    shift 2
+fi
+case "$GROUP" in
+    all|show-activate) ;;
+    *) echo "usage: test-workflow-state.sh [--group show-activate|all]" >&2; exit 2 ;;
+esac
+
+HELPER_SH="$REPO_ROOT/hooks/lib/workflow-state.sh"
+HELPER_PS1="$REPO_ROOT/hooks/lib/workflow-state.ps1"
+
+make_repo() {
+    local root
+    root=$(scratch_dir workflow-state)
+    root=$(cd "$root" && pwd -P)
+    mkdir -p "$root/.forge/local"
+    git -C "$root" init -q --initial-branch=main
+    git -C "$root" config user.email "forge-test@example.com"
+    git -C "$root" config user.name "Forge Test"
+    printf '6\n' > "$root/.forge/version"
+    printf 'fixture\n' > "$root/README.md"
+    git -C "$root" add .forge/version README.md
+    git -C "$root" commit -q -m init
+    cp "$REPO_ROOT/state.template.md" "$root/.forge/local/state.md"
+    printf '%s\n' "$root"
+}
+
+run_sh() {
+    local root="$1"
+    shift
+    (cd "$root" && bash "$HELPER_SH" "$@") > "$root/helper.out" 2> "$root/helper.err"
+}
+
+assert_rejected_unchanged() {
+    local root="$1" description="$2" before rc
+    shift 2
+    before=$(hash_file "$root/.forge/local/state.md")
+    run_sh "$root" "$@"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then pass "$description is rejected"; else fail "$description should be rejected"; fi
+    assert_hash_equals "$root/.forge/local/state.md" "$before" "$description leaves state unchanged"
+}
+
+activate_fixture() {
+    local root="$1"
+    run_sh "$root" activate --host claude --workflow quick-fix --task handoff-smoke \
+        --base-ref main --phase diagnosis --next-step 'write RED test'
+}
+
+start_test "show returns canonical V6 state without mutation"
+SHOW_REPO=$(make_repo)
+SHOW_BEFORE=$(hash_file "$SHOW_REPO/.forge/local/state.md")
+run_sh "$SHOW_REPO" show
+SHOW_RC=$?
+assert_equals "$SHOW_RC" "0" "show exits zero"
+if [ -f "$SHOW_REPO/helper.out" ] && cmp -s "$SHOW_REPO/helper.out" "$SHOW_REPO/.forge/local/state.md"; then
+    pass "show emits the exact canonical state"
+else
+    fail "show must emit the exact canonical state"
+fi
+assert_hash_equals "$SHOW_REPO/.forge/local/state.md" "$SHOW_BEFORE" "show does not mutate state"
+
+start_test "activate derives identity and initializes bounded task state"
+ACT_REPO=$(make_repo)
+ACT_BASE=$(git -C "$ACT_REPO" rev-parse main)
+activate_fixture "$ACT_REPO"
+ACT_RC=$?
+assert_equals "$ACT_RC" "0" "activate exits zero"
+assert_contains "$ACT_REPO/.forge/local/state.md" "| Worktree root        | $ACT_REPO |" \
+    "activate records the physical worktree"
+assert_contains "$ACT_REPO/.forge/local/state.md" "| Git common directory | $ACT_REPO/.git |" \
+    "activate records the physical Git-common directory"
+assert_contains "$ACT_REPO/.forge/local/state.md" '| Last active host     | claude |' \
+    "activate records the host"
+assert_contains "$ACT_REPO/.forge/local/state.md" '| Workflow base ref    | main |' \
+    "activate records the base ref"
+assert_contains "$ACT_REPO/.forge/local/state.md" "| Workflow base SHA    | $ACT_BASE |" \
+    "activate resolves the immutable base SHA"
+assert_contains "$ACT_REPO/.forge/local/state.md" '| Command   | /quick-fix handoff-smoke |' \
+    "activate records the workflow command"
+assert_contains "$ACT_REPO/.forge/local/state.md" '| Phase     | diagnosis |' \
+    "activate records phase"
+assert_contains "$ACT_REPO/.forge/local/state.md" '| Next step | write RED test |' \
+    "activate records exact next step"
+assert_contains "$ACT_REPO/.forge/local/state.md" '| Review iteration       | 0 |' \
+    "activate initializes review iteration zero"
+assert_contains "$ACT_REPO/.forge/local/state.md" \
+    '| Candidate receipt      | .forge/local/evidence/handoff-smoke/candidate.receipt |' \
+    "activate initializes candidate receipt path"
+assert_contains "$ACT_REPO/.forge/local/state.md" \
+    '| Spec review receipt    | .forge/local/reviews/handoff-smoke/spec.receipt |' \
+    "activate initializes spec receipt path"
+assert_contains "$ACT_REPO/.forge/local/state.md" \
+    '| Quality review receipt | .forge/local/reviews/handoff-smoke/quality.receipt |' \
+    "activate initializes quality receipt path"
+assert_contains "$ACT_REPO/.forge/local/state.md" \
+    '| Verify app receipt     | .forge/local/evidence/handoff-smoke/verify-app.receipt |' \
+    "activate initializes verify-app receipt path"
+assert_contains "$ACT_REPO/.forge/local/state.md" \
+    '| E2E receipt            | .forge/local/evidence/handoff-smoke/e2e.receipt |' \
+    "activate initializes E2E receipt path"
+assert_contains "$ACT_REPO/.forge/local/state.md" \
+    '| Promotion receipt      | .forge/local/evidence/handoff-smoke/promotion.receipt |' \
+    "activate initializes promotion receipt path"
+assert_contains "$ACT_REPO/.forge/local/state.md" \
+    '| Council receipt        | .forge/local/council/<council-id>/receipt.json |' \
+    "activate leaves Council receipt independently allocated"
+assert_dir_exists "$ACT_REPO/.forge/local/evidence/handoff-smoke" \
+    "activate creates the task evidence directory"
+assert_dir_exists "$ACT_REPO/.forge/local/reviews/handoff-smoke" \
+    "activate creates the task review directory"
+assert_file_missing "$ACT_REPO/.forge/local/council" \
+    "activate does not allocate a Council directory"
+
+start_test "non-terminal identical activation preserves review progress"
+awk '{ if ($0 == "| Review iteration       | 0 |") print "| Review iteration       | 2 |"; else print }' \
+    "$ACT_REPO/.forge/local/state.md" > "$ACT_REPO/.forge/local/state.next"
+mv "$ACT_REPO/.forge/local/state.next" "$ACT_REPO/.forge/local/state.md"
+activate_fixture "$ACT_REPO"
+assert_equals "$?" "0" "identical activation remains idempotent"
+assert_contains "$ACT_REPO/.forge/local/state.md" '| Review iteration       | 2 |' \
+    "identical activation preserves later review iteration"
+
+start_test "activate rejects conflicting or unsafe inputs atomically"
+assert_rejected_unchanged "$ACT_REPO" "different active task" activate --host codex \
+    --workflow quick-fix --task other-task --base-ref main --phase diagnosis --next-step 'write RED test'
+assert_rejected_unchanged "$ACT_REPO" "invalid host" activate --host other \
+    --workflow quick-fix --task handoff-smoke --base-ref main --phase diagnosis --next-step 'write RED test'
+assert_rejected_unchanged "$ACT_REPO" "invalid workflow" activate --host claude \
+    --workflow deploy --task handoff-smoke --base-ref main --phase diagnosis --next-step 'write RED test'
+assert_rejected_unchanged "$ACT_REPO" "path task slug" activate --host claude \
+    --workflow quick-fix --task ../handoff --base-ref main --phase diagnosis --next-step 'write RED test'
+assert_rejected_unchanged "$ACT_REPO" "option-like base ref" activate --host claude \
+    --workflow quick-fix --task handoff-smoke --base-ref --help --phase diagnosis --next-step 'write RED test'
+assert_rejected_unchanged "$ACT_REPO" "pipe in phase" activate --host claude \
+    --workflow quick-fix --task handoff-smoke --base-ref main --phase 'diag|nosis' --next-step 'write RED test'
+assert_rejected_unchanged "$ACT_REPO" "newline in next step" activate --host claude \
+    --workflow quick-fix --task handoff-smoke --base-ref main --phase diagnosis --next-step $'write\nRED test'
+assert_rejected_unchanged "$ACT_REPO" "outer whitespace" activate --host claude \
+    --workflow quick-fix --task handoff-smoke --base-ref main --phase ' diagnosis' --next-step 'write RED test'
+
+start_test "show and activate reject non-canonical state"
+MALFORMED=$(make_repo)
+printf '%s\n' '<!-- forge:state-schema v6 -->' '## Workflow' '| Field | Value |' '| Command | none |' \
+    '| Command | duplicate |' > "$MALFORMED/.forge/local/state.md"
+assert_rejected_unchanged "$MALFORMED" "malformed duplicate state" show
+
+LEGACY=$(make_repo)
+mkdir -p "$LEGACY/.claude/local"
+mv "$LEGACY/.forge/local/state.md" "$LEGACY/.claude/local/state.md"
+rm "$LEGACY/.forge/version"
+run_sh "$LEGACY" show
+if [ "$?" -ne 0 ]; then pass "legacy-only state is rejected"; else fail "legacy-only state must be rejected"; fi
+
+SYMLINKED=$(make_repo)
+mv "$SYMLINKED/.forge/local/state.md" "$SYMLINKED/state-target.md"
+ln -s "$SYMLINKED/state-target.md" "$SYMLINKED/.forge/local/state.md"
+run_sh "$SYMLINKED" show
+if [ "$?" -ne 0 ]; then pass "symlinked canonical state is rejected"; else fail "symlinked state must be rejected"; fi
+
+start_test "PowerShell show/activate runtime parity"
+PWSH=$(command -v pwsh 2>/dev/null || command -v powershell 2>/dev/null || true)
+if [ -z "$PWSH" ]; then
+    skip_test "no pwsh/powershell on PATH; runtime parity remains externally required"
+else
+    PS_REPO=$(make_repo)
+    (cd "$PS_REPO" && "$PWSH" -NoProfile -File "$HELPER_PS1" show) \
+        > "$PS_REPO/helper.out" 2> "$PS_REPO/helper.err"
+    assert_equals "$?" "0" "PowerShell show exits zero"
+    if cmp -s "$PS_REPO/helper.out" "$PS_REPO/.forge/local/state.md"; then
+        pass "PowerShell show emits canonical state"
+    else
+        fail "PowerShell show must emit canonical state"
+    fi
+    (cd "$PS_REPO" && "$PWSH" -NoProfile -File "$HELPER_PS1" activate --host claude \
+        --workflow quick-fix --task handoff-smoke --base-ref main --phase diagnosis \
+        --next-step 'write RED test') > "$PS_REPO/helper.out" 2> "$PS_REPO/helper.err"
+    assert_equals "$?" "0" "PowerShell activate exits zero"
+    assert_contains "$PS_REPO/.forge/local/state.md" '| Command   | /quick-fix handoff-smoke |' \
+        "PowerShell activate records the workflow"
+fi
+
+cleanup_scratch_dirs
+report "test-workflow-state"
