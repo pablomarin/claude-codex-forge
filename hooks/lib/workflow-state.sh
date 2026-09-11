@@ -205,6 +205,58 @@ workflow_state_transform_activate() {
     ' "$state" > "$next"
 }
 
+workflow_state_increment_decimal() {
+    local value="$1" result="" carry=1 index digit next_digit
+    index=$((${#value} - 1))
+    while [ "$index" -ge 0 ]; do
+        digit=${value:$index:1}
+        if [ "$carry" -eq 1 ]; then
+            next_digit=$((digit + 1))
+            if [ "$next_digit" -eq 10 ]; then
+                next_digit=0
+            else
+                carry=0
+            fi
+        else
+            next_digit=$digit
+        fi
+        result="$next_digit$result"
+        index=$((index - 1))
+    done
+    [ "$carry" -eq 0 ] || result="1$result"
+    printf '%s\n' "$result"
+}
+
+workflow_state_transform_checkpoint() {
+    local state="$1" next="$2" host="$3" phase="$4" next_step="$5" iteration="$6"
+    awk -F '|' -v host="$host" -v phase_value="$phase" -v next_value="$next_step" \
+        -v iteration="$iteration" '
+        function trim(value) {
+            sub(/^[ \t]+/, "", value)
+            sub(/[ \t]+$/, "", value)
+            return value
+        }
+        /^## / {
+            section=$0
+            sub(/^## /, "", section)
+        }
+        section == "Identity" && /^\|/ && trim($2) == "Last active host" {
+            print "| Last active host     | " host " |"
+            next
+        }
+        section == "Workflow" && /^\|/ {
+            key=trim($2)
+            if (key == "Phase") { print "| Phase     | " phase_value " |"; next }
+            if (key == "Next step") { print "| Next step | " next_value " |"; next }
+        }
+        section == "Receipts" && /^\|/ && trim($2) == "Review iteration" {
+            print "| Review iteration       | " iteration " |"
+            next
+        }
+        { print }
+    ' "$state" > "$next"
+}
+
 workflow_state_show() {
     local root state
     root=$(workflow_state_root) || {
@@ -334,6 +386,74 @@ workflow_state_activate() {
     }
 }
 
+workflow_state_checkpoint() {
+    local host="" phase="" next_step="" begin_review=false
+    local seen_host=false seen_phase=false seen_next=false seen_begin=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --host)
+                [ "$seen_host" = false ] && [ $# -ge 2 ] || return 2
+                host="$2"; seen_host=true; shift 2 ;;
+            --phase)
+                [ "$seen_phase" = false ] && [ $# -ge 2 ] || return 2
+                phase="$2"; seen_phase=true; shift 2 ;;
+            --next-step)
+                [ "$seen_next" = false ] && [ $# -ge 2 ] || return 2
+                next_step="$2"; seen_next=true; shift 2 ;;
+            --begin-review)
+                [ "$seen_begin" = false ] || return 2
+                begin_review=true; seen_begin=true; shift ;;
+            *) workflow_state_die "unsupported checkpoint option: $1"; return $? ;;
+        esac
+    done
+    [ "$seen_host" = true ] && [ "$seen_phase" = true ] && [ "$seen_next" = true ] || {
+        workflow_state_die "checkpoint requires host, phase, and next-step"
+        return $?
+    }
+    case "$host" in claude|codex) ;; *) workflow_state_die "invalid host: $host"; return $? ;; esac
+    workflow_state_validate_cell "phase" "$phase" || return $?
+    workflow_state_validate_cell "next step" "$next_step" || return $?
+
+    local root common state state_hash command recorded_root recorded_common iteration next_iteration tmp
+    root=$(workflow_state_root) || { workflow_state_die "not inside a Git worktree"; return $?; }
+    common=$(workflow_state_common_dir "$root") || { workflow_state_die "cannot resolve Git common directory"; return $?; }
+    state=$(workflow_state_canonical "$root") || return 2
+    state_hash=$(workflow_state_hash "$state") || return 2
+    command=$(workflow_state_value "$state" Workflow Command) || return 2
+    recorded_root=$(workflow_state_value "$state" Identity 'Worktree root') || return 2
+    recorded_common=$(workflow_state_value "$state" Identity 'Git common directory') || return 2
+    iteration=$(workflow_state_value "$state" Receipts 'Review iteration') || return 2
+    printf '%s\n' "$command" | grep -qE '^/(new-feature|fix-bug|quick-fix) [a-z0-9]+(-[a-z0-9]+)*$' \
+        && [ "$recorded_root" = "$root" ] && [ "$recorded_common" = "$common" ] || {
+            workflow_state_die "checkpoint requires an active workflow in this worktree"
+            return $?
+        }
+    printf '%s\n' "$iteration" | grep -qE '^(0|[1-9][0-9]*)$' || {
+        workflow_state_die "review iteration must be a non-negative integer"
+        return $?
+    }
+    next_iteration="$iteration"
+    if [ "$begin_review" = true ]; then
+        next_iteration=$(workflow_state_increment_decimal "$iteration") || return 2
+    fi
+
+    tmp=$(mktemp "$state.tmp.XXXXXX") || return 2
+    workflow_state_transform_checkpoint "$state" "$tmp" "$host" "$phase" "$next_step" \
+        "$next_iteration" || {
+        rm -f "$tmp"
+        return 2
+    }
+    workflow_state_validate_shape "$tmp" || {
+        rm -f "$tmp"
+        workflow_state_die "checkpoint produced invalid state"
+        return $?
+    }
+    forge_workflow_state_publish "$state" "$tmp" "$state_hash" || {
+        rm -f "$tmp"
+        return 2
+    }
+}
+
 workflow_state_main() {
     local action="${1:-}"
     [ $# -gt 0 ] && shift
@@ -343,7 +463,7 @@ workflow_state_main() {
             workflow_state_show
             ;;
         activate) workflow_state_activate "$@" ;;
-        checkpoint) workflow_state_die "checkpoint is not implemented" ;;
+        checkpoint) workflow_state_checkpoint "$@" ;;
         *) workflow_state_die "usage: workflow-state show|activate|checkpoint" ;;
     esac
 }

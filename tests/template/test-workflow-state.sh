@@ -59,6 +59,19 @@ activate_fixture() {
         --base-ref main --phase diagnosis --next-step 'write RED test'
 }
 
+checkpoint_fixture() {
+    local root="$1"
+    shift
+    run_sh "$root" checkpoint --host codex --phase implementation \
+        --next-step 'make GREEN' "$@"
+}
+
+capture_checkpoint_invariants() {
+    local state="$1" output="$2"
+    grep -E '^\| (Worktree root|Git common directory|Workflow base ref|Workflow base SHA|Command|Candidate receipt|Spec review receipt|Quality review receipt|Verify app receipt|E2E receipt|Promotion receipt|Council receipt) ' \
+        "$state" > "$output"
+}
+
 start_test "show returns canonical V6 state without mutation"
 SHOW_REPO=$(make_repo)
 SHOW_BEFORE=$(hash_file "$SHOW_REPO/.forge/local/state.md")
@@ -190,6 +203,95 @@ else
     assert_equals "$?" "0" "PowerShell activate exits zero"
     assert_contains "$PS_REPO/.forge/local/state.md" '| Command   | /quick-fix handoff-smoke |' \
         "PowerShell activate records the workflow"
+fi
+
+if [ "$GROUP" = "all" ]; then
+    start_test "checkpoint updates only allowlisted fields"
+    CHECK_REPO=$(make_repo)
+    activate_fixture "$CHECK_REPO"
+    assert_equals "$?" "0" "checkpoint fixture activation exits zero"
+    capture_checkpoint_invariants "$CHECK_REPO/.forge/local/state.md" "$CHECK_REPO/invariants.before"
+    checkpoint_fixture "$CHECK_REPO"
+    assert_equals "$?" "0" "checkpoint exits zero"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Last active host     | codex |' \
+        "checkpoint changes the active host"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Phase     | implementation |' \
+        "checkpoint changes phase"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Next step | make GREEN |' \
+        "checkpoint changes the next step"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Review iteration       | 0 |' \
+        "ordinary checkpoint preserves review iteration"
+    capture_checkpoint_invariants "$CHECK_REPO/.forge/local/state.md" "$CHECK_REPO/invariants.after"
+    if cmp -s "$CHECK_REPO/invariants.before" "$CHECK_REPO/invariants.after"; then
+        pass "checkpoint preserves base identity, command, and receipt paths byte-for-byte"
+    else
+        fail "checkpoint must preserve base identity, command, and receipt paths"
+    fi
+
+    start_test "begin-review increments monotonically without caller control"
+    checkpoint_fixture "$CHECK_REPO" --begin-review
+    assert_equals "$?" "0" "first begin-review checkpoint exits zero"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Review iteration       | 1 |' \
+        "first begin-review increments iteration to one"
+    checkpoint_fixture "$CHECK_REPO" --begin-review
+    assert_equals "$?" "0" "second begin-review checkpoint exits zero"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Review iteration       | 2 |' \
+        "second begin-review increments iteration to two"
+    assert_rejected_unchanged "$CHECK_REPO" "caller-selected review iteration" checkpoint \
+        --host codex --phase review --next-step 'dispatch reviewers' --review-iteration 9
+    assert_rejected_unchanged "$CHECK_REPO" "unknown checkpoint option" checkpoint \
+        --host codex --phase review --next-step 'dispatch reviewers' --other value
+
+    start_test "checkpoint rejects malformed state atomically"
+    DUP_REPO=$(make_repo)
+    activate_fixture "$DUP_REPO"
+    awk '{ print; if ($0 == "| Review iteration       | 0 |") print }' \
+        "$DUP_REPO/.forge/local/state.md" > "$DUP_REPO/.forge/local/state.next"
+    mv "$DUP_REPO/.forge/local/state.next" "$DUP_REPO/.forge/local/state.md"
+    assert_rejected_unchanged "$DUP_REPO" "duplicate review iteration" checkpoint \
+        --host codex --phase review --next-step 'dispatch reviewers' --begin-review
+
+    start_test "optimistic publication preserves a concurrent edit"
+    CONCURRENT_REPO=$(make_repo)
+    activate_fixture "$CONCURRENT_REPO"
+    CONCURRENT_STATE="$CONCURRENT_REPO/.forge/local/state.md"
+    CONCURRENT_NEXT="$CONCURRENT_REPO/.forge/local/state.next"
+    CONCURRENT_HASH=$(hash_file "$CONCURRENT_STATE")
+    cp "$CONCURRENT_STATE" "$CONCURRENT_NEXT"
+    printf '\nconcurrent marker\n' >> "$CONCURRENT_STATE"
+    # shellcheck source=../../hooks/lib/workflow-state.sh
+    source "$HELPER_SH"
+    forge_workflow_state_publish "$CONCURRENT_STATE" "$CONCURRENT_NEXT" "$CONCURRENT_HASH" \
+        > "$CONCURRENT_REPO/publish.out" 2> "$CONCURRENT_REPO/publish.err"
+    if [ "$?" -ne 0 ]; then pass "stale publication is rejected"; else fail "stale publication must be rejected"; fi
+    assert_contains "$CONCURRENT_STATE" 'concurrent marker' \
+        "concurrent state edit survives rejected publication"
+
+    start_test "terminal checkpoint permits clean workflow replacement"
+    run_sh "$CHECK_REPO" checkpoint --host codex --phase complete --next-step none
+    assert_equals "$?" "0" "terminal checkpoint exits zero"
+    activate_fixture "$CHECK_REPO"
+    assert_equals "$?" "0" "same workflow and task can reactivate after terminal checkpoint"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Review iteration       | 0 |' \
+        "same-task reactivation resets review iteration"
+    run_sh "$CHECK_REPO" checkpoint --host claude --phase complete --next-step none
+    run_sh "$CHECK_REPO" activate --host codex --workflow fix-bug --task replacement-task \
+        --base-ref main --phase diagnosis --next-step 'write failing test'
+    assert_equals "$?" "0" "different task can activate after terminal checkpoint"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Command   | /fix-bug replacement-task |' \
+        "terminal replacement records the new workflow"
+
+    start_test "PowerShell checkpoint and publication runtime parity"
+    if [ -z "$PWSH" ]; then
+        skip_test "no pwsh/powershell on PATH; checkpoint runtime parity remains externally required"
+    else
+        (cd "$PS_REPO" && "$PWSH" -NoProfile -File "$HELPER_PS1" checkpoint --host codex \
+            --phase implementation --next-step 'make GREEN' --begin-review) \
+            > "$PS_REPO/helper.out" 2> "$PS_REPO/helper.err"
+        assert_equals "$?" "0" "PowerShell checkpoint exits zero"
+        assert_contains "$PS_REPO/.forge/local/state.md" '| Review iteration       | 1 |' \
+            "PowerShell begin-review increments iteration"
+    fi
 fi
 
 cleanup_scratch_dirs

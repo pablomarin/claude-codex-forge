@@ -184,6 +184,59 @@ function Set-WorkflowStateActivationFile {
     [IO.File]::WriteAllLines($Next, $output.ToArray(), $utf8)
 }
 
+function Get-NextWorkflowReviewIteration {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    $digits = $Value.ToCharArray()
+    $carry = 1
+    for ($i = $digits.Length - 1; $i -ge 0; $i--) {
+        $digit = [int]::Parse($digits[$i].ToString())
+        if ($carry -eq 1) {
+            $digit++
+            if ($digit -eq 10) { $digit = 0 } else { $carry = 0 }
+        }
+        $digits[$i] = [char]([int][char]'0' + $digit)
+    }
+    $result = -join $digits
+    if ($carry -eq 1) { $result = "1$result" }
+    return $result
+}
+
+function Set-WorkflowStateCheckpointFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$State,
+        [Parameter(Mandatory = $true)][string]$Next,
+        [Parameter(Mandatory = $true)][string]$HostName,
+        [Parameter(Mandatory = $true)][string]$Phase,
+        [Parameter(Mandatory = $true)][string]$NextStep,
+        [Parameter(Mandatory = $true)][string]$Iteration
+    )
+    $section = ""
+    $output = New-Object Collections.Generic.List[string]
+    foreach ($line in [IO.File]::ReadAllLines($State)) {
+        $current = $line
+        if ($line -match '^## (.+)$') { $section = $Matches[1] }
+        if ($line -match '^\|') {
+            $cells = $line -split '\|'
+            $key = if ($cells.Count -ge 4) { $cells[1].Trim() } else { "" }
+            if ($section -eq "Identity" -and $key -eq "Last active host") {
+                $current = "| Last active host     | $HostName |"
+            }
+            elseif ($section -eq "Workflow" -and $key -eq "Phase") {
+                $current = "| Phase     | $Phase |"
+            }
+            elseif ($section -eq "Workflow" -and $key -eq "Next step") {
+                $current = "| Next step | $NextStep |"
+            }
+            elseif ($section -eq "Receipts" -and $key -eq "Review iteration") {
+                $current = "| Review iteration       | $Iteration |"
+            }
+        }
+        $output.Add($current)
+    }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllLines($Next, $output.ToArray(), $utf8)
+}
+
 function Convert-WorkflowStateArguments {
     param([Parameter(Mandatory = $true)][string[]]$Tokens)
     $values = @{}
@@ -307,6 +360,83 @@ function Invoke-WorkflowStateActivate {
     }
 }
 
+function Convert-WorkflowStateCheckpointArguments {
+    param([Parameter(Mandatory = $true)][string[]]$Tokens)
+    $values = @{}
+    $beginReview = $false
+    for ($i = 0; $i -lt $Tokens.Count; $i++) {
+        $name = $Tokens[$i]
+        if ($name -eq "--begin-review") {
+            if ($beginReview) { Throw-WorkflowStateBlocked "duplicate checkpoint option: $name" }
+            $beginReview = $true
+            continue
+        }
+        if ($name -notin @("--host", "--phase", "--next-step")) {
+            Throw-WorkflowStateBlocked "unsupported checkpoint option: $name"
+        }
+        if ($values.ContainsKey($name)) { Throw-WorkflowStateBlocked "duplicate checkpoint option: $name" }
+        if ($i + 1 -ge $Tokens.Count) { Throw-WorkflowStateBlocked "option requires a value: $name" }
+        $i++
+        $values[$name] = $Tokens[$i]
+    }
+    foreach ($name in @("--host", "--phase", "--next-step")) {
+        if (-not $values.ContainsKey($name)) {
+            Throw-WorkflowStateBlocked "checkpoint requires host, phase, and next-step"
+        }
+    }
+    $values["--begin-review"] = $beginReview
+    return $values
+}
+
+function Invoke-WorkflowStateCheckpoint {
+    param([Parameter(Mandatory = $true)][string[]]$Tokens)
+    $values = Convert-WorkflowStateCheckpointArguments -Tokens $Tokens
+    $hostName = $values["--host"]
+    $phase = $values["--phase"]
+    $nextStep = $values["--next-step"]
+    if ($hostName -notin @("claude", "codex")) { Throw-WorkflowStateBlocked "invalid host: $hostName" }
+    Assert-WorkflowStateCell -Label "phase" -Value $phase
+    Assert-WorkflowStateCell -Label "next step" -Value $nextStep
+
+    $root = Get-WorkflowStateRoot
+    $common = Get-WorkflowStateCommonDirectory -Root $root
+    $state = Get-CanonicalWorkflowState -Root $root
+    $stateHash = Get-WorkflowStateHash -Path $state
+    $command = Get-WorkflowStateValue -Path $state -Section Workflow -Key Command
+    $recordedRoot = Get-WorkflowStateValue -Path $state -Section Identity -Key "Worktree root"
+    $recordedCommon = Get-WorkflowStateValue -Path $state -Section Identity -Key "Git common directory"
+    $iteration = Get-WorkflowStateValue -Path $state -Section Receipts -Key "Review iteration"
+    if ($command -notmatch '^/(new-feature|fix-bug|quick-fix) [a-z0-9]+(-[a-z0-9]+)*$' -or
+        $recordedRoot -ne $root -or $recordedCommon -ne $common) {
+        Throw-WorkflowStateBlocked "checkpoint requires an active workflow in this worktree"
+    }
+    if ($iteration -notmatch '^(0|[1-9][0-9]*)$') {
+        Throw-WorkflowStateBlocked "review iteration must be a non-negative integer"
+    }
+    $nextIteration = $iteration
+    if ([bool]$values["--begin-review"]) {
+        $nextIteration = Get-NextWorkflowReviewIteration -Value $iteration
+    }
+
+    $temporary = Join-Path (Split-Path $state -Parent) ("state.md.tmp." + [Guid]::NewGuid().ToString("N"))
+    try {
+        $checkpoint = @{
+            State = $state
+            Next = $temporary
+            HostName = $hostName
+            Phase = $phase
+            NextStep = $nextStep
+            Iteration = $nextIteration
+        }
+        Set-WorkflowStateCheckpointFile @checkpoint
+        if (-not (Test-WorkflowStateShape -Path $temporary)) { Throw-WorkflowStateBlocked "checkpoint produced invalid state" }
+        Publish-ForgeWorkflowState -State $state -Next $temporary -ExpectedHash $stateHash
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    }
+}
+
 function Invoke-ForgeWorkflowState {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
     if ($Arguments.Count -eq 0) { Throw-WorkflowStateBlocked "usage: workflow-state show|activate|checkpoint" }
@@ -318,7 +448,7 @@ function Invoke-ForgeWorkflowState {
             Invoke-WorkflowStateShow
         }
         "activate" { Invoke-WorkflowStateActivate -Tokens $remaining }
-        "checkpoint" { Throw-WorkflowStateBlocked "checkpoint is not implemented" }
+        "checkpoint" { Invoke-WorkflowStateCheckpoint -Tokens $remaining }
         default { Throw-WorkflowStateBlocked "usage: workflow-state show|activate|checkpoint" }
     }
 }
