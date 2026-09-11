@@ -30,6 +30,14 @@ transition that permits clean task replacement. The existing targeted denial of 
 shell reads and common writes remains in force, with remediation pointing both engines to the
 bounded command instead of host-specific file operations.
 
+Final review closed four release-blocking regressions before release. The helper rejects multiline
+task slugs before any path construction, preserves literal backslashes, and rewrites canonical
+state as UTF-8/LF so a Windows checkpoint remains readable by Bash. An identical in-flight V6.1
+placeholder bundle can be adopted explicitly without guessing partial review progress. The first
+valid paired-review iteration is now stored as a helper-owned, monotonic anchor, so later candidate
+mutation cannot reset the convergence breaker; active-workflow Stop advisories also fire before
+candidate paths are populated. The anchor adds no caller-controlled state field or new verb.
+
 Existing 6.0 and 6.1 projects receive this contract through `setup.sh --upgrade` or
 `setup.ps1 -Upgrade`. Forge V5, mixed, custom, and unknown trees still require the read-only
 `setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun` preview and explicit blocker resolution

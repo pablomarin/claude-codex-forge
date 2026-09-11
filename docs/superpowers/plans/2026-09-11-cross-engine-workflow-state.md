@@ -318,3 +318,50 @@ Run `git diff --check`, stage `docs/CHANGELOG.md` and `README.md`, and commit wi
 ```bash
 git commit -m "docs: describe portable Forge 6.2 state handling"
 ```
+
+### Task 6: Close Final Review Findings Without Expanding the Runtime
+
+**Files:**
+
+- Modify: `hooks/lib/workflow-state.sh`
+- Modify: `hooks/lib/workflow-state.ps1`
+- Modify: `hooks/lib/review-breaker.sh`
+- Modify: `hooks/lib/review-breaker.ps1`
+- Modify: `hooks/check-state-updated.sh`
+- Modify: `hooks/check-state-updated.ps1`
+- Modify: `state.template.md`
+- Modify: `tests/template/test-workflow-state.sh`
+- Modify: `tests/template/test-review-breaker.sh`
+- Modify: `tests/template/test-build-evidence.sh`
+- Modify: release, workflow, and ADR documentation
+
+**Interfaces:**
+
+- Consumes: paired final-review findings against the frozen candidate.
+- Produces: a V6.1-safe, line-ending-stable transition contract and a non-resettable convergence
+  anchor, without a generic setter, lock, lease, or new workflow verb.
+
+- [ ] **Step 1: Reproduce the accepted findings**
+
+Add failing cases for a newline-bearing task slug before path construction, exact V6.1 placeholder
+adoption, CRLF normalization, literal backslash preservation, first-certification retention after
+receipt staleness, and active-placeholder Stop advisories. Keep PowerShell source-contract checks
+when no compatible runtime exists.
+
+- [ ] **Step 2: Repair only the bounded helper pair and existing consumers**
+
+Validate task cells before slug matching; emit LF-only UTF-8 state and raw `show` bytes; adopt only
+the exact identical V6.1 placeholder bundle; derive `First certified iteration` from the first valid
+paired receipt and never advance it; make the breaker consume that anchor; and key Stop advisories
+off active workflow state rather than candidate-path population.
+
+- [ ] **Step 3: Re-run focused and aggregate verification**
+
+Require workflow-state, review-breaker, build-evidence, parity, contract, lint, fast, and exhaustive
+suites to pass. Record the missing PowerShell runtime as unverified rather than inferred.
+
+- [ ] **Step 4: Freeze one repaired candidate and run closure review**
+
+Increment review iteration exactly once, dispatch fresh `code-spec` and `code-quality` closure
+lenses against the same staged-clean candidate, and accept only matching clean receipts. Then write
+candidate-bound verify-app and E2E receipts from final reports.

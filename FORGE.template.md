@@ -26,7 +26,8 @@ criterion.
 - Use `.forge/hooks/lib/workflow-state.sh activate` to start canonical workflow control state and
   `.forge/hooks/lib/workflow-state.sh checkpoint` for host, phase, next-step, and monotonic review
   transitions. Use the `.ps1` twin on Windows. Native file tools may update checklist and narrative
-  content, but never workflow control rows.
+  content, but never workflow control rows. The helper derives and preserves the first certified
+  review iteration; callers never set that convergence anchor.
 - Use the canonical workflows in `.forge/workflows/`, rules in `.forge/rules/`, skills in
   `.forge/skills/`, and roles in `.forge/agents/`.
 - A host switch may resume the same branch and worktree. Forge creates no edit lock: concurrent sessions are allowed.

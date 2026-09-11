@@ -61,6 +61,16 @@ function Test-WorkflowStateShape {
     )
     try {
         foreach ($pair in $required) { [void](Get-WorkflowStateValue -Path $Path -Section $pair[0] -Key $pair[1]) }
+        $firstCount = 0
+        $section = ""
+        foreach ($line in [IO.File]::ReadAllLines($Path)) {
+            if ($line -match '^## (.+)$') { $section = $Matches[1]; continue }
+            if ($section -eq 'Receipts' -and $line -match '^\|') {
+                $cells = $line -split '\|'
+                if ($cells.Count -ge 4 -and $cells[1].Trim() -eq 'First certified iteration') { $firstCount++ }
+            }
+        }
+        if ($firstCount -gt 1) { return $false }
     }
     catch { return $false }
     return $true
@@ -91,9 +101,49 @@ function Assert-WorkflowStateCell {
 
 function Assert-WorkflowStateTask {
     param([Parameter(Mandatory = $true)][string]$Task)
+    Assert-WorkflowStateCell -Label "task slug" -Value $Task
     if ($Task.Length -gt 64 -or $Task -notmatch '^[a-z0-9]+(-[a-z0-9]+)*$') {
         Throw-WorkflowStateBlocked "invalid task slug: $Task"
     }
+}
+
+function Get-OptionalFirstCertifiedIteration {
+    param([Parameter(Mandatory = $true)][string]$State)
+    $values = New-Object Collections.Generic.List[string]
+    $section = ""
+    foreach ($line in [IO.File]::ReadAllLines($State)) {
+        if ($line -match '^## (.+)$') { $section = $Matches[1]; continue }
+        if ($section -eq 'Receipts' -and $line -match '^\|') {
+            $cells = $line -split '\|'
+            if ($cells.Count -ge 4 -and $cells[1].Trim() -eq 'First certified iteration') {
+                $values.Add($cells[2].Trim())
+            }
+        }
+    }
+    if ($values.Count -eq 0) { return 'none' }
+    if ($values.Count -ne 1) { Throw-WorkflowStateBlocked 'state must contain at most one Receipts/First certified iteration row' }
+    return $values[0]
+}
+
+function Write-WorkflowStateLines {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$Lines
+    )
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($Path, ([string]::Join("`n", $Lines) + "`n"), $utf8)
+}
+
+function Test-WorkflowStateReviewsValid {
+    param([Parameter(Mandatory = $true)][string]$State)
+    $verifier = Join-Path $WorkflowStateDir 'verification-receipt.ps1'
+    if (-not (Test-Path -LiteralPath $verifier -PathType Leaf)) { return $false }
+    try {
+        . $verifier
+        $response = Invoke-VerificationReceipt -ReceiptMode check -StatePath $State
+        return ($response.Lines -contains 'REVIEWS_VALID:true')
+    }
+    catch { return $false }
 }
 
 function Assert-WorkflowStateRef {
@@ -137,7 +187,7 @@ function Set-WorkflowStateActivationFile {
     param(
         [Parameter(Mandatory = $true)][string]$State,
         [Parameter(Mandatory = $true)][string]$Next,
-        [Parameter(Mandatory = $true)][ValidateSet("new", "resume")][string]$Mode,
+        [Parameter(Mandatory = $true)][ValidateSet("new", "resume", "adopt")][string]$Mode,
         [Parameter(Mandatory = $true)][string]$Root,
         [Parameter(Mandatory = $true)][string]$Common,
         [Parameter(Mandatory = $true)][string]$HostName,
@@ -149,10 +199,22 @@ function Set-WorkflowStateActivationFile {
         [Parameter(Mandatory = $true)][string]$Task
     )
     $section = ""
+    $firstSeen = $false
+    $receiptsTable = $false
     $output = New-Object Collections.Generic.List[string]
     foreach ($line in [IO.File]::ReadAllLines($State)) {
         $current = $line
-        if ($line -match '^## (.+)$') { $section = $Matches[1] }
+        if ($section -eq 'Receipts' -and $receiptsTable -and -not $firstSeen -and -not $line.StartsWith('|')) {
+            $output.Add('| First certified iteration | none |')
+            $firstSeen = $true
+        }
+        if ($line -match '^## (.+)$') {
+            if ($section -eq 'Receipts' -and -not $firstSeen) {
+                $output.Add('| First certified iteration | none |')
+                $firstSeen = $true
+            }
+            $section = $Matches[1]
+        }
         if ($line -match '^\|') {
             $cells = $line -split '\|'
             $key = if ($cells.Count -ge 4) { $cells[1].Trim() } else { "" }
@@ -163,25 +225,32 @@ function Set-WorkflowStateActivationFile {
                 elseif ($Mode -eq "new" -and $key -eq "Workflow base ref") { $current = "| Workflow base ref    | $BaseRef |" }
                 elseif ($Mode -eq "new" -and $key -eq "Workflow base SHA") { $current = "| Workflow base SHA    | $BaseSha |" }
             }
-            elseif ($Mode -eq "new" -and $section -eq "Workflow") {
+            elseif ($Mode -ne "resume" -and $section -eq "Workflow") {
                 if ($key -eq "Command") { $current = "| Command   | $Command |" }
                 elseif ($key -eq "Phase") { $current = "| Phase     | $Phase |" }
                 elseif ($key -eq "Next step") { $current = "| Next step | $NextStep |" }
             }
-            elseif ($Mode -eq "new" -and $section -eq "Receipts") {
-                if ($key -eq "Review iteration") { $current = "| Review iteration       | 0 |" }
-                elseif ($key -eq "Candidate receipt") { $current = "| Candidate receipt      | .forge/local/evidence/$Task/candidate.receipt |" }
-                elseif ($key -eq "Spec review receipt") { $current = "| Spec review receipt    | .forge/local/reviews/$Task/spec.receipt |" }
-                elseif ($key -eq "Quality review receipt") { $current = "| Quality review receipt | .forge/local/reviews/$Task/quality.receipt |" }
-                elseif ($key -eq "Verify app receipt") { $current = "| Verify app receipt     | .forge/local/evidence/$Task/verify-app.receipt |" }
-                elseif ($key -eq "E2E receipt") { $current = "| E2E receipt            | .forge/local/evidence/$Task/e2e.receipt |" }
-                elseif ($key -eq "Promotion receipt") { $current = "| Promotion receipt      | .forge/local/evidence/$Task/promotion.receipt |" }
+            elseif ($section -eq "Receipts") {
+                if ($key -eq 'Review iteration') { $receiptsTable = $true }
+                if ($key -eq 'First certified iteration') {
+                    $firstSeen = $true
+                    if ($Mode -ne 'resume') { $current = '| First certified iteration | none |' }
+                }
+                elseif ($Mode -ne 'resume') {
+                    if ($key -eq "Review iteration") { $current = "| Review iteration       | 0 |" }
+                    elseif ($key -eq "Candidate receipt") { $current = "| Candidate receipt      | .forge/local/evidence/$Task/candidate.receipt |" }
+                    elseif ($key -eq "Spec review receipt") { $current = "| Spec review receipt    | .forge/local/reviews/$Task/spec.receipt |" }
+                    elseif ($key -eq "Quality review receipt") { $current = "| Quality review receipt | .forge/local/reviews/$Task/quality.receipt |" }
+                    elseif ($key -eq "Verify app receipt") { $current = "| Verify app receipt     | .forge/local/evidence/$Task/verify-app.receipt |" }
+                    elseif ($key -eq "E2E receipt") { $current = "| E2E receipt            | .forge/local/evidence/$Task/e2e.receipt |" }
+                    elseif ($key -eq "Promotion receipt") { $current = "| Promotion receipt      | .forge/local/evidence/$Task/promotion.receipt |" }
+                }
             }
         }
         $output.Add($current)
     }
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
-    [IO.File]::WriteAllLines($Next, $output.ToArray(), $utf8)
+    if ($section -eq 'Receipts' -and -not $firstSeen) { $output.Add('| First certified iteration | none |') }
+    Write-WorkflowStateLines -Path $Next -Lines $output.ToArray()
 }
 
 function Get-NextWorkflowReviewIteration {
@@ -208,13 +277,26 @@ function Set-WorkflowStateCheckpointFile {
         [Parameter(Mandatory = $true)][string]$HostName,
         [Parameter(Mandatory = $true)][string]$Phase,
         [Parameter(Mandatory = $true)][string]$NextStep,
-        [Parameter(Mandatory = $true)][string]$Iteration
+        [Parameter(Mandatory = $true)][string]$Iteration,
+        [Parameter(Mandatory = $true)][string]$FirstCertified
     )
     $section = ""
+    $firstSeen = $false
+    $receiptsTable = $false
     $output = New-Object Collections.Generic.List[string]
     foreach ($line in [IO.File]::ReadAllLines($State)) {
         $current = $line
-        if ($line -match '^## (.+)$') { $section = $Matches[1] }
+        if ($section -eq 'Receipts' -and $receiptsTable -and -not $firstSeen -and -not $line.StartsWith('|')) {
+            $output.Add("| First certified iteration | $FirstCertified |")
+            $firstSeen = $true
+        }
+        if ($line -match '^## (.+)$') {
+            if ($section -eq 'Receipts' -and -not $firstSeen) {
+                $output.Add("| First certified iteration | $FirstCertified |")
+                $firstSeen = $true
+            }
+            $section = $Matches[1]
+        }
         if ($line -match '^\|') {
             $cells = $line -split '\|'
             $key = if ($cells.Count -ge 4) { $cells[1].Trim() } else { "" }
@@ -228,13 +310,20 @@ function Set-WorkflowStateCheckpointFile {
                 $current = "| Next step | $NextStep |"
             }
             elseif ($section -eq "Receipts" -and $key -eq "Review iteration") {
+                $receiptsTable = $true
                 $current = "| Review iteration       | $Iteration |"
+            }
+            elseif ($section -eq "Receipts" -and $key -eq "First certified iteration") {
+                $current = "| First certified iteration | $FirstCertified |"
+                $firstSeen = $true
             }
         }
         $output.Add($current)
     }
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
-    [IO.File]::WriteAllLines($Next, $output.ToArray(), $utf8)
+    if ($section -eq 'Receipts' -and -not $firstSeen) {
+        $output.Add("| First certified iteration | $FirstCertified |")
+    }
+    Write-WorkflowStateLines -Path $Next -Lines $output.ToArray()
 }
 
 function Convert-WorkflowStateArguments {
@@ -260,7 +349,9 @@ function Convert-WorkflowStateArguments {
 function Invoke-WorkflowStateShow {
     $root = Get-WorkflowStateRoot
     $state = Get-CanonicalWorkflowState -Root $root
-    [Console]::Out.Write([IO.File]::ReadAllText($state))
+    $bytes = [IO.File]::ReadAllBytes($state)
+    $stream = [Console]::OpenStandardOutput()
+    $stream.Write($bytes, 0, $bytes.Length)
 }
 
 function Invoke-WorkflowStateActivate {
@@ -291,7 +382,7 @@ function Invoke-WorkflowStateActivate {
     $currentPhase = Get-WorkflowStateValue -Path $state -Section Workflow -Key Phase
     $currentNext = Get-WorkflowStateValue -Path $state -Section Workflow -Key "Next step"
     $mode = "new"
-    if ($currentCommand -and $currentCommand -ne "none" -and -not ($currentPhase -eq "complete" -and $currentNext -eq "none")) {
+    if ($currentCommand -and $currentCommand -notin @("none", "-", "—") -and -not ($currentPhase -eq "complete" -and $currentNext -eq "none")) {
         $expected = @{
             "Worktree root" = $root
             "Git common directory" = $common
@@ -306,8 +397,6 @@ function Invoke-WorkflowStateActivate {
         if ($currentCommand -ne $command -or $currentPhase -ne $phase -or $currentNext -ne $nextStep) {
             Throw-WorkflowStateBlocked "a different or inconsistent workflow is already active"
         }
-        $iteration = Get-WorkflowStateValue -Path $state -Section Receipts -Key "Review iteration"
-        if ($iteration -notmatch '^[0-9]+$') { Throw-WorkflowStateBlocked "a different or inconsistent workflow is already active" }
         $receiptValues = @{
             "Candidate receipt" = ".forge/local/evidence/$task/candidate.receipt"
             "Spec review receipt" = ".forge/local/reviews/$task/spec.receipt"
@@ -316,12 +405,31 @@ function Invoke-WorkflowStateActivate {
             "E2E receipt" = ".forge/local/evidence/$task/e2e.receipt"
             "Promotion receipt" = ".forge/local/evidence/$task/promotion.receipt"
         }
-        foreach ($key in $receiptValues.Keys) {
-            if ((Get-WorkflowStateValue -Path $state -Section Receipts -Key $key) -ne $receiptValues[$key]) {
-                Throw-WorkflowStateBlocked "a different or inconsistent workflow is already active"
-            }
+        $placeholderValues = @{
+            "Candidate receipt" = ".forge/local/evidence/<task-id>/candidate.receipt"
+            "Spec review receipt" = ".forge/local/reviews/<task-id>/spec.receipt"
+            "Quality review receipt" = ".forge/local/reviews/<task-id>/quality.receipt"
+            "Verify app receipt" = ".forge/local/evidence/<task-id>/verify-app.receipt"
+            "E2E receipt" = ".forge/local/evidence/<task-id>/e2e.receipt"
+            "Promotion receipt" = ".forge/local/evidence/<task-id>/promotion.receipt"
         }
-        $mode = "resume"
+        $iteration = Get-WorkflowStateValue -Path $state -Section Receipts -Key "Review iteration"
+        $receiptsMatch = $true
+        $placeholdersMatch = $true
+        foreach ($key in $receiptValues.Keys) {
+            $actual = Get-WorkflowStateValue -Path $state -Section Receipts -Key $key
+            if ($actual -ne $receiptValues[$key]) { $receiptsMatch = $false }
+            if ($actual -ne $placeholderValues[$key]) { $placeholdersMatch = $false }
+        }
+        if ($iteration -match '^[0-9]+$' -and $receiptsMatch) {
+            $mode = "resume"
+        }
+        elseif ($iteration -eq '<integer>' -and $placeholdersMatch) {
+            $mode = "adopt"
+        }
+        else {
+            Throw-WorkflowStateBlocked "a different or inconsistent workflow is already active"
+        }
     }
 
     $evidenceDir = Join-Path $root ".forge\local\evidence\$task"
@@ -406,12 +514,19 @@ function Invoke-WorkflowStateCheckpoint {
     $recordedRoot = Get-WorkflowStateValue -Path $state -Section Identity -Key "Worktree root"
     $recordedCommon = Get-WorkflowStateValue -Path $state -Section Identity -Key "Git common directory"
     $iteration = Get-WorkflowStateValue -Path $state -Section Receipts -Key "Review iteration"
+    $firstCertified = Get-OptionalFirstCertifiedIteration -State $state
     if ($command -notmatch '^/(new-feature|fix-bug|quick-fix) [a-z0-9]+(-[a-z0-9]+)*$' -or
         $recordedRoot -ne $root -or $recordedCommon -ne $common) {
         Throw-WorkflowStateBlocked "checkpoint requires an active workflow in this worktree"
     }
     if ($iteration -notmatch '^(0|[1-9][0-9]*)$') {
         Throw-WorkflowStateBlocked "review iteration must be a non-negative integer"
+    }
+    if ($firstCertified -ne 'none' -and $firstCertified -notmatch '^[1-9][0-9]*$') {
+        Throw-WorkflowStateBlocked "first certified iteration must be none or a positive integer"
+    }
+    if ($firstCertified -eq 'none' -and $iteration -ne '0' -and (Test-WorkflowStateReviewsValid -State $state)) {
+        $firstCertified = $iteration
     }
     $nextIteration = $iteration
     if ([bool]$values["--begin-review"]) {
@@ -427,6 +542,7 @@ function Invoke-WorkflowStateCheckpoint {
             Phase = $phase
             NextStep = $nextStep
             Iteration = $nextIteration
+            FirstCertified = $firstCertified
         }
         Set-WorkflowStateCheckpointFile @checkpoint
         if (-not (Test-WorkflowStateShape -Path $temporary)) { Throw-WorkflowStateBlocked "checkpoint produced invalid state" }

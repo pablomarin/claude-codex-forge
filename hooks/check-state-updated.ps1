@@ -95,14 +95,18 @@ if ($stateLocalDir -eq ".forge/local" -and (Test-Path -LiteralPath $stateMd -Pat
     $builder = Join-Path $hookDir "build-evidence.ps1"
     if ($needsEvidence -and (Test-Path -LiteralPath $builder -PathType Leaf)) { $jsonInput | & $builder 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) } }
 
-    $candidateRows = @()
     $receiptStateRaw = (Get-Content -LiteralPath $stateMd -Raw) -replace "`r", ""
+    $workflowCommandRows = @()
+    $inWorkflow = $false
     foreach ($line in @($receiptStateRaw -split "`n")) {
+        if ($line -ceq '## Workflow') { $inWorkflow = $true; continue }
+        if ($inWorkflow -and $line.StartsWith('## ')) { $inWorkflow = $false }
+        if (-not $inWorkflow) { continue }
         $parts = $line -split '\|'
-        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') { $candidateRows += $parts[2].Trim() }
+        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Command') { $workflowCommandRows += $parts[2].Trim() }
     }
-    $candidateReceipt = if ($candidateRows.Count -eq 1) { [string]$candidateRows[0] } else { "" }
-    if ($candidateReceipt -and -not $candidateReceipt.Contains('<')) {
+    $workflowCommand = if ($workflowCommandRows.Count -eq 1) { [string]$workflowCommandRows[0] } else { "" }
+    if ($workflowCommand -and $workflowCommand -notin @('none', '-', '—')) {
         $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
         if (-not (Test-Path -LiteralPath $verificationReceipt)) { $verificationReceipt = Join-Path (Get-Location) 'hooks\lib\verification-receipt.ps1' }
         $receiptStatus = 2

@@ -805,6 +805,23 @@ refresh_v2_final_receipts() {
         --output .forge/local/evidence/e2e.receipt >/dev/null) || return 1
 }
 
+start_test "receipt-v2: active placeholder state warns before final receipts exist"
+make_v2_candidate_repo
+sed -i.bak \
+    -e 's/receipt-v2/<task-id>/g' \
+    -e 's#| Candidate receipt | .*#| Candidate receipt | .forge/local/evidence/<task-id>/candidate.receipt |#' \
+    -e 's#| Spec review receipt | .*#| Spec review receipt | .forge/local/reviews/<task-id>/spec.receipt |#' \
+    -e 's#| Quality review receipt | .*#| Quality review receipt | .forge/local/reviews/<task-id>/quality.receipt |#' \
+    -e 's#| Verify app receipt | .*#| Verify app receipt | .forge/local/evidence/<task-id>/verify-app.receipt |#' \
+    -e 's#| E2E receipt | .*#| E2E receipt | .forge/local/evidence/<task-id>/e2e.receipt |#' \
+    "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+printf '{"cwd":"%s","host":"codex","stop_hook_active":false}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-state-updated.sh") \
+    > "$V2/.forge/local/evidence/stop-placeholder.out" 2>&1
+assert_contains "$V2/.forge/local/evidence/stop-placeholder.out" 'FORGE_FINAL_EVIDENCE_STALE' \
+    "Stop advisory exposes missing candidate-bound evidence for an active V6 workflow"
+
 start_test "receipt-v2: distinct clean same-engine/fallback lenses and verifiers certify one staged-clean candidate"
 make_v2_candidate_repo
 (cd "$V2" && bash "$REPO_ROOT/hooks/lib/candidate-fingerprint.sh" freeze \

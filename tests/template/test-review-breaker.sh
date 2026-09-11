@@ -295,6 +295,10 @@ tripped_state() {
       echo "- [x] Verified (tests/lint/types)"
       echo "- [x] E2E verified — N/A: internal harness change, no user surface"
       printf '%s' "${EXTRA:-}"
+      echo
+      echo "## Receipts"; echo
+      echo "| Field | Value |"
+      echo "| First certified iteration | 1 |"
     } > "$r/.claude/local/state.md"
 }
 
@@ -305,7 +309,7 @@ H="$(git -C "$R" rev-parse HEAD)"
 EXTRA="" tripped_state "$R" "$H"
 run_gate "$R"
 assert_rc 2 "tripped breaker blocks the commit"
-assert_contains_str "final receipt set" "$GATE_ERR" "v6 ignores the legacy certification rows and names receipts"
+assert_contains_str "convergence breaker" "$GATE_ERR" "receipt-native first-certification anchor blocks before receipt validation"
 
 # --- Gate 2: tripped + a `Code review loop — N/A:` escape → STILL exit 2
 #     (the breaker block precedes the N/A handling and runs on a count-less N/A,
@@ -325,10 +329,13 @@ mkdir -p "$R/.claude/local"
   echo "- [x] Simplified"
   echo "- [x] Verified (tests/lint/types)"
   echo "- [x] E2E verified — N/A: internal harness change, no user surface"
+  echo
+  echo "## Receipts"; echo
+  echo "| Field | Value |"; echo "| First certified iteration | 1 |"
 } > "$R/.claude/local/state.md"
 run_gate "$R"
 assert_rc 2 "count-less N/A does NOT bypass the breaker"
-assert_contains_str "final receipt set" "$GATE_ERR" "N/A escape cannot bypass strict receipts"
+assert_contains_str "convergence breaker" "$GATE_ERR" "N/A escape cannot bypass receipt-native breaker accounting"
 
 # --- Gate 3: tripped + a DOCS-ONLY staged commit → STILL exit 2
 #     (breaker precedes the docs-only carve-out).
@@ -338,7 +345,8 @@ H="$(git -C "$R" rev-parse HEAD)"
 EXTRA="" tripped_state "$R" "$H"
 mkdir -p "$R/docs"; echo "note" >> "$R/docs/CHANGELOG.md"; git -C "$R" add docs/CHANGELOG.md
 run_gate "$R"
-assert_rc 0 "untrusted legacy breaker rows do not block the docs-only carve-out"
+assert_rc 2 "receipt-native breaker blocks the docs-only carve-out"
+assert_contains_str "convergence breaker" "$GATE_ERR" "breaker remains before the docs-only carve-out"
 
 # --- Gate 4: tripped + adjudication at current head → breaker RELEASES.
 #     The other pre-ship gates are all checked, so a released breaker should let
@@ -372,6 +380,9 @@ mkdir -p "$R/.claude/local"
   echo "- [x] Simplified"
   echo "- [x] Verified (tests/lint/types)"
   echo "- [x] E2E verified — N/A: internal harness change, no user surface"
+  echo
+  echo "## Receipts"; echo
+  echo "| Field | Value |"; echo "| First certified iteration | 1 |"
 } > "$R/.claude/local/state.md"
 run_gate "$R"
 assert_not_contains_str "convergence breaker" "$GATE_ERR" "1 post-cert round is under the limit → breaker inert"
@@ -417,11 +428,14 @@ cp "$HELPER" "$R/.forge/hooks/lib/review-breaker.sh"
   echo "- [x] Code review iteration 5 — pr-toolkit clean — head=\`${H}\`"
   echo '- [x] Simplified'; echo '- [x] Verified (tests/lint/types)'
   echo '- [x] E2E verified — N/A: internal harness fixture'
+  echo
+  echo '## Receipts'; echo
+  echo '| Field | Value |'; echo '| First certified iteration | 1 |'
 } > "$R/.forge/local/state.md"
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' "$R" \
   | (cd "$R" && bash .forge/hooks/check-workflow-gates.sh) > "$R/v6-installed.out" 2>&1
 assert_equals "$?" "2" "installed canonical breaker blocks a tripped unadjudicated tail"
-assert_contains "$R/v6-installed.out" 'final receipt set' "installed gate reports the missing receipt set"
+assert_contains "$R/v6-installed.out" 'convergence breaker' "installed gate reports the tripped receipt-native breaker"
 echo "- [x] Post-certification tail adjudicated by human — accepted tail — head=\`${H}\` — ts=\`2026-08-27T00:00:00Z\`" >> "$R/.forge/local/state.md"
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' "$R" \
   | (cd "$R" && bash .forge/hooks/check-workflow-gates.sh) > "$R/v6-adjudicated.out" 2>&1

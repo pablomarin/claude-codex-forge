@@ -91,6 +91,7 @@ surface to user.
 | Field                  | Value |
 | ---------------------- | ----- |
 | Review iteration       | 0 |
+| First certified iteration | none |
 | Candidate receipt      | .forge/local/evidence/<task-id>/candidate.receipt |
 | Spec review receipt    | .forge/local/reviews/<task-id>/spec.receipt |
 | Quality review receipt | .forge/local/reviews/<task-id>/quality.receipt |
@@ -102,8 +103,9 @@ surface to user.
 Each action receipt records `host=<claude|codex>`. Receipt paths are worktree-local;
 they cannot satisfy gates in a sibling worktree.
 Populate every receipt path when the workflow activates. `Review iteration` starts at `0` and is
-incremented before each final paired-review dispatch; a populated candidate path is progress, not
-an evidence-mode switch.
+incremented before each final paired-review dispatch. `First certified iteration` is helper-owned:
+it starts as `none`, is set from the first valid paired-review receipt, and never advances. A
+populated candidate path is progress, not an evidence-mode switch.
 
 ## State
 

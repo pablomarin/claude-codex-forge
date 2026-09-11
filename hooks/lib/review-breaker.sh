@@ -65,17 +65,36 @@ echo "$CHECKLIST" | grep -E 'Code review loop' | grep -E 'N/A:' \
 
 # Certification: a v6 schema marker always selects receipt-v2, even before a
 # candidate path exists. Legacy rows remain readable only for pre-v6 state.
-CERT_N=""; CERT_HEAD=""; V2_ACTIVE=false
+CERT_N=""; CERT_HEAD=""; V2_ACTIVE=false; ANCHOR_INVALID=false
 V2_SCHEMA=$(sed -n '1{s/\r$//;p;}' "$STATE")
 case "$V2_SCHEMA" in '<!-- forge:state-schema v6 -->')
     V2_ACTIVE=true
-    VR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/verification-receipt.sh"
-    [ -f "$VR" ] || VR="hooks/lib/verification-receipt.sh"
-    if [ -f "$VR" ]; then
-        V2_OUT=$(bash "$VR" check --state "$STATE" 2>/dev/null || true)
-        if [ "$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEWS_VALID://p' | tail -1)" = true ]; then
-            CERT_N=$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEW_ITERATION://p' | tail -1)
-            CERT_HEAD="$HEAD_SHA"
+    FIRST_ROWS=$(tr -d '\r' < "$STATE" | awk -F'|' '
+        /^## / { section=$0; sub(/^## /,"",section); next }
+        section=="Receipts" && /^\|/ {
+            key=$2; gsub(/^[ \t]+|[ \t]+$/,"",key)
+            if(key=="First certified iteration") { value=$3; gsub(/^[ \t]+|[ \t]+$/,"",value); print value }
+        }')
+    FIRST_COUNT=$(printf '%s\n' "$FIRST_ROWS" | awk 'NF{n++} END{print n+0}')
+    if [ "$FIRST_COUNT" -gt 1 ]; then
+        ANCHOR_INVALID=true; CERT_N=0
+    elif [ "$FIRST_COUNT" -eq 1 ]; then
+        FIRST_CERT=$(printf '%s\n' "$FIRST_ROWS" | awk 'NF{print; exit}')
+        case "$FIRST_CERT" in
+            none) ;;
+            ''|0|*[!0-9]*) ANCHOR_INVALID=true; CERT_N=0 ;;
+            *) CERT_N="$FIRST_CERT"; CERT_HEAD="$HEAD_SHA" ;;
+        esac
+    fi
+    if [ -z "$CERT_N" ]; then
+        VR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/verification-receipt.sh"
+        [ -f "$VR" ] || VR="hooks/lib/verification-receipt.sh"
+        if [ -f "$VR" ]; then
+            V2_OUT=$(bash "$VR" check --state "$STATE" 2>/dev/null || true)
+            if [ "$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEWS_VALID://p' | tail -1)" = true ]; then
+                CERT_N=$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEW_ITERATION://p' | tail -1)
+                CERT_HEAD="$HEAD_SHA"
+            fi
         fi
     fi
     ;;
@@ -110,6 +129,7 @@ LOOP_POST=$(( LOOP_N > CERT_N ? LOOP_N - CERT_N : 0 ))
 POST_CERT_ROUNDS=$(( LOOP_POST > ROWS_POST ? LOOP_POST : ROWS_POST ))
 
 BREAKER=ok; [ "$POST_CERT_ROUNDS" -gt "$POST_CERT_REVIEW_ROUND_LIMIT" ] && BREAKER=tripped
+[ "$ANCHOR_INVALID" = false ] || BREAKER=tripped
 # Post-certification count-less N/A = the breaker counter was erased → fail closed.
 [ "$NA_COUNTLESS" = "1" ] && BREAKER=tripped
 

@@ -71,6 +71,8 @@ Run `.forge/hooks/lib/workflow-state.sh show` before every workflow action (Powe
 `.forge/hooks/lib/workflow-state.ps1 show`). The bounded helper is the only canonical interface for
 workflow control rows: use `workflow-state.sh activate` once in a new task worktree and
 `workflow-state.sh checkpoint` for later host, phase, next-step, and review-iteration transitions.
+The helper alone derives the first receipt-certified iteration and preserves it for convergence
+accounting; neither host may set or advance that anchor directly.
 Use host-native file tools only for checklist and narrative content. A host switch resumes the exact
 next step in the same branch/worktree. Forge creates no edit lock: concurrent sessions are allowed.
 Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
@@ -92,7 +94,8 @@ never activates a mode:
    `0`. Invoke `.forge/hooks/lib/workflow-state.sh activate --host <claude|codex> --workflow
    <new-feature|fix-bug|quick-fix> --task <slug> --base-ref <ref-or-sha> --phase <phase>
    --next-step '<exact next step>'` before any discretionary investigation or tracked mutation.
-   The active V6 schema selects structured evidence immediately.
+   The active V6 schema selects structured evidence immediately. An identical in-flight V6.1
+   placeholder bundle is adopted by this activation; partial or conflicting bundles fail closed.
 2. **Plan before code:** for planned feature and bug work, obtain clean candidate-bound plan evidence
    before production implementation. Quick fixes must record their acceptance check before editing.
 3. **Exercise early:** run preliminary E2E while mutation is still allowed, or record why no

@@ -109,6 +109,8 @@ assert_contains "$ACT_REPO/.forge/local/state.md" '| Next step | write RED test 
     "activate records exact next step"
 assert_contains "$ACT_REPO/.forge/local/state.md" '| Review iteration       | 0 |' \
     "activate initializes review iteration zero"
+assert_contains "$ACT_REPO/.forge/local/state.md" '| First certified iteration | none |' \
+    "activate initializes the helper-owned certification anchor"
 assert_contains "$ACT_REPO/.forge/local/state.md" \
     '| Candidate receipt      | .forge/local/evidence/handoff-smoke/candidate.receipt |' \
     "activate initializes candidate receipt path"
@@ -155,6 +157,11 @@ assert_rejected_unchanged "$ACT_REPO" "invalid workflow" activate --host claude 
     --workflow deploy --task handoff-smoke --base-ref main --phase diagnosis --next-step 'write RED test'
 assert_rejected_unchanged "$ACT_REPO" "path task slug" activate --host claude \
     --workflow quick-fix --task ../handoff --base-ref main --phase diagnosis --next-step 'write RED test'
+NEWLINE_TASK_REPO=$(make_repo)
+assert_rejected_unchanged "$NEWLINE_TASK_REPO" "newline task slug" activate --host claude \
+    --workflow quick-fix --task $'ok\n../../escape' --base-ref main --phase diagnosis --next-step 'write RED test'
+assert_file_missing "$NEWLINE_TASK_REPO/.forge/local/escape" \
+    "newline task slug cannot escape its task directory"
 assert_rejected_unchanged "$ACT_REPO" "option-like base ref" activate --host claude \
     --workflow quick-fix --task handoff-smoke --base-ref --help --phase diagnosis --next-step 'write RED test'
 assert_rejected_unchanged "$ACT_REPO" "pipe in phase" activate --host claude \
@@ -163,6 +170,35 @@ assert_rejected_unchanged "$ACT_REPO" "newline in next step" activate --host cla
     --workflow quick-fix --task handoff-smoke --base-ref main --phase diagnosis --next-step $'write\nRED test'
 assert_rejected_unchanged "$ACT_REPO" "outer whitespace" activate --host claude \
     --workflow quick-fix --task handoff-smoke --base-ref main --phase ' diagnosis' --next-step 'write RED test'
+run_sh "$ACT_REPO" activate --host claude --host codex --workflow quick-fix \
+    --task handoff-smoke --base-ref main --phase diagnosis --next-step 'write RED test'
+if [ "$?" -ne 0 ]; then pass "duplicate activate option is rejected"; else fail "duplicate activate option must be rejected"; fi
+assert_contains "$ACT_REPO/helper.err" 'duplicate activate option: --host' \
+    "duplicate activate option has actionable Bash/PowerShell-parity guidance"
+
+start_test "activate repairs an identical in-flight V6.1 placeholder state"
+UPGRADE_REPO=$(make_repo)
+activate_fixture "$UPGRADE_REPO"
+awk '
+    $0 == "| Review iteration       | 0 |" { print "| Review iteration       | <integer> |"; next }
+    $0 ~ /^\| (Candidate|Spec review|Quality review|Verify app|E2E|Promotion) receipt/ {
+        gsub(/handoff-smoke/, "<task-id>")
+    }
+    $0 !~ /^\| First certified iteration /
+' "$UPGRADE_REPO/.forge/local/state.md" > "$UPGRADE_REPO/.forge/local/state.next"
+mv "$UPGRADE_REPO/.forge/local/state.next" "$UPGRADE_REPO/.forge/local/state.md"
+activate_fixture "$UPGRADE_REPO"
+assert_equals "$?" "0" "identical V6.1 workflow is adopted"
+assert_contains "$UPGRADE_REPO/.forge/local/state.md" '| Review iteration       | 0 |' \
+    "V6.1 adoption initializes review iteration zero"
+assert_contains "$UPGRADE_REPO/.forge/local/state.md" '| First certified iteration | none |' \
+    "V6.1 adoption initializes the certification anchor"
+assert_equals "$(awk '$0 == "| First certified iteration | none |" { getline; if ($0 == "") print "table"; exit }' "$UPGRADE_REPO/.forge/local/state.md")" \
+    'table' \
+    "V6.1 adoption inserts the anchor inside the Receipts table"
+assert_contains "$UPGRADE_REPO/.forge/local/state.md" \
+    '| Candidate receipt      | .forge/local/evidence/handoff-smoke/candidate.receipt |' \
+    "V6.1 adoption initializes task receipt paths"
 
 start_test "show and activate reject non-canonical state"
 MALFORMED=$(make_repo)
@@ -221,6 +257,13 @@ if [ "$GROUP" = "all" ]; then
         "checkpoint changes the next step"
     assert_contains "$CHECK_REPO/.forge/local/state.md" '| Review iteration       | 0 |' \
         "ordinary checkpoint preserves review iteration"
+    run_sh "$CHECK_REPO" checkpoint --host codex --phase 'literal \n phase' \
+        --next-step 'keep literal \t and \n text'
+    assert_equals "$?" "0" "checkpoint accepts literal backslash sequences"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Phase     | literal \n phase |' \
+        "checkpoint preserves a literal backslash-n in phase"
+    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Next step | keep literal \t and \n text |' \
+        "checkpoint preserves literal backslash sequences in next step"
     capture_checkpoint_invariants "$CHECK_REPO/.forge/local/state.md" "$CHECK_REPO/invariants.after"
     if cmp -s "$CHECK_REPO/invariants.before" "$CHECK_REPO/invariants.after"; then
         pass "checkpoint preserves base identity, command, and receipt paths byte-for-byte"
@@ -237,10 +280,62 @@ if [ "$GROUP" = "all" ]; then
     assert_equals "$?" "0" "second begin-review checkpoint exits zero"
     assert_contains "$CHECK_REPO/.forge/local/state.md" '| Review iteration       | 2 |' \
         "second begin-review increments iteration to two"
+
+    start_test "checkpoint records the first receipt-certified iteration once"
+    CERT_REPO=$(make_repo)
+    activate_fixture "$CERT_REPO"
+    awk '{
+        if ($0 == "| Review iteration       | 0 |") {
+            print "| Review iteration       | 1 |"
+            next
+        }
+        print
+    }' "$CERT_REPO/.forge/local/state.md" > "$CERT_REPO/.forge/local/state.next"
+    mv "$CERT_REPO/.forge/local/state.next" "$CERT_REPO/.forge/local/state.md"
+    (
+        cd "$CERT_REPO" || exit 1
+        # shellcheck source=../../hooks/lib/workflow-state.sh
+        source "$HELPER_SH"
+        workflow_state_reviews_valid() { return 0; }
+        workflow_state_checkpoint --host codex --phase verify --next-step 'run final verification'
+    ) > "$CERT_REPO/helper.out" 2> "$CERT_REPO/helper.err"
+    assert_equals "$?" "0" "certified checkpoint exits zero"
+    assert_contains "$CERT_REPO/.forge/local/state.md" '| First certified iteration | 1 |' \
+        "first clean paired review iteration is anchored"
+    (
+        cd "$CERT_REPO" || exit 1
+        source "$HELPER_SH"
+        workflow_state_reviews_valid() { return 1; }
+        workflow_state_checkpoint --host claude --phase review --next-step 'review repaired candidate' --begin-review
+    ) > "$CERT_REPO/helper.out" 2> "$CERT_REPO/helper.err"
+    assert_equals "$?" "0" "later review checkpoint exits zero"
+    assert_contains "$CERT_REPO/.forge/local/state.md" '| Review iteration       | 2 |' \
+        "later review increments the current iteration"
+    assert_contains "$CERT_REPO/.forge/local/state.md" '| First certified iteration | 1 |' \
+        "later reviews preserve the first certification anchor"
     assert_rejected_unchanged "$CHECK_REPO" "caller-selected review iteration" checkpoint \
         --host codex --phase review --next-step 'dispatch reviewers' --review-iteration 9
     assert_rejected_unchanged "$CHECK_REPO" "unknown checkpoint option" checkpoint \
         --host codex --phase review --next-step 'dispatch reviewers' --other value
+    run_sh "$CHECK_REPO" checkpoint --host codex --phase review --next-step 'dispatch reviewers' \
+        --begin-review --begin-review
+    if [ "$?" -ne 0 ]; then pass "duplicate checkpoint option is rejected"; else fail "duplicate checkpoint option must be rejected"; fi
+    assert_contains "$CHECK_REPO/helper.err" 'duplicate checkpoint option: --begin-review' \
+        "duplicate checkpoint option has actionable Bash/PowerShell-parity guidance"
+
+    start_test "checkpoint normalizes CRLF state for cross-platform handoff"
+    CRLF_REPO=$(make_repo)
+    sed 's/$/\r/' "$CRLF_REPO/.forge/local/state.md" > "$CRLF_REPO/.forge/local/state.next"
+    mv "$CRLF_REPO/.forge/local/state.next" "$CRLF_REPO/.forge/local/state.md"
+    activate_fixture "$CRLF_REPO"
+    assert_equals "$?" "0" "activate accepts canonical state written with CRLF"
+    checkpoint_fixture "$CRLF_REPO"
+    assert_equals "$?" "0" "checkpoint resumes CRLF state"
+    if LC_ALL=C grep -q "$(printf '\r')" "$CRLF_REPO/.forge/local/state.md"; then
+        fail "checkpoint must normalize canonical state to LF"
+    else
+        pass "checkpoint normalizes canonical state to LF"
+    fi
 
     start_test "checkpoint rejects malformed state atomically"
     DUP_REPO=$(make_repo)
@@ -293,6 +388,12 @@ if [ "$GROUP" = "all" ]; then
             "PowerShell begin-review increments iteration"
     fi
 fi
+
+start_test "PowerShell twin preserves LF bytes and raw show output"
+assert_not_contains "$HELPER_PS1" '[IO.File]::WriteAllLines' \
+    "PowerShell twin does not rewrite canonical state with platform newlines"
+assert_contains "$HELPER_PS1" '[Console]::OpenStandardOutput()' \
+    "PowerShell show writes canonical bytes without console transcoding"
 
 cleanup_scratch_dirs
 report "test-workflow-state"

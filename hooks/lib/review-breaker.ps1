@@ -132,15 +132,36 @@ function Invoke-ReviewBreaker {
     $CERT_N = $null
     $CERT_HEAD = ''
     $v2Active = $false
+    $anchorInvalid = $false
     if ($lines.Count -gt 0 -and $lines[0] -eq '<!-- forge:state-schema v6 -->') {
         $v2Active = $true
-        $verificationReceipt = Join-Path $PSScriptRoot 'verification-receipt.ps1'
-        if (Test-Path -LiteralPath $verificationReceipt) {
-            . $verificationReceipt
-            $receiptResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateFile
-            if ($receiptResponse.Lines -contains 'REVIEWS_VALID:true') {
-                $iterationLine = $receiptResponse.Lines | Where-Object { $_ -match '^REVIEW_ITERATION:' } | Select-Object -Last 1
-                if ($iterationLine -match '^REVIEW_ITERATION:([0-9]+)$') { $CERT_N = [int]$matches[1]; $CERT_HEAD = $HEAD_SHA }
+        $receiptSection = $false
+        $firstValues = New-Object Collections.Generic.List[string]
+        foreach ($line in $lines) {
+            if ($line -match '^## (.+)$') { $receiptSection = ($Matches[1] -eq 'Receipts'); continue }
+            if ($receiptSection -and $line -match '^\|') {
+                $cells = $line -split '\|'
+                if ($cells.Count -ge 4 -and $cells[1].Trim() -eq 'First certified iteration') {
+                    $firstValues.Add($cells[2].Trim())
+                }
+            }
+        }
+        if ($firstValues.Count -gt 1) {
+            $anchorInvalid = $true; $CERT_N = 0
+        }
+        elseif ($firstValues.Count -eq 1 -and $firstValues[0] -ne 'none') {
+            if ($firstValues[0] -match '^[1-9][0-9]*$') { $CERT_N = [int]$firstValues[0]; $CERT_HEAD = $HEAD_SHA }
+            else { $anchorInvalid = $true; $CERT_N = 0 }
+        }
+        if ($null -eq $CERT_N) {
+            $verificationReceipt = Join-Path $PSScriptRoot 'verification-receipt.ps1'
+            if (Test-Path -LiteralPath $verificationReceipt) {
+                . $verificationReceipt
+                $receiptResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateFile
+                if ($receiptResponse.Lines -contains 'REVIEWS_VALID:true') {
+                    $iterationLine = $receiptResponse.Lines | Where-Object { $_ -match '^REVIEW_ITERATION:' } | Select-Object -Last 1
+                    if ($iterationLine -match '^REVIEW_ITERATION:([0-9]+)$') { $CERT_N = [int]$matches[1]; $CERT_HEAD = $HEAD_SHA }
+                }
             }
         }
     }
@@ -175,6 +196,7 @@ function Invoke-ReviewBreaker {
 
     $BREAKER = 'ok'
     if ($POST_CERT_ROUNDS -gt $POST_CERT_REVIEW_ROUND_LIMIT) { $BREAKER = 'tripped' }
+    if ($anchorInvalid) { $BREAKER = 'tripped' }
     # Post-certification count-less N/A = the breaker counter was erased -> fail closed.
     if ($NA_COUNTLESS) { $BREAKER = 'tripped' }
 
