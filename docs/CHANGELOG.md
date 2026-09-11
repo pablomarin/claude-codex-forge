@@ -22,12 +22,20 @@ Claude can resume work started in Codex, while preserving the workflow base SHA,
 next step, and unchanged candidate linkage. `Last active host` and receipt `main_host` remain routing
 and audit metadata rather than leases.
 
+**A bounded portable state command now makes that continuation executable.** Installed Bash and
+PowerShell twins expose only `show`, atomic `activate`, and allowlisted `checkpoint`; callers cannot
+choose fields, paths, receipt identities, base identity, or review iteration. `--begin-review`
+increments the current iteration by exactly one, and `complete`/`none` is the explicit terminal
+transition that permits clean task replacement. The existing targeted denial of direct local-state
+shell reads and common writes remains in force, with remediation pointing both engines to the
+bounded command instead of host-specific file operations.
+
 Existing 6.0 and 6.1 projects receive this contract through `setup.sh --upgrade` or
 `setup.ps1 -Upgrade`. Forge V5, mixed, custom, and unknown trees still require the read-only
 `setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun` preview and explicit blocker resolution
-before materialization. Deterministic Bash, static parity, and installer tests qualify this source;
-Windows PowerShell runtime execution remains a CI/live qualification boundary where `pwsh` is not
-installed locally.
+before materialization. Deterministic Bash, static parity, installer, and real installed-host
+handoff checks qualify this source; a source-only helper test is not enough. Windows PowerShell
+runtime execution remains a CI/live qualification boundary where `pwsh` is not installed locally.
 
 ## 6.1 — 2026-09-10
 
