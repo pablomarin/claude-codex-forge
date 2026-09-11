@@ -765,16 +765,16 @@ if echo "$out_ad" | grep -qE "WORKFLOW:.*Phase:.*Next:"; then
 else
     fail "checkpoint continuation missing (got: $out_ad)"
 fi
-if echo "$out_ad" | grep -qF "Read .forge/local/state.md"; then
-    pass "checkpoint continuation names canonical state"
+if echo "$out_ad" | grep -qF ".forge/hooks/lib/workflow-state.sh show"; then
+    pass "checkpoint continuation names the bounded state reader"
 else
-    fail "checkpoint continuation does not name canonical state (got: $out_ad)"
+    fail "checkpoint continuation does not name the bounded state reader (got: $out_ad)"
 fi
 assert_equals "$rc_ad" "2" "first active-workflow Stop continues the model"
 out_ad_repeat=$(cd "$S_AD" && printf '{"stop_hook_active":true}' | bash "$REPO_ROOT/hooks/check-state-updated.sh" 2>&1)
 rc_ad_repeat=$?
 assert_equals "$rc_ad_repeat" "0" "stop_hook_active prevents a continuation loop"
-if echo "$out_ad_repeat" | grep -qF "Read .forge/local/state.md"; then
+if echo "$out_ad_repeat" | grep -qF ".forge/hooks/lib/workflow-state.sh show"; then
     fail "repeat Stop emitted another checkpoint continuation"
 else
     pass "repeat Stop does not emit another checkpoint continuation"

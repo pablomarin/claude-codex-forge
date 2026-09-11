@@ -20,8 +20,13 @@ criterion.
 
 - The agent running in the developer's current host is the main agent for that session. There is
   no permanent main-engine preference and no workflow lease.
-- Read `.forge/local/state.md` before resuming work and keep its evidence bound to the exact
-  candidate revision. Do not infer a successful gate from execution alone.
+- Run `.forge/hooks/lib/workflow-state.sh show` before resuming work (PowerShell:
+  `.forge/hooks/lib/workflow-state.ps1 show`) and keep evidence bound to the exact candidate
+  revision. Do not infer a successful gate from execution alone.
+- Use `.forge/hooks/lib/workflow-state.sh activate` to start canonical workflow control state and
+  `.forge/hooks/lib/workflow-state.sh checkpoint` for host, phase, next-step, and monotonic review
+  transitions. Use the `.ps1` twin on Windows. Native file tools may update checklist and narrative
+  content, but never workflow control rows.
 - Use the canonical workflows in `.forge/workflows/`, rules in `.forge/rules/`, skills in
   `.forge/skills/`, and roles in `.forge/agents/`.
 - A host switch may resume the same branch and worktree. Forge creates no edit lock: concurrent sessions are allowed.

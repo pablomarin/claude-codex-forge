@@ -582,7 +582,7 @@ if [ -n "$WORKFLOW_REMINDER" ]; then
             || { rm -f "$STATE_STOP_TMP"; echo "FORGE_STATE_INVALID: could not publish state checkpoint sidecar" >&2; exit 2; }
         forge_allow
     fi
-    echo "$WORKFLOW_REMINDER. Read .forge/local/state.md before continuing; update its exact next step and record any durable learning in the appropriate Forge memory layer before stopping." >&2
+    echo "$WORKFLOW_REMINDER. Run .forge/hooks/lib/workflow-state.sh show before continuing; use workflow-state.sh checkpoint for its exact next step and record any durable learning in the appropriate Forge memory layer before stopping." >&2
     exit 2
 fi
 

@@ -67,9 +67,12 @@ runtime result rather than permission to claim the workflow is prompt-free.
 
 ## Durable State and Host Switching
 
-Read `.forge/local/state.md` before every workflow action. Record the current phase, next unchecked
-step, last active host, intended base ref, and immutable resolved base SHA. A host switch resumes
-that exact next step in the same branch/worktree. Forge creates no edit lock: concurrent sessions are allowed.
+Run `.forge/hooks/lib/workflow-state.sh show` before every workflow action (PowerShell:
+`.forge/hooks/lib/workflow-state.ps1 show`). The bounded helper is the only canonical interface for
+workflow control rows: use `workflow-state.sh activate` once in a new task worktree and
+`workflow-state.sh checkpoint` for later host, phase, next-step, and review-iteration transitions.
+Use host-native file tools only for checklist and narrative content. A host switch resumes the exact
+next step in the same branch/worktree. Forge creates no edit lock: concurrent sessions are allowed.
 Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
 Do not introduce locks, leases, or a permanent session owner.
 
@@ -86,21 +89,31 @@ never activates a mode:
 
 1. **Activate:** resolve and persist the immutable workflow base ref/SHA, create one task-local
    `.forge/local/` evidence directory, populate every receipt path, and set `Review iteration` to
-   `0`. The active V6 schema selects structured evidence immediately.
+   `0`. Invoke `.forge/hooks/lib/workflow-state.sh activate --host <claude|codex> --workflow
+   <new-feature|fix-bug|quick-fix> --task <slug> --base-ref <ref-or-sha> --phase <phase>
+   --next-step '<exact next step>'` before any discretionary investigation or tracked mutation.
+   The active V6 schema selects structured evidence immediately.
 2. **Plan before code:** for planned feature and bug work, obtain clean candidate-bound plan evidence
    before production implementation. Quick fixes must record their acceptance check before editing.
 3. **Exercise early:** run preliminary E2E while mutation is still allowed, or record why no
    supported user journey exists; this is not final certification.
 4. **Freeze:** finish TDD, documentation, and simplification; stage the intended tree and freeze one
    staged-clean candidate.
-5. **Review:** increment `Review iteration` before dispatch, then run distinct fresh `code-spec` and
-   `code-quality` lenses against the same candidate and iteration.
+5. **Review:** invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host <claude|codex> --phase
+   review --next-step '<exact next step>' --begin-review` before dispatch, then run distinct fresh
+   `code-spec` and `code-quality` lenses against the same candidate and iteration.
 6. **Verify:** run `verify-app` and E2E against that same candidate and write their structured
    receipts. E2E N/A requires its candidate-bound report and reason.
 7. **Invalidate on change:** Any candidate mutation invalidates the final review and verifier
    receipts. Restage, freeze a new candidate, increment the iteration before review, and rerun the
    affected final gates.
 8. **Promote:** revalidate the complete receipt set and promote only the exact certified tree.
+
+At every other durable boundary, invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host
+<claude|codex> --phase <phase> --next-step '<exact next step>'`. End a completed workflow with the
+exact terminal transition `workflow-state.sh checkpoint --host <claude|codex> --phase complete
+--next-step none`; only that terminal pair permits a new activation. On Windows, use the `.ps1`
+twin with the same action and arguments.
 
 - Research current documentation before design when a library, API, or provider is involved.
 - Compare viable approaches and send genuine ambiguity to `/council`.

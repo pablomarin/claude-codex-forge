@@ -55,11 +55,17 @@ if [[ "$stage" == development || "$stage" == complete ]]; then
             assert_contains "$file" "$contract" "$workflow preserves $contract"
         done
         assert_contains "$file" "do not" "$workflow warns without adding a lock"
-        for transition in "Review iteration | 0" "populate every receipt path" \
-            "before production implementation" 'increment `Review iteration` before' \
+        for transition in "workflow-state.sh show" "workflow-state.sh activate" \
+            "workflow-state.sh checkpoint" "--begin-review" \
+            "before any discretionary investigation or tracked mutation" \
+            "before production implementation" \
             "same candidate" "Any candidate mutation"; do
             assert_contains "$file" "$transition" "$workflow makes the $transition transition explicit"
         done
+        assert_not_contains "$file" 'Read `.forge/local/state.md`' \
+            "$workflow does not instruct a direct canonical state read"
+        assert_not_contains "$file" 'Update `.forge/local/state.md`' \
+            "$workflow does not instruct an unbounded canonical state write"
     done
     for workflow in new-feature fix-bug; do
         file="$REPO_ROOT/commands/$workflow.md"
@@ -73,6 +79,15 @@ if [[ "$stage" == development || "$stage" == complete ]]; then
     assert_contains "$REPO_ROOT/commands/quick-fix.md" "code-spec" "quick-fix requires the spec review lens"
     assert_contains "$REPO_ROOT/commands/quick-fix.md" "code-quality" "quick-fix requires the quality review lens"
 fi
+
+start_test "canonical policy routes workflow control rows through the bounded helper"
+for surface in "$REPO_ROOT/rules/workflow.md" "$REPO_ROOT/FORGE.template.md"; do
+    assert_contains "$surface" 'workflow-state.sh show' "$(basename "$surface") names bounded show"
+    assert_contains "$surface" 'workflow-state.sh activate' "$(basename "$surface") names bounded activation"
+    assert_contains "$surface" 'workflow-state.sh checkpoint' "$(basename "$surface") names bounded checkpoint"
+    assert_not_contains "$surface" 'Read `.forge/local/state.md`' \
+        "$(basename "$surface") does not instruct a direct canonical state read"
+done
 
 if [[ "$stage" == complete ]]; then
     start_test "final cutover owns goal composition and removes transitional dependencies"

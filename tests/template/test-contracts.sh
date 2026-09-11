@@ -1193,9 +1193,9 @@ else
 start_test "host-neutral development workflows use canonical state ownership"
 for f in "$NF" "$FB"; do
     bn=$(basename "$f")
-    assert_contains "$f" '.forge/state.template.md' "$bn initializes from the canonical state template"
-    assert_contains "$f" '.forge/local/state.md' "$bn uses canonical developer-owned state"
-    assert_contains "$f" "file read/write capabilities" "$bn avoids host-private shell state writes"
+    assert_contains "$f" '.forge/hooks/lib/workflow-state.sh show' "$bn reads canonical state through the bounded helper"
+    assert_contains "$f" '.forge/hooks/lib/workflow-state.sh activate' "$bn initializes canonical state through the bounded helper"
+    assert_contains "$f" 'do not directly edit workflow control rows' "$bn avoids unbounded state writes"
     assert_contains "$f" 'Last active host' "$bn persists host-switch continuity"
 done
 fi
@@ -2891,5 +2891,20 @@ if [ -z "$PUBLIC_FORGE_MAINTAINER_GUIDANCE" ]; then
 else
     fail "active public docs contain Forge-development guidance: $PUBLIC_FORGE_MAINTAINER_GUIDANCE"
 fi
+
+start_test "workflow consumers use bounded cross-engine state transitions"
+for relative in commands/new-feature.md commands/fix-bug.md commands/quick-fix.md rules/workflow.md FORGE.template.md; do
+    surface="$REPO_ROOT/$relative"
+    for action in show activate checkpoint; do
+        assert_contains "$surface" "workflow-state.sh $action" \
+            "$relative names workflow-state $action"
+    done
+    assert_not_contains "$surface" 'Read `.forge/local/state.md`' \
+        "$relative contains no direct canonical state-read instruction"
+done
+for relative in commands/new-feature.md commands/fix-bug.md commands/quick-fix.md; do
+    assert_contains "$REPO_ROOT/$relative" '--begin-review' \
+        "$relative begins review through the monotonic helper transition"
+done
 
 report "test-contracts.sh"

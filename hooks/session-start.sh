@@ -51,7 +51,7 @@ if [ -f "$STATE_HELPER" ]; then
                 if [ -z "$RESUME_PHASE" ] || [ -z "$RESUME_NEXT" ]; then
                     CONTEXT="$CONTEXT (FORGE_STATE_INVALID: active workflow in .forge/local/state.md is missing Phase or Next step; repair it before continuing)"
                 else
-                    CONTEXT="$CONTEXT (Forge resume from .forge/local/state.md: $RESUME_CMD; phase: $RESUME_PHASE; next step: $RESUME_NEXT — read it before continuing)"
+                    CONTEXT="$CONTEXT (Forge resume from .forge/local/state.md: $RESUME_CMD; phase: $RESUME_PHASE; next step: $RESUME_NEXT — run .forge/hooks/lib/workflow-state.sh show before continuing)"
                 fi
                 ;;
         esac

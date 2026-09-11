@@ -58,6 +58,12 @@ for retained in "base SHA" "review iteration" "next step" "candidate linkage"; d
     assert_contains "$REPO_ROOT/state.template.md" "$retained" \
         "cross-host continuation retains $retained"
 done
+for helper_action in "workflow-state.sh show" "workflow-state.sh activate" "workflow-state.sh checkpoint"; do
+    assert_contains "$REPO_ROOT/state.template.md" "$helper_action" \
+        "state template routes control transitions through $helper_action"
+done
+assert_contains "$REPO_ROOT/state.template.md" 'checklist and narrative' \
+    "state template limits native file editing to checklist and narrative content"
 
 start_test "Forge memory has isolated local and reviewable durable layers"
 MEM="$(scratch_dir forge-memory)"

@@ -60,7 +60,7 @@ if (Test-Path -LiteralPath $stateHelper) {
                 if (-not $resumePhase -or -not $resumeNext) {
                     $context += " (FORGE_STATE_INVALID: active workflow in .forge/local/state.md is missing Phase or Next step; repair it before continuing)"
                 } else {
-                    $context = "$context (Forge resume from .forge/local/state.md: $resumeCmd; phase: $resumePhase; next step: $resumeNext - read it before continuing)"
+                    $context = "$context (Forge resume from .forge/local/state.md: $resumeCmd; phase: $resumePhase; next step: $resumeNext - run .forge/hooks/lib/workflow-state.ps1 show before continuing)"
                 }
             }
             if (Test-Path -LiteralPath (Join-Path $root ".forge\local\memory\MEMORY.md") -PathType Leaf) {

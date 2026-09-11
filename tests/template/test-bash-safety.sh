@@ -26,6 +26,13 @@ run_sh() {
     echo $?
 }
 
+run_sh_capture() {
+    local cmd="$1" output="$2"
+    printf '%s' "$cmd" \
+      | jq -Rs '{tool_input:{command:.}}' \
+      | HOME="$FAKE_HOME" bash "$HOOK_SH" > /dev/null 2> "$output"
+}
+
 assert_block_sh() {
     local cmd="$1" desc="$2" rc
     rc="$(run_sh "$cmd")"
@@ -77,9 +84,26 @@ assert_allow_sh 'cat README.md' "unrelated read"
 start_test "bash: canonical Forge state read guardrail is host neutral"
 assert_block_sh 'cat .forge/local/state.md' "canonical state read via Bash is blocked"
 assert_block_sh 'sed -n "1,80p" .forge/local/state.md' "canonical state sed read is blocked"
+assert_allow_sh '.forge/hooks/lib/workflow-state.sh show' "bounded canonical state reader is allowed"
+assert_allow_sh ".forge/hooks/lib/workflow-state.sh activate --host claude --workflow quick-fix --task safe-task --base-ref main --phase diagnosis --next-step 'write RED test'" \
+    "bounded activation command is allowed"
+assert_allow_sh ".forge/hooks/lib/workflow-state.sh checkpoint --host codex --phase review --next-step 'dispatch reviewers' --begin-review" \
+    "bounded checkpoint command is allowed"
 assert_allow_sh 'cat .forge/local/state.md.bak' "canonical state filename terminator remains exact"
 assert_allow_sh 'STATE=.forge/local/state.md; sed -n "1,80p" "$STATE"' \
     "sanctioned variable-based canonical reader remains available"
+
+start_test "bash: canonical state denials point to the bounded helper"
+READ_REMEDIATION="$FAKE_HOME/read-remediation.err"
+run_sh_capture 'cat .forge/local/state.md' "$READ_REMEDIATION"
+assert_contains "$READ_REMEDIATION" '.forge/hooks/lib/workflow-state.sh show' \
+    "direct canonical read denial names workflow-state show"
+WRITE_REMEDIATION="$FAKE_HOME/write-remediation.err"
+run_sh_capture 'printf x > .forge/local/state.md' "$WRITE_REMEDIATION"
+assert_contains "$WRITE_REMEDIATION" 'workflow-state.sh activate' \
+    "direct canonical state write denial names bounded activation"
+assert_contains "$WRITE_REMEDIATION" 'workflow-state.sh checkpoint' \
+    "direct canonical state write denial names bounded checkpoint"
 
 # ---------------------------------------------------------------------------
 start_test "bash: existing high-risk patterns still block (regression guard)"

@@ -506,7 +506,7 @@ if ($workflowReminder) {
         }
         Exit-ForgeAllow
     }
-    [Console]::Error.WriteLine("$workflowReminder. Read .forge/local/state.md before continuing; update its exact next step and record any durable learning in the appropriate Forge memory layer before stopping.")
+    [Console]::Error.WriteLine("$workflowReminder. Run .forge/hooks/lib/workflow-state.ps1 show before continuing; use workflow-state.ps1 checkpoint for its exact next step and record any durable learning in the appropriate Forge memory layer before stopping.")
     exit 2
 }
 

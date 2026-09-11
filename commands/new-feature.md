@@ -5,12 +5,14 @@ host is the main agent for this session; there is no permanent main engine.
 
 ## 0. Resume or Start
 
-1. Read `.forge/instructions.md`, `.forge/rules/`, and `.forge/local/state.md`. Initialize state from
-   `.forge/state.template.md` only when it is absent; never overwrite developer state. Use the
-   host's file read/write capabilities for state, not shell commands.
-2. Resolve the active host through its installed adapter and record `Last active host`. If the host
-   changed, resume the exact next unchecked durable step. There is no Forge edit lock; concurrent sessions are allowed,
-   including simultaneous editing, so coordinate overlapping writes.
+1. Read `.forge/instructions.md` and `.forge/rules/`, resolve the active host through its installed
+   adapter, then run `.forge/hooks/lib/workflow-state.sh show` (PowerShell: the `.ps1` twin). If the
+   canonical state is absent or invalid, stop and use the setup/migration path; never reconstruct it
+   ad hoc.
+2. If this worktree already has the matching workflow active, use `workflow-state.sh checkpoint`
+   with the displayed phase and exact next step to record `Last active host`, then resume that step.
+   If it is inactive, continue only through the deterministic worktree/base preflight below. There
+   is no Forge edit lock; concurrent sessions are allowed, including simultaneous editing, so coordinate overlapping writes.
    If any session mutates the candidate, candidate-bound evidence becomes stale and must be
    regenerated before certification.
 3. From the primary checkout, create the isolated worktree with
@@ -30,10 +32,14 @@ host is the main agent for this session; there is no permanent main engine.
    `.forge/local/.state-seed-snapshot.md`. It never seeds workflow, goal, authorization, receipts,
    evidence, or local memory. For an adopted worktree, run the helper's `seed` action once; if a
    state or snapshot already exists, reconcile it explicitly rather than guessing.
-6. Before the first feature change, persist the intended base ref and resolved base SHA. The SHA is
-   immutable for the workflow and is passed to every candidate, dispatcher invocation, receipt,
-   isolated repository, and review prompt. An adopted worktree reuses its recorded base; if ancestry
-   is ambiguous and no base was recorded, require an explicit base rather than recomputing it.
+6. In the target worktree, run `workflow-state.sh show` and resolve the intended base ref. If state
+   is inactive, invoke `.forge/hooks/lib/workflow-state.sh activate --host <claude|codex> --workflow
+   new-feature --task <slug> --base-ref <ref-or-sha> --phase requirements --next-step 'complete
+   approved PRD'` before any discretionary investigation or tracked mutation. On Windows, use the
+   `.ps1` twin. The helper resolves and freezes the base SHA, which is immutable for this workflow
+   and is passed to every candidate, dispatcher invocation, receipt, isolated repository, and review
+   prompt. An adopted active worktree reuses its recorded base; if ancestry is ambiguous and no base
+   was recorded, require an explicit base before activation rather than guessing or recomputing it.
 7. Replace the active `## Workflow` block and create this checklist:
 
    ```markdown
@@ -55,9 +61,10 @@ host is the main agent for this session; there is no permanent main engine.
    - [ ] PR open
    ```
 
-8. Follow the canonical state-transition protocol in `.forge/rules/workflow.md`: create the
-   task-local evidence directories, populate every receipt path, and initialize the table with
-   `| Review iteration | 0 |`. These fields are required at activation, not deferred until review.
+8. The activation helper creates the task-local evidence directories, populates every receipt path,
+   freezes the base ref/SHA, and initializes review iteration zero. At each later durable boundary,
+   invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host <claude|codex> --phase <phase>
+   --next-step '<exact next step>'`; do not directly edit workflow control rows.
 
 ## 1. Requirements
 
@@ -148,7 +155,9 @@ Run this order exactly:
 5. Force-stage only the workflow's explicit approved ignored artifacts, then run `git add -A`.
 6. Freeze a staged-clean candidate with `candidate-fingerprint`; record its receipt under
    `.forge/local/evidence/<task-id>/`.
-7. At finalization, increment `Review iteration` before any reviewer dispatch. Against that exact candidate,
+7. At finalization, invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host <claude|codex>
+   --phase review --next-step 'dispatch final paired reviews' --begin-review` before any reviewer
+   dispatch. Against that exact candidate,
    read-only and without mutation:
    - dispatch distinct fresh `code-spec` and `code-quality` reviews and verify the pair;
    - run `verify-app`, persist its report with leading `VERDICT:`, and write its receipt;
@@ -177,7 +186,9 @@ not current-behavior claims.
 
 ## 7. State, Memory, and PR
 
-Update `.forge/local/state.md` and project memory with verified learnings only. Show the exact PR
+Use `workflow-state.sh checkpoint` for workflow control, update checklist/narrative content and
+project memory with verified learnings only, and finish with `workflow-state.sh checkpoint --host
+<claude|codex> --phase complete --next-step none`. Show the exact PR
 title/body/base/head and pause for human authorization. The developer creates the authorization
 record bound to the active objective nonce and candidate. Only then push and run `gh pr create`.
 
