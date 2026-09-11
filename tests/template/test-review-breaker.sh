@@ -311,6 +311,21 @@ run_gate "$R"
 assert_rc 2 "tripped breaker blocks the commit"
 assert_contains_str "convergence breaker" "$GATE_ERR" "receipt-native first-certification anchor blocks before receipt validation"
 
+start_test "blank or malformed receipt-native anchor fails closed"
+for bad_anchor in '' invalid; do
+    build_repo; install_helper "$R"
+    H="$(git -C "$R" rev-parse HEAD)"
+    EXTRA="" tripped_state "$R" "$H"
+    sed "s/| First certified iteration | 1 |/| First certified iteration | ${bad_anchor} |/" \
+        "$R/.claude/local/state.md" > "$R/.claude/local/state.next"
+    mv "$R/.claude/local/state.next" "$R/.claude/local/state.md"
+    RB_OUT="$( (cd "$R" && bash "$HELPER" .claude/local/state.md) 2>/dev/null )"
+    assert_contains_str "POST_CERT_ROUNDS:4" "$RB_OUT" \
+        "${bad_anchor:-blank} anchor preserves fail-closed review-tail accounting"
+    assert_contains_str "BREAKER:tripped" "$RB_OUT" \
+        "${bad_anchor:-blank} anchor cannot reset an over-limit review tail"
+done
+
 # --- Gate 2: tripped + a `Code review loop — N/A:` escape → STILL exit 2
 #     (the breaker block precedes the N/A handling and runs on a count-less N/A,
 #      which itself keeps the breaker tripped).

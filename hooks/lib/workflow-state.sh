@@ -570,7 +570,7 @@ workflow_state_checkpoint() {
     }
     case "$first_certified" in
         none) ;;
-        0|*[!0-9]*)
+        ''|0|*[!0-9]*)
             workflow_state_die "first certified iteration must be none or a positive integer"
             return $?
             ;;

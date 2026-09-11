@@ -69,17 +69,24 @@ CERT_N=""; CERT_HEAD=""; V2_ACTIVE=false; ANCHOR_INVALID=false
 V2_SCHEMA=$(sed -n '1{s/\r$//;p;}' "$STATE")
 case "$V2_SCHEMA" in '<!-- forge:state-schema v6 -->')
     V2_ACTIVE=true
-    FIRST_ROWS=$(tr -d '\r' < "$STATE" | awk -F'|' '
+    FIRST_COUNT=$(tr -d '\r' < "$STATE" | awk -F'|' '
         /^## / { section=$0; sub(/^## /,"",section); next }
         section=="Receipts" && /^\|/ {
             key=$2; gsub(/^[ \t]+|[ \t]+$/,"",key)
-            if(key=="First certified iteration") { value=$3; gsub(/^[ \t]+|[ \t]+$/,"",value); print value }
-        }')
-    FIRST_COUNT=$(printf '%s\n' "$FIRST_ROWS" | awk 'NF{n++} END{print n+0}')
+            if(key=="First certified iteration") count++
+        }
+        END { print count+0 }')
     if [ "$FIRST_COUNT" -gt 1 ]; then
         ANCHOR_INVALID=true; CERT_N=0
     elif [ "$FIRST_COUNT" -eq 1 ]; then
-        FIRST_CERT=$(printf '%s\n' "$FIRST_ROWS" | awk 'NF{print; exit}')
+        FIRST_CERT=$(tr -d '\r' < "$STATE" | awk -F'|' '
+            /^## / { section=$0; sub(/^## /,"",section); next }
+            section=="Receipts" && /^\|/ {
+                key=$2; gsub(/^[ \t]+|[ \t]+$/,"",key)
+                if(key=="First certified iteration") {
+                    value=$3; gsub(/^[ \t]+|[ \t]+$/,"",value); print value; exit
+                }
+            }')
         case "$FIRST_CERT" in
             none) ;;
             ''|0|*[!0-9]*) ANCHOR_INVALID=true; CERT_N=0 ;;

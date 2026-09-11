@@ -346,6 +346,22 @@ if [ "$GROUP" = "all" ]; then
     assert_rejected_unchanged "$DUP_REPO" "duplicate review iteration" checkpoint \
         --host codex --phase review --next-step 'dispatch reviewers' --begin-review
 
+    BLANK_ANCHOR_REPO=$(make_repo)
+    activate_fixture "$BLANK_ANCHOR_REPO"
+    sed 's/| First certified iteration | none |/| First certified iteration |  |/' \
+        "$BLANK_ANCHOR_REPO/.forge/local/state.md" > "$BLANK_ANCHOR_REPO/.forge/local/state.next"
+    mv "$BLANK_ANCHOR_REPO/.forge/local/state.next" "$BLANK_ANCHOR_REPO/.forge/local/state.md"
+    assert_rejected_unchanged "$BLANK_ANCHOR_REPO" "blank first-certified anchor" checkpoint \
+        --host codex --phase review --next-step 'dispatch reviewers'
+
+    MALFORMED_ANCHOR_REPO=$(make_repo)
+    activate_fixture "$MALFORMED_ANCHOR_REPO"
+    sed 's/| First certified iteration | none |/| First certified iteration | invalid |/' \
+        "$MALFORMED_ANCHOR_REPO/.forge/local/state.md" > "$MALFORMED_ANCHOR_REPO/.forge/local/state.next"
+    mv "$MALFORMED_ANCHOR_REPO/.forge/local/state.next" "$MALFORMED_ANCHOR_REPO/.forge/local/state.md"
+    assert_rejected_unchanged "$MALFORMED_ANCHOR_REPO" "malformed first-certified anchor" checkpoint \
+        --host codex --phase review --next-step 'dispatch reviewers'
+
     start_test "optimistic publication preserves a concurrent edit"
     CONCURRENT_REPO=$(make_repo)
     activate_fixture "$CONCURRENT_REPO"
