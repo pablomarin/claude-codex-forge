@@ -203,13 +203,13 @@ public static class ForgeFakeEngine {
     $spec = Get-LatestReceipt $repo; $specHash = Get-ShaFileForTest $spec
     $env:FAKE_CLAUDE_BEHAVIOR = 'auth-expired'; $env:FAKE_CODEX_BEHAVIOR = 'exit'
     Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' 'code-quality') 2 'unfinished lens requests auth'
-    $failed = Get-LatestReceipt $repo; $failedHash = Get-ShaFileForTest $failed
+    $failedReceipt = Get-LatestReceipt $repo; $failedHash = Get-ShaFileForTest $failedReceipt
     $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
     Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' 'code-quality') 0 'fresh retry completes unfinished lens'
     $quality = Get-LatestReceipt $repo
     Assert-Equal (Get-ShaFileForTest $spec) $specHash 'completed receipt retained'
-    Assert-Equal (Get-ShaFileForTest $failed) $failedHash 'failed receipt retained'
-    Assert-True ($quality -cne $failed) 'retry writes a distinct receipt'
+    Assert-Equal (Get-ShaFileForTest $failedReceipt) $failedHash 'failed receipt retained'
+    Assert-True ($quality -cne $failedReceipt) 'retry writes a distinct receipt'
     Assert-Equal (Get-ReceiptValue $repo 'review_iteration') '1' 'retry keeps review iteration'
     Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatcher,'-Mode','verify-pair','-CodeSpecReceipt',$spec,'-CodeQualityReceipt',$quality)) 0 'retry pair certifies unchanged candidate'
     foreach ($case in @(@('council-advisor','new'), @('council-chair','ephemeral'))) {
