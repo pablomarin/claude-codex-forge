@@ -22,11 +22,12 @@ function Invoke-SilentPowerShell([object[]]$Arguments) {
     try {
         $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $quoted -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
         $script:LastChildStderr = if (Test-Path -LiteralPath $stderr) { [IO.File]::ReadAllText($stderr) } else { '' }
+        $script:LastChildStdout = if (Test-Path -LiteralPath $stdout) { [IO.File]::ReadAllText($stdout) } else { '' }
         return [int]$process.ExitCode
     }
     finally { Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue }
 }
-function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; return $line.Substring($Key.Length + 1) }
+function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; if ($null -eq $line) { return '' }; return $line.Substring($Key.Length + 1) }
 function Get-LatestReceipt([string]$Repository) { return (Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1).FullName }
 function New-Repository([string]$Name) {
     $path = Join-Path $temporary $Name
@@ -107,6 +108,11 @@ public static class ForgeFakeEngine {
     string log=E("FAKE_"+engine.ToUpperInvariant()+"_LOG"); if(log!="") File.AppendAllText(log,"cwd="+Directory.GetCurrentDirectory()+" home="+E("HOME")+" userprofile="+E("USERPROFILE")+" username="+E("USERNAME")+" argv="+joined+Environment.NewLine);
     string argv=E("FAKE_"+engine.ToUpperInvariant()+"_ARGV_LOG"); if(argv!="") File.WriteAllLines(argv,args.Select(x=>x==""?"<EMPTY>":x));
     if(engine=="codex" && joined.Contains("--json") && !joined.Contains("exec resume")) Console.WriteLine("{\"type\":\"thread.started\",\"thread_id\":\""+E("FORGE_DISPATCH_SESSION_ID")+"\"}");
+    if(behavior=="require-proxy") {
+      foreach(var name in new[]{"HTTP_PROXY","HTTPS_PROXY","NO_PROXY"}) if(E(name)!="forge-test-"+name) return 62;
+      if(E("FORGE_AMBIENT_SECRET")+E("NODE_OPTIONS")+E("ANTHROPIC_BASE_URL")!="") return 61;
+      behavior="clean";
+    }
     if(behavior=="require-fast") {
       bool fast=engine=="codex" && joined.Contains("-c service_tier=fast");
       if(engine=="claude") for(int i=0;i+1<args.Length;i++) if(args[i]=="--settings") { string value=args[i+1]; fast=value.Contains("\"fastMode\":true") || (File.Exists(value) && File.ReadAllText(value).Contains("\"fastMode\": true")); }
@@ -117,11 +123,25 @@ public static class ForgeFakeEngine {
     if(behavior=="delayed-clean") Thread.Sleep(1000);
     if(behavior=="swap-output") { var paths=File.ReadAllLines(E("FAKE_CHILD_PID_FILE")); File.Delete(paths[0]); if(!CreateHardLink(paths[0],paths[1],IntPtr.Zero)) return 71; }
     if(behavior=="exit") return 23;
+    string expired="Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
+    if(behavior=="auth-expired" || behavior=="auth-expired-zero" || behavior=="auth-expired-delayed" || behavior=="auth-string-true" || behavior=="auth-false" || behavior=="forbidden" || behavior=="rate-limited" || behavior=="network-error") {
+      if(behavior=="auth-expired-delayed") Thread.Sleep(1000);
+      string flag=behavior=="auth-string-true"?"\"true\"":behavior=="auth-false"?"false":"true";
+      string error=behavior=="forbidden"?"API Error: 403 Forbidden":behavior=="rate-limited"?"API Error: 429 rate limit exceeded":behavior=="network-error"?"Connection error":expired;
+      Console.WriteLine("{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":"+flag+",\"result\":\""+error+"\",\"num_turns\":1,\"total_cost_usd\":0,\"modelUsage\":{}}"); return behavior=="auth-expired-zero"?0:1;
+    }
+    if(behavior=="blocked-unobserved" || behavior=="clean-unobserved") {
+      Emit(output,"schema_version=1\nverdict="+(behavior=="blocked-unobserved"?"BLOCKED":"CLEAN")+"\nmax_severity=NONE\nblocked_class="+(behavior=="blocked-unobserved"?"capability":"none")+"\nforge_canary_hash=unobserved\nforge_config_hash=unobserved\nforge_qualification_revision=unobserved\n"); return 0;
+    }
+    if(behavior=="wrong-canary") {
+      Emit(output,"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nforge_canary_hash=WRONG\nforge_config_hash="+E("FORGE_DISPATCH_CONFIG_HASH","MISSING")+"\nforge_qualification_revision="+E("FORGE_DISPATCH_QUALIFICATION_REVISION","MISSING")+"\n"); return 0;
+    }
     if(behavior=="investigate") { var target=Path.Combine(E("FORGE_CANDIDATE_ROOT"),"tests","reproductions","claimed.txt"); Directory.CreateDirectory(Path.GetDirectoryName(target)); File.WriteAllText(target,"bounded reproduction\n"); Emit(output,Qualified(engine,"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nreplay_path=tests/reproductions/claimed.txt\n")); return 0; }
     if(behavior=="full-investigation") { var root=Path.GetFullPath(E("FAKE_REAL_ROOT")); if(!String.Equals(Path.GetFullPath(Directory.GetCurrentDirectory()),root,StringComparison.OrdinalIgnoreCase)) return 71; if(E("FORGE_FULL_AGENT_PROBE")!="visible") return 72; if(!File.ReadAllText(Path.Combine(root,".forge","memory","shared.md")).Contains("shared durable memory")) return 73; if(!File.ReadAllText(Path.Combine(root,".forge","local","memory","session.md")).Contains("shared local memory")) return 74; var target=Path.Combine(root,".forge","local","investigation-artifacts",engine+".txt"); Directory.CreateDirectory(Path.GetDirectoryName(target)); File.WriteAllText(target,engine+" full agent\n"); Emit(output,Qualified(engine,"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n")); return 0; }
     if(behavior=="repro" || behavior=="repro-boundary") { if(behavior=="repro-boundary" && !(joined.Contains("--sandbox workspace-write") || joined.Contains("--safe-mode"))) return 69; var repro=RunReproduction(); if(repro!=0) return repro; Emit(output,Qualified(engine,"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n")); return 0; }
     string text="schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n";
     if(behavior=="findings") text="schema_version=1\nverdict=FINDINGS\nmax_severity=P1\nblocked_class=none\nfinding=F-1|P1|reachable\n";
+    else if(behavior=="auth-mentioned") text="schema_version=1\nverdict=FINDINGS\nmax_severity=P1\nblocked_class=none\nfinding=F-1|P1|"+expired+"\n";
     else if(behavior=="malformed") text="prose only\n";
     else if(behavior=="empty") text="";
     else if(behavior=="blocked-artifact") text="schema_version=1\nverdict=BLOCKED\nmax_severity=NONE\nblocked_class=artifact\n";
@@ -136,6 +156,71 @@ public static class ForgeFakeEngine {
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'claude.exe')
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'codex.exe')
     $env:PATH = "$bin;$($env:PATH)"; $env:FORGE_DISPATCH_TEST_MODE = '1'
+
+    Write-Host 'PowerShell explicit authentication handoff preserves fallback results'
+    foreach ($case in @(
+        @('codex','none','exit','authentication-required','claude',2),
+        @('claude','automatic','exit','authentication-required','claude',2),
+        @('codex','automatic','exit','process-exit-23','claude',2),
+        @('codex','automatic','clean','semantic-result','none',0),
+        @('codex','automatic','findings','semantic-result','none',0),
+        @('codex','automatic','blocked-artifact','semantic-result','none',2),
+        @('codex','automatic','blocked-unobserved','isolation-canary-unobserved','claude',2)
+    )) {
+        $repo = New-Repository ('auth-' + [Guid]::NewGuid().ToString('N'))
+        $env:FAKE_CLAUDE_BEHAVIOR = 'auth-expired'; $env:FAKE_CODEX_BEHAVIOR = $case[2]
+        Assert-Equal (Invoke-Dispatch $repo $case[0] 'sid' 'auto' 'general' $case[1]) $case[5] 'auth preserves fallback result'
+        Assert-Equal ($script:LastChildStdout -match 'AUTH_REQUIRED') ($case[4] -eq 'claude') 'actionable handoff only when recovery applies'
+        Assert-Equal (Get-ReceiptValue $repo 'failure_reason') $case[3] 'final failure reason is durable'
+        Assert-Equal (Get-ReceiptValue $repo 'auth_recovery_engine') $case[4] 'only unresolved engine or capability auth failure requests recovery'
+    }
+    foreach ($behavior in @('auth-expired-zero','auth-mentioned','auth-string-true','auth-false','forbidden','rate-limited','network-error')) {
+        $repo = New-Repository ('auth-shape-' + $behavior); $env:FAKE_CLAUDE_BEHAVIOR = $behavior
+        $null = Invoke-Dispatch $repo 'codex' 'sid' 'claude' 'general' 'none'
+        $expected = if ($behavior -eq 'auth-expired-zero') { 'claude' } else { 'none' }
+        Assert-Equal (Get-ReceiptValue $repo 'auth_recovery_engine') $expected "strict provider wrapper: $behavior"
+    }
+    $repo = New-Repository 'auth external mutation'; $env:FAKE_CLAUDE_BEHAVIOR = 'auth-expired-delayed'
+    $authLog = Join-Path $repo '.forge/local/reviews/auth.log'; $env:FAKE_CLAUDE_LOG = $authLog
+    $mutationJob = Start-Job -ArgumentList $authLog, (Join-Path $repo 'app.txt') -ScriptBlock {
+        param($ReadyLog, $CandidateFile)
+        for ($poll = 0; $poll -lt 300; $poll++) {
+            if ((Test-Path -LiteralPath $ReadyLog) -and (Get-Item -LiteralPath $ReadyLog).Length -gt 0) {
+                [IO.File]::AppendAllText($CandidateFile, "external mutation`n"); return
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        throw 'reviewer readiness was not observed'
+    }
+    try {
+        Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' 'general' 'none') 2 'changed candidate remains blocked'
+        $null = Wait-Job $mutationJob -Timeout 35; Receive-Job $mutationJob -ErrorAction Stop | Out-Null
+        Assert-Equal (Get-ReceiptValue $repo 'blocked_class') 'artifact' 'candidate mutation overrides auth failure'
+        Assert-Equal (Get-ReceiptValue $repo 'auth_recovery_engine') 'none' 'changed candidate does not trigger login'
+    } finally { Stop-Job $mutationJob; Remove-Job $mutationJob; Remove-Item Env:FAKE_CLAUDE_LOG -ErrorAction SilentlyContinue }
+    $repo = New-Repository 'auth retry pair'; $env:FAKE_CODEX_BEHAVIOR = 'clean'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'code-spec') 0 'completed lens before auth failure'
+    $spec = Get-LatestReceipt $repo; $specHash = Get-ShaFileForTest $spec
+    $env:FAKE_CLAUDE_BEHAVIOR = 'auth-expired'; $env:FAKE_CODEX_BEHAVIOR = 'exit'
+    Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' 'code-quality') 2 'unfinished lens requests auth'
+    $failed = Get-LatestReceipt $repo; $failedHash = Get-ShaFileForTest $failed
+    $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
+    Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' 'code-quality') 0 'fresh retry completes unfinished lens'
+    $quality = Get-LatestReceipt $repo
+    Assert-Equal (Get-ShaFileForTest $spec) $specHash 'completed receipt retained'
+    Assert-Equal (Get-ShaFileForTest $failed) $failedHash 'failed receipt retained'
+    Assert-True ($quality -cne $failed) 'retry writes a distinct receipt'
+    Assert-Equal (Get-ReceiptValue $repo 'review_iteration') '1' 'retry keeps review iteration'
+    Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatcher,'-Mode','verify-pair','-CodeSpecReceipt',$spec,'-CodeQualityReceipt',$quality)) 0 'retry pair certifies unchanged candidate'
+    foreach ($case in @(@('council-advisor','new'), @('council-chair','ephemeral'))) {
+        $repo = New-Repository ('auth-scope-' + $case[0]); $env:FAKE_CLAUDE_BEHAVIOR = 'auth-expired'
+        $sessionOutput = Join-Path $repo '.forge/local/reviews/session.id'
+        Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' $case[0] 'none' $case[1] '' $sessionOutput) 2 'council auth failure stays topology-owned'
+        Assert-Equal ($script:LastChildStdout -match 'AUTH_REQUIRED') $false 'council does not emit ordinary recovery handoff'
+        Assert-Equal (Get-ReceiptValue $repo 'failure_reason') 'authentication-required' 'council auth diagnostic retained'
+        Assert-Equal (Get-ReceiptValue $repo 'auth_recovery_engine') 'none' 'no ordinary recovery signal for council'
+    }
+    $env:FAKE_CLAUDE_BEHAVIOR = 'clean'; $env:FAKE_CODEX_BEHAVIOR = 'clean'
 
     Write-Host 'PowerShell qualified Claude read-only config retains fast mode'
     $qualifiedConfig = Join-Path $temporary 'qualified context7 config'
@@ -178,6 +263,50 @@ public static class ForgeFakeEngine {
     Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'auto') 0 'malformed other engine visibly falls back'
     Assert-Equal (Get-ReceiptValue $repo 'fallback') 'true' 'fallback is recorded'
     Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'claude' 'fallback engine is fresh main engine'
+
+    Write-Host 'PowerShell unobserved Codex evidence fails closed with capability fallback'
+    $repo = New-Repository 'unobserved fallback'; $env:FAKE_CODEX_BEHAVIOR = 'blocked-unobserved'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex') 0 'BLOCKED unobserved Codex evidence permits automatic fallback'
+    Assert-Equal (Get-ReceiptValue $repo 'attempted_engines') 'codex,claude' 'unobserved evidence triggers one fallback'
+    Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'claude' 'fallback supplies the accepted observations'
+    Assert-Equal (Get-ReceiptValue $repo 'fallback_reason') 'isolation-canary-unobserved' 'unobserved evidence has its own capability diagnostic'
+    foreach ($behavior in @('blocked-unobserved', 'clean-unobserved')) {
+        $repo = New-Repository "$behavior-no-fallback"; $env:FAKE_CODEX_BEHAVIOR = $behavior
+        Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'general' 'none') 2 "$behavior fails closed without fallback"
+        Assert-Equal (Get-ReceiptValue $repo 'attempted_engines') 'codex' 'no fallback engine is attempted'
+        Assert-Equal (Get-ReceiptValue $repo 'fallback') 'false' 'no fallback is recorded'
+        Assert-Equal (Get-ReceiptValue $repo 'semantic_verdict') 'BLOCKED' 'unobserved evidence cannot certify CLEAN'
+        Assert-Equal (Get-ReceiptValue $repo 'blocked_class') 'capability' 'unobserved evidence is a capability failure'
+    }
+    $repo = New-Repository 'wrong codex canary'; $env:FAKE_CODEX_BEHAVIOR = 'wrong-canary'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex') 0 'wrong Codex canary requires a successful fallback'
+    Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'claude' 'wrong Codex canary is rejected'
+    Assert-Equal (Get-ReceiptValue $repo 'fallback_reason') 'isolation-canary-missing-or-mismatch' 'wrong canary retains the mismatch diagnostic'
+    $env:FAKE_CODEX_BEHAVIOR = 'clean'
+
+    Write-Host 'PowerShell proxy preservation without ambient environment'
+    $proxyKeys = @('HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'FORGE_AMBIENT_SECRET', 'NODE_OPTIONS', 'ANTHROPIC_BASE_URL')
+    $savedProxyEnv = @{}
+    try {
+        foreach ($key in $proxyKeys) {
+            $savedProxyEnv[$key] = [Environment]::GetEnvironmentVariable($key)
+            [Environment]::SetEnvironmentVariable($key, "forge-test-$key")
+        }
+        foreach ($tuple in @('codex claude claude', 'claude codex codex', 'claude auto claude', 'codex auto codex')) {
+            $parts = $tuple.Split(' '); $engineHost = $parts[0]; $requested = $parts[1]; $actual = $parts[2]
+            $repo = New-Repository "proxy-$engineHost-$requested"
+            $env:FAKE_CLAUDE_BEHAVIOR = 'require-proxy'; $env:FAKE_CODEX_BEHAVIOR = 'require-proxy'
+            if ($requested -eq 'auto') {
+                if ($engineHost -eq 'claude') { $env:FAKE_CODEX_BEHAVIOR = 'exit' } else { $env:FAKE_CLAUDE_BEHAVIOR = 'exit' }
+            }
+            Assert-Equal (Invoke-Dispatch $repo $engineHost 'sid' $requested) 0 "$tuple preserves proxy and excludes ambient environment"
+            Assert-Equal (Get-ReceiptValue $repo 'actual_engine') $actual 'proxy actual engine'
+        }
+    }
+    finally {
+        foreach ($key in $proxyKeys) { [Environment]::SetEnvironmentVariable($key, $savedProxyEnv[$key]) }
+        $env:FAKE_CLAUDE_BEHAVIOR = 'clean'; $env:FAKE_CODEX_BEHAVIOR = 'clean'
+    }
 
     Write-Host 'PowerShell certifying review roles require automatic fallback'
     foreach ($role in @('plan', 'code-spec', 'code-quality')) {
@@ -288,12 +417,17 @@ public static class ForgeFakeEngine {
     $repo = New-Repository 'reproduction boundary'; $auth = Join-Path $repo 'protected-auth.json'; [IO.File]::WriteAllText($auth, "protected-auth`n"); $outside = Join-Path $temporary 'reproduction-external'
     $state = Join-Path $repo '.forge/local/state.md'; $stateHash = Get-ShaFileForTest $state; $authHash = Get-ShaFileForTest $auth
     $stateLiteral = $state.Replace('\','\\').Replace('"','\"'); $authLiteral = $auth.Replace('\','\\').Replace('"','\"'); $outsideLiteral = $outside.Replace('\','\\').Replace('"','\"')
-    $reproSource = "using System; using System.IO; public static class ForgeBoundaryProgram { public static int Main(string[] args) { if(Environment.GetEnvironmentVariable(`"FORGE_REPRO_NO_NETWORK`")!=`"1`") { File.AppendAllText(`"$stateLiteral`",`"escaped\n`"); File.AppendAllText(`"$authLiteral`",`"escaped\n`"); File.WriteAllText(`"$outsideLiteral`",`"escaped\n`"); } Console.WriteLine(args[0]==`"primary`"?`"MATCH`":`"CONTROL`"); return 0; } }"
+    $reproSource = "using System; using System.IO; public static class ForgeBoundaryProgram { public static int Main(string[] args) { if(Environment.GetEnvironmentVariable(`"HTTPS_PROXY`")!=null) return 62; if(Environment.GetEnvironmentVariable(`"FORGE_REPRO_NO_NETWORK`")!=`"1`") { File.AppendAllText(`"$stateLiteral`",`"escaped\n`"); File.AppendAllText(`"$authLiteral`",`"escaped\n`"); File.WriteAllText(`"$outsideLiteral`",`"escaped\n`"); } Console.WriteLine(args[0]==`"primary`"?`"MATCH`":`"CONTROL`"); return 0; } }"
     $reproProgram = Join-Path $repo 'boundary-repro.exe'; Add-Type -TypeDefinition $reproSource -Language CSharp -OutputAssembly $reproProgram -OutputType ConsoleApplication
     $match = Get-ShaTextForTest ("MATCH" + [Environment]::NewLine); $control = Get-ShaTextForTest ("CONTROL" + [Environment]::NewLine)
     $reproPrompt = "schema_version=1`nhypothesis=qualified boundary`nprimary_program=boundary-repro.exe`nprimary_arg=primary`nprimary_expected_exit=0`nprimary_expected_output_hash=$match`ncontrol_program=boundary-repro.exe`ncontrol_arg=control`ncontrol_expected_exit=0`ncontrol_expected_output_hash=$control`n"
     $reproLog = Join-Path $repo '.forge/local/reviews/repro.log'; $env:FORGE_CODEX_AUTH_FILE = $auth; $env:FAKE_CODEX_BEHAVIOR = 'repro-boundary'; $env:FAKE_CODEX_LOG = $reproLog
-    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'investigation-repro' 'none' 'ephemeral' '' '' $reproPrompt) 0 'primary and control use qualified Codex reproduction boundaries'
+    $savedReproProxy = $env:HTTPS_PROXY
+    try {
+        $env:HTTPS_PROXY = 'http://127.0.0.1:9'
+        Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'investigation-repro' 'none' 'ephemeral' '' '' $reproPrompt) 0 'primary and control exclude proxy from the reproduction program'
+    }
+    finally { [Environment]::SetEnvironmentVariable('HTTPS_PROXY', $savedReproProxy) }
     Assert-Equal (Get-ReceiptValue $repo 'reproduction_status') 'REPRODUCED' 'dispatcher computes a reproduced status'
     Assert-Equal (Get-ShaFileForTest $state) $stateHash 'reproduction leaves Forge state byte-identical'
     Assert-Equal (Get-ShaFileForTest $auth) $authHash 'reproduction leaves protected auth byte-identical'

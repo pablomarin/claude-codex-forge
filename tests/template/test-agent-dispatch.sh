@@ -62,6 +62,85 @@ assert_receipt_value() {
     assert_equals "$got" "$want" "$key=$want"
 }
 
+start_test "expired Claude login survives final failure and does not defeat automatic fallback"
+for tuple in 'codex none exit authentication-required claude' 'claude automatic exit authentication-required claude' 'codex automatic exit process-exit-23 claude' 'codex automatic clean semantic-result none' 'codex automatic findings semantic-result none' 'codex automatic blocked-artifact semantic-result none' 'codex automatic blocked-unobserved isolation-canary-unobserved claude'; do
+    set -- $tuple; host="$1"; policy="$2"; codex_behavior="$3"; reason="$4"; recovery="$5"
+    S=$(scratch_dir dispatch-auth); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+    auth_stdout="$S/.forge/local/reviews/auth.stdout"
+    FAKE_CLAUDE_BEHAVIOR=auth-expired FAKE_CODEX_BEHAVIOR="$codex_behavior" run_dispatch "$S" "$host" sid auto general "$policy" >"$auth_stdout" 2>&1
+    rc=$?
+    if [ "$codex_behavior" = clean ] || [ "$codex_behavior" = findings ]; then want_rc=0; else want_rc=2; fi
+    assert_equals "$rc" "$want_rc" "auth handling preserves dispatch result for $host/$policy/$codex_behavior"
+    assert_receipt_value "$S" failure_reason "$reason"
+    assert_receipt_value "$S" auth_recovery_engine "$recovery"
+    if [ "$recovery" = claude ]; then
+      assert_contains "$auth_stdout" 'AUTH_REQUIRED' 'blocked auth hands recovery to the main engine'
+    else
+      assert_not_contains "$auth_stdout" 'AUTH_REQUIRED' 'valid fallback or artifact block does not ask for login'
+    fi
+done
+
+start_test "only a typed Claude top-level expired-login error requests authentication"
+for behavior in auth-expired-zero auth-mentioned auth-string-true auth-false forbidden rate-limited network-error; do
+    S=$(scratch_dir dispatch-auth-shape); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+    FAKE_CLAUDE_BEHAVIOR="$behavior" run_dispatch "$S" codex sid claude general none >/dev/null 2>&1
+    if [ "$behavior" = auth-expired-zero ]; then recovery=claude; else recovery=none; fi
+    assert_receipt_value "$S" auth_recovery_engine "$recovery"
+done
+
+start_test "auth handoff cannot override a protected authorization or changed candidate"
+S=$(scratch_dir dispatch-auth-authorization); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+mkdir "$S/.forge/local/not-an-auth-file"
+FORGE_CODEX_AUTH_FILE="$S/.forge/local/not-an-auth-file" FAKE_CLAUDE_BEHAVIOR=auth-expired run_dispatch "$S" codex sid auto >/dev/null 2>&1
+assert_receipt_value "$S" blocked_class authorization
+assert_receipt_value "$S" auth_recovery_engine none
+S=$(scratch_dir dispatch-auth-mutation); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+auth_log="$S/.forge/local/reviews/auth.log"
+FAKE_CLAUDE_LOG="$auth_log" FAKE_CLAUDE_BEHAVIOR=auth-expired-delayed run_dispatch "$S" codex sid claude general none >"$S/.forge/local/reviews/auth.stdout" 2>&1 &
+dispatch_pid=$!
+for poll in $(seq 1 100); do [ ! -s "$auth_log" ] || break; sleep 0.1; done
+printf 'external candidate mutation\n' >> "$S/app.txt"
+wait "$dispatch_pid"
+assert_receipt_value "$S" blocked_class artifact
+assert_receipt_value "$S" failure_reason artifact-mutated
+assert_receipt_value "$S" auth_recovery_engine none
+
+start_test "fresh retry repairs only the unfinished lens and preserves candidate evidence"
+S=$(scratch_dir dispatch-auth-retry); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+run_dispatch "$S" claude sid codex code-spec >/dev/null 2>&1
+spec=$(find "$S/.forge/local/reviews" -name '*.receipt' | sort | tail -1); spec_before=$(hash_file "$spec")
+spec_output=$(awk -F= '$1=="output_path"{sub(/^[^=]*=/,"");print}' "$spec"); spec_output_before=$(hash_file "$spec_output")
+FAKE_CLAUDE_BEHAVIOR=auth-expired FAKE_CODEX_BEHAVIOR=exit run_dispatch "$S" codex sid claude code-quality >/dev/null 2>&1
+failed=$(find "$S/.forge/local/reviews" -name '*.receipt' | sort | tail -1); failed_before=$(hash_file "$failed")
+assert_receipt_value "$S" auth_recovery_engine claude
+FAKE_CLAUDE_BEHAVIOR=clean run_dispatch "$S" codex sid claude code-quality >/dev/null 2>&1
+quality=$(find "$S/.forge/local/reviews" -name '*.receipt' | sort | tail -1)
+assert_hash_equals "$spec" "$spec_before" 'completed lens receipt is retained byte-for-byte'
+assert_hash_equals "$spec_output" "$spec_output_before" 'completed lens output is retained byte-for-byte'
+assert_hash_equals "$failed" "$failed_before" 'failed attempt evidence is retained byte-for-byte'
+assert_receipt_value "$S" auth_recovery_engine none
+assert_receipt_value "$S" review_iteration 1
+if [ "$failed" != "$quality" ] && bash "$DISPATCH" verify-pair --code-spec-receipt "$spec" --code-quality-receipt "$quality" >/dev/null 2>&1; then
+  pass 'new retry receipt certifies with original completed lens on same candidate'
+else fail 'retry did not preserve a valid same-candidate review pair'; fi
+
+start_test "council topology failures retain auth diagnostics without ordinary recovery handoff"
+for tuple in 'council-advisor new' 'council-chair ephemeral'; do
+    set -- $tuple; council_role="$1"; conversation="$2"
+    S=$(scratch_dir dispatch-auth-council); make_repo "$S"
+    question_hash=$(printf council | shasum -a 256 | awk '{print $1}')
+    printf 'question_hash=%s\nreview\n' "$question_hash" > "$S/prompt.txt"
+    base=$(git -C "$S" rev-parse HEAD)
+    FAKE_CLAUDE_BEHAVIOR=auth-expired launch_dispatch "$S" codex run --engine claude --fallback-policy none \
+      --role "$council_role" --profile review --seat-id advisor-1 --artifact git:working-tree \
+      --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base --prompt-file "$S/prompt.txt" \
+      --output "$S/.forge/local/reviews/council.txt" --conversation "$conversation" \
+      --session-id-output "$S/.forge/local/reviews/session.id" --timeout-seconds 2 >"$S/.forge/local/reviews/auth.stdout" 2>&1
+    assert_receipt_value "$S" failure_reason authentication-required
+    assert_receipt_value "$S" auth_recovery_engine none
+    assert_not_contains "$S/.forge/local/reviews/auth.stdout" AUTH_REQUIRED 'council retains topology-owned recovery'
+done
+
 start_test "host compatibility hook and launcher need no receipt authority"
 S=$(scratch_dir dispatch-no-host-receipt); make_repo "$S"; mkdir -p "$S/home"
 printf '{"session_id":"ignored","cwd":"%s"}\n' "$S" \
@@ -107,6 +186,23 @@ for tuple in 'claude codex' 'codex claude'; do
       "$selected reviewer does not reclassify candidate privacy as an authorization blocker"
     assert_contains "$log" "does not authorize sourcing additional secrets, credentials, or gitignored developer state from outside the candidate" \
       "$selected reviewer receives the bounded transport exclusions"
+done
+
+start_test "proxy environment survives isolated primary and fallback without ambient secrets"
+for tuple in 'codex claude claude' 'claude codex codex' 'claude auto claude' 'codex auto codex'; do
+    set -- $tuple; host="$1"; requested="$2"; actual="$3"
+    S=$(scratch_dir "dispatch-proxy-$host-$requested"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+    claude_behavior=require-proxy; codex_behavior=require-proxy
+    if [ "$requested" = auto ]; then
+      if [ "$host" = claude ]; then codex_behavior=exit; else claude_behavior=exit; fi
+    fi
+    HTTP_PROXY=forge-test-HTTP_PROXY HTTPS_PROXY=forge-test-HTTPS_PROXY NO_PROXY=forge-test-NO_PROXY \
+    http_proxy=forge-test-http_proxy https_proxy=forge-test-https_proxy no_proxy=forge-test-no_proxy \
+    FORGE_AMBIENT_SECRET=must-not-leak NODE_OPTIONS=must-not-leak ANTHROPIC_BASE_URL=must-not-leak \
+    FAKE_CLAUDE_BEHAVIOR="$claude_behavior" FAKE_CODEX_BEHAVIOR="$codex_behavior" \
+      run_dispatch "$S" "$host" sid "$requested" >/dev/null 2>&1
+    assert_equals "$?" "0" "$host -> $requested preserves proxy and excludes ambient environment"
+    assert_receipt_value "$S" actual_engine "$actual"
 done
 
 start_test "opposite-engine reviews and same-engine fallbacks use vendor fast mode"
@@ -185,6 +281,41 @@ FAKE_CODEX_BEHAVIOR=findings FAKE_CLAUDE_BEHAVIOR=clean run_dispatch "$S" claude
 assert_receipt_value "$S" actual_engine codex
 assert_receipt_value "$S" semantic_verdict FINDINGS
 assert_receipt_value "$S" fallback false
+
+start_test "unobserved Codex evidence falls back as a capability failure and cannot certify"
+S=$(scratch_dir dispatch-unobserved-fallback); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+FAKE_CODEX_BEHAVIOR=blocked-unobserved FAKE_CLAUDE_BEHAVIOR=clean run_dispatch "$S" claude sid codex >/dev/null 2>&1
+assert_equals "$?" "0" "BLOCKED unobserved Codex evidence permits automatic fallback"
+assert_receipt_value "$S" attempted_engines codex,claude
+assert_receipt_value "$S" actual_engine claude
+assert_receipt_value "$S" fallback_reason isolation-canary-unobserved
+
+for behavior in blocked-unobserved clean-unobserved; do
+    S=$(scratch_dir "dispatch-$behavior-no-fallback"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+    FAKE_CODEX_BEHAVIOR="$behavior" run_dispatch "$S" claude sid codex general none >/dev/null 2>&1
+    assert_equals "$?" "2" "$behavior fails closed without fallback"
+    assert_receipt_value "$S" attempted_engines codex
+    assert_receipt_value "$S" fallback false
+    assert_receipt_value "$S" semantic_verdict BLOCKED
+    assert_receipt_value "$S" blocked_class capability
+done
+
+S=$(scratch_dir dispatch-wrong-codex-canary); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+FAKE_CODEX_BEHAVIOR=wrong-canary FAKE_CLAUDE_BEHAVIOR=clean run_dispatch "$S" claude sid codex >/dev/null 2>&1
+assert_equals "$?" "0" "wrong Codex canary requires a successful fallback"
+assert_receipt_value "$S" actual_engine claude
+assert_receipt_value "$S" fallback_reason isolation-canary-mismatch
+
+start_test "P3 remains advisory without accepting a falsely downgraded material finding"
+S=$(scratch_dir dispatch-findings-p3); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+FAKE_CODEX_BEHAVIOR=findings-p3 run_dispatch "$S" claude sid auto >/dev/null 2>&1
+assert_receipt_value "$S" semantic_verdict FINDINGS
+assert_receipt_value "$S" max_severity P3
+assert_receipt_value "$S" fallback false
+S=$(scratch_dir dispatch-contradictory-p3); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+FAKE_CODEX_BEHAVIOR=contradictory-p3 run_dispatch "$S" claude sid auto >/dev/null 2>&1
+assert_receipt_value "$S" actual_engine claude
+assert_receipt_value "$S" fallback_reason malformed-result
 
 for behavior in empty contradictory exit timeout; do
     S=$(scratch_dir "dispatch-$behavior"); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
@@ -680,6 +811,7 @@ printf 'protected-auth\n' > "$S/protected-auth.json"; state_before=$(hash_file "
 outside="$S/../repro-external-$RANDOM"; rm -f "$outside"; mkdir -p "$S/tests/repro"
 cat > "$S/tests/repro/boundary.sh" <<EOF
 #!/usr/bin/env bash
+test -z "\${HTTPS_PROXY:-}" || exit 62
 if [ "\${FORGE_REPRO_NO_NETWORK:-0}" != 1 ]; then
   printf 'escaped\n' >> "$S/.forge/local/state.md"
   printf 'escaped\n' >> "$S/protected-auth.json"
@@ -702,7 +834,7 @@ control_expected_output_hash=$control_hash
 EOF
 repro_boundary_log="$S/.forge/local/reviews/repro-boundary.log"
 set +e
-FORGE_CODEX_AUTH_FILE="$S/protected-auth.json" FAKE_CODEX_BEHAVIOR=repro-boundary FAKE_CODEX_LOG="$repro_boundary_log" run_dispatch "$S" claude sid codex investigation-repro none >/dev/null 2>&1
+HTTPS_PROXY=http://127.0.0.1:9 FORGE_CODEX_AUTH_FILE="$S/protected-auth.json" FAKE_CODEX_BEHAVIOR=repro-boundary FAKE_CODEX_LOG="$repro_boundary_log" run_dispatch "$S" claude sid codex investigation-repro none >/dev/null 2>&1
 repro_boundary_rc=$?
 set -e
 assert_equals "$repro_boundary_rc" "0" "qualified engine boundary completes primary and control"

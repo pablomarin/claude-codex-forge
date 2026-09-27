@@ -111,7 +111,7 @@ install_canonical_file() {
 
 render_adapter() {
     local template="$1" destination="$2" canonical_path="$3" revision="$4"
-    local stem name description tools model tmp
+    local stem name description capabilities model tmp rendered
     stem=$(basename "$destination")
     stem=${stem%.md}; stem=${stem%.toml}
     case "$destination" in
@@ -124,19 +124,34 @@ render_adapter() {
             description="$description. Invoking it authorizes only ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services. Investigation is excluded; investigate launches a separate full agent in the real worktree with normal config, tools, network, and write access under host approvals."
             ;;
     esac
-    tools="Read, Grep, Glob, Bash"
+    capabilities=$(awk '
+        NR == 1 && /^---\r?$/ { frontmatter=1; next }
+        frontmatter && /^---\r?$/ { exit }
+        frontmatter && /^(tools|disallowedTools):([[:space:]]|$)/ { capture=1; print; next }
+        capture && /^[[:space:]]/ { print; next }
+        { capture=0 }
+    ' "$MATERIALIZE_TARGET/$canonical_path")
+    [ -n "$capabilities" ] || capabilities='tools: "Read, Grep, Glob, Bash"'
     model="inherit"
     mkdir -p "$(dirname "$destination")"
     tmp="$destination.forge-tmp.$$"
+    rendered="$tmp.rendered"
     sed \
         -e "s|{{CANONICAL_PATH}}|$canonical_path|g" \
         -e "s|{{CANONICAL_REVISION}}|$revision|g" \
         -e "s|{{REVISION}}|$revision|g" \
         -e "s|{{NAME}}|$name|g" \
         -e "s|{{DESCRIPTION}}|$description|g" \
-        -e "s|{{TOOLS}}|$tools|g" \
         -e "s|{{MODEL}}|$model|g" \
-        "$template" > "$tmp"
+        "$template" > "$rendered"
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [ "$line" = '{{CAPABILITIES}}' ]; then
+            printf '%s\n' "$capabilities"
+        else
+            printf '%s\n' "$line"
+        fi
+    done < "$rendered" > "$tmp"
+    rm -f "$rendered"
     mv "$tmp" "$destination"
 }
 

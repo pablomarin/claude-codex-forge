@@ -3,6 +3,9 @@
 Build a substantial feature from requirements through an open PR. The active Claude Code or Codex
 host is the main agent for this session; there is no permanent main engine.
 
+Apply the shared [Startup boundary](../rules/workflow.md#startup-boundary) before the first workflow
+step. It is the canonical activation, resume, isolation, and setup-failure contract.
+
 ## 0. Resume or Start
 
 1. Read `.forge/instructions.md` and `.forge/rules/`, resolve the active host through its installed
@@ -15,13 +18,13 @@ host is the main agent for this session; there is no permanent main engine.
    is no Forge edit lock; concurrent sessions are allowed, including simultaneous editing, so coordinate overlapping writes.
    If any session mutates the candidate, candidate-bound evidence becomes stale and must be
    regenerated before certification.
-3. From the primary checkout, create the isolated worktree with
+3. Reuse an existing isolated physical worktree, including a prepared native worktree. If none
+   exists, create one with the portable helper where allowed:
    `.forge/hooks/lib/worktree-lifecycle.sh create --kind feat --name <slug> --base <ref-or-sha>`
    (PowerShell: `worktree-lifecycle.ps1 -Action Create -Kind feat -Name <slug> -Base <ref-or-sha>`).
    Only in the Forge source checkout, when the installed path is absent, use the tracked
-   `hooks/lib/worktree-lifecycle.sh` or `.ps1` instead. This creates exactly `feat/<slug>` under
-   `.worktrees/<slug>` and copies missing private/ignored installed harness files without
-   overwriting anything.
+   `hooks/lib/worktree-lifecycle.sh` or `.ps1`. Native creation or adoption is optional only under
+   the shared startup boundary; never create a second worktree for the same-directory handoff.
 4. Continue work in the linked worktree from the current or a later Claude Code or Codex session.
    A session opened in the primary checkout may continue the linked worktree by using it as the
    working directory; opening the client at the worktree path remains optional. The installed
@@ -30,8 +33,9 @@ host is the main agent for this session; there is no permanent main engine.
 5. The helper seeds only `## State` (with `### Now` cleared), `## Open Questions`, and `## Blockers`
    from the primary checkout and writes the exact baseline to
    `.forge/local/.state-seed-snapshot.md`. It never seeds workflow, goal, authorization, receipts,
-   evidence, or local memory. For an adopted worktree, run the helper's `seed` action once; if a
-   state or snapshot already exists, reconcile it explicitly rather than guessing.
+   evidence, or local memory. For an adopted inactive worktree that lacks seeded state, run the
+   helper's `seed` action once; if state or a snapshot already exists, reconcile it explicitly
+   rather than guessing or overwriting an active workflow.
 6. In the target worktree, run `workflow-state.sh show` and resolve the intended base ref. If state
    is inactive, invoke `.forge/hooks/lib/workflow-state.sh activate --host <claude|codex> --workflow
    new-feature --task <slug> --base-ref <ref-or-sha> --phase requirements --next-step 'complete
@@ -167,7 +171,8 @@ Run this order exactly:
 8. Promote the exact tree through the candidate promotion helper, then commit.
 
 Before each final code-review iteration: use one broad review, one repair pass, and one closure
-review. Closure checks only named findings and direct regressions; do not start a second broad scan.
+review. Before production repairs, follow the shared [Final-review repair](../rules/workflow.md#final-review-repair) transition.
+Closure checks only named findings and direct regressions; do not start a second broad scan.
 One still-open reachable P0/P1 may receive one surgical repair plus surgical verification, then
 surface the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and
 unchanged-candidate concerns do not keep the loop open; a concrete material P2 still prevents

@@ -25,6 +25,23 @@ qualified_json() {
 }
 case "${FAKE_CLAUDE_BEHAVIOR:-clean}" in
   clean) clean_json ;;
+  auth-expired|auth-expired-zero|auth-expired-delayed)
+    [ "${FAKE_CLAUDE_BEHAVIOR}" != auth-expired-delayed ] || sleep 1
+    printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.","num_turns":1,"total_cost_usd":0,"modelUsage":{}}'
+    [ "${FAKE_CLAUDE_BEHAVIOR}" = auth-expired-zero ] && exit 0
+    exit 1 ;;
+  auth-mentioned) qualified_json 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.' ;;
+  auth-string-true) printf '%s\n' '{"is_error":"true","result":"Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue."}'; exit 1 ;;
+  auth-false) printf '%s\n' '{"is_error":false,"result":"Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue."}'; exit 1 ;;
+  forbidden|rate-limited|network-error)
+    case "$FAKE_CLAUDE_BEHAVIOR" in forbidden) message='API Error: 403 Forbidden';; rate-limited) message='API Error: 429 rate limit exceeded';; *) message='Connection error';; esac
+    printf '{"is_error":true,"result":"%s"}\n' "$message"; exit 1 ;;
+  require-proxy)
+    for proxy_name in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy; do
+      [ "${!proxy_name:-}" = "forge-test-$proxy_name" ] || exit 62
+    done
+    [ -z "${FORGE_AMBIENT_SECRET:-}${NODE_OPTIONS:-}${ANTHROPIC_BASE_URL:-}" ] || exit 61
+    clean_json ;;
   require-fast) fast_mode_enabled "$@" || exit 63; clean_json ;;
   findings) qualified_json 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|reachable defect' ;;
   blocked-artifact) qualified_json 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=artifact' ;;

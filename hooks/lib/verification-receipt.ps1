@@ -89,7 +89,7 @@ function Test-CurrentCandidate([string]$Root, [string]$Receipt) {
     if (-not (Test-Path -LiteralPath $fingerprint)) { return $false }
     $temporary = Join-Path ([IO.Path]::GetTempPath()) ('forge-current-' + [Guid]::NewGuid().ToString('N'))
     try {
-        & $fingerprint -Mode freeze -Artifact 'git:working-tree' -WorkflowBaseSha (Get-Kv $Receipt 'workflow_base_sha') -WorkflowBaseRef (Get-Kv $Receipt 'workflow_base_ref') -Output $temporary
+        & $fingerprint -Mode identity -Artifact 'git:working-tree' -WorkflowBaseSha (Get-Kv $Receipt 'workflow_base_sha') -WorkflowBaseRef (Get-Kv $Receipt 'workflow_base_ref') -Output $temporary
         if ($LASTEXITCODE -ne 0) { return $false }
         foreach ($key in @('candidate_id', 'worktree_identity', 'git_head', 'workflow_base_sha', 'index_tree', 'candidate_state')) {
             if ((Get-Kv $Receipt $key) -cne (Get-Kv $temporary $key)) { return $false }
@@ -99,6 +99,42 @@ function Test-CurrentCandidate([string]$Root, [string]$Receipt) {
     catch { return $false }
     finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
 }
+function Test-PromotedCandidate([string]$Root, [string]$Receipt, [string]$Promotion) {
+    $temporaryFingerprint = Join-Path ([IO.Path]::GetTempPath()) ('forge-promoted-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        foreach ($key in @('schema_version','old_candidate_id','old_head','temporary_commit','new_branch_commit','new_branch_tree','worktree_identity','post_commit_status','post_commit_dirty')) { $null = Get-Kv $Promotion $key }
+        if ((Get-Kv $Promotion 'schema_version') -cne '2' -or (Get-Kv $Receipt 'schema_version') -cne '2' -or (Get-Kv $Receipt 'candidate_state') -cne 'staged-clean') { return $false }
+        $oldId = Get-Kv $Receipt 'candidate_id'
+        $oldHead = Get-Kv $Receipt 'git_head'
+        $base = Get-Kv $Receipt 'workflow_base_sha'
+        $baseRef = Get-Kv $Receipt 'workflow_base_ref'
+        $tree = Get-Kv $Receipt 'index_tree'
+        $worktree = Get-Kv $Receipt 'worktree_identity'
+        if ($oldId -cne (Get-ShaText "$base`n$oldHead`n$tree`n$worktree`n")) { return $false }
+        if ((Get-Kv $Promotion 'old_candidate_id') -cne $oldId -or (Get-Kv $Promotion 'old_head') -cne $oldHead -or (Get-Kv $Promotion 'worktree_identity') -cne $worktree) { return $false }
+        $currentHead = [string](& git -C $Root rev-parse HEAD 2>$null)
+        $temporaryCommit = Get-Kv $Promotion 'temporary_commit'
+        $branchCommit = Get-Kv $Promotion 'new_branch_commit'
+        if ($temporaryCommit -cne $branchCommit -or $branchCommit -cne $currentHead.Trim()) { return $false }
+        if ((Get-Kv $Promotion 'new_branch_tree') -cne $tree -or ([string](& git -C $Root rev-parse "$currentHead^{tree}" 2>$null)).Trim() -cne $tree) { return $false }
+        $parentLine = ([string](& git -C $Root rev-list --parents -n 1 $currentHead 2>$null)).Trim()
+        $parentFields = @($parentLine -split '\s+')
+        if ($parentFields.Count -ne 2 -or $parentFields[1] -cne $oldHead) { return $false }
+        if (@('pass','not-run') -cnotcontains (Get-Kv $Promotion 'post_commit_status') -or (Get-Kv $Promotion 'post_commit_dirty') -cne 'false') { return $false }
+        $fingerprint = Join-Path $PSScriptRoot 'candidate-fingerprint.ps1'
+        if (-not (Test-Path -LiteralPath $fingerprint)) { $fingerprint = Join-Path $Root 'hooks\lib\candidate-fingerprint.ps1' }
+        if (-not (Test-Path -LiteralPath $fingerprint)) { return $false }
+        & $fingerprint -Mode identity -Artifact 'git:working-tree' -WorkflowBaseSha $base -WorkflowBaseRef $baseRef -Output $temporaryFingerprint
+        if ($LASTEXITCODE -ne 0) { return $false }
+        if ((Get-Kv $temporaryFingerprint 'git_head') -cne $currentHead) { return $false }
+        foreach ($key in @('worktree_identity','workflow_base_sha','index_tree','candidate_state')) {
+            if ((Get-Kv $Receipt $key) -cne (Get-Kv $temporaryFingerprint $key)) { return $false }
+        }
+        return $true
+    }
+    catch { return $false }
+    finally { Remove-Item -LiteralPath $temporaryFingerprint -Force -ErrorAction SilentlyContinue }
+}
 function Test-Review([string]$Root, [string]$Receipt, [string]$Role, [string]$CandidateReceipt, [string]$Iteration) {
     try {
         foreach ($key in @('schema_version','invocation_id','timestamp','main_host','requested_engine','actual_engine','fallback','fallback_reason','role','profile','review_iteration','fresh_process','artifact_kind','artifact_hash','worktree_identity','git_head','workflow_base_sha','output_path','output_hash','process_exit_status','semantic_verdict','max_severity','findings_digest','result_schema_version','blocked_class')) { $null = Get-Kv $Receipt $key }
@@ -106,11 +142,17 @@ function Test-Review([string]$Root, [string]$Receipt, [string]$Role, [string]$Ca
         if (-not (Test-Fresh (Get-Kv $Receipt 'timestamp'))) { return $false }
         if ((Get-Kv $Receipt 'artifact_kind') -cne 'git-working-tree' -or (Get-Kv $Receipt 'artifact_hash') -cne (Get-Kv $CandidateReceipt 'candidate_id')) { return $false }
         foreach ($key in @('worktree_identity','git_head','workflow_base_sha')) { if ((Get-Kv $Receipt $key) -cne (Get-Kv $CandidateReceipt $key)) { return $false } }
-        if ((Get-Kv $Receipt 'process_exit_status') -cne '0' -or (Get-Kv $Receipt 'semantic_verdict') -cne 'CLEAN' -or (Get-Kv $Receipt 'blocked_class') -cne 'none') { return $false }
-        if (@('NONE','P3') -cnotcontains (Get-Kv $Receipt 'max_severity')) { return $false }
+        if ((Get-Kv $Receipt 'process_exit_status') -cne '0' -or (Get-Kv $Receipt 'blocked_class') -cne 'none') { return $false }
+        $verdict = Get-Kv $Receipt 'semantic_verdict'; $severity = Get-Kv $Receipt 'max_severity'
+        if (@('CLEAN:NONE','CLEAN:P3','FINDINGS:P3') -cnotcontains "${verdict}:${severity}") { return $false }
         $digest = Get-Kv $Receipt 'findings_digest'; if ($digest -notmatch '^[0-9a-fA-F]{64}$') { return $false }
         $report = Get-OwnedPath $Root (Get-Kv $Receipt 'output_path') $true
         if ((Get-ShaFile $report) -cne (Get-Kv $Receipt 'output_hash')) { return $false }
+        if ((Get-Kv $report 'schema_version') -cne '1' -or (Get-Kv $report 'blocked_class') -cne 'none' -or
+            (Get-Kv $report 'verdict') -cne $verdict -or (Get-Kv $report 'max_severity') -cne $severity) { return $false }
+        $findings = @(Get-Content -LiteralPath $report | Where-Object { $_ -clike 'finding=*' })
+        foreach ($finding in $findings) { if (($finding -split '\|')[1] -cne 'P3') { return $false } }
+        if ($verdict -ceq 'FINDINGS' -and $findings.Count -eq 0) { return $false }
         $requested = Get-Kv $Receipt 'requested_engine'; $actual = Get-Kv $Receipt 'actual_engine'; $fallback = Get-Kv $Receipt 'fallback'; $reason = Get-Kv $Receipt 'fallback_reason'
         if (@('auto','claude','codex') -cnotcontains $requested -or @('claude','codex') -cnotcontains $actual) { return $false }
         if ($fallback -ceq 'false') { if ($reason -cne 'none' -or ($requested -cne 'auto' -and $requested -cne $actual)) { return $false } }
@@ -196,6 +238,12 @@ function Invoke-VerificationReceipt {
         $e2eFile = Get-OwnedPath $root (Get-StateValue $stateFile 'E2E receipt') $true
         $iteration = Get-StateValue $stateFile 'Review iteration'; if ($iteration -notmatch '^[0-9]+$') { throw 'Review iteration must be numeric' }
         $candidateOk = Test-CurrentCandidate $root $candidateFile
+        if (-not $candidateOk) {
+            $promotionFile = $null
+            try { $promotionFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Promotion receipt') $true }
+            catch { $promotionFile = $null }
+            if ($promotionFile) { $candidateOk = Test-PromotedCandidate $root $candidateFile $promotionFile }
+        }
         $reviewsOk = $false; $appOk = $false; $e2eOk = $false
         if ($candidateOk -and (Test-Review $root $specFile 'code-spec' $candidateFile $iteration) -and (Test-Review $root $qualityFile 'code-quality' $candidateFile $iteration)) {
             $reviewsOk = (Get-Kv $specFile 'invocation_id') -cne (Get-Kv $qualityFile 'invocation_id')

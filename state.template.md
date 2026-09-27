@@ -168,14 +168,15 @@ workflow; the ship hook gates commit/push/PR on the checklist.
 5. Any staged, unstaged, or in-scope untracked mutation invalidates the complete final receipt set. Freeze the new candidate and rerun both review lenses plus both verifiers; never relabel an old receipt.
 6. Genuine unmigrated v5 fixtures retain the legacy checklist reader during dual-read. Every active canonical V6 workflow is receipt-native immediately; legacy clean rows cannot certify it.
 7. Exact-tree promotion revalidates the receipt set before hook execution and compare-and-swap, then records `Promotion receipt`; the real branch is not advanced early.
-8. **Convergence breaker (v5.54):** after the first receipt-certified iteration, more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
+8. **Convergence breaker (v5.54):** for canonical V6, the unique `Receipts/Review iteration` value is counted from the helper-owned `Receipts/First certified iteration`; legacy checklist counters remain readable only for pre-V6 state. After certification, malformed, missing, duplicate, or backward canonical counters fail closed. More than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
    - `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\``
-   The line is head-bound; the agent never writes it on its own initiative. If the loop line carries an iteration count, an N/A escape must KEEP it (`- [x] Code review loop (<N> iterations) — N/A: <reason>`) — a count-less `Code review loop — N/A:` after certification reads as counter erasure and trips the breaker.
+   The line is head-bound; the agent never writes it on its own initiative. In legacy pre-V6 state, if the loop line carries an iteration count, an N/A escape must KEEP it (`- [x] Code review loop (<N> iterations) — N/A: <reason>`) — a count-less `Code review loop — N/A:` after certification reads as legacy counter erasure and trips the breaker. Canonical V6 checklist wording never controls or erases its receipt-table counter.
 
 **On plan-review iteration completion (during any complex-fix workflow):**
 
 1. Append a checklist line to `### Checklist` capturing the iteration number, plan file, and plan content sha256:
-   - `- [x] Plan review iteration <N> — codex clean — plan=\`docs/plans/<name>.md\` — plan_sha=\`<sha256>\` — ts=\`<ISO8601>\``
+   - `- [x] Plan review iteration <N> — <actual-engine> clean — plan=\`docs/plans/<name>.md\` — plan_sha=\`<sha256>\` — ts=\`<ISO8601>\``
+   Record the reviewer engine that actually ran (`claude` or `codex`). The bound fields may continue on contiguous indented Markdown lines; never relabel an existing review row.
 2. Compute `plan_sha` with `shasum -a 256 <path>` (macOS), `sha256sum <path>` (Linux), or `(Get-FileHash -Algorithm SHA256 <path>).Hash` (PowerShell).
 3. When checking the loop-complete checkbox `- [x] Plan review loop (<N> iterations) — PASS`, the per-iter clean line for iteration N must be present AND its `plan_sha` must match the current plan file content. The PreToolUse `check-workflow-gates` hook enforces this on ship actions.
 4. If a fix changes the plan, re-run reviewers and append a NEW iteration row; do NOT mutate existing rows.

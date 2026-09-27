@@ -23,10 +23,28 @@ qualified_envelope() {
 }
 case "${FAKE_CODEX_BEHAVIOR:-clean}" in
   clean) clean_envelope ;;
+  require-proxy)
+    for proxy_name in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy; do
+      [ "${!proxy_name:-}" = "forge-test-$proxy_name" ] || exit 62
+    done
+    [ -z "${FORGE_AMBIENT_SECRET:-}${NODE_OPTIONS:-}${ANTHROPIC_BASE_URL:-}" ] || exit 61
+    clean_envelope ;;
   require-fast) case " $joined " in *' -c service_tier=fast '*) clean_envelope ;; *) exit 63 ;; esac ;;
   findings) qualified_envelope 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|reachable defect' ;;
+  findings-p3) qualified_envelope 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P3' 'blocked_class=none' 'finding=F-1|P3|open|advisory note' ;;
+  contradictory-p3) qualified_envelope 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P3' 'blocked_class=none' 'finding=F-1|P1|open|material defect under false maximum' ;;
   blocked-artifact) qualified_envelope 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=artifact' ;;
   blocked-engine) qualified_envelope 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=engine' ;;
+  blocked-unobserved)
+    emit 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=capability' \
+      'forge_canary_hash=unobserved' 'forge_config_hash=unobserved' 'forge_qualification_revision=unobserved' ;;
+  clean-unobserved)
+    emit 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' \
+      'forge_canary_hash=unobserved' 'forge_config_hash=unobserved' 'forge_qualification_revision=unobserved' ;;
+  wrong-canary)
+    emit 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' \
+      'forge_canary_hash=WRONG' "forge_config_hash=${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" \
+      "forge_qualification_revision=${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}" ;;
   contradictory) qualified_envelope 'schema_version=1' 'verdict=CLEAN' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|contradiction' ;;
   malformed) emit 'This is prose, not an envelope.' ;;
   empty) [ -z "$out" ] || : > "$out" ;;

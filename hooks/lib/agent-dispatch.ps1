@@ -187,7 +187,10 @@ function Read-Envelope([string]$Path) {
         $blocked -in @('none', 'engine', 'capability', 'artifact', 'authorization', 'invariant')
     foreach ($finding in $findings) { if (($finding -split '\|').Count -lt 3 -or ($finding -split '\|')[1] -notin @('P0', 'P1', 'P2', 'P3')) { $valid = $false } }
     if ($verdict -eq 'CLEAN') { $valid = $valid -and $blocked -eq 'none' -and $severity -in @('NONE', 'P3') -and -not ($findings -match '\|(P0|P1|P2)\|') }
-    elseif ($verdict -eq 'FINDINGS') { $valid = $valid -and $blocked -eq 'none' -and $findings.Count -gt 0 }
+    elseif ($verdict -eq 'FINDINGS') {
+        $valid = $valid -and $blocked -eq 'none' -and $findings.Count -gt 0 -and $severity -in @('P0','P1','P2','P3')
+        if ($severity -eq 'P3' -and ($findings -match '\|(P0|P1|P2)\|')) { $valid = $false }
+    }
     elseif ($verdict -eq 'BLOCKED') { $valid = $valid -and $blocked -ne 'none' -and $findings.Count -eq 0 }
     if (-not $valid) { return @{ Valid = $false; Class = 'engine'; Reason = 'malformed-result'; Verdict = 'BLOCKED'; Severity = 'NONE'; Schema = 'none'; Digest = 'MISSING' } }
     return @{ Valid = $true; Class = $blocked; Reason = 'semantic-result'; Verdict = $verdict; Severity = $severity; Schema = '1'; Digest = Get-ShaText ($findings -join "`n") }
@@ -377,6 +380,7 @@ function Invoke-Engine([string]$Selected) {
             ('$start.Arguments=' + (ConvertTo-PowerShellLiteral $processArguments))
             ('$start.WorkingDirectory=' + (ConvertTo-PowerShellLiteral $snapshot))
             '$start.UseShellExecute=$false; $start.CreateNoWindow=$true; $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true'
+            'foreach($name in @(''HTTP_PROXY'',''HTTPS_PROXY'',''NO_PROXY'',''http_proxy'',''https_proxy'',''no_proxy'')){$start.EnvironmentVariables.Remove($name)}'
             '$process=New-Object Diagnostics.Process; $process.StartInfo=$start'
             'if(-not $process.Start()){throw ''reproduction process did not start''}'
             '$stdoutTask=$process.StandardOutput.ReadToEndAsync(); $stderrTask=$process.StandardError.ReadToEndAsync(); $process.WaitForExit()'
@@ -400,14 +404,23 @@ function Invoke-Engine([string]$Selected) {
         if ($LASTEXITCODE -ne 0) { return @{ Rc = 2; Class = 'artifact'; Reason = 'candidate-diff-unavailable'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
         [IO.File]::WriteAllText($reviewPatch, (($patchLines -join "`n") + "`n"), $Utf8)
         [IO.File]::WriteAllText($reviewPaths, (($pathLines -join "`n") + "`n"), $Utf8)
-        $scopeInstruction = "Logical project root: $snapshot. The dispatcher materialized the exact immutable $WorkflowBaseSha..candidate diff at $reviewPatch and its changed-path list at $reviewPaths; read those files and the candidate root. Shell access is intentionally absent."
+        $scopeInstruction = "Logical project root: $snapshot. The dispatcher materialized the exact immutable $WorkflowBaseSha..candidate diff at $reviewPatch and its changed-path list at $reviewPaths; read those files and the candidate root."
+    }
+    if ($Selected -eq 'codex' -and -not $script:ReproMode) {
+        $scopeInstruction += ' Use your available command tool for read-only inspection of the primary directory and candidate root only. Do not edit files or run network commands.'
     }
     $envelopeInstruction = "Return ONLY newline-delimited fields with no Markdown or surrounding prose. Required envelope:`nschema_version=1`nverdict=CLEAN|FINDINGS|BLOCKED`nmax_severity=NONE|P0|P1|P2|P3`nblocked_class=none|engine|capability|artifact|authorization|invariant`nforge_canary_hash=<observed>`nforge_config_hash=<observed>`nforge_qualification_revision=<observed>`nFor FINDINGS add one line per finding: finding=<sequence>|P0|P1|P2|P3|open|<concise evidence>. BLOCKED must contain no finding lines.`n"
     $transportInstruction = "FORGE_REVIEW_TRANSPORT_AUTHORIZED: The main session obtained explicit user authorization before sending this complete bounded immutable candidate snapshot, prompt, and evidence to the developer-configured Claude Code or Codex reviewer service. Do not block solely because the candidate is private, sensitive, or contains unchanged tracked files. The complete candidate may include sensitive tracked or in-scope non-ignored content. This expected review transport is not an external mutation and does not authorize sourcing additional secrets, credentials, or gitignored developer state from outside the candidate; paths outside the workflow worktree; other projects; arbitrary destinations; arbitrary network tools; or any external mutation."
+    $envelopeInstruction = "P3-only notes are non-blocking: use CLEAN with max_severity=P3 and retain finding lines. Schema-valid FINDINGS/P3 is also advisory, never a reason by itself to repair or reopen review. Never label P0/P1/P2 finding rows as a P3 maximum.`n" + $envelopeInstruction
     $prompt = "You are a fresh independent $Selected reviewer. Your cwd is a clean primary. First read .forge-dispatch-canary and copy its exact observation lines into the result. $scopeInstruction Ambient instructions, hooks, plugins, skills, and write-capable MCP are absent. $transportInstruction`n" + [IO.File]::ReadAllText($PromptFile) + "`n" + $envelopeInstruction
     if ($script:ReproMode) { $prompt = "This is the dispatcher-owned $($script:ReproCheckKind) reproduction check. Under the already-qualified no-network workspace boundary, execute powershell.exe -NoProfile -ExecutionPolicy Bypass -File $($script:ReproRunner) exactly once. Do not edit it or synthesize its stdout/exit files.`n" + $prompt }
     $bound = Join-Path $scratch 'bound.out'
     $environment = @{ FORGE_DISPATCH_MODE = $(if ($Profile -eq 'investigate') { 'investigate' } else { 'review' }); FORGE_CANDIDATE_ROOT = $snapshot; FORGE_REPRO_RUNNER = $(if ($script:ReproMode) { $script:ReproRunner } else { '' }); FORGE_DISPATCH_SESSION_ID = $(if ($Conversation -eq 'new') { $SessionProvisionalId } else { $SessionId }); FORGE_DISPATCH_SEAT_HASH = $seatHash; FORGE_DISPATCH_CONFIG_HASH = $configHash; FORGE_DISPATCH_CANARY_HASH = $canaryHash; FORGE_DISPATCH_QUALIFICATION_REVISION = $QualificationRevision }
+    # Preserve host HTTP transport, never the rest of the ambient environment.
+    foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy')) {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if ($null -ne $value) { $environment[$name] = $value }
+    }
     foreach ($name in @('FORGE_DISPATCH_TEST_MODE', 'FORGE_TEST_DISABLE_ENGINE', 'FAKE_CLAUDE_BEHAVIOR', 'FAKE_CODEX_BEHAVIOR', 'FAKE_CLAUDE_LOG', 'FAKE_CLAUDE_ARGV_LOG', 'FAKE_CODEX_LOG', 'FAKE_CHILD_PID_FILE')) {
         $value = [Environment]::GetEnvironmentVariable($name)
         if ($value) { $environment[$name] = $value }
@@ -465,6 +478,20 @@ function Invoke-Engine([string]$Selected) {
         elseif ($Conversation -eq 'resume') { $capturedSession = $SessionId }
     }
     if ($process.Exit -eq 124) { return @{ Rc = 1; Class = 'engine'; Reason = 'timeout'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 124 } }
+    # Require the typed provider error wrapper, not a finding or generic HTTP error.
+    if ($Selected -eq 'claude') {
+        try {
+            $rawError = [IO.File]::ReadAllText($process.Stdout)
+            if ($rawError.TrimStart().StartsWith('{')) {
+                $errorWrapper = $rawError | ConvertFrom-Json
+                if ($errorWrapper.is_error -is [bool] -and $errorWrapper.is_error -eq $true -and
+                    $errorWrapper.result -is [string] -and
+                    $errorWrapper.result -ceq 'Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.') {
+                    return @{ Rc = 1; Class = 'engine'; Reason = 'authentication-required'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = $process.Exit }
+                }
+            }
+        } catch {}
+    }
     if ($process.Exit -ne 0) { return @{ Rc = 1; Class = 'engine'; Reason = "process-exit-$($process.Exit)"; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = $process.Exit } }
     if ($script:ReproMode) {
         foreach ($path in @($reproStdout, $reproStderr, $reproExit)) {
@@ -499,6 +526,7 @@ function Invoke-Engine([string]$Selected) {
     $boundLines = [IO.File]::ReadAllLines($bound)
     foreach ($observation in @(@('forge_canary_hash', $canaryHash), @('forge_config_hash', $configHash), @('forge_qualification_revision', $QualificationRevision))) {
         $prefix = "$($observation[0])="; $values = @($boundLines | Where-Object { $_.StartsWith($prefix, [StringComparison]::Ordinal) } | ForEach-Object { $_.Substring($prefix.Length) })
+        if ($observation[0] -ceq 'forge_canary_hash' -and $values.Count -gt 0 -and @($values | Where-Object { $_ -cne 'unobserved' }).Count -eq 0) { return @{ Rc = 1; Class = 'capability'; Reason = 'isolation-canary-unobserved'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0 } }
         if ($values.Count -eq 0 -or @($values | Where-Object { $_ -cne $observation[1] }).Count -gt 0) { return @{ Rc = 1; Class = 'capability'; Reason = 'isolation-canary-missing-or-mismatch'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 0 } }
     }
     $rc = if ($envelope.Class -in @('engine', 'capability')) { 1 } elseif ($envelope.Class -in @('artifact', 'authorization', 'invariant')) { 2 } else { 0 }
@@ -529,13 +557,19 @@ try {
         foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) { if ((Get-Value $path 'review_iteration' $true) -cne $currentIteration) { throw 'BLOCKED[artifact]: review receipt iteration is stale or mixed' } }
         foreach ($path in @($CodeSpecReceipt, $CodeQualityReceipt)) {
             if ((Get-Value $path 'schema_version' $true) -cne '1' -or (Get-Value $path 'fresh_process' $true) -cne 'true' -or (Get-Value $path 'process_exit_status' $true) -cne '0' -or (Get-Value $path 'blocked_class' $true) -cne 'none' -or (Get-Value $path 'result_schema_version' $true) -cne '1') { throw 'BLOCKED[artifact]: review receipt execution schema is not certifying' }
-            if ((Get-Value $path 'semantic_verdict' $true) -cne 'CLEAN' -or (Get-Value $path 'max_severity' $true) -notin @('NONE', 'P3')) { throw 'BLOCKED[artifact]: both lenses must be certifying clean' }
+            $verdict = Get-Value $path 'semantic_verdict' $true; $severity = Get-Value $path 'max_severity' $true
+            if (@('CLEAN:NONE','CLEAN:P3','FINDINGS:P3') -cnotcontains "${verdict}:${severity}") { throw 'BLOCKED[artifact]: both lenses must be certifying clean' }
             $reviewOutput = Get-Value $path 'output_path' $true
             $prefix = $reviews.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
             if (-not $reviewOutput.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $reviewOutput -PathType Leaf) -or ((Get-Item -LiteralPath $reviewOutput -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'BLOCKED[artifact]: review output must be a bound no-follow regular file' }
             $relativeParent = (Split-Path -Parent $reviewOutput).Substring($reviews.Length).TrimStart('\','/')
             if ($relativeParent) { $null = Ensure-ReservedReviewDirectory $reviews $relativeParent $false }
             if ((Get-ShaFile $reviewOutput) -cne (Get-Value $path 'output_hash' $true)) { throw 'BLOCKED[artifact]: review output hash changed' }
+            if ((Get-Value $reviewOutput 'schema_version' $true) -cne '1' -or (Get-Value $reviewOutput 'blocked_class' $true) -cne 'none' -or
+                (Get-Value $reviewOutput 'verdict' $true) -cne $verdict -or (Get-Value $reviewOutput 'max_severity' $true) -cne $severity) { throw 'BLOCKED[artifact]: review output contradicts its receipt' }
+            $findings = @(Get-Content -LiteralPath $reviewOutput | Where-Object { $_ -clike 'finding=*' })
+            foreach ($finding in $findings) { if (($finding -split '\|')[1] -cne 'P3') { throw 'BLOCKED[artifact]: review output has material findings' } }
+            if ($verdict -ceq 'FINDINGS' -and $findings.Count -eq 0) { throw 'BLOCKED[artifact]: review output has missing findings' }
         }
         $current = Join-Path $reviews ('.verify-pair-' + [Guid]::NewGuid().ToString('N') + '.candidate')
         try {
@@ -666,12 +700,22 @@ try {
         $null = Ensure-ReservedReviewDirectory $reviews "session-stores/$(Split-Path -Leaf $SessionStore)" $false
         Remove-Item -LiteralPath $SessionStore -Recurse -Force
     }
+    $authRecoveryEngine = 'none'
+    if ($Profile -eq 'review' -and $Conversation -eq 'ephemeral' -and $Role -notin @('council-advisor', 'council-chair') -and
+        $result.Rc -ne 0 -and $result.Verdict -eq 'BLOCKED' -and $result.Class -in @('engine', 'capability') -and
+        ($result.Reason -eq 'authentication-required' -or $fallbackReason -eq 'authentication-required')) {
+        $authRecoveryEngine = 'claude'
+    }
     $receipt = Join-Path $reviews "$invocationId.receipt"
     $outputHash = Get-ShaFile $Output
     $configHash = if ($result.ConfigHash) { $result.ConfigHash } else { 'MISSING' }
     $body = "schema_version=1`ninvocation_id=$invocationId`ntimestamp=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`nmain_host=$activeHost`nrequested_engine=$Engine`nfirst_attempted_engine=$first`nactual_engine=$($result.Engine)`nfallback=$($fallback.ToString().ToLowerInvariant())`nfallback_reason=$fallbackReason`nattempted_engines=$($attempted -join ',')`nrole=$Role`nprofile=$Profile`nreview_iteration=$reviewIteration`nfresh_process=true`nconversation=$Conversation`nsession_id=$($result.Session)`nartifact_kind=$(Get-Value $FingerprintReceipt 'artifact_kind')`nartifact_identity=$ArtifactHash`nartifact_hash=$ArtifactHash`nworktree_identity=$worktreeIdentity`ngit_head=$(Get-Value $FingerprintReceipt 'git_head')`nprompt_hash=$PromptHash`nworkflow_base_ref=$WorkflowBaseRef`nworkflow_base_sha=$(Get-Value $FingerprintReceipt 'workflow_base_sha')`noutput_path=$Output`noutput_hash=$outputHash`nprocess_exit_status=$($result.Exit)`nsemantic_verdict=$($result.Verdict)`nmax_severity=$($result.Severity)`nfindings_digest=$($result.Digest)`nresult_schema_version=$($result.Schema)`nrequested_provider=$($result.Provider)`nrequested_model=$($result.Model)`nrequested_reasoning_effort=$($result.Effort)`nbound_provider=$($result.Provider)`nbound_model=$($result.Model)`nbound_reasoning_effort=$($result.Effort)`nactual_provider=$(if($result.ActualProvider){$result.ActualProvider}else{'UNOBSERVABLE'})`nactual_model=$(if($result.ActualModel){$result.ActualModel}else{'UNOBSERVABLE'})`nactual_reasoning_effort=UNOBSERVABLE`ninvocation_config_hash=$(Get-ShaText (($attempted -join ',') + '|' + $configHash + '|' + $ArtifactHash + '|' + $PromptHash))`nmodel_qualification_revision=$QualificationRevision`nblocked_class=$($result.Class)`ninvestigation_mode=$investigationMode`ninvestigation_replay=$investigationReplay`nreproduction_status=$reproductionStatus`nhypothesis_hash=$hypothesisHash`nprimary_check_hash=$primaryHash`ncontrol_hash=$controlHash`n"
+    $body += "failure_reason=$($result.Reason)`nauth_recovery_engine=$authRecoveryEngine`n"
     [IO.File]::WriteAllText($receipt, $body, $Utf8)
     Write-Output "Reviewer selection: main=$activeHost requested=$Engine actual=$($result.Engine) fallback=$fallback role=$Role receipt=$receipt"
+    if ($authRecoveryEngine -eq 'claude') {
+        Write-Output "AUTH_REQUIRED: engine=claude; main agent must follow reviewer authentication recovery in .forge/rules/workflow.md (check host credential access, open claude auth login if needed, retry only unfinished reviews once); receipt=$receipt"
+    }
     if ($result.Rc -ne 0) { exit 2 }
     exit 0
 }

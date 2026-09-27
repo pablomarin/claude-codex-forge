@@ -273,9 +273,34 @@ function Render-Adapter {
     )) {
         $description += '. Invoking it authorizes only ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services. Investigation is excluded; investigate launches a separate full agent in the real worktree with normal config, tools, network, and write access under host approvals.'
     }
+    $canonical = Join-Path $Target ($CanonicalPath -replace '/', '\')
+    $capabilityLines = [Collections.Generic.List[string]]::new()
+    $frontmatter = $false
+    $capture = $false
+    $frontmatterLine = 0
+    foreach ($line in [IO.File]::ReadAllLines($canonical)) {
+        $frontmatterLine++
+        if (-not $frontmatter) {
+            if ($frontmatterLine -eq 1 -and $line -match '^---\r?$') { $frontmatter = $true }
+            else { break }
+            continue
+        }
+        if ($line -match '^---\r?$') { break }
+        if ($line -match '^(tools|disallowedTools):(?:\s|$)') {
+            $capture = $true
+            $capabilityLines.Add($line)
+            continue
+        }
+        if ($capture -and $line -match '^\s+') {
+            $capabilityLines.Add($line)
+            continue
+        }
+        $capture = $false
+    }
+    $capabilities = if ($capabilityLines.Count) { $capabilityLines -join "`n" } else { 'tools: "Read, Grep, Glob, Bash"' }
     $text = [IO.File]::ReadAllText($Template)
     $text = $text.Replace("{{CANONICAL_PATH}}", $CanonicalPath).Replace("{{CANONICAL_REVISION}}", $Revision).Replace("{{REVISION}}", $Revision)
-    $text = $text.Replace("{{NAME}}", $name).Replace("{{DESCRIPTION}}", $description).Replace("{{TOOLS}}", "Read, Grep, Glob, Bash").Replace("{{MODEL}}", "inherit")
+    $text = $text.Replace("{{NAME}}", $name).Replace("{{DESCRIPTION}}", $description).Replace("{{CAPABILITIES}}", $capabilities).Replace("{{MODEL}}", "inherit")
     $parent = Split-Path -Parent $Destination
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     [IO.File]::WriteAllText($Destination, $text, $Utf8NoBom)

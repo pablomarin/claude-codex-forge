@@ -18,6 +18,83 @@ never persist a permanent main-engine preference. Reviewer `auto` selects the ot
 engine and automatically falls back to a fresh same-engine reviewer when launch/capability failure
 occurs. A finding is a review result, not a fallback reason.
 
+## Reviewer authentication recovery
+
+The dispatcher preserves automatic fallback. A usable fallback review (including findings)
+needs no login interruption. When neither attempt completes and the receipt says
+`auth_recovery_engine=claude`, the `AUTH_REQUIRED` handoff belongs to the **main agent**, not
+the isolated reviewer. `failure_reason` records the final attempt; `fallback_reason` records
+the first failure. Authentication is an engine failure, not missing reviewer-transport consent.
+
+1. Collect the completed parallel review calls before recovery. Preserve their outputs and
+   receipts, including failures. Coalesce same-provider failures into one recovery cycle; keep
+   clean lenses and independent verification. Record a narrative recovery entry under
+   `.forge/local/` with candidate hash, iteration, failed receipt paths, unfinished roles,
+   each role's original engine selection and fallback policy, preserved regular prompt
+   path and SHA-256 matching its failed receipt's
+   `prompt_hash`, and `recovery_cycles=1` **before** starting recovery. Keep those prompt
+   bytes under `.forge/local/reviews/`. Check this entry on host handoff:
+   a new session does not reset the cycle or retry budget. Use `workflow-state checkpoint`
+   for the exact durable next step, not direct writes to control rows.
+2. Distinguish credential access from expired login. Use the same CLI binary and operator
+   credential context as the reviewer. A sandboxed `claude auth status` reporting logged out
+   does not establish that the normal host is logged out; desktop sign-in does not prove CLI
+   access either. If a host restriction is evidenced, use its normal approval mechanism for
+   a bounded no-project, no-tool authentication probe. A denied boundary remains blocked;
+   never copy credentials, broaden reviewer permissions, or bypass the restriction.
+   A successful probe skips login and proceeds to the one review retry in step 4.
+3. When login recovery is needed, open a developer-visible interactive terminal and start the
+   official `claude auth login` with that CLI and credential context. Tell the developer:
+   “The Claude reviewer needs you to finish sign-in in the terminal/browser I opened.
+   Your work and completed reviews are saved; I’ll retry only the unfinished review afterward.”
+   Pause for the human authentication step. The human enters credentials and completes MFA;
+   never ask them to paste tokens or authorization codes into chat. Record no secrets or
+   raw login output in project evidence. If an interactive terminal cannot be opened, provide
+   the exact command and explain that limitation. Do not run login inside the hermetic reviewer,
+   automatically log out, mint a long-lived token, or change the provider/billing method.
+4. After successful login (or the successful context probe), mark `review_retry_consumed=true`
+   in the recovery entry before dispatch. Verify each saved prompt still matches its
+   recorded hash and failed receipt. Missing or changed prompts are an evidence blocker;
+   checkpoint and stop instead of reconstructing instructions from conversation memory.
+   Recheck the candidate fingerprint. If unchanged,
+   invoke only the unfinished ordinary review roles once, with the same base, candidate,
+   iteration, prompt, engine selection, and fallback policy, and fresh output/receipt paths.
+   Revalidate the completed lens when assembling the pair. If the candidate changed, stop
+   this retry and follow normal refreeze/invalidation; never relabel old evidence or reset
+   the consumed recovery budget merely by changing candidate bytes.
+5. If login is cancelled/fails or the retry is still blocked, checkpoint the exact reason and
+   remaining role(s), then stop and tell the developer what action is required. A second
+   recovery cycle requires explicit user direction. Never treat login success as review
+   certification or loop through repeated login/review attempts.
+
+For multi-turn council calls, the council orchestrator still owns whole-topology fallback.
+Do not independently restart a failed seat or mix recovered sessions into an existing panel.
+Network, quota, permission, missing capability, and artifact failures retain their own
+remediation; a generic HTTP error or review text mentioning authentication is not a login signal.
+
+## Startup boundary
+
+Before activation, read only the Forge instructions and bounded state, then perform deterministic
+checks of the actual host, physical worktree, current branch, intended base, and installed harness.
+Do not investigate the app, run tests, explore source, or begin implementation before activation.
+
+If the matching task is already active in this physical worktree, checkpoint the displayed host,
+phase, and exact next step, then resume that step in the same directory.
+Quick-fix never creates a worktree: confirm its current branch is non-protected, then activate there.
+Only `/new-feature` and `/fix-bug` require worktree creation when they are not already isolated. A prepared native worktree
+is existing isolation: never create another worktree for a same-directory handoff. For those two
+isolated workflows, the ordinary `worktree-lifecycle` shell helper remains the portable creation
+path where the host permits it. Native creation or adoption is an option only when the actual host
+exposes that capability and the intended base and installed Forge harness are verified in the
+resulting worktree before activation. Never silently substitute a host's default base.
+
+If worktree creation, adoption, seeding, or harness setup is denied, stop before task work and
+report the exact target, missing prerequisite, and next supported setup action. Do not fabricate activation.
+Do not overwrite another primary active workflow to manufacture a checkpoint, copy all of
+`.forge/local/`, create unmanaged worktree-include policy, reconstruct protected files, change
+permissions, or retry a denied protected write through another transport. Prompt changes do not by
+themselves prove that native setup works; that requires a later native E2E run.
+
 ## Resource Discipline
 
 Optimize for the smallest correct solution; developer time, session length, tokens, and money are
@@ -31,6 +108,9 @@ One still-open reachable P0/P1 may receive one surgical repair plus a surgical v
 that finding, then Forge surfaces the blocker to the developer instead of iterating indefinitely.
 
 P3, naming, cosmetic, purely theoretical, and unchanged candidate concerns never keep a loop open.
+Schema-valid `FINDINGS/P3` is advisory and certifying, just like `CLEAN/P3`; preserve
+the notes without repairing or reopening review solely for them. Any P0/P1/P2
+finding row still blocks certification regardless of the reported maximum severity.
 P2 means a concrete material maintainability, reliability, performance, or test risk, not a merely
 imaginable rare case. Rare but catastrophic security or data loss triggers remain P0/P1. Resource
 discipline never excuses reachable security failure, data loss, incorrect supported behavior, or an
@@ -168,6 +248,14 @@ counted loop preserves its count as `Code review loop (<N> iterations) — N/A:`
 use candidate-bound structured receipts instead.
 
 ## Finalization Order
+
+### Final-review repair
+
+Before changing production code to address a final-review finding, reapply the
+[canonical TDD rule](critical-rules.md): write and observe the regression test fail,
+then make the minimal fix and observe GREEN. Earlier passing tests, a reviewer's
+description, and post-edit checks do not substitute for that pre-edit RED.
+Then restage/refreeze and rerun the affected final gates; never relabel old receipts.
 
 1. Implement with TDD; update solution and changelog material.
 2. Design E2E use cases and run a preliminary feature E2E pass while fixes are allowed.

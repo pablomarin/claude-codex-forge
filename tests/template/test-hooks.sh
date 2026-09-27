@@ -1669,8 +1669,8 @@ cd "$REPO_ROOT"
 assert_equals "$rc" "2" "Plan review PASS without evidence is blocked"
 assert_contains "$S16/.hook-stderr" "Plan review iteration" \
     "stderr mentions Plan review iteration"
-assert_contains "$S16/.hook-stderr" "codex clean" \
-    "stderr names the required clean-line tool"
+assert_contains "$S16/.hook-stderr" "<actual-engine> clean" \
+    "stderr names the required actual-engine clean-line label"
 
 # ---------------------------------------------------------------------------
 # Test 17: [x] Plan review loop PASS + valid evidence + matching plan_sha → exit 0
@@ -1722,6 +1722,68 @@ assert_contains "$S18/.hook-stderr" "plan_sha" \
     "stderr mentions plan_sha mismatch"
 
 # ---------------------------------------------------------------------------
+# Plan evidence records the actual reviewer engine and may wrap its bound
+# fields onto ordinary indented Markdown continuation lines. These cases must
+# clear the plan gate, then reach the still-mandatory structured final gate.
+# ---------------------------------------------------------------------------
+_run_actual_engine_plan_gate() {
+    local label="$1" evidence="$2"
+    local scratch plan_sha
+    scratch=$(scratch_dir "$label")
+    mkdir -p "$scratch/docs/plans"
+    printf '# Actual-engine plan\n' > "$scratch/docs/plans/actual-engine.md"
+    git -C "$scratch" init -q -b main
+    git -C "$scratch" -c user.email=test@test -c user.name=test \
+        commit -q --allow-empty -m init
+    plan_sha=$(shasum -a 256 "$scratch/docs/plans/actual-engine.md" 2>/dev/null | awk '{print $1}')
+    [ -n "$plan_sha" ] || plan_sha=$(sha256sum "$scratch/docs/plans/actual-engine.md" | awk '{print $1}')
+    evidence=${evidence//__PLAN_SHA__/$plan_sha}
+    rc=$(run_hook_sh "$scratch" 'git push' "- [x] Plan review loop (3 iterations) — PASS
+$evidence
+- [x] Code review loop — receipt lenses clean
+- [x] Simplified
+- [x] Verified (tests/lint/types)
+- [x] E2E verified — N/A: hook fixture has no user-facing behavior")
+    printf '%s|%s' "$scratch" "$rc"
+}
+
+start_test "plan gate accepts delimited actual Claude label"
+R18A=$(_run_actual_engine_plan_gate wgate-plan-claude \
+    '- [x] Plan review iteration 3 — claude clean — plan=`docs/plans/actual-engine.md` — plan_sha=`__PLAN_SHA__` — ts=`2026-09-14T00:00:00Z`')
+S18A=${R18A%|*}
+assert_equals "${R18A##*|}" "2" "actual Claude plan case reaches a blocking final gate"
+assert_contains "$S18A/.hook-stderr" "Candidate receipt state linkage is missing" \
+    "actual Claude evidence clears plan checks and reaches structured final checks"
+
+start_test "plan gate accepts indented continuation fields for actual Codex label"
+R18B=$(_run_actual_engine_plan_gate wgate-plan-codex-wrapped \
+    '- [x] Plan review iteration 3 — codex clean —
+  plan=`docs/plans/actual-engine.md` — plan_sha=`__PLAN_SHA__` —
+  ts=`2026-09-14T00:00:00Z`')
+S18B=${R18B%|*}
+assert_equals "${R18B##*|}" "2" "wrapped Codex plan case reaches a blocking final gate"
+assert_contains "$S18B/.hook-stderr" "Candidate receipt state linkage is missing" \
+    "wrapped Codex evidence clears plan checks and reaches structured final checks"
+
+start_test "plan gate keeps current-SHA rejection for wrapped actual-engine evidence"
+R18C=$(_run_actual_engine_plan_gate wgate-plan-claude-wrapped-stale \
+    '- [x] Plan review iteration 3 — claude clean —
+  plan=`docs/plans/actual-engine.md` —
+  plan_sha=`0000000000000000000000000000000000000000000000000000000000000000` — ts=`2026-09-14T00:00:00Z`')
+S18C=${R18C%|*}
+assert_equals "${R18C##*|}" "2" "wrapped stale plan evidence remains blocked"
+assert_contains "$S18C/.hook-stderr" "plan_sha mismatch" \
+    "wrapped actual-engine evidence remains bound to current plan bytes"
+
+start_test "plan gate rejects a malformed reviewer label"
+R18D=$(_run_actual_engine_plan_gate wgate-plan-malformed-label \
+    '- [x] Plan review iteration 3 — not-claude clean — plan=`docs/plans/actual-engine.md` — plan_sha=`__PLAN_SHA__` — ts=`2026-09-14T00:00:00Z`')
+S18D=${R18D%|*}
+assert_equals "${R18D##*|}" "2" "malformed-label plan evidence is blocked"
+assert_contains "$S18D/.hook-stderr" "clean line variant not recognized" \
+    "only exact delimited actual-engine labels are accepted"
+
+# ---------------------------------------------------------------------------
 # Test 19: [x] Code review loop PASS without per-iter clean lines → exit 2
 # ---------------------------------------------------------------------------
 start_test "[x] Code review loop PASS + no per-iter evidence → exit 2"
@@ -1738,8 +1800,8 @@ rc=$?
 cd "$REPO_ROOT"
 
 assert_equals "$rc" "2" "Code review PASS without evidence is blocked"
-assert_contains "$S19/.hook-stderr" "Code review iteration" \
-    "stderr names Code review iteration requirement"
+assert_contains "$S19/.hook-stderr" "Candidate receipt state linkage is missing" \
+    "stderr names the missing structured candidate linkage"
 
 # ---------------------------------------------------------------------------
 # Test 20: [x] Code review loop PASS + matching codex+pr-toolkit at HEAD → exit 0
@@ -1780,11 +1842,12 @@ rc=$?
 cd "$REPO_ROOT"
 
 assert_equals "$rc" "2" "Code review PASS with stale HEAD is blocked"
-assert_contains "$S21/.hook-stderr" "head" "stderr mentions head mismatch"
+assert_contains "$S21/.hook-stderr" "Candidate receipt state linkage is missing" \
+    "stderr names the missing structured candidate linkage"
 
 # ---------------------------------------------------------------------------
 # Test 22 (v5.40): N/A escape on Plan review loop → exit 0 (no evidence needed).
-# Codex is mandatory — the only escape is an N/A justification on the loop line.
+# An actual-engine clean row is absent, so only a justified N/A skips this gate.
 # ---------------------------------------------------------------------------
 start_test "[x] Plan review loop — N/A: reason → exit 0 (N/A bypasses evidence)"
 
@@ -2415,7 +2478,8 @@ MALFORMED_CODE='- [x] Code review loop
 S=$(scratch_dir malformed-code)
 rc=$(run_hook_sh "$S" 'git commit -m x' "$MALFORMED_CODE")
 assert_equals "$rc" "2" "malformed Code review loop line is blocked"
-assert_contains "$S/.hook-stderr" "malformed" "stderr names it malformed"
+assert_contains "$S/.hook-stderr" "Git worktree required" \
+    "no-Git fixture reports the structured worktree prerequisite"
 
 start_test "malformed '[x] Plan review loop' (no PASS, no N/A) → exit 2"
 MALFORMED_PLAN='- [x] Code review loop — N/A: harness
@@ -2437,7 +2501,8 @@ STALE_NA_PASS='- [x] Code review loop (1 iterations) — PASS
 - [x] E2E verified — N/A: harness'
 rc=$(run_hook_sh "$SA" 'git commit -m x' "$STALE_NA_PASS")
 assert_equals "$rc" "2" "PASS line's evidence is required despite a stale N/A line"
-assert_contains "$SA/.hook-stderr" "per-iter clean evidence" "blocks on missing evidence, not skipped via N/A"
+assert_contains "$SA/.hook-stderr" "Candidate receipt state linkage is missing" \
+    "stale prose cannot bypass missing structured candidate linkage"
 
 # --- bug d: stdin `cwd` governs repo context; `git -C` does NOT redirect it ---
 # Repo W: active workflow, gates UNCHECKED. The hook is invoked from a different

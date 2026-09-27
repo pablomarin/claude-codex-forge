@@ -311,11 +311,10 @@ function Compute-BreakerFields {
 # ---------------------------------------------------------------------------
 # Compute-PlanReviewGate: returns @{clean=$false; matched_iteration="";
 #   matched_plan_sha=""}
-# Scoped to ## Workflow / ### Checklist. Requires a per-iter "codex clean"
-# line for the same iteration N as the "Plan review loop (N iterations) — PASS"
-# checkbox, with plan_sha matching the sha256 of the referenced plan file.
-# Canonical clean-line stem (test-contracts.sh parity check):
-#   Plan review iteration N — codex clean — plan=`<path>` — plan_sha=`<sha>`
+# Scoped to ## Workflow / ### Checklist. Requires a per-iter actual-engine
+# (`claude` or `codex`) clean row for the same iteration N as the
+# "Plan review loop (N iterations) — PASS" checkbox, with plan_sha matching the
+# sha256 of the referenced plan file.
 # Canonical code stem (parity with Compute-ReviewerGate):
 #   Code review iteration N — codex clean — head=`<sha>`
 # ---------------------------------------------------------------------------
@@ -344,13 +343,28 @@ function Compute-PlanReviewGate {
     if (-not $passLine) { return $result }
     if ($passLine -match 'Plan review loop \((\d+) iterations\)') { $n = $matches[1] } else { return $result }
 
-    # Matching per-iter clean line for iteration n (scoped lookup)
-    $cleanLine = ($checklist `
-        | Where-Object { $_ -match "^\s*-\s*\[x\]\s+Plan review iteration $n — " } `
-        | Select-Object -Last 1)
+    # Select the LAST matching iteration row and fold only contiguous,
+    # indented non-list Markdown continuations. Never cross into another row.
+    $cleanCandidates = @()
+    for ($i = 0; $i -lt $checklist.Count; $i++) {
+        $line = [string]$checklist[$i]
+        if ($line -notmatch "^\s*-\s*\[x\]\s+Plan review iteration $n — ") { continue }
+        $record = $line
+        $j = $i + 1
+        while ($j -lt $checklist.Count) {
+            $continuation = [string]$checklist[$j]
+            if ($continuation -notmatch '^\s+\S' -or
+                $continuation -match '^\s*[-*+]\s' -or
+                $continuation -match '^\s*#') { break }
+            $record += " " + $continuation.TrimStart()
+            $j++
+        }
+        $cleanCandidates += $record
+    }
+    $cleanLine = ($cleanCandidates | Select-Object -Last 1)
     if (-not $cleanLine) { return $result }
 
-    if ($cleanLine -match '— codex clean —') {
+    if ($cleanLine -match '— (claude|codex) clean —') {
         if ($cleanLine -match 'plan=`([^`]+)`') { $planPath = $matches[1] } else { return $result }
         if ($cleanLine -match 'plan_sha=`([^`]+)`') { $claimedSha = $matches[1].ToLower() } else { return $result }
         if (-not (Test-Path $planPath)) { return $result }
@@ -365,10 +379,8 @@ function Compute-PlanReviewGate {
         }
         return $result
     }
-    # Codex is mandatory: only a `codex clean` line with matching plan_sha sets
-    # clean=true. There is no "codex unavailable" escape. A plan-review N/A
-    # escape does NOT set it true — so /goal can't self-complete without real
-    # Codex evidence (mirrors e2e_report).
+    # Unknown or malformed engine labels never certify. A plan-review N/A
+    # escape likewise does not set this evidence gate true.
     return $result
 }
 

@@ -560,13 +560,9 @@ fi
 #   - a matching per-iter clean line for iteration N
 #   - the line's plan_sha matches sha256 of the referenced plan file
 #
-# Canonical clean-line stem (referenced by tests/template/test-contracts.sh
-# parity check): Plan review iteration N — codex clean — plan=`<path>`
-#
-# Codex is MANDATORY in this repo (Claude × Codex dual-engine). The ONLY escape
-# is an N/A justification on the loop line (mirrors the E2E verified — N/A:
-# gate). There is no "codex unavailable" escape: if Codex is genuinely down,
-# /goal halts and a human takes over.
+# Canonical clean-line stem: Plan review iteration N — <actual-engine> clean —
+# plan=`<path>`. The actual engine is `claude` or `codex`; wrapped fields may
+# continue on contiguous indented non-list Markdown lines.
 #
 # N/A escape: if the `Plan review loop (N iterations) — PASS` line OR a
 # dedicated `- [x] Plan review loop — N/A: <reason>` line carries `N/A:`, the
@@ -611,28 +607,39 @@ if [ -n "$PLAN_PASS_LINE" ]; then
     # Extract N from "Plan review loop (N iterations) — PASS"
     PLAN_N=$(echo "$PLAN_PASS_LINE" | sed -E 's/.*Plan review loop \(([0-9]+) iterations\).*/\1/')
 
-    # Find the per-iter clean line for iteration N (LAST matching line — defensive
-    # against stale duplicates, matches PR-authorization pattern at line 115-117).
-    PLAN_CLEAN=$(echo "$CHECKLIST" | tr -d '\r' \
-        | grep -E "^\s*-\s*\[x\]\s+Plan review iteration $PLAN_N — " \
-        | tail -1)
+    # Find the LAST matching iteration row and fold only its contiguous,
+    # indented non-list Markdown continuations. A next checklist item (checked
+    # or unchecked) and section content remain separate evidence boundaries.
+    PLAN_CLEAN=$(echo "$CHECKLIST" | tr -d '\r' | awk -v n="$PLAN_N" '
+        function finish() {
+            if (active) { selected=record; active=0 }
+        }
+        $0 ~ "^[[:space:]]*-[[:space:]]*\\[x\\][[:space:]]+Plan review iteration " n " — " {
+            finish(); record=$0; active=1; next
+        }
+        active && $0 ~ /^[[:space:]]+[^[:space:]]/ \
+            && $0 !~ /^[[:space:]]*[-*+][[:space:]]/ \
+            && $0 !~ /^[[:space:]]*#/ {
+            line=$0; sub(/^[[:space:]]+/, "", line); record=record " " line; next
+        }
+        { finish() }
+        END { finish(); if (selected != "") print selected }
+    ')
 
     if [ -z "$PLAN_CLEAN" ]; then
         echo "WORKFLOW GATE: [x] Plan review loop ($PLAN_N iterations) — PASS lacks per-iter clean evidence." >&2
         echo "" >&2
         echo "Required: a matching line in state.md (### Checklist):" >&2
-        echo "  - [x] Plan review iteration $PLAN_N — codex clean — plan=\`<plan-file>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
+        echo "  - [x] Plan review iteration $PLAN_N — <actual-engine> clean — plan=\`<plan-file>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
         echo "" >&2
         echo "Run iter-$PLAN_N reviewers and append the clean line, OR uncheck the loop" >&2
         echo "and run another iteration. See rules/workflow.md Revision Loop Protocol." >&2
         exit 2
     fi
 
-    # Branch on the clean-line variant. Match the canonical delimited form
-    # (— codex clean —), not a bare substring, so "not-codex clean" can't pass.
-    # Codex is mandatory: only `codex clean`
-    # (plan_sha bound) is accepted. No "codex unavailable" escapes.
-    if echo "$PLAN_CLEAN" | grep -qF -- "— codex clean —"; then
+    # Match the canonical delimited actual-engine form, not a bare substring,
+    # so labels such as "not-claude clean" cannot pass.
+    if echo "$PLAN_CLEAN" | grep -qE -- "— (claude|codex) clean —"; then
         # Presence check BEFORE sed extraction. `sed -E 's/.*plan=`...`.*/\1/'`
         # returns the WHOLE line on no-match, so a clean line missing the
         # plan=/plan_sha= tokens would slip past a non-empty check and hit a
@@ -640,7 +647,7 @@ if [ -n "$PLAN_PASS_LINE" ]; then
         # gate's `grep -qE 'head=`[0-9a-f]+`'` presence check).
         if ! echo "$PLAN_CLEAN" | grep -qE 'plan=`[^`]+`.*plan_sha=`[^`]+`'; then
             echo "WORKFLOW GATE: Plan review iteration $PLAN_N clean line is malformed." >&2
-            echo "Expected format: codex clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
+            echo "Expected format: <actual-engine> clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
             echo "Got: $PLAN_CLEAN" >&2
             exit 2
         fi
@@ -651,7 +658,7 @@ if [ -n "$PLAN_PASS_LINE" ]; then
 
         if [ -z "$PLAN_PATH" ] || [ -z "$CLAIMED_SHA" ]; then
             echo "WORKFLOW GATE: Plan review iteration $PLAN_N clean line is malformed." >&2
-            echo "Expected format: codex clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
+            echo "Expected format: <actual-engine> clean — plan=\`<path>\` — plan_sha=\`<sha256>\` — ts=\`<ts>\`" >&2
             echo "Got: $PLAN_CLEAN" >&2
             exit 2
         fi
@@ -689,7 +696,8 @@ if [ -n "$PLAN_PASS_LINE" ]; then
         echo "WORKFLOW GATE: Plan review iteration $PLAN_N clean line variant not recognized." >&2
         echo "Got: $PLAN_CLEAN" >&2
         echo "" >&2
-        echo "Codex is mandatory in this repo. Accepted forms (see rules/workflow.md):" >&2
+        echo "Accepted actual-engine forms:" >&2
+        echo "  - claude clean — plan=\`<path>\` — plan_sha=\`<sha>\` — ts=\`<ts>\`" >&2
         echo "  - codex clean — plan=\`<path>\` — plan_sha=\`<sha>\` — ts=\`<ts>\`" >&2
         echo "  - mark the loop N/A:  - [x] Plan review loop — N/A: <reason>" >&2
         exit 2
@@ -709,6 +717,10 @@ fi
 # Canonical clean-line stem (referenced by tests/template/test-contracts.sh
 # parity check): Code review iteration N — codex clean — head=`<sha>`
 # ---------------------------------------------------------------------------
+# Receipt-native V6 is rejected or accepted by structured receipts before this
+# historical parser can authorize anything. Keep the unreachable pre-V6 parser
+# here only as dual-read documentation; it cannot certify a V6 ship action.
+if [ "$STATE_IS_V6" != true ]; then
 # N/A escape: any `[x] Code review loop ... N/A:` line skips the evidence check.
 CODE_NA_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
     | grep -E '^\s*-\s*\[x\]\s+Code review loop' \
@@ -747,7 +759,7 @@ elif [ -n "$CODE_CHECKED_ANY" ]; then
     exit 2
 fi
 
-if [ "$RECEIPT_V2_ACTIVE" != true ] && [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
+if [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_SHA" ]; then
     CODE_N=$(echo "$CODE_PASS_LINE" | sed -E 's/.*Code review loop \(([0-9]+) iterations\).*/\1/')
 
     # Validate codex side (last-line semantics — defensive against stale duplicates)
@@ -803,6 +815,7 @@ if [ "$RECEIPT_V2_ACTIVE" != true ] && [ -n "$CODE_PASS_LINE" ] && [ -n "$HEAD_S
             exit 2
         fi
     done
+fi
 fi
 
 # Strict v6 boundary: receipt linkage never controls whether enforcement runs.

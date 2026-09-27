@@ -1,7 +1,7 @@
 ---
 name: "{{NAME}}"
 description: "{{DESCRIPTION}}"
-tools: "{{TOOLS}}"
+{{CAPABILITIES}}
 model: "{{MODEL}}"
 forge-generated: true
 canonical-path: "{{CANONICAL_PATH}}"

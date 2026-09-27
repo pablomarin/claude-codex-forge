@@ -4,6 +4,9 @@ Use only for a clearly understood, low-risk change that touches at most three fi
 architecture decision, and has an obvious verification path. Otherwise use `/fix-bug` or
 `/new-feature`.
 
+Apply the shared [Startup boundary](../rules/workflow.md#startup-boundary) before the first workflow
+step. It is the canonical activation, resume, isolation, and setup-failure contract.
+
 ## Steps
 
 1. Resolve the active host and run `.forge/hooks/lib/workflow-state.sh show` (PowerShell: the `.ps1`
@@ -43,6 +46,7 @@ reviewer on launch/capability failure. A finding is not fallback. Reports and re
 `.forge/local/` and do not become post-verification source changes.
 
 Use one broad review, one repair pass, and one closure review limited to named findings plus direct
-regressions; never start a second broad scan for the same candidate revision. If a reachable P0/P1
+regressions. Before production repairs, follow the shared [Final-review repair](../rules/workflow.md#final-review-repair) transition.
+Never start a second broad scan for the same candidate revision. If a reachable P0/P1
 remains, allow one surgical repair and verification, then surface it to the developer. P3, cosmetic,
 speculative, and unchanged-candidate concerns do not keep the closure review open.

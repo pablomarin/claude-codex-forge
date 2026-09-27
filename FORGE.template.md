@@ -74,6 +74,11 @@ Ordinary review remains hermetic and grants no arbitrary network tools; only an 
 investigation uses the selected host's normal full-agent capabilities, subject to the existing
 human mutation boundaries.
 
+If ordinary reviewer fallback cannot finish and emits `AUTH_REQUIRED`, the main agent follows
+the single interactive login handoff and bounded retry in
+`.forge/rules/workflow.md#reviewer-authentication-recovery`. Authentication recovery is not
+another reviewer-transport consent request; keep completed reviews and failed evidence.
+
 ## Native Goal Composition
 
 Claude Code and Codex keep their own native `/goal`; Forge never shadows it with a command or skill.

@@ -68,12 +68,61 @@ vr_candidate_current() {
     [ -f "$helper" ] || helper="$VR_ROOT/hooks/lib/candidate-fingerprint.sh"
     [ -f "$helper" ] || return 1
     tmp=$(mktemp "${TMPDIR:-/tmp}/forge-current-candidate.XXXXXX") || return 1
-    if ! bash "$helper" freeze --artifact git:working-tree --workflow-base-sha "$base" \
+    if ! bash "$helper" identity --artifact git:working-tree --workflow-base-sha "$base" \
         --workflow-base-ref "$base_ref" --output "$tmp" >/dev/null 2>&1; then rm -f "$tmp"; return 1; fi
     for key in candidate_id worktree_identity git_head workflow_base_sha index_tree candidate_state; do
         expected=$(vr_kv "$receipt" "$key" 2>/dev/null) || { rm -f "$tmp"; return 1; }
         actual=$(vr_kv "$tmp" "$key" 2>/dev/null) || { rm -f "$tmp"; return 1; }
         [ "$expected" = "$actual" ] || { rm -f "$tmp"; return 1; }
+    done
+    rm -f "$tmp"
+    return 0
+}
+vr_candidate_promoted() {
+    local candidate="$1" promotion="$2" tmp key base base_ref old_id old_head tree worktree helper
+    local current_head temporary branch_commit branch_tree post_status post_dirty expected_id parent_line
+    [ -f "$promotion" ] && [ ! -L "$promotion" ] || return 1
+    for key in schema_version old_candidate_id old_head temporary_commit new_branch_commit new_branch_tree worktree_identity post_commit_status post_commit_dirty; do
+        vr_kv "$promotion" "$key" >/dev/null 2>&1 || return 1
+    done
+    [ "$(vr_kv "$promotion" schema_version)" = 2 ] || return 1
+    [ "$(vr_kv "$candidate" schema_version 2>/dev/null || true)" = 2 ] || return 1
+    [ "$(vr_kv "$candidate" candidate_state 2>/dev/null || true)" = staged-clean ] || return 1
+    old_id=$(vr_kv "$candidate" candidate_id) || return 1
+    old_head=$(vr_kv "$candidate" git_head) || return 1
+    base=$(vr_kv "$candidate" workflow_base_sha) || return 1
+    base_ref=$(vr_kv "$candidate" workflow_base_ref) || return 1
+    tree=$(vr_kv "$candidate" index_tree) || return 1
+    worktree=$(vr_kv "$candidate" worktree_identity) || return 1
+    expected_id=$(printf '%s\n' "$base" "$old_head" "$tree" "$worktree" | vr_hash_stream)
+    [ "$old_id" = "$expected_id" ] || return 1
+    [ "$(vr_kv "$promotion" old_candidate_id)" = "$old_id" ] || return 1
+    [ "$(vr_kv "$promotion" old_head)" = "$old_head" ] || return 1
+    [ "$(vr_kv "$promotion" worktree_identity)" = "$worktree" ] || return 1
+    temporary=$(vr_kv "$promotion" temporary_commit) || return 1
+    branch_commit=$(vr_kv "$promotion" new_branch_commit) || return 1
+    branch_tree=$(vr_kv "$promotion" new_branch_tree) || return 1
+    current_head=$(git -C "$VR_ROOT" rev-parse HEAD 2>/dev/null) || return 1
+    [ "$temporary" = "$branch_commit" ] && [ "$branch_commit" = "$current_head" ] || return 1
+    [ "$branch_tree" = "$tree" ] || return 1
+    [ "$(git -C "$VR_ROOT" rev-parse "$current_head^{tree}" 2>/dev/null)" = "$tree" ] || return 1
+    parent_line=$(git -C "$VR_ROOT" rev-list --parents -n 1 "$current_head" 2>/dev/null) || return 1
+    [ "$(printf '%s\n' "$parent_line" | awk '{print NF}')" -eq 2 ] || return 1
+    [ "$(printf '%s\n' "$parent_line" | awk '{print $2}')" = "$old_head" ] || return 1
+    post_status=$(vr_kv "$promotion" post_commit_status) || return 1
+    case "$post_status" in pass|not-run) ;; *) return 1 ;; esac
+    post_dirty=$(vr_kv "$promotion" post_commit_dirty) || return 1
+    [ "$post_dirty" = false ] || return 1
+    tmp=$(mktemp "${TMPDIR:-/tmp}/forge-promoted-candidate.XXXXXX") || return 1
+    helper="$VR_SCRIPT_DIR/candidate-fingerprint.sh"
+    [ -f "$helper" ] || helper="$VR_ROOT/hooks/lib/candidate-fingerprint.sh"
+    [ -f "$helper" ] || { rm -f "$tmp"; return 1; }
+    if ! bash "$helper" identity --artifact git:working-tree --workflow-base-sha "$base" \
+        --workflow-base-ref "$base_ref" --output "$tmp" >/dev/null 2>&1; then rm -f "$tmp"; return 1; fi
+    [ "$(vr_kv "$tmp" git_head 2>/dev/null || true)" = "$current_head" ] || { rm -f "$tmp"; return 1; }
+    for key in worktree_identity workflow_base_sha index_tree candidate_state; do
+        [ "$(vr_kv "$tmp" "$key" 2>/dev/null || true)" = "$(vr_kv "$candidate" "$key" 2>/dev/null || true)" ] \
+            || { rm -f "$tmp"; return 1; }
     done
     rm -f "$tmp"
     return 0
@@ -100,14 +149,23 @@ vr_validate_review() {
     [ "$(vr_kv "$receipt" git_head)" = "$head" ] || return 1
     [ "$(vr_kv "$receipt" workflow_base_sha)" = "$base" ] || return 1
     [ "$(vr_kv "$receipt" process_exit_status)" = 0 ] || return 1
-    [ "$(vr_kv "$receipt" semantic_verdict)" = CLEAN ] || return 1
-    case "$(vr_kv "$receipt" max_severity)" in NONE|P3) ;; *) return 1 ;; esac
+    case "$(vr_kv "$receipt" semantic_verdict):$(vr_kv "$receipt" max_severity)" in
+        CLEAN:NONE|CLEAN:P3|FINDINGS:P3) ;; *) return 1 ;;
+    esac
     [ "$(vr_kv "$receipt" blocked_class)" = none ] || return 1
     digest=$(vr_kv "$receipt" findings_digest)
     [ "${#digest}" -eq 64 ] || return 1
     case "$digest" in *[!0-9a-fA-F]*) return 1 ;; esac
     output=$(vr_owned_path "$(vr_kv "$receipt" output_path)" true) || return 1
     [ "$(vr_hash_file "$output")" = "$(vr_kv "$receipt" output_hash)" ] || return 1
+    [ "$(vr_kv "$output" schema_version)" = 1 ] && [ "$(vr_kv "$output" blocked_class)" = none ] || return 1
+    [ "$(vr_kv "$output" verdict)" = "$(vr_kv "$receipt" semantic_verdict)" ] \
+        && [ "$(vr_kv "$output" max_severity)" = "$(vr_kv "$receipt" max_severity)" ] || return 1
+    # A P3 label cannot conceal a material finding in the hash-bound output.
+    awk -F= -v verdict="$(vr_kv "$output" verdict)" '
+        $1=="finding" { n++; sub(/^[^=]*=/, ""); split($0, fields, "|"); if(fields[2]!="P3") bad=1 }
+        END { exit (bad || (verdict=="FINDINGS" && !n)) ? 1 : 0 }
+    ' "$output" || return 1
     requested=$(vr_kv "$receipt" requested_engine); actual=$(vr_kv "$receipt" actual_engine)
     case "$requested" in auto|claude|codex) ;; *) return 1 ;; esac
     case "$actual" in claude|codex) ;; *) return 1 ;; esac
@@ -211,7 +269,13 @@ quality=$(vr_owned_path "$quality" true) || vr_die 'quality receipt path is inva
 verify_app=$(vr_owned_path "$verify_app" true) || vr_die 'verify-app receipt path is invalid'
 e2e=$(vr_owned_path "$e2e" true) || vr_die 'E2E receipt path is invalid'
 candidate_ok=false; reviews_ok=false; app_ok=false; e2e_ok=false
-vr_candidate_current "$candidate" && candidate_ok=true
+if vr_candidate_current "$candidate"; then
+    candidate_ok=true
+else
+    promotion=$(vr_state_value "$state" 'Promotion receipt' 2>/dev/null || true)
+    promotion=$(vr_owned_path "$promotion" true 2>/dev/null || true)
+    [ -n "$promotion" ] && vr_candidate_promoted "$candidate" "$promotion" && candidate_ok=true
+fi
 if [ "$candidate_ok" = true ] && vr_validate_review "$spec" code-spec "$candidate" "$iteration" && vr_validate_review "$quality" code-quality "$candidate" "$iteration"; then
     spec_id=$(vr_kv "$spec" invocation_id); quality_id=$(vr_kv "$quality" invocation_id)
     [ "$spec_id" != "$quality_id" ] && reviews_ok=true

@@ -313,8 +313,8 @@ compute_breaker_fields() {
 
 compute_plan_review_gate() {
     # Output: "clean_same_iteration|matched_iteration|matched_plan_sha"
-    # Canonical clean-line stem (referenced by tests/template/test-contracts.sh
-    # parity check): Plan review iteration N — codex clean — plan=`<path>` — plan_sha=`<sha>`
+    # Canonical clean-line stem: Plan review iteration N — <actual-engine> clean —
+    # plan=`<path>` — plan_sha=`<sha>`. Actual engine is claude or codex.
     # Canonical code stem: Code review iteration N — codex clean — head=`<sha>`
     # Scope extraction to ## Workflow / ### Checklist (mirror compute_reviewer_gate
     # scoping above). A whole-file grep would pick up stray "Plan review iteration"
@@ -342,16 +342,29 @@ compute_plan_review_gate() {
     n=$(echo "$pass_line" | sed -E 's/.*Plan review loop \(([0-9]+) iterations\).*/\1/')
     [ -z "$n" ] && { echo "false||"; return 0; }
 
-    # Find matching per-iter clean line for iteration n (scoped lookup)
+    # Find the LAST matching iteration row and fold only contiguous, indented
+    # non-list Markdown continuations. Never cross into another checklist row.
     local clean_line
-    clean_line=$(echo "$checklist" \
-        | grep -E "^\s*-\s*\[x\]\s+Plan review iteration $n — " \
-        | tail -1)
+    clean_line=$(echo "$checklist" | awk -v n="$n" '
+        function finish() {
+            if (active) { selected=record; active=0 }
+        }
+        $0 ~ "^[[:space:]]*-[[:space:]]*\\[x\\][[:space:]]+Plan review iteration " n " — " {
+            finish(); record=$0; active=1; next
+        }
+        active && $0 ~ /^[[:space:]]+[^[:space:]]/ \
+            && $0 !~ /^[[:space:]]*[-*+][[:space:]]/ \
+            && $0 !~ /^[[:space:]]*#/ {
+            line=$0; sub(/^[[:space:]]+/, "", line); record=record " " line; next
+        }
+        { finish() }
+        END { finish(); if (selected != "") print selected }
+    ')
     [ -z "$clean_line" ] && { echo "false||"; return 0; }
 
-    # Match codex clean variant + verify plan_sha (read from file, hash, compare).
-    # Canonical delimited form only (— codex clean —), so "not-codex clean" can't pass.
-    if echo "$clean_line" | grep -qF -- "— codex clean —"; then
+    # Accept only the delimited actual-engine variants so malformed labels such
+    # as "not-claude clean" remain non-certifying.
+    if echo "$clean_line" | grep -qE -- "— (claude|codex) clean —"; then
         local plan_path claimed_sha actual_sha
         plan_path=$(echo "$clean_line" | sed -E 's/.*plan=`([^`]+)`.*/\1/')
         claimed_sha=$(echo "$clean_line" | sed -E 's/.*plan_sha=`([^`]+)`.*/\1/')
@@ -373,10 +386,8 @@ compute_plan_review_gate() {
             echo "false|$n|$claimed_sha"
         fi
     else
-        # Codex is mandatory: only a `codex clean` line with matching plan_sha
-        # sets clean_same_iteration=true. There is no "codex unavailable" escape.
-        # A plan-review N/A escape does NOT set it true — so /goal can't
-        # self-complete without real Codex evidence (mirrors e2e_report).
+        # Unknown or malformed engine labels never certify. A plan-review N/A
+        # escape likewise does not set this evidence gate true.
         echo "false||"
     fi
 }
