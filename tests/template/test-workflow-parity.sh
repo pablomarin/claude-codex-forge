@@ -55,6 +55,17 @@ if [[ "$stage" == development || "$stage" == complete ]]; then
             assert_contains "$file" "$contract" "$workflow preserves $contract"
         done
         assert_contains "$file" "do not" "$workflow warns without adding a lock"
+        for transition in "workflow-state.sh show" "workflow-state.sh activate" \
+            "workflow-state.sh checkpoint" "--begin-review" \
+            "before any discretionary investigation or tracked mutation" \
+            "before production implementation" \
+            "same candidate" "Any candidate mutation"; do
+            assert_contains "$file" "$transition" "$workflow makes the $transition transition explicit"
+        done
+        assert_not_contains "$file" 'Read `.forge/local/state.md`' \
+            "$workflow does not instruct a direct canonical state read"
+        assert_not_contains "$file" 'Update `.forge/local/state.md`' \
+            "$workflow does not instruct an unbounded canonical state write"
     done
     for workflow in new-feature fix-bug; do
         file="$REPO_ROOT/commands/$workflow.md"
@@ -65,7 +76,38 @@ if [[ "$stage" == development || "$stage" == complete ]]; then
     assert_contains "$REPO_ROOT/commands/new-feature.md" "same-engine reviewer" "new-feature has automatic reviewer fallback"
     assert_contains "$REPO_ROOT/commands/fix-bug.md" "same-engine fallback" "fix-bug has automatic reviewer fallback"
     assert_contains "$REPO_ROOT/commands/quick-fix.md" "falls back automatically" "quick-fix has automatic reviewer fallback"
+    assert_contains "$REPO_ROOT/commands/quick-fix.md" "code-spec" "quick-fix requires the spec review lens"
+    assert_contains "$REPO_ROOT/commands/quick-fix.md" "code-quality" "quick-fix requires the quality review lens"
 fi
+
+start_test "canonical policy routes workflow control rows through the bounded helper"
+for surface in "$REPO_ROOT/rules/workflow.md" "$REPO_ROOT/FORGE.template.md"; do
+    assert_contains "$surface" 'workflow-state.sh show' "$(basename "$surface") names bounded show"
+    assert_contains "$surface" 'workflow-state.sh activate' "$(basename "$surface") names bounded activation"
+    assert_contains "$surface" 'workflow-state.sh checkpoint' "$(basename "$surface") names bounded checkpoint"
+    assert_not_contains "$surface" 'Read `.forge/local/state.md`' \
+        "$(basename "$surface") does not instruct a direct canonical state read"
+done
+
+start_test "development entrypoints load the shared startup boundary before workflow steps"
+for workflow in new-feature fix-bug quick-fix; do
+    entry=$(sed '/^## /q' "$REPO_ROOT/commands/$workflow.md")
+    if printf '%s\n' "$entry" | grep -qF 'Startup boundary'; then
+        pass "$workflow exposes activation-first startup at entry"
+    else
+        fail "$workflow buries activation behind discretionary work"
+    fi
+done
+assert_contains "$REPO_ROOT/rules/workflow.md" '## Startup boundary' \
+    "startup preflight has one canonical owner"
+assert_contains "$REPO_ROOT/rules/workflow.md" 'Do not fabricate activation' \
+    "a denied setup cannot be reported as an active workflow"
+assert_contains "$REPO_ROOT/rules/workflow.md" 'prepared native worktree' \
+    "startup supports native isolation without duplicating worktrees"
+assert_contains "$REPO_ROOT/rules/workflow.md" 'Quick-fix never creates a worktree' \
+    "shared startup preserves the quick-fix no-worktree contract"
+assert_contains "$REPO_ROOT/rules/workflow.md" 'Only `/new-feature` and `/fix-bug`' \
+    "shared startup limits required worktree creation to isolated workflows"
 
 if [[ "$stage" == complete ]]; then
     start_test "final cutover owns goal composition and removes transitional dependencies"
@@ -191,6 +233,37 @@ done
 assert_file_exists "$INSTALL/.forge/agents/forge-v6-producer.md" "canonical producer agent installed"
 assert_file_exists "$INSTALL/.claude/agents/forge-v6-producer.md" "Claude producer agent installed"
 assert_file_exists "$INSTALL/.codex/agents/forge-v6-producer.toml" "Codex producer agent installed"
+
+start_test "installed Claude agent capabilities preserve canonical roles and restricted defaults"
+agent_policy() {
+    awk -v key="$2" '
+        /^---\r?$/ { boundary++; next }
+        boundary != 1 { next }
+        /^[^[:space:]]/ { active=($0 ~ ("^" key ":")) }
+        active { print }
+    ' "$1"
+}
+assert_equals "$(agent_policy "$INSTALL/.claude/agents/forge-v6-producer.md" tools)" \
+    "$(agent_policy "$INSTALL/.forge/agents/forge-v6-producer.md" tools)" \
+    "producer adapter retains canonical tools including Edit and Write"
+assert_equals "$(agent_policy "$INSTALL/.claude/agents/independent-reviewer.md" tools)" \
+    "$(agent_policy "$INSTALL/.forge/agents/independent-reviewer.md" tools)" \
+    "explicit read-only reviewer tool restriction is preserved"
+for role in verify-app research-first; do
+    assert_equals "$(agent_policy "$INSTALL/.claude/agents/$role.md" tools)" \
+        'tools: "Read, Grep, Glob, Bash"' "$role keeps its existing restricted default"
+done
+assert_equals "$(agent_policy "$INSTALL/.claude/agents/verify-e2e.md" tools)" "" \
+    "E2E verifier does not exclude host browser tools with a fixed builtin allowlist"
+assert_contains "$INSTALL/.claude/agents/verify-e2e.md" 'disallowedTools:' \
+    "E2E verifier explicitly restricts implementation-edit tools"
+for denied in Write Edit NotebookEdit; do
+    if agent_policy "$INSTALL/.claude/agents/verify-e2e.md" disallowedTools | grep -qw "$denied"; then
+        pass "E2E verifier denies $denied"
+    else
+        fail "E2E verifier does not deny $denied"
+    fi
+done
 
 if [[ "$stage" == complete ]]; then
     start_test "native goal composition does not shadow custom host goals"

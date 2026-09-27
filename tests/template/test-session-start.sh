@@ -162,7 +162,8 @@ OUTFILE=$(run_session_start_sh "$S_RESUME/repo" "resume")
 assert_contains "$OUTFILE" "/new-feature canonical-resume" "resume context reads canonical v6 workflow"
 assert_contains "$OUTFILE" "next step: continue" "resume context includes the exact durable next step"
 assert_contains "$OUTFILE" ".forge/local/state.md" "resume context names the canonical state authority"
-assert_contains "$OUTFILE" "read it before continuing" "resume context tells the model to rehydrate from state"
+assert_contains "$OUTFILE" ".forge/hooks/lib/workflow-state.sh show" \
+    "resume context tells the model to rehydrate through the bounded helper"
 assert_not_contains "$OUTFILE" "stale-legacy" "resume context never resurrects conflicting v5 state"
 
 start_test "source=compact rehydrates active workflow and optional memory indexes"

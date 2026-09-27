@@ -20,8 +20,14 @@ criterion.
 
 - The agent running in the developer's current host is the main agent for that session. There is
   no permanent main-engine preference and no workflow lease.
-- Read `.forge/local/state.md` before resuming work and keep its evidence bound to the exact
-  candidate revision. Do not infer a successful gate from execution alone.
+- Run `.forge/hooks/lib/workflow-state.sh show` before resuming work (PowerShell:
+  `.forge/hooks/lib/workflow-state.ps1 show`) and keep evidence bound to the exact candidate
+  revision. Do not infer a successful gate from execution alone.
+- Use `.forge/hooks/lib/workflow-state.sh activate` to start canonical workflow control state and
+  `.forge/hooks/lib/workflow-state.sh checkpoint` for host, phase, next-step, and monotonic review
+  transitions. Use the `.ps1` twin on Windows. Native file tools may update checklist and narrative
+  content, but never workflow control rows. The helper derives and preserves the first certified
+  review iteration; callers never set that convergence anchor.
 - Use the canonical workflows in `.forge/workflows/`, rules in `.forge/rules/`, skills in
   `.forge/skills/`, and roles in `.forge/agents/`.
 - A host switch may resume the same branch and worktree. Forge creates no edit lock: concurrent sessions are allowed.
@@ -68,6 +74,11 @@ Ordinary review remains hermetic and grants no arbitrary network tools; only an 
 investigation uses the selected host's normal full-agent capabilities, subject to the existing
 human mutation boundaries.
 
+If ordinary reviewer fallback cannot finish and emits `AUTH_REQUIRED`, the main agent follows
+the single interactive login handoff and bounded retry in
+`.forge/rules/workflow.md#reviewer-authentication-recovery`. Authentication recovery is not
+another reviewer-transport consent request; keep completed reviews and failed evidence.
+
 ## Native Goal Composition
 
 Claude Code and Codex keep their own native `/goal`; Forge never shadows it with a command or skill.
@@ -99,6 +110,10 @@ evidence is missing, report the result as unverified or blocked rather than succ
 State what you verified, not what you assume. Read files before making claims about them, run the
 owning check before claiming behavior works, and distinguish fact from inference. Bind review and
 verification receipts to the final candidate fingerprint; mutation invalidates earlier evidence.
+Every active canonical V6 shipping action requires the current structured receipt set. Missing,
+placeholder, stale, mixed-candidate, or non-clean receipts block shipping; legacy prose cannot certify
+an active V6 workflow. A direct documentation-only commit retains its narrow carve-out, but push and
+PR creation always enforce the receipt boundary.
 
 ## Protected Content
 

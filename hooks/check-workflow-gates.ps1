@@ -325,43 +325,6 @@ if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $st
     }
 }
 
-# Receipt-v2 compatibility switch. An explicit Candidate receipt linkage means
-# all final evidence must bind to one current staged-clean candidate. Genuine
-# unconverted workflows continue through the legacy checklist evidence below.
-$ReceiptV2Active = $false
-$receiptCandidate = ""
-$receiptCandidateRows = @()
-foreach ($line in (($content -replace "`r", "") -split "`n")) {
-    $parts = $line -split '\|'
-    if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') {
-        $receiptCandidateRows += $parts[2].Trim()
-    }
-}
-if ($receiptCandidateRows.Count -eq 1) { $receiptCandidate = [string]$receiptCandidateRows[0] }
-if ($receiptCandidate -and -not $receiptCandidate.Contains('<')) {
-    $ReceiptV2Active = $true
-    $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
-    if (-not (Test-Path -LiteralPath $verificationReceipt)) {
-        $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1'
-    }
-    $vrOut = @()
-    $vrStatus = 2
-    if (Test-Path -LiteralPath $verificationReceipt) {
-        . $verificationReceipt
-        $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateFile
-        $vrOut = @($vrResponse.Lines)
-        if ($vrResponse.Error) { $vrOut += $vrResponse.Error }
-        $vrStatus = $vrResponse.Status
-    }
-    if ($vrStatus -ne 0) {
-        [Console]::Error.WriteLine('WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean.')
-        foreach ($line in $vrOut) { [Console]::Error.WriteLine([string]$line) }
-        if (-not $vrOut) { [Console]::Error.WriteLine('verification-receipt helper unavailable') }
-        [Console]::Error.WriteLine('Freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E.')
-        exit 2
-    }
-}
-
 # ---------------------------------------------------------------------------
 # No-code carve-out (git commit only) — closes the integrity hole (mirrors .sh)
 # See check-workflow-gates.sh for the full rationale + scope decision. When a
@@ -460,6 +423,22 @@ if ($unchecked.Count -gt 0) {
     exit 2
 }
 
+# A concrete candidate path selects receipt-native diagnostics below, avoiding
+# duplicate legacy evidence errors. This flag does NOT activate enforcement;
+# every active canonical v6 workflow validates receipts before the final allow.
+$ReceiptV2Active = $false
+$receiptCandidateRows = @()
+foreach ($line in (($content -replace "`r", "") -split "`n")) {
+    $parts = $line -split '\|'
+    if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') {
+        $receiptCandidateRows += $parts[2].Trim()
+    }
+}
+if ($receiptCandidateRows.Count -eq 1) {
+    $receiptCandidate = [string]$receiptCandidateRows[0]
+    if ($receiptCandidate -and -not $receiptCandidate.Contains('<')) { $ReceiptV2Active = $true }
+}
+
 # ---------------------------------------------------------------------------
 # Evidence-based gate for E2E verified. Mirrors the .sh logic:
 # a checked '[x] E2E verified' without 'N/A:' must have a fresh report file
@@ -548,8 +527,7 @@ if (-not $ReceiptV2Active -and $e2eCheckedLine -and ($e2eCheckedLine -notmatch '
 # ($checklistLines was built once above the E2E gate and is reused here.)
 
 # N/A escape: any `[x] Plan review loop ... N/A:` line skips the evidence check
-# (mirrors the E2E verified — N/A: gate). Codex is mandatory; there is no
-# "codex unavailable" escape.
+# (mirrors the E2E verified — N/A: gate).
 $planNaLine = ($checklistLines `
     | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Plan review loop' -and $_ -match 'N/A:' } `
     | Select-Object -First 1)
@@ -586,25 +564,43 @@ if ($planPassLine) {
         $planN = $null
     }
 
-    $planClean = ($checklistLines `
-        | Where-Object { $_ -match "^\s*-\s*\[x\]\s+Plan review iteration $planN — " } `
-        | Select-Object -Last 1)
+    # Select the LAST matching iteration row and fold only contiguous,
+    # indented non-list Markdown continuations. Never cross into another
+    # checklist item or section.
+    $planCleanCandidates = @()
+    for ($i = 0; $i -lt $checklistLines.Count; $i++) {
+        $line = [string]$checklistLines[$i]
+        if ($line -notmatch "^\s*-\s*\[x\]\s+Plan review iteration $planN — ") { continue }
+        $record = $line
+        $j = $i + 1
+        while ($j -lt $checklistLines.Count) {
+            $continuation = [string]$checklistLines[$j]
+            if ($continuation -notmatch '^\s+\S' -or
+                $continuation -match '^\s*[-*+]\s' -or
+                $continuation -match '^\s*#') { break }
+            $record += " " + $continuation.TrimStart()
+            $j++
+        }
+        $planCleanCandidates += $record
+    }
+    $planClean = ($planCleanCandidates | Select-Object -Last 1)
 
     if (-not $planClean) {
         [Console]::Error.WriteLine("WORKFLOW GATE: [x] Plan review loop ($planN iterations) — PASS lacks per-iter clean evidence.")
         [Console]::Error.WriteLine("")
         [Console]::Error.WriteLine("Required: matching line in state.md (### Checklist):")
-        [Console]::Error.WriteLine("  - [x] Plan review iteration $planN — codex clean — plan=``<plan-file>`` — plan_sha=``<sha256>`` — ts=``<ts>``")
+        [Console]::Error.WriteLine("  - [x] Plan review iteration $planN — <actual-engine> clean — plan=``<plan-file>`` — plan_sha=``<sha256>`` — ts=``<ts>``")
         exit 2
     }
 
-    # Codex is mandatory: only `codex clean` (plan_sha bound) is accepted.
-    if ($planClean -match '— codex clean —') {
+    # Accept only an exact delimited actual-engine label, never a substring
+    # such as `not-claude clean`.
+    if ($planClean -match '— (claude|codex) clean —') {
         # Presence check BEFORE extraction (mirror .sh): a clean line missing
         # plan=/plan_sha= tokens must hit "malformed", not a garbled missing-file error.
         if ($planClean -notmatch 'plan=`[^`]+`.*plan_sha=`[^`]+`') {
             [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN clean line is malformed.")
-            [Console]::Error.WriteLine("Expected format: codex clean — plan=``<path>`` — plan_sha=``<sha256>`` — ts=``<ts>``")
+            [Console]::Error.WriteLine("Expected format: <actual-engine> clean — plan=``<path>`` — plan_sha=``<sha256>`` — ts=``<ts>``")
             [Console]::Error.WriteLine("Got: $planClean")
             exit 2
         }
@@ -630,7 +626,8 @@ if ($planPassLine) {
         [Console]::Error.WriteLine("WORKFLOW GATE: Plan review iteration $planN clean line variant not recognized.")
         [Console]::Error.WriteLine("Got: $planClean")
         [Console]::Error.WriteLine("")
-        [Console]::Error.WriteLine("Codex is mandatory in this repo. Accepted forms (see rules/workflow.md):")
+        [Console]::Error.WriteLine("Accepted actual-engine forms:")
+        [Console]::Error.WriteLine("  - claude clean — plan=``<path>`` — plan_sha=``<sha>`` — ts=``<ts>``")
         [Console]::Error.WriteLine("  - codex clean — plan=``<path>`` — plan_sha=``<sha>`` — ts=``<ts>``")
         [Console]::Error.WriteLine("  - mark the loop N/A:  - [x] Plan review loop — N/A: <reason>")
         exit 2
@@ -644,6 +641,10 @@ if ($planPassLine) {
 # Canonical clean-line stem (test-contracts.sh parity check):
 #   Code review iteration N — codex clean — head=`<sha>`
 # ---------------------------------------------------------------------------
+# Receipt-native V6 is rejected or accepted by structured receipts before this
+# historical parser can authorize anything. Keep the unreachable pre-V6 parser
+# here only as dual-read documentation; it cannot certify a V6 ship action.
+if (-not $stateIsV6) {
 # N/A escape: any `[x] Code review loop ... N/A:` line skips the evidence check.
 # Codex is mandatory; there is no "tool unavailable" escape.
 $codeNaLine = ($checklistLines `
@@ -677,7 +678,7 @@ if ($codePassLine) {
     exit 2
 }
 
-if (-not $ReceiptV2Active -and $codePassLine -and $headShaCode) {
+if ($codePassLine -and $headShaCode) {
     if ($codePassLine -match 'Code review loop \((\d+) iterations\)') {
         $codeN = $matches[1]
     } else {
@@ -731,6 +732,31 @@ if (-not $ReceiptV2Active -and $codePassLine -and $headShaCode) {
             exit 2
         }
     }
+}
+}
+
+# Strict v6 boundary: receipt linkage never controls whether enforcement runs.
+# Placeholder, absent, and stale receipt sets all fail closed here after any
+# more-specific checklist diagnostic has had a chance to guide the developer.
+$verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
+if (-not (Test-Path -LiteralPath $verificationReceipt)) {
+    $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1'
+}
+$vrOut = @()
+$vrStatus = 2
+if (Test-Path -LiteralPath $verificationReceipt) {
+    . $verificationReceipt
+    $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateFile
+    $vrOut = @($vrResponse.Lines)
+    if ($vrResponse.Error) { $vrOut += $vrResponse.Error }
+    $vrStatus = $vrResponse.Status
+}
+if ($vrStatus -ne 0) {
+    [Console]::Error.WriteLine('WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean.')
+    foreach ($line in $vrOut) { [Console]::Error.WriteLine([string]$line) }
+    if (-not $vrOut) { [Console]::Error.WriteLine('verification-receipt helper unavailable') }
+    [Console]::Error.WriteLine('Initialize the v6 receipt paths and Review iteration, freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E.')
+    exit 2
 }
 
 Exit-ForgeAllow

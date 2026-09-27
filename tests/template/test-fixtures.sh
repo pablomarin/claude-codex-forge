@@ -88,7 +88,7 @@ fi
 # ---------------------------------------------------------------------------
 start_test "verify-e2e.md — structured response format"
 
-VE2E="$REPO_ROOT/agents/verify-e2e.md"
+VE2E="${VERIFY_E2E_FIXTURE:-$REPO_ROOT/agents/verify-e2e.md}"
 assert_file_exists "$VE2E" "verify-e2e agent definition exists"
 
 assert_contains "$VE2E" "VERDICT: PASS | FAIL | PARTIAL" \
@@ -96,15 +96,26 @@ assert_contains "$VE2E" "VERDICT: PASS | FAIL | PARTIAL" \
 assert_contains "$VE2E" "SUGGESTED_PATH:" \
     "header documents SUGGESTED_PATH field"
 
-# Read-only invariant: frontmatter tools list must NOT include Write/Edit
-# (frontmatter is lines between opening '---' and next '---'). Extract it
-# and assert.
+# Read-only invariant: direct implementation edits must be denied. A fixed
+# tools allowlist is intentionally absent so native browser/host tools inherit.
+# Extract only the opening frontmatter block and distinguish allow/deny keys.
 FM=$(awk 'NR==1 && /^---/{f=1; next} f && /^---/{exit} f' "$VE2E")
-if echo "$FM" | grep -qE '^\s*-\s*(Write|Edit)\s*$'; then
-    fail "Write or Edit tool listed in frontmatter (breaks read-only invariant)"
+if echo "$FM" | grep -qE '^tools:'; then
+    fail "verify-e2e frontmatter fixes an allowed-tools list instead of inheriting host capabilities"
 else
-    pass "no Write/Edit in frontmatter tools list"
+    pass "verify-e2e frontmatter inherits host capabilities"
 fi
+for denied in Write Edit NotebookEdit; do
+    if printf '%s\n' "$FM" | awk '
+        /^disallowedTools:([[:space:]]|$)/ { denied=1; next }
+        denied && /^[^[:space:]]/ { denied=0 }
+        denied { print }
+    ' | grep -qE "^[[:space:]]*-[[:space:]]*${denied}[[:space:]]*$"; then
+        pass "verify-e2e frontmatter denies $denied"
+    else
+        fail "verify-e2e frontmatter does not deny $denied"
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # Test 4: post-tool-format.sh — no hardcoded src/ shortcut
@@ -149,11 +160,6 @@ if (( COUNT_3 % 2 == 0 )); then
 else
     fail "three-backtick fences unbalanced (count: $COUNT_3, must be even)"
 fi
-
-# ---------------------------------------------------------------------------
-# Report
-# ---------------------------------------------------------------------------
-report "test-fixtures.sh"
 
 # ---------------------------------------------------------------------------
 # Shared fixture helpers (sourced by other test-*.sh)
@@ -238,3 +244,30 @@ EOF
 A test project.
 EOF
 }
+
+# ---------------------------------------------------------------------------
+# Exit-propagation regression. The historical mid-file report call was followed
+# by function definitions, which replaced a failing report's process status.
+# A disposable invalid verify-e2e frontmatter must make a child suite nonzero;
+# the canonical fixture must make the same child suite zero.
+# ---------------------------------------------------------------------------
+if [ -z "${TEST_FIXTURES_SKIP_EXIT_PROBE:-}" ]; then
+    EXIT_PROBE_DIR=$(scratch_dir fixture-exit-propagation)
+    printf '%s\n' '---' 'name: verify-e2e' 'tools:' '  - Write' '---' \
+        > "$EXIT_PROBE_DIR/verify-e2e-bad.md"
+    TEST_FIXTURES_SKIP_EXIT_PROBE=1 VERIFY_E2E_FIXTURE="$EXIT_PROBE_DIR/verify-e2e-bad.md" \
+        bash "$REPO_ROOT/tests/template/test-fixtures.sh" \
+        > "$EXIT_PROBE_DIR/bad.out" 2>&1
+    if [ "$?" -ne 0 ]; then
+        pass "an intentionally bad disposable fixture propagates a nonzero suite status"
+    else
+        fail "an intentionally bad disposable fixture was reported but returned zero"
+    fi
+    TEST_FIXTURES_SKIP_EXIT_PROBE=1 \
+        bash "$REPO_ROOT/tests/template/test-fixtures.sh" \
+        > "$EXIT_PROBE_DIR/good.out" 2>&1
+    assert_equals "$?" "0" "canonical good fixtures return zero"
+fi
+
+# Keep report as the final executable statement so its status reaches callers.
+report "test-fixtures.sh"

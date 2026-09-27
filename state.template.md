@@ -2,7 +2,8 @@
 # Project State (per-developer, gitignored)
 
 > This file holds your active workflow state. It is NOT shared with the team.
-> Hooks read this file on demand. Claude reads it when the workflow rule says to.
+> Hooks read this file on demand. Claude and Codex inspect it through the bounded workflow-state
+> helper when the workflow rule says to.
 >
 > If you started a workflow with `/new-feature` or `/fix-bug`, the Workflow section below tracks your progress.
 > The Done / Now / Next sections capture your current focus across sessions.
@@ -19,7 +20,8 @@
 
 The worktree root and Git common directory are resolved physical paths. The workflow
 base ref and SHA remain immutable for one workflow. Switching between Claude and Codex
-changes only `Last active host`; it never restarts completed gates.
+changes only `Last active host`; it retains the base SHA, review iteration, next step, and
+unchanged candidate linkage, and it never restarts completed gates.
 
 ## Workflow
 
@@ -88,7 +90,8 @@ surface to user.
 
 | Field                  | Value |
 | ---------------------- | ----- |
-| Review iteration       | <integer> |
+| Review iteration       | 0 |
+| First certified iteration | none |
 | Candidate receipt      | .forge/local/evidence/<task-id>/candidate.receipt |
 | Spec review receipt    | .forge/local/reviews/<task-id>/spec.receipt |
 | Quality review receipt | .forge/local/reviews/<task-id>/quality.receipt |
@@ -99,6 +102,10 @@ surface to user.
 
 Each action receipt records `host=<claude|codex>`. Receipt paths are worktree-local;
 they cannot satisfy gates in a sibling worktree.
+Populate every receipt path when the workflow activates. `Review iteration` starts at `0` and is
+incremented before each final paired-review dispatch. `First certified iteration` is helper-owned:
+it starts as `none`, is set from the first valid paired-review receipt, and never advances. A
+populated candidate path is progress, not an evidence-mode switch.
 
 ## State
 
@@ -132,8 +139,12 @@ they cannot satisfy gates in a sibling worktree.
 
 ## Update Rules
 
-The currently active host is responsible for updating this file. The Stop hook reminds
-Claude or Codex of the active workflow; the ship hook gates commit/push/PR on the checklist.
+The currently active host is responsible for advancing this file. Inspect control state with
+`.forge/hooks/lib/workflow-state.sh show`, start it with `workflow-state.sh activate`, and advance
+it with `workflow-state.sh checkpoint` (use the `.ps1` twin on Windows). Only those bounded helpers
+may update identity, workflow, receipt-path, or review-iteration control rows. Use native file tools
+only for checklist and narrative content. The Stop hook reminds Claude or Codex of the active
+workflow; the ship hook gates commit/push/PR on the checklist.
 
 **On task completion:**
 
@@ -143,25 +154,29 @@ Claude or Codex of the active workflow; the ship hook gates commit/push/PR on th
 
 **On new feature start (`/new-feature` or `/fix-bug` Pre-Flight step 3):**
 
-1. REPLACE the `## Workflow` section entirely
-2. Delete any orphaned checkbox lines outside `### Checklist`
+1. Run `workflow-state.sh activate` with the workflow, task, host, base, phase, and exact next step.
+2. Populate only the workflow checklist with native file tools; delete orphaned checkbox lines
+   outside `### Checklist`.
 
-**On code-review iteration completion (during a `/forge-goal`-driven run):**
+**On code-review iteration start (during a `/forge-goal`-driven run):**
 
-1. Freeze one staged-clean `git:working-tree` candidate and set `Candidate receipt`.
-2. Record distinct `code-spec` and `code-quality` review receipts for the same review iteration and candidate. Engine choice is neutral: same-engine reviews and a visible fallback are valid when each receipt records requested engine, actual engine, and fallback reason.
-3. Persist candidate-bound `verify-app` and `e2e` receipts only after their reports are written under `.forge/local/evidence/` and hashed by `verification-receipt`.
-4. Any staged, unstaged, or in-scope untracked mutation invalidates the complete final receipt set. Freeze the new candidate and rerun both review lenses plus both verifiers; never relabel an old receipt.
-5. Genuine unmigrated v5 fixtures retain the legacy checklist reader during dual-read. Once receipt-v2 linkage is present, legacy clean rows cannot certify the workflow.
-6. Exact-tree promotion revalidates the receipt set before hook execution and compare-and-swap, then records `Promotion receipt`; the real branch is not advanced early.
-7. **Convergence breaker (v5.54):** after the first receipt-certified iteration, more than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
+1. Freeze one staged-clean `git:working-tree` candidate and persist its candidate receipt.
+2. Run `workflow-state.sh checkpoint --host <claude|codex> --phase review --next-step '<exact next
+   step>' --begin-review` exactly once before the paired dispatch.
+3. Record distinct `code-spec` and `code-quality` review receipts for the same review iteration and candidate. Engine choice is neutral: same-engine reviews and a visible fallback are valid when each receipt records requested engine, actual engine, and fallback reason.
+4. Persist candidate-bound `verify-app` and `e2e` receipts only after their reports are written under `.forge/local/evidence/` and hashed by `verification-receipt`.
+5. Any staged, unstaged, or in-scope untracked mutation invalidates the complete final receipt set. Freeze the new candidate and rerun both review lenses plus both verifiers; never relabel an old receipt.
+6. Genuine unmigrated v5 fixtures retain the legacy checklist reader during dual-read. Every active canonical V6 workflow is receipt-native immediately; legacy clean rows cannot certify it.
+7. Exact-tree promotion revalidates the receipt set before hook execution and compare-and-swap, then records `Promotion receipt`; the real branch is not advanced early.
+8. **Convergence breaker (v5.54):** for canonical V6, the unique `Receipts/Review iteration` value is counted from the helper-owned `Receipts/First certified iteration`; legacy checklist counters remain readable only for pre-V6 state. After certification, malformed, missing, duplicate, or backward canonical counters fail closed. More than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN releases it by recording, in `### Checklist`:
    - `- [x] Post-certification tail adjudicated by human — <decision> — head=\`<sha>\` — ts=\`<ISO8601>\``
-   The line is head-bound; the agent never writes it on its own initiative. If the loop line carries an iteration count, an N/A escape must KEEP it (`- [x] Code review loop (<N> iterations) — N/A: <reason>`) — a count-less `Code review loop — N/A:` after certification reads as counter erasure and trips the breaker.
+   The line is head-bound; the agent never writes it on its own initiative. In legacy pre-V6 state, if the loop line carries an iteration count, an N/A escape must KEEP it (`- [x] Code review loop (<N> iterations) — N/A: <reason>`) — a count-less `Code review loop — N/A:` after certification reads as legacy counter erasure and trips the breaker. Canonical V6 checklist wording never controls or erases its receipt-table counter.
 
 **On plan-review iteration completion (during any complex-fix workflow):**
 
 1. Append a checklist line to `### Checklist` capturing the iteration number, plan file, and plan content sha256:
-   - `- [x] Plan review iteration <N> — codex clean — plan=\`docs/plans/<name>.md\` — plan_sha=\`<sha256>\` — ts=\`<ISO8601>\``
+   - `- [x] Plan review iteration <N> — <actual-engine> clean — plan=\`docs/plans/<name>.md\` — plan_sha=\`<sha256>\` — ts=\`<ISO8601>\``
+   Record the reviewer engine that actually ran (`claude` or `codex`). The bound fields may continue on contiguous indented Markdown lines; never relabel an existing review row.
 2. Compute `plan_sha` with `shasum -a 256 <path>` (macOS), `sha256sum <path>` (Linux), or `(Get-FileHash -Algorithm SHA256 <path>).Hash` (PowerShell).
 3. When checking the loop-complete checkbox `- [x] Plan review loop (<N> iterations) — PASS`, the per-iter clean line for iteration N must be present AND its `plan_sha` must match the current plan file content. The PreToolUse `check-workflow-gates` hook enforces this on ship actions.
 4. If a fix changes the plan, re-run reviewers and append a NEW iteration row; do NOT mutate existing rows.

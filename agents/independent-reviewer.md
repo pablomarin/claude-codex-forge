@@ -31,6 +31,9 @@ For `code-spec`, inspect specification coverage, correctness, reliability, failu
 test intent. For `code-quality`, inspect security, maintainability, simplicity, performance, and
 implementation quality. Report every reachable P0/P1/P2 finding with a concrete trigger and the
 smallest correct fix. P3 notes do not block certification.
+Use `CLEAN/P3` for advisory-only notes; existing schema-valid `FINDINGS/P3` with
+only P3 rows is likewise non-blocking. The maximum severity must never conceal
+a higher-severity finding row.
 
 Return only the line-oriented schema provided by the dispatcher. Never claim engine/provider/model
 identity beyond observable fields, mutate Forge state/evidence/authorization, or perform external

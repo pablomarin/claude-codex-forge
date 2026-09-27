@@ -692,7 +692,25 @@ SRC_HASH_RSPS=$(hash_file "$REPO_ROOT/hooks/lib/review-breaker.ps1")
 assert_hash_equals "$S11/.forge/hooks/lib/review-breaker.ps1" "$SRC_HASH_RSPS" \
     "installed review-breaker.ps1 matches source (hash-identical)"
 
-for retired_helper in default-branch.sh default-branch.ps1 review-breaker.sh review-breaker.ps1 codex-pty.sh codex-pty.ps1 codex-pty-helper.py; do
+# workflow-state platform twins are the only supported cross-engine state command.
+assert_file_exists "$S11/.forge/hooks/lib/workflow-state.sh" \
+    ".forge/hooks/lib/workflow-state.sh installed"
+if [[ -x "$S11/.forge/hooks/lib/workflow-state.sh" ]]; then
+    pass ".forge/hooks/lib/workflow-state.sh is executable"
+else
+    fail ".forge/hooks/lib/workflow-state.sh is NOT executable"
+fi
+SRC_HASH_WS=$(hash_file "$REPO_ROOT/hooks/lib/workflow-state.sh")
+assert_hash_equals "$S11/.forge/hooks/lib/workflow-state.sh" "$SRC_HASH_WS" \
+    "installed workflow-state.sh matches source (hash-identical)"
+
+assert_file_exists "$S11/.forge/hooks/lib/workflow-state.ps1" \
+    ".forge/hooks/lib/workflow-state.ps1 installed"
+SRC_HASH_WSPS=$(hash_file "$REPO_ROOT/hooks/lib/workflow-state.ps1")
+assert_hash_equals "$S11/.forge/hooks/lib/workflow-state.ps1" "$SRC_HASH_WSPS" \
+    "installed workflow-state.ps1 matches source (hash-identical)"
+
+for retired_helper in default-branch.sh default-branch.ps1 review-breaker.sh review-breaker.ps1 workflow-state.sh workflow-state.ps1 codex-pty.sh codex-pty.ps1 codex-pty-helper.py; do
     assert_file_missing "$S11/.claude/hooks/lib/$retired_helper" \
         "ordinary v6 setup does not recreate retired .claude helper $retired_helper"
 done

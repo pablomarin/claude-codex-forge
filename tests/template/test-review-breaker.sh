@@ -66,6 +66,27 @@ write_state() {
     } > "$r/.claude/local/state.md"
 }
 
+# write_v6_state <repo> <current-iteration> <first-certified> <checklist-body>:
+# emit the canonical receipt-native counter rows used by Forge V6. Callers may
+# pass an empty current value to exercise malformed canonical state.
+write_v6_state() {
+    local r="$1" current="$2" first="$3" body="$4"
+    mkdir -p "$r/.forge/local"
+    { echo '<!-- forge:state-schema v6 -->'
+      echo '## Workflow'; echo
+      echo '| Field | Value |'
+      echo '| Command | /new-feature x |'
+      echo
+      echo '### Checklist'; echo
+      printf '%s\n' "$body"
+      echo
+      echo '## Receipts'; echo
+      echo '| Field | Value |'
+      echo "| Review iteration | $current |"
+      echo "| First certified iteration | $first |"
+    } > "$r/.forge/local/state.md"
+}
+
 # run_helper <repo>: run review-breaker.sh from a checkout of the branch (the
 # helper's only git call is `rev-parse HEAD`, which needs to run in-repo). Sets
 # RB_OUT to the 4 sentinel lines.
@@ -174,6 +195,47 @@ write_state "$R" "- [x] Code review loop — N/A: skipping, no codex"
 run_helper "$R"
 assert_contains_str "CERTIFIED:no" "$RB_OUT" "no certifying pair → not certified"
 assert_contains_str "BREAKER:ok" "$RB_OUT" "count-less N/A before certification does not trip the breaker"
+
+start_test "(g2) V6 canonical current count ignores count-less and stale checklist prose"
+build_repo; install_helper "$R"
+write_v6_state "$R" 5 1 '- [x] Code review loop — receipt lenses clean'
+RB_OUT="$( (cd "$R" && bash "$HELPER" .forge/local/state.md) 2>/dev/null )"
+assert_contains_str "POST_CERT_ROUNDS:4" "$RB_OUT" "V6 current 5 minus certified anchor 1 yields 4 rounds"
+assert_contains_str "BREAKER:tripped" "$RB_OUT" "V6 current above the three-round tail limit trips"
+write_v6_state "$R" 4 1 '- [x] Code review loop — receipt lenses clean'
+RB_OUT="$( (cd "$R" && bash "$HELPER" .forge/local/state.md) 2>/dev/null )"
+assert_contains_str "POST_CERT_ROUNDS:3" "$RB_OUT" "V6 current at the three-round tail limit remains countable"
+assert_contains_str "BREAKER:ok" "$RB_OUT" "count-less V6 review prose does not erase or independently trip the canonical count"
+write_v6_state "$R" 5 1 '- [x] Code review loop (1 iterations) — PASS'
+RB_OUT="$( (cd "$R" && bash "$HELPER" .forge/local/state.md) 2>/dev/null )"
+assert_contains_str "POST_CERT_ROUNDS:4" "$RB_OUT" "stale V6 checklist count cannot override canonical current iteration"
+write_v6_state "$R" 100000000000000000003 100000000000000000000 '- [x] Code review loop — receipt lenses clean'
+RB_OUT="$( (cd "$R" && bash "$HELPER" .forge/local/state.md) 2>/dev/null )"
+assert_contains_str "POST_CERT_ROUNDS:3" "$RB_OUT" "wide canonical decimals retain the workflow-state boundary without a machine-width cap"
+assert_contains_str "BREAKER:ok" "$RB_OUT" "wide canonical current at the tail limit remains allowed"
+write_v6_state "$R" 100000000000000000004 100000000000000000000 '- [x] Code review loop — receipt lenses clean'
+RB_OUT="$( (cd "$R" && bash "$HELPER" .forge/local/state.md) 2>/dev/null )"
+assert_contains_str "BREAKER:tripped" "$RB_OUT" "wide canonical current above the tail limit trips"
+
+start_test "(g3) V6 malformed or backward canonical current count trips fail closed"
+build_repo; install_helper "$R"
+for bad_current in '' invalid 0 01 -1 1e2; do
+    write_v6_state "$R" "$bad_current" 1 '- [x] Code review loop — receipt lenses clean'
+    RB_OUT="$( (cd "$R" && bash "$HELPER" .forge/local/state.md) 2>/dev/null )"
+    assert_contains_str "BREAKER:tripped" "$RB_OUT" \
+        "canonical current '${bad_current:-blank}' cannot erase a certified V6 tail"
+done
+write_v6_state "$R" 2 1 '- [x] Code review loop — receipt lenses clean'
+sed '/| Review iteration |/d' "$R/.forge/local/state.md" > "$R/.forge/local/state.next"
+mv "$R/.forge/local/state.next" "$R/.forge/local/state.md"
+RB_OUT="$( (cd "$R" && bash "$HELPER" .forge/local/state.md) 2>/dev/null )"
+assert_contains_str "BREAKER:tripped" "$RB_OUT" "missing canonical current iteration trips after certification"
+write_v6_state "$R" 2 3 '- [x] Code review loop — receipt lenses clean'
+RB_OUT="$( (cd "$R" && bash "$HELPER" .forge/local/state.md) 2>/dev/null )"
+assert_contains_str "BREAKER:tripped" "$RB_OUT" "canonical current behind the certified anchor trips"
+printf '| Review iteration | 2 |\n' >> "$R/.forge/local/state.md"
+RB_OUT="$( (cd "$R" && bash "$HELPER" .forge/local/state.md) 2>/dev/null )"
+assert_contains_str "BREAKER:tripped" "$RB_OUT" "duplicate canonical current iteration trips"
 
 # --- (h) ADJUDICATED head-bound: line at current head → yes; after a new commit → no
 start_test "(h) adjudication line is HEAD-bound (yes at head, no after head moves)"
@@ -295,6 +357,11 @@ tripped_state() {
       echo "- [x] Verified (tests/lint/types)"
       echo "- [x] E2E verified — N/A: internal harness change, no user surface"
       printf '%s' "${EXTRA:-}"
+      echo
+      echo "## Receipts"; echo
+      echo "| Field | Value |"
+      echo "| Review iteration | 5 |"
+      echo "| First certified iteration | 1 |"
     } > "$r/.claude/local/state.md"
 }
 
@@ -305,8 +372,33 @@ H="$(git -C "$R" rev-parse HEAD)"
 EXTRA="" tripped_state "$R" "$H"
 run_gate "$R"
 assert_rc 2 "tripped breaker blocks the commit"
-assert_contains_str "POST_CERT_REVIEW_ROUND_LIMIT" "$GATE_ERR" "stderr names the limit"
-assert_contains_str "convergence breaker" "$GATE_ERR" "stderr names the convergence breaker"
+assert_contains_str "convergence breaker" "$GATE_ERR" "receipt-native first-certification anchor blocks before receipt validation"
+
+start_test "gate 1b: V6 count-less review prose cannot erase canonical over-limit count"
+build_repo; install_helper "$R"
+H="$(git -C "$R" rev-parse HEAD)"
+EXTRA="" tripped_state "$R" "$H"
+sed 's/Code review loop (5 iterations) — PASS/Code review loop — receipt lenses clean/' \
+    "$R/.claude/local/state.md" > "$R/.claude/local/state.next"
+mv "$R/.claude/local/state.next" "$R/.claude/local/state.md"
+run_gate "$R"
+assert_rc 2 "canonical current iteration blocks the ship action despite count-less review prose"
+assert_contains_str "convergence breaker" "$GATE_ERR" "ship gate uses the V6 receipt-table count"
+
+start_test "blank, malformed, or out-of-range receipt-native anchor fails closed"
+for bad_anchor in '' invalid 0 01 -1 1e2; do
+    build_repo; install_helper "$R"
+    H="$(git -C "$R" rev-parse HEAD)"
+    EXTRA="" tripped_state "$R" "$H"
+    sed "s/| First certified iteration | 1 |/| First certified iteration | ${bad_anchor} |/" \
+        "$R/.claude/local/state.md" > "$R/.claude/local/state.next"
+    mv "$R/.claude/local/state.next" "$R/.claude/local/state.md"
+    RB_OUT="$( (cd "$R" && bash "$HELPER" .claude/local/state.md) 2>/dev/null )"
+    assert_contains_str "POST_CERT_ROUNDS:4" "$RB_OUT" \
+        "${bad_anchor:-blank} anchor preserves fail-closed review-tail accounting"
+    assert_contains_str "BREAKER:tripped" "$RB_OUT" \
+        "${bad_anchor:-blank} anchor cannot reset an over-limit review tail"
+done
 
 # --- Gate 2: tripped + a `Code review loop — N/A:` escape → STILL exit 2
 #     (the breaker block precedes the N/A handling and runs on a count-less N/A,
@@ -326,10 +418,13 @@ mkdir -p "$R/.claude/local"
   echo "- [x] Simplified"
   echo "- [x] Verified (tests/lint/types)"
   echo "- [x] E2E verified — N/A: internal harness change, no user surface"
+  echo
+  echo "## Receipts"; echo
+  echo "| Field | Value |"; echo "| Review iteration | 5 |"; echo "| First certified iteration | 1 |"
 } > "$R/.claude/local/state.md"
 run_gate "$R"
 assert_rc 2 "count-less N/A does NOT bypass the breaker"
-assert_contains_str "convergence breaker" "$GATE_ERR" "N/A escape still hits the breaker block"
+assert_contains_str "convergence breaker" "$GATE_ERR" "N/A escape cannot bypass receipt-native breaker accounting"
 
 # --- Gate 3: tripped + a DOCS-ONLY staged commit → STILL exit 2
 #     (breaker precedes the docs-only carve-out).
@@ -339,8 +434,8 @@ H="$(git -C "$R" rev-parse HEAD)"
 EXTRA="" tripped_state "$R" "$H"
 mkdir -p "$R/docs"; echo "note" >> "$R/docs/CHANGELOG.md"; git -C "$R" add docs/CHANGELOG.md
 run_gate "$R"
-assert_rc 2 "a docs-only staged diff does not get past the breaker"
-assert_contains_str "convergence breaker" "$GATE_ERR" "docs-only commit still hits the breaker block"
+assert_rc 2 "receipt-native breaker blocks the docs-only carve-out"
+assert_contains_str "convergence breaker" "$GATE_ERR" "breaker remains before the docs-only carve-out"
 
 # --- Gate 4: tripped + adjudication at current head → breaker RELEASES.
 #     The other pre-ship gates are all checked, so a released breaker should let
@@ -354,7 +449,7 @@ EXTRA="- [x] Post-certification tail adjudicated by human — accepted P2 tail �
 " tripped_state "$R" "$H"
 run_gate "$R"
 assert_not_contains_str "convergence breaker" "$GATE_ERR" "current-head adjudication releases the breaker"
-assert_rc 0 "released breaker + all other gates checked (E2E N/A) → commit allowed"
+assert_rc 2 "human adjudication cannot replace the strict receipt set"
 
 # --- Gate 5: untripped happy path → no breaker message (cert at 1, loop 2 = 1 round)
 start_test "gate 5: untripped (1 post-cert round) → no breaker message, commit allowed"
@@ -374,10 +469,13 @@ mkdir -p "$R/.claude/local"
   echo "- [x] Simplified"
   echo "- [x] Verified (tests/lint/types)"
   echo "- [x] E2E verified — N/A: internal harness change, no user surface"
+  echo
+  echo "## Receipts"; echo
+  echo "| Field | Value |"; echo "| Review iteration | 2 |"; echo "| First certified iteration | 1 |"
 } > "$R/.claude/local/state.md"
 run_gate "$R"
 assert_not_contains_str "convergence breaker" "$GATE_ERR" "1 post-cert round is under the limit → breaker inert"
-assert_rc 0 "untripped happy path → commit allowed"
+assert_rc 2 "untripped legacy rows still cannot replace strict receipts"
 
 # ===========================================================================
 # PowerShell parity — re-run cases d, f, h through Invoke-ReviewBreaker via the
@@ -400,8 +498,8 @@ printf '6\n' > "$R/.forge/version"
   echo "- [x] Code review iteration 1 — pr-toolkit clean — head=\`${H}\`"
 } > "$R/.forge/local/state.md"
 RB_OUT="$( (cd "$R" && bash "$HELPER") 2>/dev/null )"
-assert_contains_str 'CERTIFIED:yes' "$RB_OUT" \
-    "canonical state is authoritative without a Claude-specific argv path"
+assert_contains_str 'CERTIFIED:no' "$RB_OUT" \
+    "canonical v6 state without receipts never falls back to legacy rows"
 
 start_test "installed v6 gate resolves its canonical breaker before legacy fallbacks"
 mkdir -p "$R/.forge/hooks/lib"
@@ -419,15 +517,18 @@ cp "$HELPER" "$R/.forge/hooks/lib/review-breaker.sh"
   echo "- [x] Code review iteration 5 — pr-toolkit clean — head=\`${H}\`"
   echo '- [x] Simplified'; echo '- [x] Verified (tests/lint/types)'
   echo '- [x] E2E verified — N/A: internal harness fixture'
+  echo
+  echo '## Receipts'; echo
+  echo '| Field | Value |'; echo '| First certified iteration | 1 |'
 } > "$R/.forge/local/state.md"
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' "$R" \
   | (cd "$R" && bash .forge/hooks/check-workflow-gates.sh) > "$R/v6-installed.out" 2>&1
 assert_equals "$?" "2" "installed canonical breaker blocks a tripped unadjudicated tail"
-assert_contains "$R/v6-installed.out" 'convergence breaker' "installed gate reports canonical breaker trip"
+assert_contains "$R/v6-installed.out" 'convergence breaker' "installed gate reports the tripped receipt-native breaker"
 echo "- [x] Post-certification tail adjudicated by human — accepted tail — head=\`${H}\` — ts=\`2026-08-27T00:00:00Z\`" >> "$R/.forge/local/state.md"
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' "$R" \
   | (cd "$R" && bash .forge/hooks/check-workflow-gates.sh) > "$R/v6-adjudicated.out" 2>&1
-assert_equals "$?" "0" "installed canonical breaker allows a current-head human adjudication"
+assert_equals "$?" "2" "installed canonical breaker still requires receipts after adjudication"
 
 detect_pwsh() {
     if command -v pwsh >/dev/null 2>&1; then echo "pwsh"; return 0; fi
@@ -490,6 +591,21 @@ assert_contains "$HELPER_PS" 'REVIEWS_VALID:true' \
     "PowerShell breaker mirrors receipt-v2 pair certification"
 assert_contains "$HELPER_PS" '$v2Active = $true' \
     "PowerShell breaker disables legacy rows after receipt-v2 activation"
+
+start_test "v6 schema without receipt linkage never falls back to legacy certification rows"
+build_repo
+H="$(git -C "$R" rev-parse HEAD)"
+mkdir -p "$R/.forge/local"
+{
+    printf '<!-- forge:state-schema v6 -->\n'
+    printf '## Workflow\n\n### Checklist\n'
+    printf '%s\n' "- [ ] Code review loop (5 iterations) — iterate until clean"
+    printf '%s\n' "- [x] Code review iteration 1 — codex clean — head=\`$H\`"
+    printf '%s\n' "- [x] Code review iteration 1 — pr-toolkit clean — head=\`$H\`"
+} > "$R/.forge/local/state.md"
+(cd "$R" && bash "$HELPER" .forge/local/state.md) > "$R/.breaker-v6-no-receipts" 2>&1
+assert_contains "$R/.breaker-v6-no-receipts" 'CERTIFIED:no' \
+    "Bash breaker rejects legacy certification rows under a v6 schema"
 
 # lib.sh's EXIT trap prints scratch info; emit the summary explicitly.
 report "test-review-breaker.sh"

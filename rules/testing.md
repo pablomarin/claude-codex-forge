@@ -293,7 +293,10 @@ Any change to **user-facing behavior**: API changes, UI changes, new pages, flow
 ### When E2E can be skipped (N/A)
 
 Purely internal changes with zero user-facing impact: migrations, internal scripts, CI config, dev tooling, behavior-preserving refactors.
-Must write justification: `- [x] E2E verified — N/A: [reason]`
+The main agent must write the checklist justification
+`- [x] E2E verified — N/A: [reason]`, persist a report beginning with `VERDICT: N/A`, the normal
+`SUGGESTED_PATH`, and `N/A_REASON: [same concrete reason]`, then write the candidate-bound E2E
+receipt. Prose alone cannot certify an active V6 workflow.
 
 ## Canonical E2E gate vocabulary
 
@@ -304,7 +307,7 @@ There is **one** gated marker name. The Stop hook (`check-workflow-gates.sh`/`.p
 | **Marker stem**           | `E2E verified` — this exact two-word phrase appears in every gated context                                 |
 | **Checklist entry**       | `- [ ] E2E verified via verify-e2e agent (Phase 5.4)` (from `new-feature.md` / `fix-bug.md`)               |
 | **Checked after passing** | `- [x] E2E verified via verify-e2e agent (Phase 5.4)`                                                      |
-| **Checked as N/A**        | `- [x] E2E verified — N/A: <reason>` (reason must be specific; "not needed" does not satisfy human review) |
+| **Checked as N/A**        | `- [x] E2E verified — N/A: <reason>` plus a candidate-bound `VERDICT: N/A` report and E2E receipt |
 | **Hook regex key**        | `E2E verified` (literal substring match, present in all three checked-state variants)                      |
 
 Changing any of these strings in one place requires updating the hook + tests in the same PR. The `test-contracts.sh` cross-file contract asserts this.
@@ -318,7 +321,9 @@ The `check-workflow-gates.sh`/`.ps1` hook does TWO checks on the `E2E verified` 
 
 Why: a bad-faith actor can type `[x]` without running the verify-e2e agent. The evidence check binds the checkbox claim to a filesystem artifact — the agent's report, persisted via Phase 5.4 Step 3 (`mkdir -p tests/e2e/reports && Write`).
 
-The N/A escape (`- [x] E2E verified — N/A: <reason>`) skips the evidence check. Human reviewers catch lazy N/A justifications at PR review time.
+The legacy N/A escape (`- [x] E2E verified — N/A: <reason>`) skips only the legacy report-mtime
+check. An active V6 workflow still requires a candidate-bound N/A report and E2E receipt; the
+receipt writer rejects an empty reason.
 
 Intentionally NOT covered by evidence check (gracefully skipped):
 

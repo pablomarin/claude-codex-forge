@@ -2,6 +2,115 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.2 — 2026-09-10
+
+**Expired reviewer login has an explicit recovery handoff.** Claude's structured expired-OAuth
+error is distinguished from generic process failure in both dispatchers. Automatic fallback
+remains first; only an unresolved engine/capability block requests authentication recovery.
+The shared main-agent procedure preserves completed reviews and failed receipts, opens the
+official interactive login for the developer, and retries unfinished roles once against the
+unchanged candidate. No credential storage, token refresh implementation, permission relaxation,
+or billing change is added. Deterministic CLI-boundary tests do not by themselves qualify a
+real native login flow or Windows runtime.
+
+**Codex reviewers receive accurate file-reading instructions.** Ordinary isolated Codex reviews
+use their existing command tool for read-only inspection of the primary and candidate root;
+the shared prompt no longer incorrectly claims shell access is absent. Claude's tool allowlist,
+reviewer permissions, sandbox flags, and immutable evidence checks remain unchanged. Literal
+`unobserved` canary evidence is reported distinctly from a wrong observation and still blocks
+certification or triggers the existing visible fallback. This addresses a prompt contradiction
+and a misleading diagnostic; a successful replay of the old prompt means the original intermittent
+failure is not proven to have been caused by wording alone.
+
+**Native handoff regression repairs preserve engine-neutral evidence.** Plan gates and Stop
+evidence accept the actual Claude or Codex reviewer label and contiguous indented Markdown
+continuations, while retaining iteration, plan-hash, and checklist boundaries. Current and
+promoted receipt checks use read-only candidate identity instead of writing Git objects.
+Valid P3-only findings remain advisory and certifying; material findings, contradictory
+severity labels, and missing findings still block. The shared final-review repair transition
+explicitly reapplies RED-before-production TDD. The completed second native matrix remains
+recorded as one workflow PASS and five FAIL; these repairs require new native evidence and do
+not retroactively change those scores. Windows runtime and Codex GUI remain unverified.
+
+**Isolated reviewers preserve the host HTTP proxy.** Claude and Codex reviewer launches retain
+`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and lowercase variants without inheriting unrelated
+environment settings. This repairs primary and fallback DNS failures inside a proxy-dependent
+Claude sandbox. The no-network reproduction runner remains unchanged. Deterministic coverage
+exercises both primary engines and both fallback directions. PowerShell runtime execution is
+unverified locally because neither `pwsh` nor Windows PowerShell is available; static parity is
+not runtime qualification. The first six-case native Pocket Tasks matrix completed with workflow
+failures, despite five passing app journeys. It used Claude's UI and fresh Codex CLI processes
+because Codex GUI control was denied; an all-GUI round-trip remains unverified.
+
+**Exact-tree promotion retains its original certification.** Final evidence checking now accepts
+the original candidate only through its state-linked promotion receipt, a matching single-parent
+commit and tree, and a fresh clean fingerprint in the same worktree. Changed files, reports,
+promotion linkage, or later commits still invalidate certification. Receipt writing remains bound
+to the current candidate. V6 code-review checks use the structured paired receipts, not legacy
+PASS wording; unchecked workflow gates, simplification, and plan binding remain enforced.
+The V6 convergence breaker uses the existing canonical review iteration and first-certified
+anchor, so count-less or stale checklist prose cannot reset it. Invalid post-certification
+counts fail closed; the existing review limit and human adjudication remain unchanged.
+Focused promotion tests and read-only checks of the five original promoted cases pass with the
+repaired checker. These differential checks do not relabel the failed native baseline or qualify
+a fresh native workflow run.
+
+**Claude agent adapters preserve canonical capabilities.** Explicit tools and disallowedTools
+frontmatter now flows from the canonical role through both materializers. The producer retains
+Write/Edit; verify-app and research-first keep their previous restricted defaults. The E2E role
+inherits available host/browser tools while denying Write, Edit, and NotebookEdit. This is not a
+technical read-only sandbox for Bash or MCP tools. Native tool availability remains a live-host
+qualification boundary.
+
+**All three development workflows share an activation-first startup boundary.** Only instruction,
+state, and deterministic host/worktree/base preflight precedes activation. Prepared native
+worktrees can be reused; same-directory handoffs do not create another worktree. Missing harness
+setup or denied protected writes must stop before task investigation, without fabricated state
+or permission bypass. Contract tests pass; protected native setup is not qualified by prose alone.
+Quick-fix retains its existing non-protected-branch policy without creating a worktree;
+new-feature and fix-bug retain their isolation requirement.
+
+**Active V6 workflows now enforce one structured, candidate-bound evidence path.** Canonical V6
+state selects receipt evaluation immediately across ship gates, Stop evidence, and convergence
+accounting; an absent or placeholder candidate path can no longer fall through to checked legacy
+rows. The direct documentation-only commit carveout remains narrow, while push and PR creation
+always require the complete current receipt set.
+
+**The workflow state machine is explicit again for both main engines.** Feature, bug-fix, and quick
+fix workflows create task-local receipt paths at activation, initialize review iteration `0`, keep
+plan approval before production implementation, freeze one staged-clean candidate, increment the
+iteration before paired `code-spec` and `code-quality` review, and invalidate final evidence after
+candidate mutation. E2E may be N/A only through a successful, reasoned report and receipt bound to
+that candidate; verify-app remains PASS-only.
+
+**Same-worktree continuation remains host-neutral.** Codex can resume work started in Claude, and
+Claude can resume work started in Codex, while preserving the workflow base SHA, review iteration,
+next step, and unchanged candidate linkage. `Last active host` and receipt `main_host` remain routing
+and audit metadata rather than leases.
+
+**A bounded portable state command now makes that continuation executable.** Installed Bash and
+PowerShell twins expose only `show`, atomic `activate`, and allowlisted `checkpoint`; callers cannot
+choose fields, paths, receipt identities, base identity, or review iteration. `--begin-review`
+increments the current iteration by exactly one, and `complete`/`none` is the explicit terminal
+transition that permits clean task replacement. The existing targeted denial of direct local-state
+shell reads and common writes remains in force, with remediation pointing both engines to the
+bounded command instead of host-specific file operations.
+
+Final review closed four release-blocking regressions before release. The helper rejects multiline
+task slugs before any path construction, preserves literal backslashes, and rewrites canonical
+state as UTF-8/LF so a Windows checkpoint remains readable by Bash. An identical in-flight V6.1
+placeholder bundle can be adopted explicitly without guessing partial review progress. The first
+valid paired-review iteration is now stored as a helper-owned, monotonic anchor, so later candidate
+mutation cannot reset the convergence breaker; active-workflow Stop advisories also fire before
+candidate paths are populated. The anchor adds no caller-controlled state field or new verb.
+
+Existing 6.0 and 6.1 projects receive this contract through `setup.sh --upgrade` or
+`setup.ps1 -Upgrade`. Forge V5, mixed, custom, and unknown trees still require the read-only
+`setup.sh -F --dry-run` or `setup.ps1 -FullRefresh -DryRun` preview and explicit blocker resolution
+before materialization. Deterministic Bash, static parity, installer, and real installed-host
+handoff checks qualify this source; a source-only helper test is not enough. Windows PowerShell
+runtime execution remains a CI/live qualification boundary where `pwsh` is not installed locally.
+
 ## 6.1 — 2026-09-10
 
 **Reviewer consent is now user-originated at the native host boundary.** Review-capable Claude Code

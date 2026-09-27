@@ -30,6 +30,7 @@ BASH_FILES=(
     "$REPO_ROOT/hooks/check-workflow-gates.sh"
     "$REPO_ROOT/hooks/lib/default-branch.sh"
     "$REPO_ROOT/hooks/lib/review-breaker.sh"
+    "$REPO_ROOT/hooks/lib/workflow-state.sh"
     "$REPO_ROOT/tests/template/test-review-breaker.sh"
     "$REPO_ROOT/tests/template/lib.sh"
     "$REPO_ROOT/tests/template/test-setup.sh"
@@ -40,6 +41,7 @@ BASH_FILES=(
     "$REPO_ROOT/tests/template/run-all.sh"
     "$REPO_ROOT/tests/template/test-default-branch.sh"
     "$REPO_ROOT/tests/template/test-session-start.sh"
+    "$REPO_ROOT/tests/template/test-workflow-state.sh"
 )
 
 for f in "${BASH_FILES[@]}"; do
@@ -76,6 +78,7 @@ if command -v pwsh >/dev/null 2>&1; then
         "$REPO_ROOT/hooks/check-workflow-gates.ps1"
         "$REPO_ROOT/hooks/lib/default-branch.ps1"
         "$REPO_ROOT/hooks/lib/review-breaker.ps1"
+        "$REPO_ROOT/hooks/lib/workflow-state.ps1"
     )
     for f in "${PS_FILES[@]}"; do
         if [[ ! -f "$f" ]]; then

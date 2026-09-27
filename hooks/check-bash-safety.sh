@@ -102,7 +102,7 @@ elif echo "$COMMAND" | grep -qE '(^|\s)pip3?\s+install\s+[^-]' 2>/dev/null && ! 
 #    diagnostic (bash is not a read-utility). Filename terminator keeps state.md.bak
 #    from matching. Gates the AGENT's Bash tool only — a human's terminal is unaffected.
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(/[^[:space:]]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[[:space:]].*\.forge/local/state\.md([^A-Za-z0-9._-]|$)' 2>/dev/null; then
-    REASON="Reading .forge/local/state.md via Bash — use the host read tool instead during autonomous /goal runs"
+    REASON="Reading .forge/local/state.md directly via Bash — use .forge/hooks/lib/workflow-state.sh show"
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(/[^[:space:]]*/)?(cat|sed|grep|egrep|fgrep|rg|awk|head|tail|less|more|nl|tac)[[:space:]].*\.claude/local/state\.md([^A-Za-z0-9._-]|$)' 2>/dev/null; then
     REASON="Reading .claude/local/state.md via Bash — use the Read tool instead (Bash reads of this sensitive file stall autonomous /goal runs on a permission prompt)"
 
@@ -124,11 +124,11 @@ elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(/[^[:space:]]*/)?(cat|sed|grep|
 #    .claude/local path as a plain string ARGUMENT (no shell op) is not matched.
 #    Gates the AGENT's Bash tool only — a human's terminal is unaffected.
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(mkdir|touch|cp|mv|tee|rm)[[:space:]][^|&;]*\.forge/local/' 2>/dev/null; then
-    REASON="Writing under .forge/local/ via Bash — use the host Write/Edit tool instead"
+    REASON="Writing under .forge/local/ via Bash — for workflow state use .forge/hooks/lib/workflow-state.sh activate or .forge/hooks/lib/workflow-state.sh checkpoint; for other local artifacts use the host Write/Edit tool"
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(mkdir|touch|cp|mv|tee|rm)[[:space:]][^|&;]*\.claude/local/' 2>/dev/null; then
     REASON="Writing under .claude/local/ via Bash — use the Write/Edit tool instead (Bash writes under .claude/ are never auto-approved and stall autonomous /goal runs on a permission prompt; the Write tool auto-creates parent dirs — see ADR 0006)"
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])[12]?>>?[[:space:]]*[^[:space:]|&;]*\.forge/local/' 2>/dev/null; then
-    REASON="Writing under .forge/local/ via Bash (redirect) — use the host Write/Edit tool instead"
+    REASON="Writing under .forge/local/ via Bash (redirect) — for workflow state use .forge/hooks/lib/workflow-state.sh activate or .forge/hooks/lib/workflow-state.sh checkpoint; for other local artifacts use the host Write/Edit tool"
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])[12]?>>?[[:space:]]*[^[:space:]|&;]*\.claude/local/' 2>/dev/null; then
     REASON="Writing under .claude/local/ via Bash (redirect) — use the Write/Edit tool instead (Bash writes under .claude/ stall autonomous /goal runs on a permission prompt; see ADR 0006)"
 fi

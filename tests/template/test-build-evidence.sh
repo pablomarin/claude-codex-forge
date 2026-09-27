@@ -330,7 +330,7 @@ assert_contains "$OUT" '"pr_authorization":{"authorized":false' "authorized=fals
 # Task 7: pr_ready, all_gates_green, progress_fingerprint
 # ---------------------------------------------------------------------------
 
-start_test "build-evidence.sh computes pr_ready=true when all conditions met"
+start_test "build-evidence.sh refuses legacy all-green state without receipts"
 
 scratch=$(scratch_dir bevidence-prready)
 mkdir -p "$scratch/.claude/local" "$scratch/bin"
@@ -396,9 +396,8 @@ STUB
 )
 
 OUT="$scratch/.out"
-assert_contains "$OUT" '"pr_ready":true' "pr_ready=true with full state"
-# all-green.md has ALL 8 items checked → DONE_COUNT==TOTAL_COUNT==8 AND pr_ready=true
-assert_contains "$OUT" '"all_gates_green":true' "all_gates_green=true (all items checked + pr_ready)"
+assert_contains "$OUT" '"pr_ready":false' "legacy all-green rows cannot certify active v6"
+assert_contains "$OUT" '"all_gates_green":false' "missing receipts keep the aggregate gate false"
 
 start_test "build-evidence.sh computes pr_ready=false when E2E report missing"
 
@@ -476,11 +475,86 @@ assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":true' \
 assert_contains "$OUT" '"matched_iteration":"3"' \
     "matched_iteration is the loop PASS count"
 
+_run_actual_engine_plan_evidence() {
+    local label="$1" checklist_tail="$2"
+    local scratch plan_sha out
+    scratch=$(scratch_dir "$label")
+    mkdir -p "$scratch/.claude/local" "$scratch/docs/plans"
+    printf '# Actual-engine plan\n' > "$scratch/docs/plans/actual-engine.md"
+    plan_sha=$(shasum -a 256 "$scratch/docs/plans/actual-engine.md" 2>/dev/null | awk '{print $1}')
+    [ -n "$plan_sha" ] || plan_sha=$(sha256sum "$scratch/docs/plans/actual-engine.md" | awk '{print $1}')
+    checklist_tail=${checklist_tail//__PLAN_SHA__/$plan_sha}
+    cat > "$scratch/.claude/local/state.md" <<EOF
+# Project State (per-developer, gitignored)
+
+## Workflow
+
+| Field     | Value            |
+| --------- | ---------------- |
+| Command   | /new-feature foo |
+| Phase     | 4 — Execute      |
+| Next step | Write code       |
+
+### Checklist
+
+- [x] Plan review loop (3 iterations) — PASS
+$checklist_tail
+EOF
+    out="$scratch/.out"
+    (cd "$scratch" && run_evidence) > "$out" 2>&1
+    printf '%s' "$out"
+}
+
+start_test "build-evidence accepts delimited actual Claude plan evidence"
+OUT=$(_run_actual_engine_plan_evidence bevidence-plan-claude \
+    '- [x] Plan review iteration 3 — claude clean — plan=`docs/plans/actual-engine.md` — plan_sha=`__PLAN_SHA__` — ts=`2026-09-14T00:00:00Z`')
+assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":true' \
+    "actual Claude label certifies matching current plan bytes"
+assert_contains "$OUT" '"matched_iteration":"3"' \
+    "actual Claude label remains bound to the PASS iteration"
+
+start_test "build-evidence folds indented continuation fields for actual Codex plan evidence"
+OUT=$(_run_actual_engine_plan_evidence bevidence-plan-codex-wrapped \
+    '- [x] Plan review iteration 3 — codex clean —
+  plan=`docs/plans/actual-engine.md` — plan_sha=`__PLAN_SHA__` —
+  ts=`2026-09-14T00:00:00Z`')
+assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":true' \
+    "wrapped actual Codex evidence certifies matching current plan bytes"
+assert_contains "$OUT" '"matched_iteration":"3"' \
+    "wrapped actual Codex evidence remains bound to the PASS iteration"
+
+start_test "build-evidence reports wrapped actual-engine evidence stale at the matching iteration"
+OUT=$(_run_actual_engine_plan_evidence bevidence-plan-claude-wrapped-stale \
+    '- [x] Plan review iteration 3 — claude clean —
+  plan=`docs/plans/actual-engine.md` —
+  plan_sha=`0000000000000000000000000000000000000000000000000000000000000000` — ts=`2026-09-14T00:00:00Z`')
+assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":false' \
+    "wrapped actual-engine evidence cannot certify stale plan bytes"
+assert_contains "$OUT" '"matched_iteration":"3"' \
+    "stale wrapped evidence reports the matching reviewed iteration"
+
+start_test "build-evidence never folds fields from the next unchecked iteration row"
+OUT=$(_run_actual_engine_plan_evidence bevidence-plan-next-row \
+    '- [x] Plan review iteration 3 — claude clean —
+- [ ] Plan review iteration 4 — codex clean — plan=`docs/plans/actual-engine.md` — plan_sha=`__PLAN_SHA__` — ts=`2026-09-14T00:00:00Z`')
+assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":false' \
+    "a different unchecked iteration cannot complete the selected evidence row"
+
+start_test "build-evidence never folds fields from outside the Workflow checklist"
+OUT=$(_run_actual_engine_plan_evidence bevidence-plan-outside-checklist \
+    '- [x] Plan review iteration 3 — claude clean —
+
+## State
+
+  plan=`docs/plans/actual-engine.md` — plan_sha=`__PLAN_SHA__` — ts=`2026-09-14T00:00:00Z`')
+assert_contains "$OUT" '"plan_review_gate":{"clean_same_iteration":false' \
+    "content outside Checklist cannot complete a plan evidence row"
+
 start_test "build-evidence: plan-review N/A line does NOT set plan_review_gate.clean_same_iteration=true"
 
-# Codex is mandatory: an N/A escape on the plan-review loop must NOT propagate a
-# clean gate (mirrors e2e_report). Only real `codex clean` + matching plan_sha
-# sets clean=true. This prevents /goal from self-completing without Codex evidence.
+# An N/A escape on the plan-review loop must NOT propagate a clean gate (mirrors
+# e2e_report). Only a real actual-engine clean row + matching plan_sha sets
+# clean=true. This prevents /goal from self-completing without review evidence.
 scratch=$(scratch_dir bevidence-plan-na)
 mkdir -p "$scratch/.claude/local"
 cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/plan-review-na.md" \
@@ -589,8 +663,8 @@ bev_scope_repo; bev_install_helper "$R"
 H="$(git -C "$R" rev-parse HEAD)"
 bev_breaker_state "$R" "$H" ""
 bev_run_fullgreen "$R"
-assert_contains "$GATE_OUT" '"breaker":"tripped"' "loop 5 − cert 1 = 4 > 3 → tripped"
-assert_contains "$GATE_OUT" '"post_cert_rounds":4' "post_cert_rounds = 4"
+assert_contains "$GATE_OUT" '"breaker":"ok"' "v6 legacy rows cannot establish breaker certification"
+assert_contains "$GATE_OUT" '"post_cert_rounds":0' "uncertified v6 evidence has zero post-cert rounds"
 assert_contains "$GATE_OUT" '"pr_ready":false' "tripped breaker suppresses pr_ready even with all gates green"
 
 # --- Breaker + adjudication at CURRENT head → pr_ready no longer suppressed
@@ -600,8 +674,8 @@ H="$(git -C "$R" rev-parse HEAD)"
 bev_breaker_state "$R" "$H" \
     "- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${H}\` — ts=\`2026-06-06T00:00:00Z\`"
 bev_run_fullgreen "$R"
-assert_contains "$GATE_OUT" '"breaker":"tripped"' "breaker still reports tripped (raw count)"
-assert_contains "$GATE_OUT" '"pr_ready":true' "current-head adjudication clears the breaker suppression"
+assert_contains "$GATE_OUT" '"breaker":"ok"' "legacy rows remain uncertified despite adjudication"
+assert_contains "$GATE_OUT" '"pr_ready":false' "adjudication cannot replace candidate-bound receipts"
 
 # --- Breaker + adjudication at STALE head → still suppressed
 start_test "bev breaker: adjudication at STALE head keeps pr_ready false"
@@ -611,12 +685,12 @@ STALE="0000000000000000000000000000000000000000"
 bev_breaker_state "$R" "$H" \
     "- [x] Post-certification tail adjudicated by human — accepted P2 tail — head=\`${STALE}\` — ts=\`2026-06-06T00:00:00Z\`"
 bev_run_fullgreen "$R"
-assert_contains "$GATE_OUT" '"breaker":"tripped"' "breaker reports tripped"
+assert_contains "$GATE_OUT" '"breaker":"ok"' "stale legacy rows remain uncertified"
 assert_contains "$GATE_OUT" '"pr_ready":false' "stale-head adjudication does not clear the breaker"
 
 # --- Helper absent: no installed helper, no source fallback (scratch repo outside
 #     the forge tree) → fields 0/ok, legacy reviewer_gate still computes clean.
-start_test "bev breaker: helper absent → post_cert_rounds 0 / breaker ok, legacy pair still clean"
+start_test "bev breaker: helper absent → active v6 remains non-certifying"
 bev_scope_repo   # NOTE: bev_install_helper intentionally NOT called.
 # Scratch repo lives in $TMPDIR, outside the forge tree: $TOPLEVEL is the scratch
 # repo, so neither .claude/hooks/lib/review-breaker.sh nor the hooks/lib/ source
@@ -637,7 +711,7 @@ GATE_OUT="$R/.bev.out"
 ( cd "$R" && run_evidence ) >"$GATE_OUT" 2>&1
 assert_contains "$GATE_OUT" '"post_cert_rounds":0' "helper absent → post_cert_rounds 0 (fail-open)"
 assert_contains "$GATE_OUT" '"breaker":"ok"' "helper absent → breaker ok (fail-open)"
-assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":true' "helper absent → legacy pair still computes clean"
+assert_contains "$GATE_OUT" '"reviewer_gate":{"clean_same_iteration":false' "helper absence cannot restore legacy v6 certification"
 
 # --- PowerShell parity smoke (only runs if pwsh is on PATH) ---
 if command -v pwsh >/dev/null 2>&1; then
@@ -733,11 +807,14 @@ make_v2_candidate_repo() {
 ## Receipts
 | Field | Value |
 | Review iteration | 1 |
+| First certified iteration | 1 |
 | Candidate receipt | .forge/local/evidence/candidate.receipt |
 | Spec review receipt | .forge/local/reviews/spec.receipt |
 | Quality review receipt | .forge/local/reviews/quality.receipt |
 | Verify app receipt | .forge/local/evidence/verify-app.receipt |
 | E2E receipt | .forge/local/evidence/e2e.receipt |
+| Promotion receipt | .forge/local/evidence/promotion.receipt |
+| Council receipt | .forge/local/council/<council-id>/receipt.json |
 EOF
     printf 'changed\n' > "$V2/app.txt"
     git -C "$V2" add -A
@@ -745,13 +822,15 @@ EOF
 
 write_v2_review() {
     local role="$1" invocation="$2" actual="$3" fallback="$4" reason="$5" receipt="$6"
+    local verdict="${7:-CLEAN}" severity="${8:-NONE}" finding="${9:-}"
     local candidate_id worktree head base output output_hash now empty_digest
     candidate_id=$(awk -F= '$1=="candidate_id"{print $2}' "$V2/.forge/local/evidence/candidate.receipt")
     worktree=$(awk -F= '$1=="worktree_identity"{print $2}' "$V2/.forge/local/evidence/candidate.receipt")
     head=$(awk -F= '$1=="git_head"{print $2}' "$V2/.forge/local/evidence/candidate.receipt")
     base=$(awk -F= '$1=="workflow_base_sha"{print $2}' "$V2/.forge/local/evidence/candidate.receipt")
     output="$V2/.forge/local/reviews/$role.result"
-    printf 'schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n' > "$output"
+    printf 'schema_version=1\nverdict=%s\nmax_severity=%s\nblocked_class=none\n' "$verdict" "$severity" > "$output"
+    [ -z "$finding" ] || printf 'finding=F-1|%s|open|controlled review finding\n' "$finding" >> "$output"
     output_hash=$(shasum -a 256 "$output" | awk '{print $1}')
     empty_digest=$(printf '' | shasum -a 256 | awk '{print $1}')
     now=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -780,12 +859,45 @@ workflow_base_sha=$base
 output_path=$output
 output_hash=$output_hash
 process_exit_status=0
-semantic_verdict=CLEAN
-max_severity=NONE
+semantic_verdict=$verdict
+max_severity=$severity
 findings_digest=$empty_digest
 result_schema_version=1
 blocked_class=none
 EOF
+}
+
+check_v2_without_source_object_writes() {
+    local phase="$1" real_git
+    real_git=$(command -v git)
+    mkdir -p "$V2/.forge/local/read-only-bin"
+    cat > "$V2/.forge/local/read-only-bin/git" <<'EOF'
+#!/usr/bin/env bash
+# Deny only the OS write boundary; all accepted Git operations remain real.
+for arg in "$@"; do
+    if [ "$arg" = write-tree ] && [ -z "${GIT_OBJECT_DIRECTORY:-}" ]; then
+        printf 'source Git object writes denied\n' >&2
+        exit 128
+    fi
+done
+exec "$FORGE_TEST_REAL_GIT" "$@"
+EOF
+    chmod +x "$V2/.forge/local/read-only-bin/git"
+    (cd "$V2" && PATH="$V2/.forge/local/read-only-bin:$PATH" FORGE_TEST_REAL_GIT="$real_git" \
+        bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) \
+        > "$V2/.forge/local/evidence/read-only-$phase.out" 2>&1
+    assert_equals "$?" "0" "$phase validation needs no source Git object writes"
+    assert_contains "$V2/.forge/local/evidence/read-only-$phase.out" 'SHIP_READY:true' \
+        "$phase read-only identity preserves full certification"
+    sed -i.bak 's/| First certified iteration | 1 |/| First certified iteration | none |/' "$V2/.forge/local/state.md"
+    (cd "$V2" && PATH="$V2/.forge/local/read-only-bin:$PATH" FORGE_TEST_REAL_GIT="$real_git" \
+        bash "$REPO_ROOT/hooks/lib/workflow-state.sh" checkpoint --host codex --phase verification --next-step 'verify final candidate') \
+        > "$V2/.forge/local/evidence/read-only-$phase-checkpoint.out" 2>&1
+    assert_equals "$?" "0" "$phase native-shaped checkpoint succeeds"
+    assert_contains "$V2/.forge/local/state.md" '| First certified iteration | 1 |' \
+        "$phase checkpoint latches the real first certified review pair"
+    # Preserve the fixture for subsequent independent controls, including RED runs.
+    sed -i.bak 's/| First certified iteration | none |/| First certified iteration | 1 |/' "$V2/.forge/local/state.md"
 }
 
 refresh_v2_final_receipts() {
@@ -805,6 +917,39 @@ refresh_v2_final_receipts() {
         --report .forge/local/evidence/e2e.report --result PASS --exit-status 0 \
         --output .forge/local/evidence/e2e.receipt >/dev/null) || return 1
 }
+
+start_test "receipt-v2: active placeholder state warns before final receipts exist"
+make_v2_candidate_repo
+sed -i.bak \
+    -e 's/receipt-v2/<task-id>/g' \
+    -e 's#| Candidate receipt | .*#| Candidate receipt | .forge/local/evidence/<task-id>/candidate.receipt |#' \
+    -e 's#| Spec review receipt | .*#| Spec review receipt | .forge/local/reviews/<task-id>/spec.receipt |#' \
+    -e 's#| Quality review receipt | .*#| Quality review receipt | .forge/local/reviews/<task-id>/quality.receipt |#' \
+    -e 's#| Verify app receipt | .*#| Verify app receipt | .forge/local/evidence/<task-id>/verify-app.receipt |#' \
+    -e 's#| E2E receipt | .*#| E2E receipt | .forge/local/evidence/<task-id>/e2e.receipt |#' \
+    "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+printf '{"cwd":"%s","host":"codex","stop_hook_active":false}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-state-updated.sh") \
+    > "$V2/.forge/local/evidence/stop-placeholder.out" 2>&1
+assert_contains "$V2/.forge/local/evidence/stop-placeholder.out" 'FORGE_FINAL_EVIDENCE_STALE' \
+    "Stop advisory exposes missing candidate-bound evidence for an active V6 workflow"
+
+start_test "receipt-native code review preserves legacy E2E freshness diagnostics"
+git -C "$V2" switch -q -c feature/e2e-diagnostic
+git -C "$V2" commit -qm candidate
+sed -i.bak \
+    -e 's/Code review loop (1 iterations) — PASS/Code review loop — receipt lenses clean/' \
+    -e 's#| Candidate receipt | .*#| Candidate receipt | .forge/local/evidence/<task-id>/candidate.receipt |#' \
+    "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+printf '{"cwd":"%s","host":"codex","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") \
+    > "$V2/.forge/local/evidence/e2e-diagnostic.out" 2>&1
+assert_equals "$?" "2" "placeholder final receipts remain blocked"
+assert_contains "$V2/.forge/local/evidence/e2e-diagnostic.out" \
+    'WORKFLOW GATE: E2E verified is checked, but no fresh report was found.' \
+    "canonical V6 code-review selection does not suppress the existing E2E diagnostic"
 
 start_test "receipt-v2: distinct clean same-engine/fallback lenses and verifiers certify one staged-clean candidate"
 make_v2_candidate_repo
@@ -860,6 +1005,80 @@ assert_contains "$V2/.forge/local/evidence/evidence.out" '"verification_gate":{"
 printf '{"cwd":"%s","host":"claude","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
     | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$V2/.forge/local/evidence/gate-valid.out" 2>&1
 assert_equals "$?" "0" "ship hook accepts the complete current receipt set"
+
+start_test "receipt-v2: host switch preserves an unchanged candidate and its receipts"
+check_v2_without_source_object_writes current
+sed -i.bak 's/| Last active host | claude |/| Last active host | codex |/' "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check \
+    --state .forge/local/state.md) > "$V2/.forge/local/evidence/host-switch-check.out" 2>&1
+assert_equals "$?" "0" "Codex can resume Claude receipts when candidate bytes are unchanged"
+assert_contains "$V2/.forge/local/evidence/host-switch-check.out" 'SHIP_READY:true' \
+    "host metadata is not a candidate lease"
+sed -i.bak 's/| Last active host | codex |/| Last active host | claude |/' "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check \
+    --state .forge/local/state.md) >/dev/null 2>&1
+assert_equals "$?" "0" "switching back to Claude preserves the same receipt set"
+
+start_test "receipt-v2: P3-only findings certify without hiding P0/P1/P2 or contradictory output"
+for tuple in 'CLEAN NONE none 0' 'CLEAN P3 P3 0' 'FINDINGS P3 P3 0' 'FINDINGS P2 P2 2' 'FINDINGS P1 P1 2' 'FINDINGS P0 P0 2' 'FINDINGS P3 P1 2' 'FINDINGS P3 none 2'; do
+    set -- $tuple
+    finding="$3"; [ "$finding" != none ] || finding=""
+    write_v2_review code-spec invoke-spec claude false none "$V2/.forge/local/reviews/spec.receipt" "$1" "$2" "$finding"
+    (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) \
+        > "$V2/.forge/local/evidence/severity-check.out" 2>&1
+    assert_equals "$?" "$4" "final receipt gate handles verdict/severity/finding: $tuple"
+    bash "$REPO_ROOT/hooks/lib/agent-dispatch.sh" verify-pair \
+        --code-spec-receipt "$V2/.forge/local/reviews/spec.receipt" \
+        --code-quality-receipt "$V2/.forge/local/reviews/quality.receipt" \
+        > "$V2/.forge/local/evidence/severity-pair.out" 2>&1
+    assert_equals "$?" "$4" "paired review gate handles verdict/severity/finding: $tuple"
+done
+write_v2_review code-spec invoke-spec claude false none "$V2/.forge/local/reviews/spec.receipt"
+
+start_test "receipt-v2: candidate-bound E2E N/A is explicit, justified, and verifier-specific"
+printf 'VERDICT: N/A\nSUGGESTED_PATH: .forge/local/evidence/receipt-v2/e2e-report.md\nN/A_REASON: internal harness-only change with no user surface\n' \
+    > "$V2/.forge/local/evidence/e2e-na.report"
+rm -f "$V2/.forge/local/evidence/e2e.receipt"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+    --candidate .forge/local/evidence/candidate.receipt --command 'e2e scope decision' \
+    --profile regression --report .forge/local/evidence/e2e-na.report --result N/A \
+    --exit-status 0 --output .forge/local/evidence/e2e.receipt) >/dev/null 2>&1
+assert_equals "$?" "0" "candidate-bound E2E N/A receipt is written"
+assert_contains "$V2/.forge/local/evidence/e2e.receipt" 'result=N/A' \
+    "E2E receipt stores the explicit N/A result"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check \
+    --state .forge/local/state.md) > "$V2/.forge/local/evidence/check-na.out" 2>&1
+assert_equals "$?" "0" "justified E2E N/A satisfies the structured receipt set"
+assert_contains "$V2/.forge/local/evidence/check-na.out" 'E2E_VALID:true' \
+    "candidate-bound E2E N/A is valid"
+assert_contains "$V2/.forge/local/evidence/check-na.out" 'SHIP_READY:true' \
+    "candidate-bound E2E N/A can certify the unchanged candidate"
+
+printf 'VERDICT: N/A\nSUGGESTED_PATH: .forge/local/evidence/receipt-v2/e2e-report.md\nN/A_REASON: \n' \
+    > "$V2/.forge/local/evidence/e2e-na-empty.report"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+    --candidate .forge/local/evidence/candidate.receipt --command 'empty e2e scope decision' \
+    --profile regression --report .forge/local/evidence/e2e-na-empty.report --result N/A \
+    --exit-status 0 --output .forge/local/evidence/e2e-na-empty.receipt) >/dev/null 2>&1
+assert_equals "$?" "2" "E2E N/A without a concrete reason is rejected"
+
+printf 'VERDICT: N/A\nSUGGESTED_PATH: .forge/local/evidence/receipt-v2/verify-app-report.md\nN/A_REASON: verify-app is never optional\n' \
+    > "$V2/.forge/local/evidence/verify-app-na.report"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind verify-app \
+    --candidate .forge/local/evidence/candidate.receipt --command 'invalid verify-app n-a' \
+    --profile focused --report .forge/local/evidence/verify-app-na.report --result N/A \
+    --exit-status 0 --output .forge/local/evidence/verify-app-na.receipt) >/dev/null 2>&1
+assert_equals "$?" "2" "verify-app cannot use N/A"
+
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+    --candidate .forge/local/evidence/candidate.receipt --command 'failed e2e scope decision' \
+    --profile regression --report .forge/local/evidence/e2e-na.report --result N/A \
+    --exit-status 1 --output .forge/local/evidence/e2e-na-failed.receipt) >/dev/null 2>&1
+assert_equals "$?" "2" "E2E N/A requires a successful scope decision"
+refresh_v2_final_receipts
+assert_equals "$?" "0" "PASS receipts are restored for later mutation tests"
 
 start_test "receipt-v2: semantic/process/identity/iteration mutations fail closed in one compact matrix"
 for mutation in duplicate-invocation wrong-role findings stale-output copied-worktree stale-iteration; do
@@ -933,6 +1152,134 @@ assert_contains "$V2/.forge/local/evidence/promotion.receipt" "old_candidate_id=
     "promotion receipt binds the old candidate"
 assert_equals "$(git -C "$V2" status --porcelain | wc -l | tr -d ' ')" "0" \
     "original worktree and index are clean after CAS"
+
+start_test "promoted certification survives the exact authorized HEAD transition only"
+check_v2_without_source_object_writes promoted
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) \
+    > "$V2/.forge/local/evidence/post-promotion-check.out" 2>&1
+assert_equals "$?" "0" "exact clean promotion preserves final certification"
+assert_contains "$V2/.forge/local/evidence/post-promotion-check.out" 'SHIP_READY:true' \
+    "original receipts certify their promoted tree without being rewritten"
+printf '{"cwd":"%s","host":"codex","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") \
+    > "$V2/.forge/local/evidence/post-promotion-push.out" 2>&1
+assert_equals "$?" "0" "exact promoted certification permits a later standalone push"
+
+start_test "receipt-native code review uses canonical V6 state and preserves all other gates"
+sed -i.bak 's/Code review loop (1 iterations) — PASS/Code review loop — receipt lenses clean/' \
+    "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+printf '{"cwd":"%s","host":"codex","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") \
+    > "$V2/.forge/local/evidence/receipt-native-prose.out" 2>&1
+assert_equals "$?" "0" "valid receipts accept checked code-review prose without legacy PASS syntax"
+cp "$V2/.forge/local/evidence/promotion.receipt" "$V2/.forge/local/evidence/promotion.gate-saved"
+rm "$V2/.forge/local/evidence/promotion.receipt"
+printf '{"cwd":"%s","host":"codex","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") \
+    > "$V2/.forge/local/evidence/receipt-native-missing.out" 2>&1
+assert_equals "$?" "2" "receipt-native prose cannot bypass missing final evidence"
+mv "$V2/.forge/local/evidence/promotion.gate-saved" "$V2/.forge/local/evidence/promotion.receipt"
+cp "$V2/.forge/local/evidence/e2e.report" "$V2/.forge/local/evidence/e2e.gate-saved"
+printf 'changed\n' >> "$V2/.forge/local/evidence/e2e.report"
+printf '{"cwd":"%s","host":"codex","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") \
+    > "$V2/.forge/local/evidence/receipt-native-changed.out" 2>&1
+assert_equals "$?" "2" "receipt-native prose cannot bypass changed final evidence"
+mv "$V2/.forge/local/evidence/e2e.gate-saved" "$V2/.forge/local/evidence/e2e.report"
+sed -i.bak 's/- \[x\] Simplified/- [ ] Simplified/' "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+printf '{"cwd":"%s","host":"codex","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") \
+    > "$V2/.forge/local/evidence/receipt-native-unsimplified.out" 2>&1
+assert_equals "$?" "2" "receipt-native code review never bypasses unchecked Simplified"
+sed -i.bak 's/- \[ \] Simplified/- [x] Simplified/' "$V2/.forge/local/state.md"
+rm -f "$V2/.forge/local/state.md.bak"
+
+WINDOWS_PS=""
+if command -v powershell.exe >/dev/null 2>&1; then
+    WINDOWS_PS=powershell.exe
+elif command -v pwsh >/dev/null 2>&1 \
+    && pwsh -NoProfile -Command 'if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) { exit 0 } else { exit 1 }' >/dev/null 2>&1; then
+    WINDOWS_PS=pwsh
+fi
+if [ -n "$WINDOWS_PS" ]; then
+    start_test "Windows PowerShell promoted receipt validation mirrors Bash"
+    (cd "$V2" && "$WINDOWS_PS" -NoProfile -File "$REPO_ROOT/hooks/lib/verification-receipt.ps1" \
+        check -State .forge/local/state.md) > "$V2/.forge/local/evidence/ps-promoted.out" 2>&1
+    assert_equals "$?" "0" "Windows PowerShell accepts the exact clean promotion"
+    printf 'dirty\n' >> "$V2/app.txt"
+    (cd "$V2" && "$WINDOWS_PS" -NoProfile -File "$REPO_ROOT/hooks/lib/verification-receipt.ps1" \
+        check -State .forge/local/state.md) > "$V2/.forge/local/evidence/ps-dirty.out" 2>&1
+    assert_equals "$?" "2" "Windows PowerShell rejects a dirty promoted worktree"
+    git -C "$V2" restore --worktree -- app.txt
+    mv "$V2/.forge/local/evidence/promotion.receipt" "$V2/.forge/local/evidence/promotion.ps-missing"
+    (cd "$V2" && "$WINDOWS_PS" -NoProfile -File "$REPO_ROOT/hooks/lib/verification-receipt.ps1" \
+        check -State .forge/local/state.md) > "$V2/.forge/local/evidence/ps-missing.out" 2>&1
+    assert_equals "$?" "2" "Windows PowerShell rejects missing promotion linkage"
+    assert_contains "$V2/.forge/local/evidence/ps-missing.out" 'CANDIDATE_VALID:false' \
+        "missing promotion yields the normal false candidate status"
+    assert_contains "$V2/.forge/local/evidence/ps-missing.out" 'SHIP_READY:false' \
+        "missing promotion yields the normal false ship status"
+    mv "$V2/.forge/local/evidence/promotion.ps-missing" "$V2/.forge/local/evidence/promotion.receipt"
+else
+    start_test "Windows PowerShell promoted receipt validation (skipped — no Windows runtime)"
+    pass "skipped (Windows PowerShell runtime unavailable; portable/static checks remain active)"
+fi
+
+cp "$V2/.forge/local/evidence/promotion.receipt" "$V2/.forge/local/evidence/promotion.saved"
+cp "$V2/.forge/local/state.md" "$V2/.forge/local/evidence/state.saved"
+for mutation in missing-promotion wrong-linkage duplicate-linkage wrong-schema wrong-old-id duplicate-old-id wrong-parent wrong-commit wrong-temporary wrong-tree wrong-worktree failed-hook dirty-hook changed-report unstaged untracked staged extra-commit multi-parent; do
+    case "$mutation" in
+        missing-promotion) mv "$V2/.forge/local/evidence/promotion.receipt" "$V2/.forge/local/evidence/promotion.missing" ;;
+        wrong-linkage) sed -i.bak 's#| Promotion receipt | .*#| Promotion receipt | .forge/local/evidence/missing-promotion.receipt |#' "$V2/.forge/local/state.md" ;;
+        duplicate-linkage) printf '| Promotion receipt | .forge/local/evidence/promotion.receipt |\n' >> "$V2/.forge/local/state.md" ;;
+        wrong-schema) sed -i.bak 's/schema_version=.*/schema_version=1/' "$V2/.forge/local/evidence/promotion.receipt" ;;
+        wrong-old-id) sed -i.bak 's/old_candidate_id=.*/old_candidate_id=wrong/' "$V2/.forge/local/evidence/promotion.receipt" ;;
+        duplicate-old-id) printf 'old_candidate_id=duplicate\n' >> "$V2/.forge/local/evidence/promotion.receipt" ;;
+        wrong-parent) sed -i.bak "s/old_head=.*/old_head=$PROMOTED_HEAD/" "$V2/.forge/local/evidence/promotion.receipt" ;;
+        wrong-commit) sed -i.bak "s/new_branch_commit=.*/new_branch_commit=$OLD_HEAD/" "$V2/.forge/local/evidence/promotion.receipt" ;;
+        wrong-temporary) sed -i.bak "s/temporary_commit=.*/temporary_commit=$OLD_HEAD/" "$V2/.forge/local/evidence/promotion.receipt" ;;
+        wrong-tree) sed -i.bak "s/new_branch_tree=.*/new_branch_tree=$OLD_HEAD/" "$V2/.forge/local/evidence/promotion.receipt" ;;
+        wrong-worktree) sed -i.bak 's/worktree_identity=.*/worktree_identity=wrong/' "$V2/.forge/local/evidence/promotion.receipt" ;;
+        failed-hook) sed -i.bak 's/post_commit_status=.*/post_commit_status=failed/' "$V2/.forge/local/evidence/promotion.receipt" ;;
+        dirty-hook) sed -i.bak 's/post_commit_dirty=.*/post_commit_dirty=true/' "$V2/.forge/local/evidence/promotion.receipt" ;;
+        changed-report) cp "$V2/.forge/local/evidence/e2e.report" "$V2/.forge/local/evidence/e2e.saved"; printf 'changed\n' >> "$V2/.forge/local/evidence/e2e.report" ;;
+        unstaged) printf 'mutation\n' >> "$V2/app.txt" ;;
+        untracked) printf 'mutation\n' > "$V2/new.txt" ;;
+        staged) printf 'mutation\n' >> "$V2/app.txt"; git -C "$V2" add app.txt ;;
+        extra-commit) EXTRA_COMMIT=$(printf 'unrelated same-tree commit\n' | git -C "$V2" commit-tree "$FROZEN_TREE" -p "$PROMOTED_HEAD"); git -C "$V2" update-ref refs/heads/main "$EXTRA_COMMIT" "$PROMOTED_HEAD" ;;
+        multi-parent)
+            SIDE_COMMIT=$(printf 'side parent\n' | git -C "$V2" commit-tree "$FROZEN_TREE" -p "$OLD_HEAD")
+            EXTRA_COMMIT=$(printf 'merge-shaped promotion\n' | git -C "$V2" commit-tree "$FROZEN_TREE" -p "$OLD_HEAD" -p "$SIDE_COMMIT")
+            sed -i.bak -e "s/temporary_commit=.*/temporary_commit=$EXTRA_COMMIT/" \
+                -e "s/new_branch_commit=.*/new_branch_commit=$EXTRA_COMMIT/" "$V2/.forge/local/evidence/promotion.receipt"
+            git -C "$V2" update-ref refs/heads/main "$EXTRA_COMMIT" "$PROMOTED_HEAD"
+            ;;
+    esac
+    (cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" check --state .forge/local/state.md) \
+        > "$V2/.forge/local/evidence/promotion-$mutation.out" 2>&1
+    assert_equals "$?" "2" "$mutation cannot reuse promoted certification"
+    case "$mutation" in
+        changed-report) mv "$V2/.forge/local/evidence/e2e.saved" "$V2/.forge/local/evidence/e2e.report" ;;
+        unstaged|staged) git -C "$V2" restore --source="$PROMOTED_HEAD" --staged --worktree -- app.txt ;;
+        untracked) rm "$V2/new.txt" ;;
+        extra-commit|multi-parent) git -C "$V2" update-ref refs/heads/main "$PROMOTED_HEAD" "$EXTRA_COMMIT" ;;
+    esac
+    cp "$V2/.forge/local/evidence/state.saved" "$V2/.forge/local/state.md"
+    cp "$V2/.forge/local/evidence/promotion.saved" "$V2/.forge/local/evidence/promotion.receipt"
+done
+printf 'mutation\n' >> "$V2/app.txt"
+printf '{"cwd":"%s","host":"codex","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
+    | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") \
+    > "$V2/.forge/local/evidence/post-promotion-mutated-push.out" 2>&1
+assert_equals "$?" "2" "a changed promoted candidate blocks a later standalone push"
+git -C "$V2" restore --worktree -- app.txt
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/verification-receipt.sh" write --kind e2e \
+    --candidate .forge/local/evidence/candidate.receipt --command 'post-commit relabel attempt' --profile regression \
+    --report .forge/local/evidence/e2e.report --result PASS --exit-status 0 \
+    --output .forge/local/evidence/relabel.receipt) >/dev/null 2>&1
+assert_equals "$?" "2" "post-promotion acceptance cannot mint old-candidate receipts"
 
 start_test "exact-tree promotion does not execute post-checkout hooks in its disposable worktree"
 make_v2_candidate_repo

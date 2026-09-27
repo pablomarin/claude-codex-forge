@@ -21,6 +21,31 @@ if [ -z "$STATE" ]; then
 fi
 emit_inert() { echo "CERTIFIED:no"; echo "POST_CERT_ROUNDS:0"; echo "BREAKER:ok"; echo "ADJUDICATED:no"; exit 0; }
 
+# Decimal helpers mirror workflow-state's platform-neutral integer contract:
+# canonical non-negative decimal text with no leading zeroes. They deliberately
+# avoid machine-width arithmetic so the Bash and PowerShell readers accept the
+# same values as the workflow-state writer.
+decimal_valid_nonnegative() {
+    case "$1" in ''|*[!0-9]*|0[0-9]*) return 1 ;; *) return 0 ;; esac
+}
+decimal_subtract() {
+    local minuend="$1" subtrahend="$2" result="" borrow=0 i j a b digit
+    [ ${#minuend} -gt ${#subtrahend} ] \
+        || { [ ${#minuend} -eq ${#subtrahend} ] && [ "$minuend" \> "$subtrahend" -o "$minuend" = "$subtrahend" ]; } \
+        || return 1
+    i=$((${#minuend} - 1)); j=$((${#subtrahend} - 1))
+    while [ "$i" -ge 0 ]; do
+        a=${minuend:$i:1}; b=0
+        [ "$j" -lt 0 ] || b=${subtrahend:$j:1}
+        digit=$((a - borrow - b)); borrow=0
+        if [ "$digit" -lt 0 ]; then digit=$((digit + 10)); borrow=1; fi
+        result="$digit$result"
+        i=$((i - 1)); j=$((j - 1))
+    done
+    result=$(printf '%s\n' "$result" | sed 's/^0*//')
+    printf '%s\n' "${result:-0}"
+}
+
 [ -n "$STATE" ] && [ -f "$STATE" ] || emit_inert
 git rev-parse HEAD >/dev/null 2>&1 || emit_inert
 HEAD_SHA="$(git rev-parse HEAD)"
@@ -47,8 +72,9 @@ ROWS="$(echo "$CHECKLIST" | awk '
     print n "|" tool "|" head
   }')"
 
-# Loop-counter line: rounds with FINDINGS write no clean rows (the incident shape),
-# so the loop line "Code review loop (N iterations)" is the authoritative round count.
+# Legacy loop-counter line: rounds with FINDINGS wrote no clean rows, so pre-V6
+# state uses "Code review loop (N iterations)" as its authoritative round count.
+# Canonical V6 uses Receipts/Review iteration below and ignores this prose.
 LOOP_N="$(echo "$CHECKLIST" | grep -E 'Code review loop \([0-9]+ iterations\)' \
     | sed -E 's/.*Code review loop \(([0-9]+) iterations\).*/\1/' | tail -1)"
 [ -n "$LOOP_N" ] || LOOP_N=0
@@ -63,20 +89,69 @@ NA_COUNTLESS=0
 echo "$CHECKLIST" | grep -E 'Code review loop' | grep -E 'N/A:' \
     | grep -qvE '\([0-9]+ iterations\)' && NA_COUNTLESS=1
 
-# Certification: receipt-v2 uses the first iteration whose distinct code-spec
-# and code-quality receipts validate for one immutable candidate. Workflows not
-# yet converted retain the v5 Codex/PR-toolkit row reader through v6.0.
-CERT_N=""; CERT_HEAD=""; V2_ACTIVE=false
-V2_CANDIDATE=$(tr -d '\r' < "$STATE" | awk -F'|' '{k=$2; gsub(/^[ \t]+|[ \t]+$/, "", k); if(k=="Candidate receipt"){v=$3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit}}')
-case "$V2_CANDIDATE" in ''|*'<'*) ;; *)
+# Certification: a v6 schema marker always selects receipt-v2, even before a
+# candidate path exists. Legacy rows remain readable only for pre-v6 state.
+CERT_N=""; CERT_HEAD=""; V2_ACTIVE=false; ANCHOR_INVALID=false
+CURRENT_N=""; CURRENT_INVALID=false; FIRST_COUNT=0
+V2_SCHEMA=$(sed -n '1{s/\r$//;p;}' "$STATE")
+case "$V2_SCHEMA" in '<!-- forge:state-schema v6 -->')
     V2_ACTIVE=true
-    VR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/verification-receipt.sh"
-    [ -f "$VR" ] || VR="hooks/lib/verification-receipt.sh"
-    if [ -f "$VR" ]; then
-        V2_OUT=$(bash "$VR" check --state "$STATE" 2>/dev/null || true)
-        if [ "$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEWS_VALID://p' | tail -1)" = true ]; then
-            CERT_N=$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEW_ITERATION://p' | tail -1)
-            CERT_HEAD="$HEAD_SHA"
+    CURRENT_COUNT=$(tr -d '\r' < "$STATE" | awk -F'|' '
+        /^## / { section=$0; sub(/^## /,"",section); next }
+        section=="Receipts" && /^\|/ {
+            key=$2; gsub(/^[ \t]+|[ \t]+$/,"",key)
+            if(key=="Review iteration") count++
+        }
+        END { print count+0 }')
+    if [ "$CURRENT_COUNT" -ne 1 ]; then
+        CURRENT_INVALID=true
+    else
+        CURRENT_N=$(tr -d '\r' < "$STATE" | awk -F'|' '
+            /^## / { section=$0; sub(/^## /,"",section); next }
+            section=="Receipts" && /^\|/ {
+                key=$2; gsub(/^[ \t]+|[ \t]+$/,"",key)
+                if(key=="Review iteration") {
+                    value=$3; gsub(/^[ \t]+|[ \t]+$/,"",value); print value; exit
+                }
+            }')
+        decimal_valid_nonnegative "$CURRENT_N" || CURRENT_INVALID=true
+    fi
+    FIRST_COUNT=$(tr -d '\r' < "$STATE" | awk -F'|' '
+        /^## / { section=$0; sub(/^## /,"",section); next }
+        section=="Receipts" && /^\|/ {
+            key=$2; gsub(/^[ \t]+|[ \t]+$/,"",key)
+            if(key=="First certified iteration") count++
+        }
+        END { print count+0 }')
+    if [ "$FIRST_COUNT" -gt 1 ]; then
+        ANCHOR_INVALID=true; CERT_N=0
+    elif [ "$FIRST_COUNT" -eq 1 ]; then
+        FIRST_CERT=$(tr -d '\r' < "$STATE" | awk -F'|' '
+            /^## / { section=$0; sub(/^## /,"",section); next }
+            section=="Receipts" && /^\|/ {
+                key=$2; gsub(/^[ \t]+|[ \t]+$/,"",key)
+                if(key=="First certified iteration") {
+                    value=$3; gsub(/^[ \t]+|[ \t]+$/,"",value); print value; exit
+                }
+            }')
+        case "$FIRST_CERT" in none) ;;
+            *) if decimal_valid_nonnegative "$FIRST_CERT" && [ "$FIRST_CERT" != 0 ]; then
+                   CERT_N="$FIRST_CERT"; CERT_HEAD="$HEAD_SHA"
+               else
+                   ANCHOR_INVALID=true; CERT_N=0
+               fi ;;
+        esac
+    fi
+    if [ -z "$CERT_N" ]; then
+        VR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/verification-receipt.sh"
+        [ -f "$VR" ] || VR="hooks/lib/verification-receipt.sh"
+        if [ -f "$VR" ]; then
+            V2_OUT=$(bash "$VR" check --state "$STATE" 2>/dev/null || true)
+            if [ "$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEWS_VALID://p' | tail -1)" = true ]; then
+                CERT_N=$(printf '%s\n' "$V2_OUT" | sed -n 's/^REVIEW_ITERATION://p' | tail -1)
+                CERT_HEAD="$HEAD_SHA"
+                [ "$FIRST_COUNT" -eq 1 ] || ANCHOR_INVALID=true
+            fi
         fi
     fi
     ;;
@@ -104,15 +179,25 @@ if [ -z "$CERT_N" ]; then
 fi
 echo "CERTIFIED:yes"
 
-# Rounds: max of (loop-counter − CERT_N) and the distinct post-cert evidence rows —
-# finding-rounds appear only in the loop counter; clean rounds appear in both.
-ROWS_POST="$(echo "$ROWS" | cut -d'|' -f1 | sort -n | uniq | awk -v c="$CERT_N" 'NF && $1>c' | wc -l | tr -d ' ')"
-LOOP_POST=$(( LOOP_N > CERT_N ? LOOP_N - CERT_N : 0 ))
-POST_CERT_ROUNDS=$(( LOOP_POST > ROWS_POST ? LOOP_POST : ROWS_POST ))
-
-BREAKER=ok; [ "$POST_CERT_ROUNDS" -gt "$POST_CERT_REVIEW_ROUND_LIMIT" ] && BREAKER=tripped
-# Post-certification count-less N/A = the breaker counter was erased → fail closed.
-[ "$NA_COUNTLESS" = "1" ] && BREAKER=tripped
+# Canonical V6 count comes only from the unique receipt-table rows. Legacy
+# state retains max(loop counter, distinct clean rows) and counter-erasure rules.
+BREAKER=ok; POST_CERT_ROUNDS=0
+if [ "$V2_ACTIVE" = true ]; then
+    if [ "$CURRENT_INVALID" = true ] || ! POST_CERT_ROUNDS=$(decimal_subtract "$CURRENT_N" "$CERT_N"); then
+        POST_CERT_ROUNDS=0; BREAKER=tripped
+    elif [ ${#POST_CERT_ROUNDS} -gt 1 ] || [ "$POST_CERT_ROUNDS" -gt "$POST_CERT_REVIEW_ROUND_LIMIT" ]; then
+        BREAKER=tripped
+    fi
+else
+    ROWS_POST="$(echo "$ROWS" | cut -d'|' -f1 | sort -n | uniq | awk -v c="$CERT_N" 'NF && $1>c' | wc -l | tr -d ' ')"
+    LOOP_POST=$(( LOOP_N > CERT_N ? LOOP_N - CERT_N : 0 ))
+    POST_CERT_ROUNDS=$(( LOOP_POST > ROWS_POST ? LOOP_POST : ROWS_POST ))
+    [ "$POST_CERT_ROUNDS" -gt "$POST_CERT_REVIEW_ROUND_LIMIT" ] && BREAKER=tripped
+fi
+[ "$ANCHOR_INVALID" = false ] || BREAKER=tripped
+# Only legacy state stores its counter in checklist wording. Canonical V6 prose
+# may be count-less because Receipts/Review iteration cannot be erased by it.
+[ "$V2_ACTIVE" = true ] || [ "$NA_COUNTLESS" = "0" ] || BREAKER=tripped
 
 echo "POST_CERT_ROUNDS:$POST_CERT_ROUNDS"
 echo "BREAKER:$BREAKER"

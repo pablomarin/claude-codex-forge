@@ -51,11 +51,17 @@ the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and
 candidate concerns do not keep the loop open; a concrete material P2 still prevents certification.
 
 - `CLEAN` certifies only when maximum severity is `NONE` or `P3` and no P0/P1/P2 record exists.
-- `FINDINGS` is a successful review result, not an engine fallback. Repair and invoke only within
+- `FINDINGS/P3` with only P3 finding rows is also certifying: keep the advisory notes without
+  production repair or another review solely for those notes. Never rewrite its envelope to CLEAN.
+- Other `FINDINGS` is a successful review result, not an engine fallback. Repair and invoke only within
   the bounded broad/repair/closure policy above.
 - `BLOCKED artifact|authorization|invariant` stops without fallback.
 - Engine/capability launch failure follows the dispatcher's visible one-retry policy. With
   `--fallback-policy none`, no retry occurs.
+- When exhausted ordinary review attempts emit `AUTH_REQUIRED`, follow the main-agent
+  [authentication recovery](../rules/workflow.md#reviewer-authentication-recovery) handoff:
+  one coordinated official login, then one retry of unfinished roles only. A completed
+  fallback needs no login; authentication is not a request to reapprove review transport.
 
 Code requires two distinct fresh receipts over the identical candidate: `code-spec` and
 `code-quality`. Validate them with `agent-dispatch verify-pair`; neither lens substitutes for the

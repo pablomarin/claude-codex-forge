@@ -80,17 +80,22 @@ for f in "$VE2E" "$NF" "$FB"; do
 done
 
 # Pull the set of VERDICT values defined in verify-e2e.md.
-# Looks for lines like: VERDICT: PASS | FAIL | PARTIAL
-VERDICT_LINE=$(grep -E "^VERDICT:\s*(PASS|FAIL|PARTIAL)" "$VE2E" | head -1)
+# Looks for lines like: VERDICT: PASS | FAIL | PARTIAL | N/A
+VERDICT_LINE=$(grep -E "^VERDICT:\s*(PASS|FAIL|PARTIAL|N/A)" "$VE2E" | head -1)
 if [[ -z "$VERDICT_LINE" ]]; then
     fail "could not find VERDICT: header definition in verify-e2e.md"
 else
     pass "found VERDICT header in verify-e2e.md"
 fi
 
-# Extract the named values (PASS, FAIL, PARTIAL) from the header line.
+# Extract the named values (PASS, FAIL, PARTIAL, N/A) from the header line.
 # Treat this as the authoritative vocabulary.
-VERDICT_VALUES=$(echo "$VERDICT_LINE" | grep -oE "(PASS|FAIL|PARTIAL)" | sort -u)
+VERDICT_VALUES=$(echo "$VERDICT_LINE" | grep -oE "(PASS|FAIL|PARTIAL|N/A)" | sort -u)
+if echo "$VERDICT_VALUES" | grep -qx 'N/A'; then
+    pass "verify-e2e defines the structured N/A verdict"
+else
+    fail "verify-e2e is missing the structured N/A verdict"
+fi
 
 # For each value in the authoritative set, the callers should have
 # branching logic that references it (we look for 'VERDICT: <VAL>' which
@@ -118,13 +123,13 @@ done
 # macOS sed -E does NOT support \s; use [[:space:]] for portability.
 # Also: `grep -o` across multiple files prefixes output with `file:`, so
 # the sed pattern strips everything up through `VERDICT: ` literally.
-UNKNOWN_BRANCHES=$(grep -oE 'VERDICT: [A-Z_]+' "$NF" "$FB" \
+UNKNOWN_BRANCHES=$(grep -oE 'VERDICT: [A-Z_/]+' "$NF" "$FB" \
     | sed -E 's/.*VERDICT:[[:space:]]+//' \
     | sort -u \
-    | grep -vE '^(PASS|FAIL|PARTIAL)$' || true)
+    | grep -vE '^(PASS|FAIL|PARTIAL|N/A)$' || true)
 
 if [[ -z "$UNKNOWN_BRANCHES" ]]; then
-    pass "callers reference only valid VERDICT values (PASS/FAIL/PARTIAL)"
+    pass "callers reference only valid VERDICT values (PASS/FAIL/PARTIAL/N/A)"
 else
     while read -r bad; do
         fail "caller references unknown VERDICT: '$bad' (not in agent header)"
@@ -1188,9 +1193,9 @@ else
 start_test "host-neutral development workflows use canonical state ownership"
 for f in "$NF" "$FB"; do
     bn=$(basename "$f")
-    assert_contains "$f" '.forge/state.template.md' "$bn initializes from the canonical state template"
-    assert_contains "$f" '.forge/local/state.md' "$bn uses canonical developer-owned state"
-    assert_contains "$f" "file read/write capabilities" "$bn avoids host-private shell state writes"
+    assert_contains "$f" '.forge/hooks/lib/workflow-state.sh show' "$bn reads canonical state through the bounded helper"
+    assert_contains "$f" '.forge/hooks/lib/workflow-state.sh activate' "$bn initializes canonical state through the bounded helper"
+    assert_contains "$f" 'do not directly edit workflow control rows' "$bn avoids unbounded state writes"
     assert_contains "$f" 'Last active host' "$bn persists host-switch continuity"
 done
 fi
@@ -1933,7 +1938,7 @@ EOF
     )
 
     BASH_EXIT=$(cat "$scratch/.bash_exit")
-    assert_equals "$BASH_EXIT" "0" "Bash guard uses LAST auth line (matching) and ALLOWS (exit 0)"
+    assert_equals "$BASH_EXIT" "2" "matching last auth line cannot replace strict final receipts"
 else
     pass "git not available — stale-duplicate contract test skipped"
 fi
@@ -1956,6 +1961,19 @@ for f in state.template.md rules/workflow.md commands/opinion.md; do
         grep -qF "$token" "$REPO_ROOT/$f" \
             || { fail "$f missing structured review lens: $token"; ok=0; }
     done
+done
+
+start_test "active v6 policy selects strict receipts by schema, never candidate population"
+assert_contains "$REPO_ROOT/FORGE.template.md" "Every active canonical V6 shipping action requires" \
+    "root policy requires strict active-v6 receipts"
+assert_contains "$REPO_ROOT/FORGE.template.md" "legacy prose cannot certify" \
+    "root policy rejects legacy prose certification"
+for active_source in "$REPO_ROOT/hooks/check-workflow-gates.sh" \
+    "$REPO_ROOT/hooks/check-workflow-gates.ps1" "$REPO_ROOT/hooks/build-evidence.sh" \
+    "$REPO_ROOT/hooks/build-evidence.ps1" "$REPO_ROOT/hooks/lib/review-breaker.sh" \
+    "$REPO_ROOT/hooks/lib/review-breaker.ps1" "$REPO_ROOT/rules/workflow.md"; do
+    assert_not_contains "$active_source" "Candidate receipt activates receipt-v2" \
+        "$(basename "$active_source") has no candidate-population activation switch"
 done
 for f in state.template.md rules/workflow.md hooks/build-evidence.sh hooks/build-evidence.ps1; do
     grep -qiF "candidate" "$REPO_ROOT/$f" \
@@ -2733,22 +2751,22 @@ assert_contains "$REPO_ROOT/state.template.md" 'fresh same-engine reviewer' \
 start_test "release version is synchronized across installer source and README"
 assert_contains "$REPO_ROOT/docs/adr/README.md" '0010-dual-engine-canonical-harness.md' \
     "ADR index includes the dual-engine decision"
-EXPECTED_FORGE_VERSION='6.1'
+EXPECTED_FORGE_VERSION='6.2'
 FIRST_CHANGELOG_RELEASE=$(grep -m1 '^## ' "$REPO_ROOT/docs/CHANGELOG.md")
 FIRST_CHANGELOG_VERSION=$(printf '%s\n' "$FIRST_CHANGELOG_RELEASE" | sed -E 's/^## ([0-9]+\.[0-9]+).*/\1/')
 README_BADGE_VERSION=$(sed -n 's/.*badge\/version-\([0-9][0-9.]*\)-blue.*/\1/p' "$README" | head -1)
 README_HISTORY_VERSION=$(sed -n '/^## Version history/,$p' "$README" \
     | sed -n 's/^| \([0-9][0-9.]*\)[[:space:]]*|.*/\1/p' | head -1)
-assert_equals "$FIRST_CHANGELOG_RELEASE" '## 6.1 — 2026-09-10' \
-    "6.1 is the top changelog release"
+assert_equals "$FIRST_CHANGELOG_RELEASE" '## 6.2 — 2026-09-10' \
+    "6.2 is the top changelog release"
 assert_equals "$FIRST_CHANGELOG_VERSION" "$EXPECTED_FORGE_VERSION" \
     "top changelog release carries the expected version"
 assert_equals "$README_BADGE_VERSION" "$EXPECTED_FORGE_VERSION" \
     "README badge matches the release version"
 assert_equals "$README_HISTORY_VERSION" "$EXPECTED_FORGE_VERSION" \
     "first README history row matches the release version"
-assert_contains "$README" 'Review authorization and permission-prompt correction' \
-    "README 6.1 history describes the user-visible release"
+assert_contains "$README" 'Strict V6 structured receipts with cross-host continuation' \
+    "README 6.2 history describes strict receipts and host continuation"
 
 start_test "Forge source repository uses one contributor guide with thin host adapters"
 assert_file_exists "$REPO_ROOT/CONTRIBUTING.md" \
@@ -2873,5 +2891,20 @@ if [ -z "$PUBLIC_FORGE_MAINTAINER_GUIDANCE" ]; then
 else
     fail "active public docs contain Forge-development guidance: $PUBLIC_FORGE_MAINTAINER_GUIDANCE"
 fi
+
+start_test "workflow consumers use bounded cross-engine state transitions"
+for relative in commands/new-feature.md commands/fix-bug.md commands/quick-fix.md rules/workflow.md FORGE.template.md; do
+    surface="$REPO_ROOT/$relative"
+    for action in show activate checkpoint; do
+        assert_contains "$surface" "workflow-state.sh $action" \
+            "$relative names workflow-state $action"
+    done
+    assert_not_contains "$surface" 'Read `.forge/local/state.md`' \
+        "$relative contains no direct canonical state-read instruction"
+done
+for relative in commands/new-feature.md commands/fix-bug.md commands/quick-fix.md; do
+    assert_contains "$REPO_ROOT/$relative" '--begin-review' \
+        "$relative begins review through the monotonic helper transition"
+done
 
 report "test-contracts.sh"

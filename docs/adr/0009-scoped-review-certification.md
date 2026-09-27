@@ -20,6 +20,12 @@ A first 5-advisor council ruled the fix must be machine-visible, not prose. A fu
 
 Ship the **convergence breaker**: a small read-only helper, `hooks/lib/review-breaker.sh` + dual-mode `review-breaker.ps1` (`Invoke-ReviewBreaker`), computes from `state.md` alone (only git call: `rev-parse HEAD`): **certification** = the first iteration where both engines recorded clean evidence at the same head (today's legacy evidence format — no new grammar); **rounds past certification** = the `Code review loop (N iterations)` counter (authoritative — finding-rounds bump it without writing clean rows), backstopped by counting post-cert evidence rows; **trip** at more than `POST_CERT_REVIEW_ROUND_LIMIT = 3` (canonical in the helper). When tripped and unadjudicated, `check-workflow-gates.{sh,ps1}` blocks every gated ship action — the check runs BEFORE the docs-only commit carve-out and outside the PASS-evidence branch, so neither an N/A escape nor a docs-only commit bypasses it; a count-less `Code review loop — N/A:` line after certification reads as counter erasure and trips fail-closed. Release is HUMAN-only: a head-bound `Post-certification tail adjudicated by human — <decision> — head=… — ts=…` checklist line that the agent never writes on its own initiative; in `/goal` runs the breaker halts for the human — `/council` is explicitly carved out as a substitute. `build-evidence.{sh,ps1}` expose `post_cert_rounds`/`breaker` (fail-open on helper absence — visibility only) and suppress `pr_ready` while tripped+unadjudicated, so an autonomous run halts visibly.
 
+Canonical V6 receipt state refines only how the first certification is remembered. The bounded
+workflow-state helper derives `First certified iteration` from the first valid paired receipt and
+never advances it; callers cannot supply the value. The breaker consumes this anchor even after a
+candidate mutation makes those receipts stale, preventing the post-certification counter from
+silently resetting. Legacy pre-V6 state retains its original checklist-row derivation.
+
 ## Consequences
 
 - ✅ Non-convergence now has a hard stop with a named human authority: the PR #89 shape costs at most 3 extra rounds, then pages the human with the open tail — instead of grinding to iteration 25.

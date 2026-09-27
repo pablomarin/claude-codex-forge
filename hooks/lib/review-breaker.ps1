@@ -25,6 +25,35 @@
 
 $POST_CERT_REVIEW_ROUND_LIMIT = 3   # canonical home mirrored from review-breaker.sh
 
+function Test-CanonicalDecimal {
+    param([string]$Value)
+    return $Value -match '^(0|[1-9][0-9]*)$'
+}
+
+function Get-DecimalDifference {
+    param([string]$Current, [string]$Anchor)
+    if ($Current.Length -lt $Anchor.Length -or
+        ($Current.Length -eq $Anchor.Length -and [string]::CompareOrdinal($Current, $Anchor) -lt 0)) {
+        return $null
+    }
+    $result = ''
+    $borrow = 0
+    $j = $Anchor.Length - 1
+    for ($i = $Current.Length - 1; $i -ge 0; $i--) {
+        $a = [int]::Parse($Current[$i].ToString())
+        $b = 0
+        if ($j -ge 0) { $b = [int]::Parse($Anchor[$j].ToString()) }
+        $digit = $a - $borrow - $b
+        $borrow = 0
+        if ($digit -lt 0) { $digit += 10; $borrow = 1 }
+        $result = ([string][char]([int][char]'0' + $digit)) + $result
+        $j--
+    }
+    $difference = $result.TrimStart('0')
+    if (-not $difference) { $difference = '0' }
+    return $difference
+}
+
 function Invoke-ReviewBreaker {
     param(
         [string]$StateFile
@@ -105,7 +134,7 @@ function Invoke-ReviewBreaker {
         $rows += [pscustomobject]@{ N = $n; Tool = $tool; Head = $head }
     }
 
-    # Loop-counter line: authoritative round count (finding-rounds write no rows).
+    # Legacy loop-counter line. Canonical V6 uses Receipts/Review iteration.
     $LOOP_N = 0
     foreach ($ln in $checklist) {
         $lm = [regex]::Match($ln, 'Code review loop \(([0-9]+) iterations\)')
@@ -128,25 +157,52 @@ function Invoke-ReviewBreaker {
         }
     }
 
-    # --- certification: receipt-v2 first, legacy rows only when unconverted ---
+    # --- certification: a v6 schema marker always selects receipt-v2 ---
     $CERT_N = $null
     $CERT_HEAD = ''
     $v2Active = $false
-    $candidateRows = @()
-    foreach ($ln in $lines) {
-        $parts = $ln -split '\|'
-        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Candidate receipt') { $candidateRows += $parts[2].Trim() }
-    }
-    $candidateReceipt = if ($candidateRows.Count -eq 1) { [string]$candidateRows[0] } else { '' }
-    if ($candidateReceipt -and -not $candidateReceipt.Contains('<')) {
+    $anchorInvalid = $false
+    $currentInvalid = $false
+    $currentN = ''
+    $firstValues = New-Object Collections.Generic.List[string]
+    if ($lines.Count -gt 0 -and $lines[0] -eq '<!-- forge:state-schema v6 -->') {
         $v2Active = $true
-        $verificationReceipt = Join-Path $PSScriptRoot 'verification-receipt.ps1'
-        if (Test-Path -LiteralPath $verificationReceipt) {
-            . $verificationReceipt
-            $receiptResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateFile
-            if ($receiptResponse.Lines -contains 'REVIEWS_VALID:true') {
-                $iterationLine = $receiptResponse.Lines | Where-Object { $_ -match '^REVIEW_ITERATION:' } | Select-Object -Last 1
-                if ($iterationLine -match '^REVIEW_ITERATION:([0-9]+)$') { $CERT_N = [int]$matches[1]; $CERT_HEAD = $HEAD_SHA }
+        $receiptSection = $false
+        $currentValues = New-Object Collections.Generic.List[string]
+        foreach ($line in $lines) {
+            if ($line -match '^## (.+)$') { $receiptSection = ($Matches[1] -eq 'Receipts'); continue }
+            if ($receiptSection -and $line -match '^\|') {
+                $cells = $line -split '\|'
+                if ($cells.Count -ge 4) {
+                    if ($cells[1].Trim() -eq 'First certified iteration') { $firstValues.Add($cells[2].Trim()) }
+                    elseif ($cells[1].Trim() -eq 'Review iteration') { $currentValues.Add($cells[2].Trim()) }
+                }
+            }
+        }
+        if ($currentValues.Count -ne 1 -or -not (Test-CanonicalDecimal $currentValues[0])) {
+            $currentInvalid = $true
+        } else {
+            $currentN = $currentValues[0]
+        }
+        if ($firstValues.Count -gt 1) {
+            $anchorInvalid = $true; $CERT_N = '0'
+        }
+        elseif ($firstValues.Count -eq 1 -and $firstValues[0] -ne 'none') {
+            if ($firstValues[0] -match '^[1-9][0-9]*$') { $CERT_N = $firstValues[0]; $CERT_HEAD = $HEAD_SHA }
+            else { $anchorInvalid = $true; $CERT_N = '0' }
+        }
+        if ($null -eq $CERT_N) {
+            $verificationReceipt = Join-Path $PSScriptRoot 'verification-receipt.ps1'
+            if (Test-Path -LiteralPath $verificationReceipt) {
+                . $verificationReceipt
+                $receiptResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateFile
+                if ($receiptResponse.Lines -contains 'REVIEWS_VALID:true') {
+                    $iterationLine = $receiptResponse.Lines | Where-Object { $_ -match '^REVIEW_ITERATION:' } | Select-Object -Last 1
+                    if ($iterationLine -match '^REVIEW_ITERATION:(0|[1-9][0-9]*)$') {
+                        $CERT_N = $matches[1]; $CERT_HEAD = $HEAD_SHA
+                        if ($firstValues.Count -ne 1) { $anchorInvalid = $true }
+                    }
+                }
             }
         }
     }
@@ -171,18 +227,31 @@ function Invoke-ReviewBreaker {
         )
     }
 
-    # Rounds: max of (loop-counter − CERT_N) and the distinct post-cert evidence rows.
-    $postNs = $rows | ForEach-Object { $_.N } | Sort-Object -Unique | Where-Object { $_ -gt $CERT_N }
-    $ROWS_POST = @($postNs).Count
-    $LOOP_POST = 0
-    if ($LOOP_N -gt $CERT_N) { $LOOP_POST = $LOOP_N - $CERT_N }
-    $POST_CERT_ROUNDS = $LOOP_POST
-    if ($ROWS_POST -gt $POST_CERT_ROUNDS) { $POST_CERT_ROUNDS = $ROWS_POST }
-
     $BREAKER = 'ok'
-    if ($POST_CERT_ROUNDS -gt $POST_CERT_REVIEW_ROUND_LIMIT) { $BREAKER = 'tripped' }
-    # Post-certification count-less N/A = the breaker counter was erased -> fail closed.
-    if ($NA_COUNTLESS) { $BREAKER = 'tripped' }
+    $POST_CERT_ROUNDS = '0'
+    if ($v2Active) {
+        if ($currentInvalid) {
+            $BREAKER = 'tripped'
+        } else {
+            $difference = Get-DecimalDifference -Current $currentN -Anchor ([string]$CERT_N)
+            if ($null -eq $difference) { $BREAKER = 'tripped' }
+            else {
+                $POST_CERT_ROUNDS = $difference
+                if ($difference.Length -gt 1 -or [int]$difference -gt $POST_CERT_REVIEW_ROUND_LIMIT) { $BREAKER = 'tripped' }
+            }
+        }
+    } else {
+        $postNs = $rows | ForEach-Object { $_.N } | Sort-Object -Unique | Where-Object { $_ -gt $CERT_N }
+        $ROWS_POST = @($postNs).Count
+        $LOOP_POST = 0
+        if ($LOOP_N -gt $CERT_N) { $LOOP_POST = $LOOP_N - $CERT_N }
+        $POST_CERT_ROUNDS = $LOOP_POST
+        if ($ROWS_POST -gt $POST_CERT_ROUNDS) { $POST_CERT_ROUNDS = $ROWS_POST }
+        if ($POST_CERT_ROUNDS -gt $POST_CERT_REVIEW_ROUND_LIMIT) { $BREAKER = 'tripped' }
+    }
+    if ($anchorInvalid) { $BREAKER = 'tripped' }
+    # Only legacy state stores its counter in checklist wording.
+    if (-not $v2Active -and $NA_COUNTLESS) { $BREAKER = 'tripped' }
 
     return @(
         "CERTIFIED:yes",
