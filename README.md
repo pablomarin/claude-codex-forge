@@ -160,9 +160,9 @@ The main workflows are:
 
 | Purpose | Claude Code | Codex |
 | --- | --- | --- |
-| New feature | `/new-feature <name>` | `$workflow-new-feature <name>` |
-| Bug fix | `/fix-bug <name>` | `$workflow-fix-bug <name>` |
-| Quick fix | `/quick-fix <name>` | `$workflow-quick-fix <name>` |
+| New feature | `/new-feature <name>` | `$new-feature <name>` |
+| Bug fix | `/fix-bug <name>` | `$fix-bug <name>` |
+| Quick fix | `/quick-fix <name>` | `$quick-fix <name>` |
 | Fresh opinion | `/opinion <request>` | `$opinion <request>` |
 | Full investigation | `/opinion investigate <request>` | `$opinion investigate <request>` |
 | Engineering Council | `/council <question>` | `$council <question>` |

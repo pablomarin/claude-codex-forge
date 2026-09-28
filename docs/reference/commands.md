@@ -6,13 +6,32 @@ The host-native entry points and shared agent roles available after setup.
 
 | Purpose | Claude Code | Codex |
 | --- | --- | --- |
-| Full feature workflow | `/new-feature <name>` | `$workflow-new-feature <name>` |
-| Bug-fix workflow | `/fix-bug <name>` | `$workflow-fix-bug <name>` |
-| Trivial change | `/quick-fix <name>` | `$workflow-quick-fix <name>` |
-| Merge and worktree cleanup | `/finish-branch` | `$workflow-finish-branch` |
+| Full feature workflow | `/new-feature <name>` | `$new-feature <name>` |
+| Bug-fix workflow | `/fix-bug <name>` | `$fix-bug <name>` |
+| Trivial change | `/quick-fix <name>` | `$quick-fix <name>` |
+| Merge and worktree cleanup | `/finish-branch` | `$finish-branch` |
 
 **Workflow commands guide the process.** `.forge/local/state.md` is the host-neutral durable
 checkpoint; hooks validate its current candidate evidence before commit/push/PR.
+
+### Upgrading from prefixed Codex names
+
+Codex now uses `$fix-bug`, `$new-feature`, `$quick-fix`, `$finish-branch`,
+`$prd-create`, `$prd-discuss`, and `$review-pr-comments`, without `workflow-`.
+Claude's entry points and the shared `.forge/workflows/` procedures are unchanged.
+Upgrade an existing V6 project with `setup.sh --upgrade` or `setup.ps1 -Upgrade`.
+Setup removes old wrappers only when their recorded installation hash and generated
+identity prove they are unchanged Forge files. Modified or unproven old wrappers
+and sibling files remain, with a warning to reconcile the old name manually.
+
+A custom or unproven skill at a new short name blocks replacement. Move that skill
+directory aside outside the skill discovery folders, rerun setup, then reconcile
+your custom content under a distinct name. Use the same recovery if an interrupted
+install wrote a wrapper but not its installation receipt; do not delete custom work.
+Transactional full-refresh preview and apply enforce the same ownership checks.
+On Unix, reconciling existing renamed skills requires Python 3; PowerShell performs
+these checks natively. Existing projects may need a fresh Codex session to discover
+the updated skill inventory.
 
 ### Autonomous loop (`/goal`)
 
@@ -50,8 +69,8 @@ to a fresh same-engine reviewer on launch or capability failure.
 
 | Purpose | Claude Code | Codex | Output |
 | --- | --- | --- | --- |
-| Interactive requirements | `/prd:discuss {feature}` | `$workflow-prd-discuss {feature}` | `docs/prds/{feature}-discussion.md` |
-| Structured PRD | `/prd:create {feature}` | `$workflow-prd-create {feature}` | `docs/prds/{feature}.md` |
+| Interactive requirements | `/prd:discuss {feature}` | `$prd-discuss {feature}` | `docs/prds/{feature}-discussion.md` |
+| Structured PRD | `/prd:create {feature}` | `$prd-create {feature}` | `docs/prds/{feature}.md` |
 
 ## Quality Gates (Pre-PR — in this order)
 
@@ -77,7 +96,7 @@ For bug fixes, targeted research runs after root-cause isolation (Phase 2.5 of `
 | Host | Invocation | Purpose |
 | --- | --- | --- |
 | Claude Code | `/review-pr-comments` | Address automated PR review comments |
-| Codex | `$workflow-review-pr-comments` | Address the same comments through the canonical workflow |
+| Codex | `$review-pr-comments` | Address the same comments through the canonical workflow |
 
 ## Claude Code Built-in Commands
 

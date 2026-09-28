@@ -160,7 +160,7 @@ The review-comments workflow processes comments already present on a GitHub pull
 the human or automated reviewers your repository trusts; Forge does not require a specific vendor.
 
 Once configured, the workflow becomes: create PR → automated reviewers leave comments → Claude
-`/review-pr-comments` or Codex `$workflow-review-pr-comments` processes them → push fixes → merge.
+`/review-pr-comments` or Codex `$review-pr-comments` processes them → push fixes → merge.
 
 > **No automated reviewers?** The workflow still works — you just skip `/review-pr-comments`.
 > Pre-PR gates still include fresh opinion review, simplification, verify-app, and verify-e2e.

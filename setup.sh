@@ -1194,7 +1194,7 @@ else
     echo -e "1. ${BLUE}Verify both installed host surfaces${NC}:"
     echo ""
     echo "   /hooks       → Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    echo "   /help        → Claude should show Forge commands; Codex should show the matching \$workflow-* skills"
+    echo "   /help        → Claude should show Forge commands; Codex should show matching skills such as \$fix-bug"
     echo "   scripts/verify-runtime.sh discovery --project-root \"$(pwd -P)\""
     echo ""
     echo -e "2. ${BLUE}Commit the shared harness${NC} (.forge/local/ remains gitignored):"

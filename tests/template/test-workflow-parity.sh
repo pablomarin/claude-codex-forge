@@ -183,7 +183,8 @@ if [[ "$stage" == complete ]]; then converted="$converted finish-branch review-p
 for workflow in $converted; do
     canonical="$INSTALL/.forge/workflows/$workflow.md"
     claude_name=$(printf '%s' "$workflow" | tr '/' '-')
-    case "$workflow" in opinion) claude_path="$INSTALL/.claude/commands/opinion.md"; codex_path="$INSTALL/.agents/skills/opinion/SKILL.md" ;; prd/discuss) claude_path="$INSTALL/.claude/commands/prd/discuss.md"; codex_path="$INSTALL/.agents/skills/workflow-prd-discuss/SKILL.md" ;; prd/create) claude_path="$INSTALL/.claude/commands/prd/create.md"; codex_path="$INSTALL/.agents/skills/workflow-prd-create/SKILL.md" ;; *) claude_path="$INSTALL/.claude/commands/$workflow.md"; codex_path="$INSTALL/.agents/skills/workflow-$claude_name/SKILL.md" ;; esac
+    claude_path="$INSTALL/.claude/commands/$workflow.md"
+    codex_path="$INSTALL/.agents/skills/$claude_name/SKILL.md"
     assert_file_exists "$canonical" "canonical workflow installed: $workflow"
     assert_file_exists "$claude_path" "Claude adapter installed: $workflow"
     assert_file_exists "$codex_path" "Codex adapter installed: $workflow"
@@ -199,10 +200,10 @@ for adapter in \
     .claude/commands/review-pr-comments.md \
     .claude/skills/council/SKILL.md \
     .agents/skills/opinion/SKILL.md \
-    .agents/skills/workflow-new-feature/SKILL.md \
-    .agents/skills/workflow-fix-bug/SKILL.md \
-    .agents/skills/workflow-quick-fix/SKILL.md \
-    .agents/skills/workflow-review-pr-comments/SKILL.md \
+    .agents/skills/new-feature/SKILL.md \
+    .agents/skills/fix-bug/SKILL.md \
+    .agents/skills/quick-fix/SKILL.md \
+    .agents/skills/review-pr-comments/SKILL.md \
     .agents/skills/council/SKILL.md; do
     assert_contains "$INSTALL/$adapter" "$review_transport_disclosure" \
         "$adapter gives the user informed reviewer-transport notice before invocation"
@@ -224,8 +225,8 @@ done
 for adapter in \
     .claude/commands/prd/discuss.md \
     .claude/commands/finish-branch.md \
-    .agents/skills/workflow-prd-discuss/SKILL.md \
-    .agents/skills/workflow-finish-branch/SKILL.md; do
+    .agents/skills/prd-discuss/SKILL.md \
+    .agents/skills/finish-branch/SKILL.md; do
     assert_not_contains "$INSTALL/$adapter" "$review_transport_disclosure" \
         "$adapter does not claim ordinary-review transport consent"
 done

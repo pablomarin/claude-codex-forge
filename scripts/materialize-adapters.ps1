@@ -574,6 +574,52 @@ function Get-EngineAvailability {
     }
 }
 
+function Get-RetiredWorkflowSkills([object[]]$Rows) {
+    $retired = @{}
+    if ($Scope -ne 'project') { return $retired }
+    $hashes = @{}
+    Assert-NoLinkAncestor $Target '.forge/installed-files.tsv'
+    $receipt = Join-Path $Target '.forge/installed-files.tsv'
+    if (Test-Path -LiteralPath $receipt) {
+        foreach ($line in [IO.File]::ReadAllLines($receipt)) {
+            if (-not $line -or $line.StartsWith('#')) { continue }
+            $fields = $line.Split("`t")
+            if ($fields.Count -ne 3) { throw 'malformed installed-files.tsv row' }
+            if ($hashes.ContainsKey($fields[0])) { $hashes[$fields[0]] = $null }
+            else { $hashes[$fields[0]] = $fields[1] }
+        }
+    }
+    foreach ($row in $Rows) {
+        if ($row.Kind -ne 'tombstone' -or $row.Host -ne 'codex' -or $row.Scope -ne 'project' -or $row.Ownership -ne 'forge-generated') { continue }
+        $old = $row.Destination
+        $short = $old.Replace('/workflow-', '/')
+        foreach ($relative in @($short, $old)) {
+            Assert-NoLinkAncestor $Target $relative
+            $path = Join-Path $Target $relative
+            if (-not (Test-Path -LiteralPath $path)) { continue }
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "workflow skill is not a regular file: $relative" }
+            $digest = Get-FileRevision $path
+            $lines = [IO.File]::ReadAllLines($path)
+            $metadata = @{}
+            if ($lines.Length -gt 0 -and $lines[0] -ceq '---') {
+                for ($i = 1; $i -lt $lines.Length; $i++) {
+                    if ($lines[$i] -ceq '---') { break }
+                    $pair = $lines[$i] -split ':', 2
+                    if ($pair.Count -eq 2) { $metadata[$pair[0]] = $pair[1].Trim().Trim('"') }
+                }
+                if ($i -eq $lines.Length) { $metadata = @{} }
+            }
+            $name = ($relative -split '/')[-2]
+            $owned = $hashes[$relative] -ceq $digest -and $metadata['forge-generated'] -ceq 'true' -and $metadata['canonical-path'] -ceq $row.CanonicalPath -and $metadata['name'] -ceq $name
+            if (-not $owned) {
+                if ($relative -eq $short) { throw "custom or unproven workflow skill collision: $relative; move it aside, rerun setup, then reconcile custom content" }
+                Write-Host "PRESERVED_COMPAT: $relative (modified or unproven; reconcile the old name manually)"
+            } elseif ($relative -eq $old) { $retired[$relative] = $digest }
+        }
+    }
+    return $retired
+}
+
 function Write-InstallManifest {
     param([object[]]$Records)
     $out = Join-Path $Target ".forge\installed-files.tsv"
@@ -588,6 +634,7 @@ function Write-InstallManifest {
 
 Invoke-LegacyAliasCleanup "check"
 $rows = Read-ManagedManifest $Manifest
+$retiredWorkflowSkills = Get-RetiredWorkflowSkills $rows
 foreach ($row in $rows) {
     if ($row.Scope -ne $Scope -or @("all", $Platform) -notcontains $row.Platform) { continue }
     $source = Join-Path $RepoRoot ($row.Source -replace '/', '\')
@@ -626,6 +673,13 @@ if ($Scope -eq "project") {
     Merge-CodexHookEntries (Join-Path $RepoRoot "settings\codex-hooks.template.json") (Join-Path $Target ".codex\hooks.json")
     Set-CodexTomlBlock (Join-Path $RepoRoot "settings\codex-config.template.toml") (Join-Path $Target ".codex\config.toml") (Join-Path $Target ".mcp.json")
     Invoke-LegacyAliasCleanup "apply"
+    foreach ($relative in $retiredWorkflowSkills.Keys) {
+        Assert-NoLinkAncestor $Target $relative
+        $path = Join-Path $Target $relative
+        if ((Get-FileRevision $path) -cne $retiredWorkflowSkills[$relative]) { throw "workflow skill changed before cleanup: $relative" }
+        Remove-Item -LiteralPath $path
+        Write-Host "RETIRED_COMPAT: $relative"
+    }
 } else {
     foreach ($relative in @(".claude\settings.json", ".codex\config.toml", ".forge\goal-authorizations", ".forge\goal-captures")) { Assert-NoLinkAncestor $Target $relative }
     New-Item -ItemType Directory -Path (Join-Path $Target ".forge\goal-authorizations") -Force | Out-Null

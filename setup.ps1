@@ -1368,7 +1368,7 @@ if ($Upgrade) {
     Write-Host ":"
     Write-Host ""
     Write-Host "   /hooks       -> Should show: SessionStart, Stop, PreToolUse, PostToolUse, PreCompact, SubagentStop, ConfigChange"
-    Write-Host "   /help        -> Claude should show Forge commands; Codex should show the matching `$workflow-* skills"
+    Write-Host "   /help        -> Claude should show Forge commands; Codex should show matching skills such as `$fix-bug"
     Write-Host "   & '$ScriptDir\scripts\verify-runtime.ps1' discovery -ProjectRoot (Get-Location).Path"
     Write-Host ""
     Write-Host "2. " -NoNewline

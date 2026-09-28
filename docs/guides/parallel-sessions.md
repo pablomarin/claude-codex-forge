@@ -22,7 +22,7 @@ cd /project && claude
 
 # Terminal 2
 cd /project && codex
-# invoke the installed workflow-new-feature skill for api
+# invoke the installed new-feature skill for api
 ```
 
 Review and verification receipts are bound to both candidate identity and worktree identity.

@@ -5,7 +5,7 @@ instruction-discovery	codex	all	root-marker	none	-	-	-	AGENTS.md-pointer	path,re
 rule-discovery	claude	all	canonical-pointer	none	-	-	-	root-instructions	canonical-hash	complete-markdown	claude>=2.1.237	block
 rule-discovery	codex	all	canonical-pointer	none	-	-	-	root-instructions	canonical-hash	complete-markdown	codex>=0.144.1	block
 commands	claude	all	native-command	none	-	-	-	.claude/commands	path,revision	wrapper-result	claude>=2.1.237	block
-commands	codex	all	native-skill	none	-	-	-	.agents/skills/workflow-*	path,revision	wrapper-result	codex>=0.144.1	block
+commands	codex	all	native-skill	none	-	-	-	.agents/skills/*/SKILL.md	path,revision	wrapper-result	codex>=0.144.1	block
 skills	claude	all	native-skill	none	-	-	-	.claude/skills	path,revision	wrapper-result	claude>=2.1.237	block
 skills	codex	all	native-skill	none	-	-	-	.agents/skills	path,revision	wrapper-result	codex>=0.144.1	block
 session-start	claude	all	command-hook	none	-	-	-	SessionStart:.forge/hooks/session-start.sh|ps1	registry-hash	json-context	claude>=2.1.237	block
