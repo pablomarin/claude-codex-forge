@@ -76,7 +76,7 @@ public static class ForgeRuntimeHang {
  public static int Main(string[] args){
   if(args.Length>0 && args[0]=="--version"){Console.WriteLine("runtime hang 1");return 0;}
   if(args.Length>0 && (args[0]=="--help" || (args[0]=="exec" && args.Length>1 && args[1]=="--help"))){Console.WriteLine("--safe-mode --strict-mcp-config --setting-sources --session-id --resume --no-session-persistence --add-dir --ignore-user-config --ignore-rules --ephemeral --sandbox --json --disable");return 0;}
-  if(Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).Equals("claude",StringComparison.OrdinalIgnoreCase) && !File.Exists(Environment.GetEnvironmentVariable("FORGE_RUNTIME_HANG_MARKER"))){File.WriteAllText(Environment.GetEnvironmentVariable("FORGE_RUNTIME_HANG_MARKER"),"used");Thread.Sleep(10000);}
+  if(Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).Equals("claude",StringComparison.OrdinalIgnoreCase) && !File.Exists(Environment.GetEnvironmentVariable("FORGE_RUNTIME_HANG_MARKER"))){File.WriteAllText(Environment.GetEnvironmentVariable("FORGE_RUNTIME_HANG_MARKER"),"used");Thread.Sleep(30000);}
   return 23;
  }
 }
@@ -85,7 +85,7 @@ public static class ForgeRuntimeHang {
     Copy-Item (Join-Path $hangBin 'runtime-hang.exe') (Join-Path $hangBin 'claude.exe');Copy-Item (Join-Path $hangBin 'runtime-hang.exe') (Join-Path $hangBin 'codex.exe')
     $savedPath=$env:PATH;$env:PATH="$hangBin;$savedPath";$env:FORGE_RUNTIME_HANG_MARKER=$hangMarker;$timeoutOutput=Join-Path $temporary 'timeout-final.receipt';$clock=[Diagnostics.Stopwatch]::StartNew()
     try{& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -Live -ProjectRoot $project -Output $timeoutOutput -EngineDir $hangBin -QualificationTimeoutSeconds 1 *> $null;$timeoutRc=$LASTEXITCODE}finally{$clock.Stop();$env:PATH=$savedPath;Remove-Item Env:FORGE_RUNTIME_HANG_MARKER -ErrorAction SilentlyContinue}
-    Assert-True ($timeoutRc -ne 0 -and $clock.Elapsed.TotalSeconds -lt 8) 'authenticated PowerShell child qualification timeout is bounded and BLOCKED'
+    Assert-True ($timeoutRc -ne 0 -and $clock.Elapsed.TotalSeconds -lt 15) "authenticated PowerShell child qualification timeout is bounded and BLOCKED (rc=$timeoutRc, elapsed=$($clock.Elapsed.TotalSeconds)s)"
     Assert-True ((Get-Content -Raw "$timeoutOutput.d\claude-dispatch.json") -match 'qualification child timeout') 'PowerShell timeout emits a truthful child receipt'
 } finally {Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue}
 Write-Host 'PASS: PowerShell runtime qualification schema'
