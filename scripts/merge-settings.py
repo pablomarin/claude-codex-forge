@@ -235,6 +235,72 @@ def read_tsv(path: Path, expected_fields: int) -> list[list[str]]:
     return rows
 
 
+def workflow_skill_renames(repo_root: Path, target: Path, check_destinations: bool = True) -> dict[str, str]:
+    """Prove v6 wrapper ownership before replacing short names or retiring old ones."""
+    rows = read_tsv(repo_root / "manifests/managed-v6.tsv", 9)
+    renamed = [row for row in rows if row[0] == "tombstone" and row[4:7] == ["codex", "project", "forge-generated"]]
+    receipt = relative_path(".forge/installed-files.tsv")
+    reject_link_ancestors(target, receipt)
+    hashes: dict[str, Optional[str]] = {}
+    if (target / receipt).exists():
+        for path, digest, _revision in read_tsv(target / receipt, 3):
+            hashes[path] = None if path in hashes else digest
+    retired: dict[str, str] = {}
+    for row in renamed:
+        old, canonical = row[2], row[7]
+        short = old.replace("/workflow-", "/", 1)
+        for relative in ([short, old] if check_destinations else [old]):
+            path = relative_path(relative)
+            reject_link_ancestors(target, path)
+            full = target / path
+            if not full.exists():
+                continue
+            if not full.is_file():
+                raise RefreshBlocked(f"workflow skill is not a regular file: {relative}")
+            digest = sha256_path(full)
+            lines = full.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+            metadata: dict[str, str] = {}
+            if lines and lines[0] == "---" and "---" in lines[1:]:
+                for line in lines[1:lines.index("---", 1)]:
+                    key, separator, value = line.partition(":")
+                    if separator:
+                        metadata[key] = value.strip().strip('"')
+            owned = (hashes.get(relative) == digest
+                     and metadata.get("forge-generated") == "true"
+                     and metadata.get("canonical-path") == canonical
+                     and metadata.get("name") == path.parent.name)
+            if not owned:
+                if relative == short:
+                    raise RefreshBlocked(f"custom or unproven workflow skill collision: {relative}; move it aside, rerun setup, then reconcile custom content")
+                print(f"PRESERVED_COMPAT: {relative} (modified or unproven; reconcile the old name manually)")
+            elif relative == old:
+                retired[relative] = digest
+    return retired
+
+
+def cleanup_workflow_skills_cli(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="merge-settings.py cleanup-workflow-skills")
+    parser.add_argument("--repo-root", required=True, type=Path)
+    parser.add_argument("--target", required=True, type=Path)
+    parser.add_argument("--mode", required=True, choices=("check", "apply"))
+    args = parser.parse_args(argv)
+    try:
+        retired = workflow_skill_renames(args.repo_root, args.target, args.mode == "check")
+        if args.mode == "apply":
+            for relative, digest in retired.items():
+                path = relative_path(relative)
+                reject_link_ancestors(args.target, path)
+                full = args.target / path
+                if sha256_path(full) != digest:
+                    raise RefreshBlocked(f"workflow skill changed before cleanup: {relative}")
+                full.unlink()
+                print(f"RETIRED_COMPAT: {relative}")
+    except (RefreshBlocked, OSError, ValueError) as error:
+        print(f"BLOCKED: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def released_ownership(
     repo_root: Path,
 ) -> tuple[dict[str, tuple[str, str]], list[list[str]], list[list[str]]]:
@@ -1998,6 +2064,7 @@ def full_refresh(
     }
     journal: dict = {}
     try:
+        retired_workflows = workflow_skill_renames(repo_root, target) if scope == "project" else {}
         inventory = inventory_legacy(repo_root, target, scope, platform)
         report["PRESERVED"].extend(
             f"{relative} (modified seeded project content)"
@@ -2075,6 +2142,10 @@ def full_refresh(
         )
         legacy_deletions = stage_legacy_hook_delegates(stage, proven_legacy, scope, report)
         legacy_deletions.update(translated_state_sources)
+        if scope == "project":
+            if workflow_skill_renames(repo_root, target) != retired_workflows:
+                raise RefreshBlocked("workflow skill ownership changed during refresh; retry preview")
+            legacy_deletions.update(retired_workflows)
         state = stage / ".forge/local/state.md"
         if scope == "project" and (not state.is_file() or not state.read_bytes().startswith(STATE_SCHEMA)):
             raise RefreshBlocked("staged translated state failed v6 schema validation")
@@ -2637,6 +2708,8 @@ def merge_mcp(template, user):
 
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "cleanup-workflow-skills":
+        sys.exit(cleanup_workflow_skills_cli(sys.argv[2:]))
     if len(sys.argv) >= 2 and sys.argv[1] == "full-refresh":
         sys.exit(full_refresh_cli(sys.argv[2:]))
     if len(sys.argv) >= 2 and sys.argv[1] == "recover-full-refresh":

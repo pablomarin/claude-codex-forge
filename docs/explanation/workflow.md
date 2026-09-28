@@ -3,7 +3,7 @@
 How a feature goes from idea to merged PR.
 
 The diagram uses Claude Code's slash-command spellings for readability. Codex exposes the same
-canonical workflows as `$workflow-*` skills; see the [commands map](../reference/commands.md).
+canonical workflows as skills such as `$fix-bug`; see the [commands map](../reference/commands.md).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

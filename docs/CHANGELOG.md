@@ -2,6 +2,14 @@
 
 All notable changes to claude-codex-forge.
 
+**Unreleased changes**
+
+- Codex workflow skills now use short names such as `$fix-bug` and `$new-feature`,
+  matching Claude's command vocabulary. All seven formerly prefixed entry points,
+  current guides, setup messages, and capability metadata are updated; shared
+  workflow behavior is unchanged. Upgrades retire only proven unchanged old
+  wrappers, preserve custom content, and block collisions with custom short names.
+
 ## 6.2 — 2026-09-10
 
 **Expired reviewer login has an explicit recovery handoff.** Claude's structured expired-OAuth

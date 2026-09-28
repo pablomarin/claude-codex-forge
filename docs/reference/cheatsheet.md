@@ -45,7 +45,7 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 │   Hooks read .forge/local/state.md     ← shared checkpoint │
 │                                                             │
 │ THEN RUN ONE OF THESE COMMANDS:                             │
-│   Claude uses /...; Codex uses matching $workflow-* skills  │
+│   Claude uses /fix-bug; Codex uses $fix-bug                 │
 │   /new-feature <name>  ← Full workflow (Research→PRD→Plan)  │
 │   /fix-bug <name>      ← Debugging workflow (Systematic)    │
 │   /quick-fix <name>    ← Trivial only (< 3 files)           │

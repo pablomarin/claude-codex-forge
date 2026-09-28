@@ -28,6 +28,7 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-resource-discipline.sh"
     "$REPO_ROOT/tests/template/test-contracts.sh"
     "$REPO_ROOT/tests/template/test-workflow-parity.sh"
+    "$REPO_ROOT/tests/template/test-codex-workflow-names.sh"
     "$REPO_ROOT/tests/template/test-skill-pressure-schema.sh"
     "$REPO_ROOT/tests/template/test-worktree-lifecycle.sh"
     "$REPO_ROOT/tests/template/test-workflow-state.sh"

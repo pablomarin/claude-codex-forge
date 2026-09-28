@@ -1267,7 +1267,7 @@ assert_file_exists "$ROOT_CASE/.forge/rules/critical-rules.md" "canonical rule i
 RULE_COPIES=$(find "$ROOT_CASE/.forge" "$ROOT_CASE/.claude" "$ROOT_CASE/.agents" "$ROOT_CASE/.codex" -type f -name critical-rules.md 2>/dev/null | wc -l | tr -d ' ')
 assert_equals "$RULE_COPIES" "1" "critical-rules.md has one regular-file policy copy"
 assert_contains "$ROOT_CASE/.claude/commands/new-feature.md" '.forge/workflows/new-feature.md' "Claude command reads canonical workflow"
-assert_contains "$ROOT_CASE/.agents/skills/workflow-new-feature/SKILL.md" '.forge/workflows/new-feature.md' "Codex skill reads canonical workflow"
+assert_contains "$ROOT_CASE/.agents/skills/new-feature/SKILL.md" '.forge/workflows/new-feature.md' "Codex skill reads canonical workflow"
 assert_contains "$ROOT_CASE/.gitignore" '.forge/local/' "volatile v6 state is gitignored"
 assert_not_contains "$ROOT_CASE/setup.log" 'CODEX_MCP_PARITY: BLOCKED' "unchanged built-in MCP source is covered without duplicate parity warnings"
 BUILTIN_CODEX_MCPS=$(grep -c '^\[mcp_servers\.' "$ROOT_CASE/.codex/config.toml")

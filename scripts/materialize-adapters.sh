@@ -295,6 +295,27 @@ legacy_alias_cleanup() {
     fi
 }
 
+workflow_skill_cleanup() {
+    [ "$MATERIALIZE_SCOPE" = project ] || return 0
+    if command -v python3 >/dev/null 2>&1; then
+        python3 "$MATERIALIZE_REPO/scripts/merge-settings.py" cleanup-workflow-skills \
+            --repo-root "$MATERIALIZE_REPO" --target "$MATERIALIZE_TARGET" --mode "$1"
+    else
+        [ "$1" = check ] || return 0
+        local kind source destination platform host scope ownership canonical revision
+        while IFS=$'\t' read -r kind source destination platform host scope ownership canonical revision; do
+            [ "$kind:$host:$ownership" = tombstone:codex:forge-generated ] || continue
+            for destination in "$destination" "${destination/\/workflow-/\/}"; do
+                assert_no_link_ancestors "$MATERIALIZE_TARGET" "$destination" || return 1
+                if [ -e "$MATERIALIZE_TARGET/$destination" ]; then
+                    echo 'BLOCKED: Python 3 is required to reconcile existing Codex workflow skills safely' >&2
+                    return 1
+                fi
+            done
+        done < "$MATERIALIZE_MANIFEST"
+    fi
+}
+
 primary_checkout_for() {
     git -C "$1" worktree list --porcelain 2>/dev/null | awk '/^worktree / {sub(/^worktree /, ""); print; exit}'
 }
@@ -401,6 +422,7 @@ materialize_scope() {
         [ -f "$MATERIALIZE_TARGET/.forge/local/state.md" ] || cp "$MATERIALIZE_REPO/state.template.md" "$MATERIALIZE_TARGET/.forge/local/state.md"
         materialize_project_config
         legacy_alias_cleanup apply
+        workflow_skill_cleanup apply
     else
         assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/goal-authorizations"
         assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/goal-captures"
@@ -471,6 +493,7 @@ MATERIALIZE_DIAGNOSTIC_HOME=${FORGE_DIAGNOSTIC_HOME:-${HOME:-}}
 MATERIALIZE_MANIFEST="$MATERIALIZE_REPO/manifests/managed-v6.tsv"
 load_managed_manifest "$MATERIALIZE_MANIFEST"
 legacy_alias_cleanup check
+workflow_skill_cleanup check
 materialize_scope
 
 echo "INSTALLATION: MATERIALIZED"

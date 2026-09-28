@@ -309,7 +309,7 @@ assert_file_missing "$S4/.claude/local/state.md" "translated v5 state source is 
 assert_file_exists "$S4/.claude/commands/new-feature.md" "Claude adapter materialized"
 assert_contains "$S4/.claude/commands/new-feature.md" "canonical-path:" \
     "exact legacy command is replaced by the thin v6 adapter"
-assert_file_exists "$S4/.agents/skills/workflow-new-feature/SKILL.md" "Codex adapter materialized"
+assert_file_exists "$S4/.agents/skills/new-feature/SKILL.md" "Codex adapter materialized"
 assert_contains "$S4/refresh.log" "CREATED" "categorized CREATED report emitted"
 assert_contains "$S4/refresh.log" "REWRITTEN" "categorized REWRITTEN report emitted"
 assert_contains "$S4/refresh.log" "PRESERVED" "categorized PRESERVED report emitted"
