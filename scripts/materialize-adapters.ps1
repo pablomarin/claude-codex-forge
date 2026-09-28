@@ -604,7 +604,7 @@ function Get-RetiredWorkflowSkills([object[]]$Rows) {
             if ($lines.Length -gt 0 -and $lines[0] -ceq '---') {
                 for ($i = 1; $i -lt $lines.Length; $i++) {
                     if ($lines[$i] -ceq '---') { break }
-                    $pair = $lines[$i].Split(@(':'), 2)
+                    $pair = $lines[$i] -split ':', 2
                     if ($pair.Count -eq 2) { $metadata[$pair[0]] = $pair[1].Trim().Trim('"') }
                 }
                 if ($i -eq $lines.Length) { $metadata = @{} }
