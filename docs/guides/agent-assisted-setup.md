@@ -10,6 +10,12 @@ The agent must preserve their exact output and must not reproduce or bypass thei
 
 ## Start in the target repository
 
+Keep two folders distinct: the **Forge clone** contains `setup.sh` / `setup.ps1`; the **target
+project** is where you want Forge installed. Do not install into the Forge clone itself. Clone
+Forge once using [Getting Started](../getting-started.md#1-clone-forge), or update your existing
+clone with `git pull --ff-only` from that clone before installing/upgrading a project. Stop on a
+failed pull; do not discard local changes. A new project needs a folder and `git init` first.
+
 macOS or Linux:
 
 ```bash
@@ -31,19 +37,32 @@ Then paste this prompt, replacing the Forge checkout path:
 ```text
 Install or upgrade Forge in this repository using the Forge checkout at <path-to-forge>.
 
-1. Inspect the repository and choose the correct installer mode:
-   - fresh project: normal project setup;
+1. Confirm the target Git root and the separate Forge checkout path. Inspect git status; preserve
+   uncommitted work and use a dedicated setup/update branch. Confirm the Forge checkout revision;
+   if it needs updating, propose that separately and stop if the update fails.
+2. Inspect the repository and choose the correct installer mode:
+   - fresh project: normal project setup (a new or existing app with no agent harness);
    - existing Forge v6: routine update;
    - Forge v5, Claude-only, Codex-only, mixed, custom, or unknown: full reconciliation.
-2. Run the read-only full-refresh preview first for Forge v5, Claude-only, Codex-only, mixed, custom, or unknown harnesses.
-3. Preserve the exact installer output and explain every result or blocker in plain language.
-4. Do not bypass ownership blockers or guess which project content may be removed.
-5. Keep shared project knowledge in docs/agent-context.md and keep CLAUDE.md and AGENTS.md as thin
+   A custom CLAUDE.md or AGENTS.md counts as existing agent configuration. A v6 layout stamp alone
+   does not prove a mixed/customized harness is safe for routine update; preview if uncertain.
+3. Run the read-only full-refresh preview first for Forge v5, Claude-only, Codex-only, mixed, custom, or unknown harnesses.
+4. Preserve the exact installer output and explain every result or blocker in plain language.
+5. Do not bypass ownership blockers or guess which project content may be removed.
+6. Keep shared project knowledge in docs/agent-context.md and keep CLAUDE.md and AGENTS.md as thin
    native discovery adapters.
-6. If a blocker appears to describe valid Forge-generated output, stop and report a possible Forge
+7. If a blocker appears to describe valid Forge-generated output, stop and report a possible Forge
    upgrader defect instead of working around it.
-7. Show the proposed command and reconciliation changes. Ask for my approval before modifying files or running the non-preview command.
-8. After approval, run the deterministic installer. Review the final Git diff and per-host readiness diagnostics.
+8. Show the proposed command and reconciliation changes. Ask for my approval before modifying files or running the non-preview command.
+9. After approval, run the deterministic installer from the target Git root using the full path
+   to setup.sh or setup.ps1 in the Forge clone. Stop on any failed command or BLOCKED migration;
+   execute full reconciliation only after its preview says UPGRADE: READY.
+10. Review the final Git diff and per-host readiness diagnostics. Run the documented discovery
+    check, but do not call it live runtime certification. Follow RUNTIME_QUALIFICATION guidance;
+    report installed files and each host's readiness separately, including unverified checks.
+11. Treat global setup as a separate home-directory change requiring separate approval. Preserve
+    existing global configuration and preview legacy/custom/unknown global setups first. Do not
+    update sibling worktrees or commit/push the project changes without my authorization.
 ```
 
 Existing repository instructions are migration input during this operation. They do not authorize
@@ -58,6 +77,19 @@ ready.
 | existing Forge v6 | `setup.sh --upgrade` or `setup.ps1 -Upgrade` |
 | Forge v5, Claude-only, Codex-only, mixed, custom, or unknown | Preview with `setup.sh -f --dry-run` or `setup.ps1 -Force -DryRun`; execute only after `UPGRADE: READY` |
 | global harness | `setup.sh --global` or `setup.ps1 -Global`; approve home-directory changes separately |
+
+These are mode summaries, not commands to run from the Forge clone. The complete target-directory
+commands are in [Getting Started](../getting-started.md). First global setup is for an absent
+harness; use a separate global preview for legacy/custom/unknown configurations. Do not combine
+`--upgrade` with `-f` or `--dry-run`.
+
+## What a successful handoff tells you
+
+The agent should name the target project, Forge source revision, selected mode, files changed and
+preserved, verification results, and any remaining host readiness blocker. A ready **preview**
+means no installation has happened. `INSTALLATION: MATERIALIZED` means files exist; it is not
+proof that either authenticated host or its hooks work. If migration is blocked, the next step is
+the named ownership/configuration decision—not repeated force attempts.
 
 ## Direct CLI path
 

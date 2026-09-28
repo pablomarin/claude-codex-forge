@@ -174,8 +174,13 @@ nonce, persistent turn count, evidence, and next step survive a host switch.
 
 ## Quick start
 
-Prerequisites: Git 2.23+ and at least one authenticated supported host. Both adapters are installed
-even if only one CLI is currently available.
+Prerequisites: Git 2.23+ and at least one authenticated supported host. On macOS/Linux, install
+Python 3 (`python3` on PATH) before first setup or any upgrade. Windows requires PowerShell 5.1+,
+plus Python 3 for full reconciliation. Both adapters are installed even if only one CLI is available.
+
+**Two different folders:** the **Forge clone** holds the installer; your **project repository**
+receives Forge. Run project setup from your project's Git root, calling the installer by its full
+path. Do not run project installation inside the Forge clone itself.
 
 ### Recommended for people: install with Claude Code or Codex
 
@@ -195,29 +200,39 @@ current state:
 
 | Repository state | Use |
 | --- | --- |
-| New repository with no agent harness | Normal project setup: `setup.sh -p "My Project"` or `setup.ps1 -Project "My Project"` |
+| First installation: new or existing app with no agent harness | Normal project setup: `setup.sh -p "My Project"` or `setup.ps1 -Project "My Project"` |
 | Existing Forge v6 installation | Managed update: `setup.sh --upgrade` or `setup.ps1 -Upgrade` |
 | Forge v5, Claude-only files, Codex-only files, a mixed tree, or another/custom harness | Read-only inventory first: `setup.sh -f --dry-run` or `setup.ps1 -Force -DryRun` |
 | Not sure what is installed | Use the same read-only full-refresh preview; it writes nothing |
 
-For an existing harness, resolve every printed blocker and rerun the preview. Execute `-f` /
+“First installation” means no existing agent instructions, settings, hooks, or workflows—not an
+empty application. A project with its own `CLAUDE.md`, `AGENTS.md`, or custom agent setup belongs
+in the preview-first row. If unsure, preview; do not guess from the app's age.
+
+Before changing an existing project, save ongoing work in a commit or backup and use a dedicated
+setup/update branch. Stop sessions that could edit the same setup files. For a legacy/custom
+preview, resolve every printed blocker and rerun the preview. Execute `-f` /
 `-Force` only after it reports `UPGRADE: READY`. Forge will not silently stack v6 beside
 unresolved legacy or custom machinery.
 
 ### Fresh installation — macOS and Linux
 
+Use a separate project folder that is already a Git repository (`git init` there if needed).
+If you already cloned Forge, reuse/update that clone instead of cloning over it. Run each command
+separately and stop on any error; existing global configuration uses the separate preview below.
+
 ```bash
 git clone https://github.com/pablomarin/claude-codex-forge.git ~/claude-codex-forge
 chmod +x ~/claude-codex-forge/setup.sh
 
-# Once per machine
+# First global setup only; preview existing global agent configuration separately.
 ~/claude-codex-forge/setup.sh --global
 
 # Once per fresh project
 cd /path/to/your/project
 ~/claude-codex-forge/setup.sh -p "My Project"
 
-# Confirm installed discovery and trust surfaces
+# Check installed discovery (not full runtime readiness)
 ~/claude-codex-forge/scripts/verify-runtime.sh discovery --project-root "$(pwd -P)"
 
 # Work in either host
@@ -231,19 +246,57 @@ codex
 ```powershell
 git clone https://github.com/pablomarin/claude-codex-forge.git $HOME\claude-codex-forge
 
-# Once per machine
+# First global setup only; preview existing global agent configuration separately.
 & $HOME\claude-codex-forge\setup.ps1 -Global
 
 # Once per fresh project
 Set-Location C:\path\to\your-project
 & $HOME\claude-codex-forge\setup.ps1 -Project "My Project"
 
-# Confirm installed discovery and trust surfaces
+# Check installed discovery (not full runtime readiness)
 & $HOME\claude-codex-forge\scripts\verify-runtime.ps1 discovery -ProjectRoot (Get-Location).Path
 ```
 
 See [Getting Started](docs/getting-started.md) for authentication, trust prompts, one-engine use,
 and runtime qualification.
+
+### Next time — update an existing Forge v6 project
+
+Update the installer clone first, then run it **from your project**. Use a clean update branch;
+run each command separately and stop if the pull or setup fails.
+
+```bash
+git -C ~/claude-codex-forge pull --ff-only
+cd /path/to/your/project
+~/claude-codex-forge/setup.sh --upgrade
+```
+
+```powershell
+git -C $HOME\claude-codex-forge pull --ff-only
+Set-Location C:\path\to\your-project
+& $HOME\claude-codex-forge\setup.ps1 -Upgrade
+```
+
+Pulling Forge alone does **not** update your project. If you have v5, customizations to the
+managed harness, mixed versions, or do not know the installed version, use the
+[preview-first migration instructions](docs/getting-started.md#4c-migrate-older-custom-or-unknown-harnesses).
+Do not combine `--upgrade` with `-f` or `--dry-run`.
+
+### How to know you are done
+
+- **Preview says `UPGRADE: READY`:** a safe migration plan was found; nothing has been installed yet.
+- **`UPGRADE: BLOCKED` or a command fails:** stop. Preserve the report, resolve its named issue,
+  and rerun the preview. Do not delete custom files or use force as a bypass.
+- **`CONFIG_READINESS: BLOCKED` or `CODEX_CONFIG_READINESS: BLOCKED`:** configuration is incomplete,
+  even if setup exits zero or prints `MATERIALIZED`. Resolve the named prerequisite or merge issue,
+  then rerun the appropriate setup/update command and check the diagnostics again.
+- **`INSTALLATION: MATERIALIZED`:** files are installed. Review `git diff` and per-host diagnostics,
+  open the host in that project, and complete its normal authentication/trust steps.
+- **`RUNTIME_READY: BLOCKED`:** follow the reported qualification instructions; reinstalling is not
+  proof of a working runtime. Discovery alone does not test live hooks or authenticated reviewers.
+
+After verification, commit the reviewed harness changes in your project; `.forge/local/` stays
+gitignored. A project update does not update global configuration or sibling worktrees.
 
 ## What setup installs
 
@@ -333,16 +386,21 @@ For interactive use, start with the [agent-assisted setup guide](docs/guides/age
 The table below is the direct CLI reference for automation, offline use, and troubleshooting; both
 paths invoke the same installer.
 
+Run these commands from the **target project root**. The examples assume the installer clone is
+at `~/claude-codex-forge` (Windows: `$HOME\claude-codex-forge`); substitute its real location.
+Avoid ambiguous `./setup.sh -f` or `./setup.ps1 -Force` commands: `./` means the current folder,
+not your Forge clone.
+
 | Task | macOS/Linux | Windows PowerShell |
 | --- | --- | --- |
-| Fresh project | `setup.sh -p "My Project"` | `setup.ps1 -Project "My Project"` |
-| Global install | `setup.sh --global` | `setup.ps1 -Global` |
-| Update an existing v6 install | `./setup.sh --upgrade` | `./setup.ps1 -Upgrade` |
-| Preview a full project reconciliation | `./setup.sh -f --dry-run` | `./setup.ps1 -Force -DryRun` |
-| Execute a ready project reconciliation | `./setup.sh -f` | `./setup.ps1 -Force` |
-| Preview a global reconciliation | `./setup.sh --global -f --dry-run` | `./setup.ps1 -Global -Force -DryRun` |
-| Execute a global reconciliation | `./setup.sh --global -f` | `./setup.ps1 -Global -Force` |
-| Playwright scaffold | `setup.sh -t fullstack --with-playwright` | `setup.ps1 -Tech fullstack -WithPlaywright` |
+| First project installation (no harness) | `~/claude-codex-forge/setup.sh -p "My Project"` | `& $HOME\claude-codex-forge\setup.ps1 -Project "My Project"` |
+| First global install (no harness) | `~/claude-codex-forge/setup.sh --global` | `& $HOME\claude-codex-forge\setup.ps1 -Global` |
+| Update an existing v6 install | `~/claude-codex-forge/setup.sh --upgrade` | `& $HOME\claude-codex-forge\setup.ps1 -Upgrade` |
+| Preview a full project reconciliation | `~/claude-codex-forge/setup.sh -f --dry-run` | `& $HOME\claude-codex-forge\setup.ps1 -Force -DryRun` |
+| Execute a ready project reconciliation | `~/claude-codex-forge/setup.sh -f` | `& $HOME\claude-codex-forge\setup.ps1 -Force` |
+| Preview a global reconciliation | `~/claude-codex-forge/setup.sh --global -f --dry-run` | `& $HOME\claude-codex-forge\setup.ps1 -Global -Force -DryRun` |
+| Execute a ready global reconciliation | `~/claude-codex-forge/setup.sh --global -f` | `& $HOME\claude-codex-forge\setup.ps1 -Global -Force` |
+| Playwright scaffold (first install only) | `~/claude-codex-forge/setup.sh -t fullstack --with-playwright` | `& $HOME\claude-codex-forge\setup.ps1 -Tech fullstack -WithPlaywright` |
 
 Use `--upgrade` for a routine update of an existing v6 install. Use `-f` / `--force` for an
 ownership-aware full installation or reconciliation from any state, and preview it first when the
