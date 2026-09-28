@@ -5,8 +5,12 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 $names = @('finish-branch', 'fix-bug', 'new-feature', 'prd-create', 'prd-discuss', 'quick-fix', 'review-pr-comments')
 function Assert-True([bool]$Value, [string]$Message) { if (-not $Value) { throw $Message }; Write-Host "PASS $Message" }
 function Install-Fixture {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts/materialize-adapters.ps1') -RepoRoot $root -Target $temporary *> (Join-Path $temporary 'install.log')
-    return $LASTEXITCODE
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts/materialize-adapters.ps1') -RepoRoot $root -Target $temporary *> (Join-Path $temporary 'install.log')
+        return $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousPreference }
 }
 New-Item -ItemType Directory -Path $temporary | Out-Null
 try {
