@@ -35,6 +35,28 @@ criterion.
 - Keep developer state, receipts, and local memories under `.forge/local/`; never overwrite them
   during setup. Keep project-owned durable memory under `.forge/memory/`.
 
+## Branch Naming
+
+Name every task branch by the work it contains, regardless of the active engine. Use only these
+prefixes, followed by a short lowercase, hyphen-separated slug:
+
+| Work type | Branch name |
+| --- | --- |
+| New feature | `feat/<slug>` |
+| Bug fix | `fix/<slug>` |
+| Quick fix | `quick-fix/<slug>` |
+| Maintenance, tooling, or documentation upkeep | `chore/<slug>` |
+
+Choose the prefix for the overall task when starting it; a small documentation correction handled
+as a quick fix uses `quick-fix/`. Do not use engine or tool prefixes such as `codex/`, `claude/`, or
+`agent/`. This convention applies to Claude Code, Codex, and any other host, including native
+branch/worktree creation; a host's suggested default is not the project's naming convention.
+
+A host switch keeps the existing branch name and worktree. Adding approved work to the same task
+does not require another branch or a prefix change. Do not rename a shared or published branch
+automatically: report a nonconforming name and obtain the developer's approval to reconcile it.
+Protected integration branches such as `main` are not task branches and must not be renamed.
+
 ## Reviewer Transport Authorization
 
 `FORGE_REVIEW_TRANSPORT_AUTHORIZED` applies only to the ordinary read-only review profile; it does
