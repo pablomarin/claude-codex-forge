@@ -88,7 +88,7 @@ $stateLocalDir = ".forge/local"
 if (($stateMd -replace '\\', '/') -match '/\.claude/local/state\.md$') { $stateLocalDir = ".claude/local" }
 
 # Stop is self-sufficient when the side channel is missing or older than state.
-if ($stateLocalDir -eq ".forge/local" -and (Test-Path -LiteralPath $stateMd -PathType Leaf)) {
+if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd) -and (Test-Path -LiteralPath $stateMd -PathType Leaf)) {
     $fp = Join-Path $stateLocalDir "forge-goal-last-fingerprint"
     $needsEvidence = -not (Test-Path -LiteralPath $fp -PathType Leaf)
     if (-not $needsEvidence) { $needsEvidence = (Get-Item -LiteralPath $stateMd).LastWriteTimeUtc -gt (Get-Item -LiteralPath $fp).LastWriteTimeUtc }
@@ -153,7 +153,7 @@ function Publish-ForgeNoClobber([string]$Path,[byte[]]$Bytes,[string]$Label) {
     (Get-Item -LiteralPath $Path).IsReadOnly=$true
 }
 function Invoke-ForgeGoalChargeTurn {
-    if ($stateLocalDir -ne ".forge/local" -or -not (Test-Path -LiteralPath $stateMd -PathType Leaf)) { return }
+    if ($stateLocalDir -ne ".forge/local" -or [string]::IsNullOrEmpty($stateMd) -or -not (Test-Path -LiteralPath $stateMd -PathType Leaf)) { return }
     $rawState=(Get-Content -LiteralPath $stateMd -Raw) -replace "`r",""; $lines=$rawState -split "`n"; $inside=$false; $goal=@{}
     foreach($line in $lines){if($line -match '^## /goal session$'){$inside=$true;continue};if($inside -and $line -match '^## '){break};if($inside -and $line -match '^\|\s*([^|]+?)\s*\|\s*([^|]*?)\s*\|'){$goal[$matches[1].Trim().ToLowerInvariant()]=$matches[2].Trim()}}
     $nonce=[string]$goal["nonce"]; if(-not $nonce -or $nonce -eq "<uuid-v4-lowercase>"){return}; $objective=[string]$goal["objective_hash"]
@@ -267,7 +267,7 @@ function Invoke-ForgeGoalStuckCheck {
 
     # Only proceed if /forge-goal is active: state.md must have a non-empty
     # nonce in the ## /goal session table.
-    if (-not (Test-Path $stateMd)) { return }
+    if ([string]::IsNullOrEmpty($stateMd) -or -not (Test-Path -LiteralPath $stateMd)) { return }
 
     $raw = Get-Content $stateMd -Raw -ErrorAction SilentlyContinue
     if ([string]::IsNullOrEmpty($raw)) { return }

@@ -144,7 +144,7 @@ _TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null || true)
 HOOK_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)
 CONFIG_CHECK="$HOOK_DIR/check-config-change.sh"
 FORGE_VERSION=$(head -1 .forge/version 2>/dev/null | tr -d '[:space:]')
-if [ "$FORGE_VERSION" = 6 ] && [ -f "$CONFIG_CHECK" ]; then
+if printf '%s\n' "$FORGE_VERSION" | grep -Eq '^6(\.[0-9]+)?$' && [ -f "$CONFIG_CHECK" ]; then
     if ! printf '{}' | bash "$CONFIG_CHECK" --verify-boundary "$(pwd)" >/dev/null 2>&1; then
         echo "FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -f and inspect the diff before shipping." >&2
         exit 2

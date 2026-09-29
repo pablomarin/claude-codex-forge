@@ -38,6 +38,22 @@ param(
 # Script directory (where templates live)
 $ScriptDir = $PSScriptRoot
 
+function Get-ForgeVersion {
+    try {
+        $top = Select-String -Path (Join-Path $ScriptDir "docs/CHANGELOG.md") -Pattern '^##\s' -List 2>$null
+        if ($top -and $top.Line -match '^##\s+([0-9]+\.[0-9]+)') {
+            $v = $Matches[1]
+            if ($v -match '^\d+\.\d+$') { return $v }
+        }
+    } catch {}
+    return "unknown"
+}
+$ForgeVersion = Get-ForgeVersion
+if ($ForgeVersion -notmatch '^\d+\.\d+$') {
+    [Console]::Error.WriteLine('BLOCKED: published Forge release is unavailable')
+    exit 2
+}
+
 if ($Migrate) {
     [Console]::Error.WriteLine("ERROR: -Migrate was retired in Forge 6; no files changed. Run .\setup.ps1 -Force -DryRun.")
     exit 1
@@ -125,8 +141,8 @@ if ($FullRefresh) {
         [Console]::Error.WriteLine("BLOCKED: full-refresh helper not found: $refreshHelper")
         exit 1
     }
-    if ($Global) { $refreshArguments = @{ Target = $HOME; Scope = "global" } }
-    else { $refreshArguments = @{ Target = (Get-Location).Path; Scope = "project" } }
+    if ($Global) { $refreshArguments = @{ Target = $HOME; Scope = "global"; ReleaseVersion = $ForgeVersion } }
+    else { $refreshArguments = @{ Target = (Get-Location).Path; Scope = "project"; ReleaseVersion = $ForgeVersion } }
     if ($DryRun) { $refreshArguments["DryRun"] = $true }
     & $refreshHelper @refreshArguments
     if (-not $Global) {
@@ -139,7 +155,13 @@ function Test-V6PreflightNoLegacy {
     param([string]$Root, [ValidateSet("project", "global")][string]$Scope)
     $version = Join-Path $Root ".forge\version"
     if (Test-Path $version) {
-        if (((Get-Content -Raw $version).Trim()) -ne "6") { throw "BLOCKED: unsupported Forge layout version at $version" }
+        $installedVersion = ((Get-Content -Raw $version).Trim())
+        if ($installedVersion -eq "6") { return }
+        if ($installedVersion -match '^(\d+)\.(\d+)$') {
+            if ($Matches[1] -ne "6") { throw "BLOCKED: unsupported Forge layout major $($Matches[1])" }
+            return
+        }
+        throw "BLOCKED: malformed Forge release at $version"
         return
     }
     if ($Scope -eq "project" -and (Test-Path -LiteralPath (Join-Path $Root "CONTINUITY.md"))) {
@@ -206,44 +228,6 @@ try {
 } catch {
     [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
-}
-
-# --- Forge version stamp (advisory drift detection) ------------------------
-# Mirror of setup.sh: read the Forge version from the top "## X.YY" line of its
-# CHANGELOG (single source of truth). Validated -> "unknown" on a non-match.
-function Get-ForgeVersion {
-    # Inspect ONLY the first "## " heading (mirror of setup.sh forge_version): if it
-    # isn't a bare X.Y version, fail open to "unknown" rather than scanning past a
-    # "## [Unreleased]" to a stale older release (Codex code-review P2-1).
-    try {
-        $top = Select-String -Path (Join-Path $ScriptDir "docs/CHANGELOG.md") -Pattern '^##\s' -List 2>$null
-        if ($top -and $top.Line -match '^##\s+([0-9]+\.[0-9]+)') {
-            $v = $Matches[1]
-            if ($v -match '^\d+\.\d+$') { return $v }
-        }
-    } catch {}
-    return "unknown"
-}
-$ForgeVersion = Get-ForgeVersion
-
-# Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
-# ordinary install / -Upgrade / -Global run. The authoritative -Force path and
-# retired -Migrate command exit above without reaching this code. Placed before
-# the -Global branch so both ordinary modes hit it. Fail-open via
-# try/catch + $HOME guard so a stamp-write failure never aborts setup.
-if ($HOME) {
-    try {
-        $machineClaude = Join-Path $HOME ".claude"
-        $machineStamp  = Join-Path $machineClaude ".forge-version"
-        if ($ForgeVersion -ne "unknown") {
-            if (-not (Test-Path $machineClaude)) { New-Item -ItemType Directory -Path $machineClaude -Force | Out-Null }
-            [System.IO.File]::WriteAllText($machineStamp, "$ForgeVersion`n")
-        } else {
-            # Unparseable version → clear any stale machine stamp (mirror of setup.sh;
-            # Codex code-review iter-3 P2) so session-start fails open.
-            Remove-Item $machineStamp -Force -ErrorAction SilentlyContinue
-        }
-    } catch {}
 }
 
 # Tracks template-copy failures so the project version pin is only written after a
@@ -314,7 +298,7 @@ function Copy-TemplateFile {
 # GLOBAL SETUP (-Global flag)
 # ============================================================================
 if ($Global) {
-    & (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target $HOME -Scope global -Platform windows
+    & (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target $HOME -Scope global -Platform windows -ReleaseVersion $ForgeVersion
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "GLOBAL_HARNESS: MATERIALIZED"
     Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
@@ -711,35 +695,19 @@ Write-Color "Copying configuration files..." "Yellow"
 $hadClaude = Test-Path "CLAUDE.md"
 $hadContinuity = Test-Path "CONTINUITY.md"
 
-# Forge version pin: capture PRE-state for the advisory + lie-prevention (mirror of setup.sh).
-#  - $prevForgeVersion: the project's existing pin (for the drift warning).
-#  - $hadForgeMachinery: did Forge machinery already exist? (.claude/settings.json sentinel)
-#    so a plain non-force rerun that SKIPS existing files never fabricates a pin.
 $prevForgeVersion = ""
 try {
-    if (Test-Path ".claude/.forge-version") {
-        $prevForgeVersion = ((Get-Content ".claude/.forge-version" -Raw -ErrorAction SilentlyContinue)).Trim()
+    if (Test-Path ".forge/version") {
+        $prevForgeVersion = ((Get-Content ".forge/version" -Raw -ErrorAction SilentlyContinue)).Trim()
     }
 } catch {}
-$hadForgeMachinery = Test-Path ".claude/settings.json"
 
-# Setup-time advisory warning: -Upgrade rewrites machinery + advances the pin,
-# so warn if it differs. Numeric [version] compare (NOT string — 5.50 vs 5.9). Advisory.
-$forgeDriftWarn = ""
-if ($ForgeVersion -ne "unknown" -and ($prevForgeVersion -match '^\d+\.\d+$') -and $prevForgeVersion -ne $ForgeVersion -and ($Upgrade -or $Force)) {
-    $isDowngrade = $false
-    try { $isDowngrade = ([version]("$ForgeVersion.0") -lt [version]("$prevForgeVersion.0")) } catch {}
-    if ($isDowngrade) {
-        $forgeDriftWarn = "i This project's .claude/ was pinned to Forge $prevForgeVersion; you're running $ForgeVersion. This run will DOWNGRADE the project's .claude/ to $ForgeVersion. That's a shared change - other clones of this repo will pull it."
-    } else {
-        $forgeDriftWarn = "i This project's .claude/ was pinned to Forge $prevForgeVersion; you're running $ForgeVersion. This run will UPGRADE the project's .claude/ to $ForgeVersion. That's a shared change - other clones of this repo will pull it."
-    }
-    Write-Color $forgeDriftWarn "Yellow"
-}
-
-& (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows
+& (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows -ReleaseVersion $ForgeVersion
 Write-NativeGoalCollisions (Get-Location).Path
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($prevForgeVersion -and $prevForgeVersion -ne $ForgeVersion) {
+    Write-Host "FORGE_VERSION_CHANGE: $prevForgeVersion -> $ForgeVersion"
+}
 
 # Retain the v5 implementation text for Task 3 ownership recognition, but do
 # not execute it beside the v6 materialized layout.
@@ -1202,33 +1170,12 @@ else {
 # The v6 marker materializer owns only the bounded Forge block. Text outside
 # that block is user-owned bytes and is never subject to project-name rewriting.
 
-# Forge version pin (project) — WRITE LATE, after all .claude/ copies succeeded, and
-# only when machinery was actually (re)written this run (-Upgrade, or no
-# machinery existed before). Never advance the pin on a skipped non-force rerun.
-if ((Test-Path ".claude/settings.json") -and ($script:ForgeCopyErrors -eq 0) -and ($Force -or $Upgrade -or (-not $hadForgeMachinery))) {
-    # Machinery (re)written this run AND every copy succeeded ($script:ForgeCopyErrors
-    # -eq 0 — the PowerShell analog of setup.sh's `set -e` abort; the settings.json
-    # post-condition is a second belt) — so the pin reflects what's actually on disk.
-    if ($ForgeVersion -ne "unknown") {
-        try { [System.IO.File]::WriteAllText((Join-Path (Get-Location) ".claude/.forge-version"), "$ForgeVersion`n") } catch {}
-    } else {
-        # Version unparseable but machinery WAS rewritten → clear the stale pin so it
-        # can't lie (mirror of setup.sh; Codex code-review iter-2 P2).
-        Remove-Item (Join-Path (Get-Location) ".claude/.forge-version") -Force -ErrorAction SilentlyContinue
-    }
-}
-
 Write-Host ""
 if ($Upgrade) {
     Write-Color "============================================" "Green"
     Write-Color "  Upgrade Complete!" "Green"
     Write-Color "============================================" "Green"
     Write-Host ""
-    # Re-surface the version-drift advisory so it isn't lost in scrollback.
-    if ($forgeDriftWarn) {
-        Write-Color $forgeDriftWarn "Yellow"
-        Write-Host ""
-    }
     Write-Color "What was updated:" "Yellow"
     Write-Host ""
     Write-Host "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and state template"

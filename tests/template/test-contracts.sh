@@ -839,37 +839,28 @@ assert_contains "$SETUP_SH" '-f --dry-run' "setup.sh points preserved continuity
 assert_contains "$SETUP_PS1" '-Force -DryRun' "setup.ps1 points preserved continuity to preview"
 
 # ---------------------------------------------------------------------------
-# Contract: Forge version stamp + advisory drift warning (v5.51) — parity.
-# Both installers write `.claude/.forge-version` (project pin) + a machine stamp,
-# read the version from the CHANGELOG top line, and warn (advisory) on mismatch.
-# Both session-start hooks emit a direction-aware drift line. Advisory only:
-# the version logic must NOT introduce a blocking exit/throw. PowerShell must use
-# a numeric ([version]) compare, not a string compare (else 5.50 vs 5.9 reverses).
+# Contract: one exact repository-local Forge release, no machine stamp.
 # ---------------------------------------------------------------------------
-start_test "Forge version-stamp + drift advisory parity (setup + session-start, sh ↔ ps1)"
+start_test "exact project Forge release parity (setup + materializer + verifier, sh ↔ ps1)"
 SS_SH="$REPO_ROOT/hooks/session-start.sh"
 SS_PS1="$REPO_ROOT/hooks/session-start.ps1"
 fv_ok=1
-# Both installers reference the stamp file + read the CHANGELOG version line.
 for f in "$SETUP_SH" "$SETUP_PS1"; do
-    grep -qF -- ".forge-version" "$f" || { fail "$(basename "$f") missing .forge-version stamp write (5.51)"; fv_ok=0; }
-    grep -qF -- 'CHANGELOG.md' "$f"   || { fail "$(basename "$f") missing CHANGELOG version source (5.51)"; fv_ok=0; }
+    grep -qF -- 'CHANGELOG.md' "$f" || { fail "$(basename "$f") missing CHANGELOG release source"; fv_ok=0; }
+    grep -qF -- 'FORGE_VERSION_CHANGE:' "$f" || { fail "$(basename "$f") missing exact transition diagnostic"; fv_ok=0; }
 done
-# Both session-start hooks carry the drift advisory (stable phrase) + read the stamp.
 for f in "$SS_SH" "$SS_PS1"; do
-    grep -qF -- "pins Forge" "$f"      || { fail "$(basename "$f") missing drift advisory phrase 'pins Forge' (5.51)"; fv_ok=0; }
-    grep -qF -- ".forge-version" "$f"  || { fail "$(basename "$f") missing .forge-version read (5.51)"; fv_ok=0; }
+    grep -qF -- '.claude/.forge-version' "$f" && { fail "$(basename "$f") still reads retired Claude version pin"; fv_ok=0; }
+    grep -qF -- 'pins Forge' "$f" && { fail "$(basename "$f") still emits machine drift advice"; fv_ok=0; }
 done
-# PowerShell numeric compare (NOT string) in BOTH ps1 files — guards 5.50 vs 5.9.
-for f in "$SETUP_PS1" "$SS_PS1"; do
-    grep -qF -- "[version]" "$f" || { fail "$(basename "$f") must use a [version] numeric compare for the stamp (5.51)"; fv_ok=0; }
+for f in "$REPO_ROOT/scripts/materialize-adapters.sh" "$REPO_ROOT/scripts/materialize-adapters.ps1"; do
+    grep -qF -- 'release-version' "$f" || grep -qF -- 'ReleaseVersion' "$f" \
+        || { fail "$(basename "$f") missing required exact release input"; fv_ok=0; }
 done
-# Advisory-only guard: the drift hooks must never block — no real `exit 2` STATEMENT
-# (line-anchored so the "exit 2 is advisory" explanatory comment doesn't false-match).
-for f in "$SS_SH" "$SS_PS1"; do
-    grep -qE '^[[:space:]]*exit[[:space:]]+2([[:space:]]|$)' "$f" && { fail "$(basename "$f") has a real 'exit 2' — drift signal must stay advisory (5.51)"; fv_ok=0; }
+for f in "$REPO_ROOT/scripts/verify-runtime.sh" "$REPO_ROOT/scripts/verify-runtime.ps1"; do
+    grep -qF -- 'FORGE_VERSION:' "$f" || { fail "$(basename "$f") does not report project release"; fv_ok=0; }
 done
-[ "$fv_ok" = "1" ] && pass "version-stamp + drift advisory present in all 4 files, numeric PS compare, advisory-only"
+[ "$fv_ok" = "1" ] && pass "exact project release is canonical and machine drift dependency is absent"
 
 # ---------------------------------------------------------------------------
 # Contract 4: CI template placeholder ↔ setup.sh substitution
@@ -1074,7 +1065,10 @@ else
     ( cd "$scratch" && git init -q )
     sh_out=$(cd "$scratch" && echo '{"tool_input":{"command":"git commit -m x"}}' | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>&1)
     ps_out=$(cd "$scratch" && echo '{"tool_input":{"command":"git commit -m x"}}' | "$ps_runner" -NoProfile -File "$REPO_ROOT/hooks/check-workflow-gates.ps1" 2>&1)
-    assert_equals "$sh_out" "$ps_out" "bash and PS check-workflow-gates emit byte-equivalent missing-state breadcrumb"
+    ps_out_normalized=$(printf '%s\n' "$ps_out" \
+        | sed -e 's/setup -Force -DryRun/setup -f --dry-run/g' -e 's/setup -Force/setup -f/g')
+    assert_equals "$sh_out" "$ps_out_normalized" \
+        "bash and PS check-workflow-gates emit equivalent missing-state breadcrumbs"
     rm -rf "$scratch"
 
     # AC-4 broadened — also cover check-state-updated parity.
@@ -1790,7 +1784,8 @@ if command -v pwsh > /dev/null 2>&1; then
     # Test 1: nonce mismatch → both guards must exit 2 with "nonce mismatch" in stderr
     scratch=$(scratch_dir parity-nonce-mismatch)
     mkdir -p "$scratch/.forge/local"
-    cat > "$scratch/.claude/local/state.md" <<'EOF'
+    cat > "$scratch/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -1798,6 +1793,12 @@ if command -v pwsh > /dev/null 2>&1; then
 | nonce            | correct-session-nonce |
 | workflow_command | /new-feature foo |
 | issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field   | Value            |
+| ------- | ---------------- |
+| Command | /new-feature foo |
 
 ## PR authorization
 
@@ -1820,10 +1821,12 @@ EOF
     assert_contains "$scratch/.bash_out" "nonce mismatch" "Bash guard mentions nonce mismatch"
     assert_contains "$scratch/.ps_out" "nonce mismatch" "PS guard mentions nonce mismatch (parity)"
 
-    # Test 2: empty nonce row → both guards treat session as INACTIVE (exit 0)
+    # Test 2: empty nonce row → the goal-specific PR-auth guard is INACTIVE,
+    # but the ordinary ship-evidence gate still applies to an active workflow.
     scratch2=$(scratch_dir parity-empty-nonce)
-    mkdir -p "$scratch2/.claude/local"
-    cat > "$scratch2/.claude/local/state.md" <<'EOF'
+    mkdir -p "$scratch2/.forge/local"
+    cat > "$scratch2/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -1842,7 +1845,10 @@ EOF
 
 ### Checklist
 
-- [x] E2E verified via verify-e2e agent (Phase 5.4)
+- [x] Code review loop — N/A: nonce parity fixture
+- [x] Simplified
+- [x] Verified (tests, lint, types)
+- [x] E2E verified — N/A: nonce parity fixture
 EOF
 
     (
@@ -1856,8 +1862,16 @@ EOF
 
     BASH_EXIT2=$(cat "$scratch2/.bash_exit")
     PS_EXIT2=$(cat "$scratch2/.ps_exit")
-    assert_equals "$BASH_EXIT2" "0" "Bash guard exits 0 on empty nonce (INACTIVE)"
-    assert_equals "$PS_EXIT2" "0" "PS guard exits 0 on empty nonce (INACTIVE, parity)"
+    assert_equals "$BASH_EXIT2" "2" "Bash empty nonce falls through to ordinary ship evidence"
+    assert_equals "$PS_EXIT2" "2" "PS empty nonce falls through to ordinary ship evidence (parity)"
+    assert_contains "$scratch2/.bash_out" "final receipt set" \
+        "Bash empty nonce is blocked by evidence rather than PR authorization"
+    assert_contains "$scratch2/.ps_out" "final receipt set" \
+        "PS empty nonce is blocked by evidence rather than PR authorization (parity)"
+    assert_not_contains "$scratch2/.bash_out" "PR authorization" \
+        "Bash empty nonce does not activate the PR authorization guard"
+    assert_not_contains "$scratch2/.ps_out" "PR authorization" \
+        "PS empty nonce does not activate the PR authorization guard (parity)"
 
 else
     pass "pwsh not available — PS runtime parity tests skipped (not a failure)"

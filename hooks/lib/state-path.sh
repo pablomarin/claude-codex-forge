@@ -69,7 +69,7 @@ forge_state_path() {
     # state is an error. Falling back here could resurrect stale v5 goal/review
     # authorization evidence after migration.
     if [ -e "$canonical" ] || [ "$version_present" = true ]; then
-        if { [ "$version_present" = true ] && [ "$version" != 6 ]; } \
+        if { [ "$version_present" = true ] && ! printf '%s\n' "$version" | grep -Eq '^6(\.[0-9]+)?$'; } \
             || ! forge_state_v6_valid "$canonical"; then
             echo "BLOCKED: invalid Forge v6 state at $canonical" >&2
             return 1

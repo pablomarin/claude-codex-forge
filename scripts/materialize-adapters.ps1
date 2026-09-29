@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$RepoRoot,
     [Parameter(Mandatory=$true)][string]$Target,
+    [Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+$')][string]$ReleaseVersion,
     [ValidateSet("project", "global")][string]$Scope = "project",
     [ValidateSet("windows")][string]$Platform = "windows"
 )
@@ -627,7 +628,14 @@ function Write-InstallManifest {
     foreach ($record in ($Records | Sort-Object Path -Unique)) {
         $relative = $record.Path
         $full = Join-Path $Target $relative
-        if (Test-Path $full -PathType Leaf) { $lines += "$relative`t$(Get-FileRevision $full)`t$($record.CanonicalRevision)" }
+        if (Test-Path $full -PathType Leaf) {
+            $revision = Get-FileRevision $full
+        } elseif ($relative -eq '.forge/version') {
+            $revision = Get-ForgeMaterializerTextHash "$ReleaseVersion`n"
+        } else {
+            continue
+        }
+        $lines += "$relative`t$revision`t$($record.CanonicalRevision)"
     }
     [IO.File]::WriteAllLines($out, $lines, $Utf8NoBom)
 }
@@ -704,9 +712,10 @@ if ($Scope -eq "project") {
     Merge-JsonManagedEntries (Join-Path $RepoRoot "settings\global-settings.template.json") (Join-Path $Target ".claude\settings.json")
     Set-CodexTomlBlock (Join-Path $RepoRoot "settings\codex-config.template.toml") (Join-Path $Target ".codex\config.toml")
 }
-[IO.File]::WriteAllText((Join-Path $Target ".forge\version"), "6`n", $Utf8NoBom)
 $Installed += [pscustomobject]@{ Path=".forge/version"; CanonicalRevision="-" }
 Write-InstallManifest -Records $Installed
+[IO.File]::WriteAllText((Join-Path $Target ".forge\version"), "$ReleaseVersion`n", $Utf8NoBom)
+Write-Host "FORGE_VERSION: $ReleaseVersion"
 Write-Host "INSTALLATION: MATERIALIZED"
 foreach ($engine in Get-EngineAvailability) {
     if ($engine.Availability -eq "ABSENT") { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED binary unavailable; host surface remains materialized" }
@@ -735,7 +744,7 @@ if ($Scope -eq "project") {
     $globalVersionReady = $false
     if ($globalVersionItem -and -not $globalVersionItem.PSIsContainer -and
         -not ($globalVersionItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        $globalVersionReady = ([IO.File]::ReadAllText($globalVersionPath).Trim() -ceq "6")
+        $globalVersionReady = ([IO.File]::ReadAllText($globalVersionPath).Trim() -match '^6(\.\d+)?$')
     }
     $globalAuthorizerReady = $globalAuthorizerItem -and -not $globalAuthorizerItem.PSIsContainer -and
         -not ($globalAuthorizerItem.Attributes -band [IO.FileAttributes]::ReparsePoint)

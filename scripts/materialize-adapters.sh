@@ -245,12 +245,22 @@ $($binary exec --help 2>&1 || true)"
 }
 
 write_install_manifest() {
-    local destination="$MATERIALIZE_TARGET/.forge/installed-files.tsv" relative canonical_revision
+    local destination="$MATERIALIZE_TARGET/.forge/installed-files.tsv" relative canonical_revision revision
     mkdir -p "$(dirname "$destination")"
     : > "$destination"
     while IFS=$'\t' read -r relative canonical_revision; do
-        [ -f "$MATERIALIZE_TARGET/$relative" ] || continue
-        printf '%s\t%s\t%s\n' "$relative" "$(hash_file_materializer "$MATERIALIZE_TARGET/$relative")" "$canonical_revision" >> "$destination"
+        if [ -f "$MATERIALIZE_TARGET/$relative" ]; then
+            revision=$(hash_file_materializer "$MATERIALIZE_TARGET/$relative")
+        elif [ "$relative" = .forge/version ]; then
+            if command -v shasum >/dev/null 2>&1; then
+                revision=$(printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" | shasum -a 256 | awk '{print $1}')
+            else
+                revision=$(printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" | sha256sum | awk '{print $1}')
+            fi
+        else
+            continue
+        fi
+        printf '%s\t%s\t%s\n' "$relative" "$revision" "$canonical_revision" >> "$destination"
     done < "$MATERIALIZE_INSTALLED_LIST"
 }
 
@@ -461,27 +471,34 @@ materialize_scope() {
         fi
         materialize_global_config
     fi
-    printf '6\n' > "$MATERIALIZE_TARGET/.forge/version"
     printf '.forge/version\t-\n' >> "$MATERIALIZE_INSTALLED_LIST"
     write_install_manifest
+    printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" > "$MATERIALIZE_TARGET/.forge/version"
+    echo "FORGE_VERSION: $MATERIALIZE_RELEASE_VERSION"
 }
 
 MATERIALIZE_REPO=""
 MATERIALIZE_TARGET=""
 MATERIALIZE_SCOPE=project
 MATERIALIZE_PLATFORM=unix
+MATERIALIZE_RELEASE_VERSION=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --repo-root) MATERIALIZE_REPO="$2"; shift 2 ;;
         --target) MATERIALIZE_TARGET="$2"; shift 2 ;;
         --scope) MATERIALIZE_SCOPE="$2"; shift 2 ;;
         --platform) MATERIALIZE_PLATFORM="$2"; shift 2 ;;
+        --release-version) MATERIALIZE_RELEASE_VERSION="$2"; shift 2 ;;
         *) echo "Unknown materializer option: $1" >&2; exit 2 ;;
     esac
 done
 
 [ -n "$MATERIALIZE_REPO" ] && [ -n "$MATERIALIZE_TARGET" ] || {
-    echo "Usage: materialize-adapters.sh --repo-root DIR --target DIR --scope project|global" >&2
+    echo "Usage: materialize-adapters.sh --repo-root DIR --target DIR --scope project|global --release-version MAJOR.MINOR" >&2
+    exit 2
+}
+[[ "$MATERIALIZE_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || {
+    echo "BLOCKED: invalid release version" >&2
     exit 2
 }
 mkdir -p "$MATERIALIZE_TARGET"
@@ -524,7 +541,7 @@ if [ "$MATERIALIZE_SCOPE" = project ]; then
     global_authorizer="$MATERIALIZE_DIAGNOSTIC_HOME/.forge/bin/forge-goal-authorize"
     global_version_ready=false
     if [ -f "$global_version" ] && [ ! -L "$global_version" ] \
-        && [ "$(tr -d '\r\n' < "$global_version")" = 6 ]; then
+        && printf '%s\n' "$(tr -d '\r\n' < "$global_version")" | grep -Eq '^6(\.[0-9]+)?$'; then
         global_version_ready=true
     fi
     if [ "$global_version_ready" = true ] && [ -x "$global_authorizer" ] && [ ! -L "$global_authorizer" ]; then

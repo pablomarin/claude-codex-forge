@@ -3,6 +3,7 @@
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 source "$REPO_ROOT/tests/template/lib.sh"
 init_counters
+RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
 CASE=$(scratch_dir codex-workflow-names)
 PROJECT="$CASE/project"
 mkdir -p "$PROJECT"
@@ -11,7 +12,8 @@ NAMES='finish-branch fix-bug new-feature prd-create prd-discuss quick-fix review
 materialize() {
     PATH=/usr/bin:/bin:/usr/sbin:/sbin FORGE_ENGINE_IDENTITY_FIXTURE=1 \
         bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" \
-        --target "$PROJECT" --scope project > "$CASE/install.log" 2>&1
+        --target "$PROJECT" --scope project \
+        --release-version "$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)" > "$CASE/install.log" 2>&1
 }
 seed_old() {
     local name canonical path
@@ -68,7 +70,7 @@ assert_contains "$PROJECT/.forge/workflows/fix-bug.md" 'canonical sentinel' 'pre
 
 start_test 'full refresh preview blocks the same collision'
 PATH=/usr/bin:/bin:/usr/sbin:/sbin FORGE_ENGINE_IDENTITY_FIXTURE=1 \
-    bash "$REPO_ROOT/scripts/full-refresh.sh" --target "$PROJECT" --dry-run > "$CASE/preview.log" 2>&1
+    bash "$REPO_ROOT/scripts/full-refresh.sh" --target "$PROJECT" --release-version "$RELEASE" --dry-run > "$CASE/preview.log" 2>&1
 if [ "$?" -ne 0 ]; then pass 'full refresh cannot overwrite custom short name'; else fail 'full refresh cannot overwrite custom short name'; fi
 assert_contains "$PROJECT/.agents/skills/fix-bug/SKILL.md" 'My custom fix-bug skill' 'preview is read-only'
 
@@ -78,11 +80,11 @@ rm "$PROJECT/.agents/skills/fix-bug/SKILL.md"
 materialize
 seed_old
 PATH=/usr/bin:/bin:/usr/sbin:/sbin FORGE_ENGINE_IDENTITY_FIXTURE=1 \
-    bash "$REPO_ROOT/scripts/full-refresh.sh" --target "$PROJECT" --dry-run > "$CASE/preview.log" 2>&1
+    bash "$REPO_ROOT/scripts/full-refresh.sh" --target "$PROJECT" --release-version "$RELEASE" --dry-run > "$CASE/preview.log" 2>&1
 assert_equals "$?" 0 'refresh preview succeeds'
 assert_file_exists "$PROJECT/.agents/skills/workflow-fix-bug/SKILL.md" 'preview does not delete old wrapper'
 PATH=/usr/bin:/bin:/usr/sbin:/sbin FORGE_ENGINE_IDENTITY_FIXTURE=1 \
-    bash "$REPO_ROOT/scripts/full-refresh.sh" --target "$PROJECT" > "$CASE/refresh.log" 2>&1
+    bash "$REPO_ROOT/scripts/full-refresh.sh" --target "$PROJECT" --release-version "$RELEASE" > "$CASE/refresh.log" 2>&1
 assert_equals "$?" 0 'refresh apply succeeds'
 for name in $NAMES; do
     assert_file_exists "$PROJECT/.agents/skills/$name/SKILL.md" "refresh installs $name"

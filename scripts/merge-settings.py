@@ -497,7 +497,8 @@ def inventory_legacy(
     current_v6 = False
     v6_stamp = target / ".forge/version"
     if v6_stamp.is_file() and not v6_stamp.is_symlink():
-        current_v6 = v6_stamp.read_text(encoding="utf-8", errors="replace").strip() == "6"
+        current_version = v6_stamp.read_text(encoding="utf-8", errors="replace").strip()
+        current_v6 = current_version == "6" or re.fullmatch(r"6\.[0-9]+", current_version) is not None
 
     stamp_relative = ".claude/.forge-version"
     stamp = target / stamp_relative
@@ -1677,13 +1678,18 @@ def selected_materializer(repo_root: Path, platform: str) -> list[str]:
 
 
 def materialize_stage(
-    repo_root: Path, target: Path, stage: Path, scope: str, platform: str
+    repo_root: Path,
+    target: Path,
+    stage: Path,
+    scope: str,
+    platform: str,
+    release_version: str,
 ) -> str:
     command = selected_materializer(repo_root, platform)
     if platform == "windows":
-        command.extend(["-RepoRoot", str(repo_root), "-Target", str(stage), "-Scope", scope, "-Platform", platform])
+        command.extend(["-RepoRoot", str(repo_root), "-Target", str(stage), "-Scope", scope, "-Platform", platform, "-ReleaseVersion", release_version])
     else:
-        command.extend(["--repo-root", str(repo_root), "--target", str(stage), "--scope", scope, "--platform", platform])
+        command.extend(["--repo-root", str(repo_root), "--target", str(stage), "--scope", scope, "--platform", platform, "--release-version", release_version])
     environment = os.environ.copy()
     environment["FORGE_TRANSACTION_STAGE"] = "1"
     environment["FORGE_DIAGNOSTIC_TARGET"] = str(target)
@@ -1725,11 +1731,12 @@ def reconcile_legacy_hook_settings(
     if not settings_path.is_file():
         return
     version_path = target / ".forge/version"
-    current_v6 = (
-        version_path.is_file()
-        and not version_path.is_symlink()
-        and version_path.read_text(encoding="utf-8", errors="replace").strip() == "6"
+    current_version = (
+        version_path.read_text(encoding="utf-8", errors="replace").strip()
+        if version_path.is_file() and not version_path.is_symlink()
+        else ""
     )
+    current_v6 = current_version == "6" or re.fullmatch(r"6\.[0-9]+", current_version) is not None
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -2013,15 +2020,31 @@ def full_refresh(
     target: Path,
     scope: str,
     platform: str,
+    release_version: str,
     dry_run: bool = False,
 ) -> None:
     repo_root = repo_root.resolve(strict=True)
     if scope not in {"project", "global"} or platform not in {"unix", "windows"}:
         raise RefreshBlocked("invalid full-refresh scope or platform")
+    if re.fullmatch(r"[0-9]+\.[0-9]+", release_version) is None:
+        raise RefreshBlocked("invalid release version")
     lexical_target = target.absolute()
     if lexical_target.is_symlink():
         raise RefreshBlocked(f"symlink transaction root: {lexical_target}")
     target = target.resolve(strict=True)
+    installed_version_path = target / ".forge/version"
+    previous_version = ""
+    if installed_version_path.is_file() and not installed_version_path.is_symlink():
+        installed_version = installed_version_path.read_text(encoding="utf-8", errors="replace").strip()
+        previous_version = installed_version
+        if installed_version != "6":
+            installed_match = re.fullmatch(r"([0-9]+)\.([0-9]+)", installed_version)
+            if installed_match is None:
+                raise RefreshBlocked("malformed Forge release at .forge/version")
+            if installed_match.group(1) != "6":
+                raise RefreshBlocked(
+                    f"unsupported Forge layout major {installed_match.group(1)}"
+                )
     if scope == "global":
         if lexical_target != target:
             raise RefreshBlocked(f"selected global Forge home is not canonical: {lexical_target}")
@@ -2132,7 +2155,7 @@ def full_refresh(
                     report["PRESERVED"].append(relative)
 
         materializer_output = materialize_stage(
-            repo_root, target, stage, scope, platform
+            repo_root, target, stage, scope, platform, release_version
         )
         reconcile_legacy_hook_settings(
             repo_root, target, stage, proven_legacy, scope, report
@@ -2150,8 +2173,8 @@ def full_refresh(
         if scope == "project" and (not state.is_file() or not state.read_bytes().startswith(STATE_SCHEMA)):
             raise RefreshBlocked("staged translated state failed v6 schema validation")
         version = stage / ".forge/version"
-        if not version.is_file() or version.read_text(encoding="utf-8").strip() != "6":
-            raise RefreshBlocked("staged materializer did not produce the v6 stamp")
+        if not version.is_file() or version.read_text(encoding="utf-8").strip() != release_version:
+            raise RefreshBlocked("staged materializer did not produce the exact release stamp")
 
         # Remove materializer-local backups: the transaction already keeps raw,
         # collision-free backups under .forge/local/migration-backups/<txid>.
@@ -2199,11 +2222,12 @@ def full_refresh(
                 for entry in entries:
                     handle.write(f"{category}\t{entry}\n")
         staged_operations = operation_files(stage, target, quarantine)
-        final_names = {".forge/version", ".forge/managed-files.tsv", ".forge/installed-files.tsv"}
+        manifest_names = {".forge/managed-files.tsv", ".forge/installed-files.tsv"}
         operations = (
-            [operation for operation in staged_operations if operation["relative"] not in final_names]
+            [operation for operation in staged_operations if operation["relative"] not in manifest_names | {".forge/version"}]
             + deletes
-            + [operation for operation in staged_operations if operation["relative"] in final_names]
+            + [operation for operation in staged_operations if operation["relative"] in manifest_names]
+            + [operation for operation in staged_operations if operation["relative"] == ".forge/version"]
         )
         operation_destinations = [operation["relative"] for operation in operations]
         if len(operation_destinations) != len(set(operation_destinations)):
@@ -2233,6 +2257,8 @@ def full_refresh(
         journal["phase"] = "committed"
         durable_json(journal_path, journal)
         print(materializer_output)
+        if previous_version and previous_version != release_version:
+            print(f"FORGE_VERSION_CHANGE: {previous_version} -> {release_version}")
         if report["PRESERVED_COMPAT_BLOCKED"]:
             print("claude RUNTIME_READY: BLOCKED preserved compatibility plugin requires qualification")
         print("INSTALLATION: MATERIALIZED")
@@ -2265,10 +2291,18 @@ def full_refresh_cli(argv: list[str]) -> int:
     parser.add_argument("--target", required=True, type=Path)
     parser.add_argument("--scope", required=True, choices=("project", "global"))
     parser.add_argument("--platform", required=True, choices=("unix", "windows"))
+    parser.add_argument("--release-version", required=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     try:
-        full_refresh(args.repo_root, args.target, args.scope, args.platform, args.dry_run)
+        full_refresh(
+            args.repo_root,
+            args.target,
+            args.scope,
+            args.platform,
+            args.release_version,
+            args.dry_run,
+        )
     except (RefreshBlocked, OSError, ValueError, json.JSONDecodeError) as error:
         if not isinstance(error, ReportedRefreshBlocked):
             print(f"BLOCKED: {error}", file=sys.stderr)

@@ -180,7 +180,8 @@ mkdir -p "$PARTIAL_PROJECT" "$PARTIAL_HOME/.forge/bin"
 chmod +x "$PARTIAL_HOME/.forge/bin/forge-goal-authorize"
 FORGE_DIAGNOSTIC_HOME="$PARTIAL_HOME" \
     bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" \
-    --target "$PARTIAL_PROJECT" --scope project --platform unix > "$S/project-partial.log" 2>&1
+    --target "$PARTIAL_PROJECT" --scope project --platform unix \
+    --release-version "$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)" > "$S/project-partial.log" 2>&1
 assert_contains "$S/project-partial.log" 'GLOBAL_HARNESS: PARTIAL' \
     "helper without canonical global v6 stamp is reported as partial"
 assert_contains "$S/project-partial.log" 'NORMAL_PROJECT_WORKFLOWS: READY' \

@@ -45,7 +45,16 @@ S3=$(scratch_dir setup-flags-force)
 git -C "$S3" init -q
 run_setup "$S3" "$S3/force.log" -f
 assert_equals "$?" "0" "-f succeeds on a fresh project"
-assert_contains "$S3/.forge/version" "6" "-f installs the canonical v6 harness"
+EXPECTED_RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' \
+    "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
+assert_equals "$(tr -d '\r\n' < "$S3/.forge/version")" "$EXPECTED_RELEASE" \
+    "project stamp records the exact Forge release"
+assert_contains "$S3/force.log" "FORGE_VERSION: $EXPECTED_RELEASE" \
+    "setup reports the installed project release"
+assert_file_missing "$S3/.claude/.forge-version" \
+    "project does not retain the Claude-specific version pin"
+assert_file_missing "$S3/.fakehome/.claude/.forge-version" \
+    "project setup writes no machine-wide version stamp"
 assert_contains "$S3/force.log" "UPGRADE: READY" "-f reports transactional completion"
 mkdir -p "$S3/docs"
 printf '%s\n' 'FORCE_CONTEXT_SENTINEL' > "$S3/docs/agent-context.md"

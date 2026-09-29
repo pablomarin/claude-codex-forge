@@ -4,6 +4,7 @@ $setup = Join-Path $root "setup.ps1"
 $refresh = Join-Path $root "scripts\full-refresh.ps1"
 $recover = Join-Path $root "scripts\recover-full-refresh.ps1"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$expectedRelease = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-full-refresh-ps51-" + [Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($scratch) | Out-Null
 $passes = 0
@@ -121,7 +122,7 @@ function Assert-OneActiveForge {
     $manifest = Join-Path $Project ".forge\managed-files.tsv"
     $claudeRoot = [IO.File]::ReadAllText((Join-Path $Project "CLAUDE.md"))
     $codexRoot = [IO.File]::ReadAllText((Join-Path $Project "AGENTS.md"))
-    Assert-True ((Test-Path -LiteralPath $version -PathType Leaf) -and ([IO.File]::ReadAllText($version).Trim() -eq "6")) "$Label has the v6 stamp"
+    Assert-True ((Test-Path -LiteralPath $version -PathType Leaf) -and ([IO.File]::ReadAllText($version).Trim() -eq $script:expectedRelease)) "$Label has the exact Forge release stamp"
     Assert-True ((Test-Path -LiteralPath $instructions -PathType Leaf) -and (Test-Path -LiteralPath $manifest -PathType Leaf)) "$Label has one canonical Forge source and ownership manifest"
     Assert-True (([regex]::Matches($claudeRoot, '<!-- forge:begin v6 -->').Count -eq 1) -and ([regex]::Matches($codexRoot, '<!-- forge:begin v6 -->').Count -eq 1)) "$Label has one bounded adapter per native root"
     $commands = @(Get-ChildItem -LiteralPath (Join-Path $Project ".claude\commands") -Filter "*.md" -File -Recurse -ErrorAction SilentlyContinue)
@@ -200,6 +201,26 @@ function Invoke-IsolatedPowerShell {
 }
 
 try {
+    $exactProject = New-Project "exact-project-version"
+    Write-Text (Join-Path $exactProject ".forge\version") "6`n"
+    $exactResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Force") -WorkingDirectory $exactProject `
+        -Environment @{ HOME = (Join-Path $scratch "exact-home"); USERPROFILE = (Join-Path $scratch "exact-home") }
+    Assert-True ($exactResult.Code -eq 0) "PowerShell major-only V6 refresh succeeds"
+    Assert-True ([IO.File]::ReadAllText((Join-Path $exactProject ".forge\version")).Trim() -eq $expectedRelease) `
+        "PowerShell refresh publishes the exact Forge release"
+    Assert-True ($exactResult.Output.Contains("FORGE_VERSION_CHANGE: 6 -> $expectedRelease")) `
+        "PowerShell refresh reports the exact version transition"
+
+    $unsupportedProject = New-Project "unsupported-project-version"
+    Write-Text (Join-Path $unsupportedProject ".forge\version") "7.0`n"
+    $unsupportedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $unsupportedProject ".forge\version")).Hash
+    $unsupportedResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Force") -WorkingDirectory $unsupportedProject `
+        -Environment @{ HOME = (Join-Path $scratch "unsupported-home"); USERPROFILE = (Join-Path $scratch "unsupported-home") }
+    Assert-True ($unsupportedResult.Code -ne 0 -and $unsupportedResult.Output.Contains("unsupported Forge layout major 7")) `
+        "PowerShell unsupported major blocks with a concrete diagnostic"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $unsupportedProject ".forge\version")).Hash -eq $unsupportedHash) `
+        "PowerShell unsupported version remains unchanged"
+
     $previewProject = New-Project "preview"
     Write-Text (Join-Path $previewProject ".claude\.forge-version") "5.61`n"
     Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/session-start.ps1" `
@@ -324,8 +345,9 @@ try {
 
     $managedCompat = New-Project "managed-cross-host-compat"
     $materializer = Join-Path $root "scripts\materialize-adapters.ps1"
+    $release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
     $managedFirst = Invoke-IsolatedPowerShell -Script $materializer -Arguments @(
-        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows"
+        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows", "-ReleaseVersion", $release
     ) -WorkingDirectory $managedCompat
     Assert-True ($managedFirst.Code -eq 0) "PowerShell managed compatibility fixture starts as v6"
     $managedLegacyHook = Join-Path $managedCompat ".codex\hooks\session-start.ps1"

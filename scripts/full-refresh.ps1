@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$Target,
+    [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+$')][string]$ReleaseVersion,
     [Parameter(Mandatory = $false)][ValidateSet("project", "global")][string]$Scope = "project",
     [switch]$DryRun
 )
@@ -56,7 +57,7 @@ if (-not $python) {
 
 $refreshArguments = @(
     "full-refresh", "--repo-root", $repoRoot, "--target", $targetRoot,
-    "--scope", $Scope, "--platform", "windows"
+    "--scope", $Scope, "--platform", "windows", "--release-version", $ReleaseVersion
 )
 if ($DryRun) { $refreshArguments += "--dry-run" }
 [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")

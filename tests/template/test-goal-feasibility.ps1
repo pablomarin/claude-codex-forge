@@ -3,6 +3,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-task2-ps-goal-" + [Guid]::NewGuid().ToString("N"))
 $materializer = Join-Path $root "scripts\materialize-adapters.ps1"
 $setup = Join-Path $root "setup.ps1"
+$release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
 try {
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
 
@@ -10,7 +11,7 @@ try {
         $target = Join-Path $scratch $scope
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         if ($scope -eq "project") { & git -C $target init -q }
-        $materializerOutput = (& $materializer -RepoRoot $root -Target $target -Scope $scope -Platform windows 6>&1 | Out-String)
+        $materializerOutput = (& $materializer -RepoRoot $root -Target $target -Scope $scope -Platform windows -ReleaseVersion $release 6>&1 | Out-String)
         if ($scope -eq "project") {
             if (-not $materializerOutput.Contains("NORMAL_PROJECT_WORKFLOWS: READY") -or
                 -not $materializerOutput.Contains("NATIVE_GOAL_RUNTIME:") -or

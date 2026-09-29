@@ -1017,53 +1017,32 @@ EOF
 }
 
 # ===========================================================================
-# Forge version stamp (v5.51): committed .claude/.forge-version pin + machine
-# stamp + advisory drift warning (all advisory, fail-open, never blocks).
+# Forge version stamp: one exact repository-local .forge/version pin.
 # ===========================================================================
 test_forge_version_stamp() {
-    start_test "forge version stamp: pin + machine stamp + direction-aware advisory"
+    start_test "forge version stamp: exact project pin with no machine dependency"
     local EXPECT
     EXPECT=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
 
-    # Fresh install → project pin AND machine stamp both equal the forge's version.
     local S; S=$(scratch_dir fvstamp); make_project "$S" flat
     run_setup "$S" "$S/.setup.log" -p FV -t python
     assert_equals "$?" "0" "fv: fresh install exits 0"
-    assert_file_exists "$S/.claude/.forge-version" "fv: project pin written on fresh install"
-    assert_equals "$(cat "$S/.claude/.forge-version" 2>/dev/null)" "$EXPECT" "fv: project pin == CHANGELOG version"
-    assert_equals "$(cat "$S/.fakehome/.claude/.forge-version" 2>/dev/null)" "$EXPECT" "fv: machine stamp written under HOME"
+    assert_equals "$(tr -d '\r\n' < "$S/.forge/version")" "$EXPECT" \
+        "fv: project pin equals CHANGELOG release"
+    assert_contains "$S/.setup.log" "FORGE_VERSION: $EXPECT" \
+        "fv: setup reports exact installed release"
+    assert_file_missing "$S/.claude/.forge-version" \
+        "fv: Claude-specific project pin is retired"
+    assert_file_missing "$S/.fakehome/.claude/.forge-version" \
+        "fv: machine-wide version stamp is retired"
 
-    # --upgrade with an OLDER pin → UPGRADE advisory, exits 0 (advisory), pin advances.
-    printf '0.1\n' > "$S/.claude/.forge-version"
+    printf '6\n' > "$S/.forge/version"
     run_setup "$S" "$S/.up.log" -p FV -t python --upgrade
-    assert_equals "$?" "0" "fv: --upgrade exits 0 (advisory only, never blocks)"
-    assert_contains "$S/.up.log" "UPGRADE the project" "fv: older pin → UPGRADE advisory shown"
-    assert_equals "$(cat "$S/.claude/.forge-version")" "$EXPECT" "fv: pin advanced after upgrade"
-
-    # --upgrade with a NEWER pin → DOWNGRADE advisory, exits 0.
-    printf '99.99\n' > "$S/.claude/.forge-version"
-    run_setup "$S" "$S/.dn.log" -p FV -t python --upgrade
-    assert_equals "$?" "0" "fv: newer-pin --upgrade exits 0 (advisory only)"
-    assert_contains "$S/.dn.log" "DOWNGRADE the project" "fv: newer pin + --upgrade → DOWNGRADE advisory shown"
-
-    # --upgrade with another OLDER pin continues to emit the UPGRADE advisory.
-    printf '0.2\n' > "$S/.claude/.forge-version"
-    run_setup "$S" "$S/.fup.log" -p FV -t python --upgrade
-    assert_contains "$S/.fup.log" "UPGRADE the project" "fv: older pin + --upgrade → UPGRADE advisory shown"
-
-    # Malformed existing pin → NO advisory (the prev pin is validated as X.Y first).
-    printf 'garbage\n' > "$S/.claude/.forge-version"
-    run_setup "$S" "$S/.mal.log" -p FV -t python --upgrade
-    assert_not_contains "$S/.mal.log" "UPGRADE the project" "fv: malformed prev pin → no upgrade advisory (fail-open)"
-    assert_not_contains "$S/.mal.log" "DOWNGRADE the project" "fv: malformed prev pin → no downgrade advisory (fail-open)"
-
-    # Legacy-partial: machinery present (settings.json) but NO stamp, plain (non-force)
-    # rerun → must NOT fabricate a pin (it would lie about the actual on-disk version).
-    local L; L=$(scratch_dir fvlegacy); make_project "$L" flat
-    run_setup "$L" "$L/.seed.log" -p FV -t python
-    rm -f "$L/.claude/.forge-version"
-    run_setup "$L" "$L/.plain.log" -p FV -t python
-    assert_file_missing "$L/.claude/.forge-version" "fv: plain rerun on legacy machinery does NOT fabricate a pin"
+    assert_equals "$?" "0" "fv: major-only V6 upgrade exits 0"
+    assert_contains "$S/.up.log" "FORGE_VERSION_CHANGE: 6 -> $EXPECT" \
+        "fv: upgrade reports the exact repository version transition"
+    assert_equals "$(tr -d '\r\n' < "$S/.forge/version")" "$EXPECT" \
+        "fv: legacy major-only V6 advances to exact release"
 }
 
 # Extract + unit-test the real forge_version() parser (mirrors extract_copy_file).

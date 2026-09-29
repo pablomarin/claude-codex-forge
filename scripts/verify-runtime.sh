@@ -37,11 +37,20 @@ identity_mode() {
 }
 
 discovery_mode() {
-    local root="" count duplicates relative base seen_file collision=0
+    local root="" count duplicates relative base seen_file collision=0 version
     while [ "$#" -gt 0 ]; do
         case "$1" in --project-root) root="$2"; shift 2 ;; *) return 2 ;; esac
     done
     [ -d "$root/.forge/rules" ] && [ -f "$root/CLAUDE.md" ] && [ -f "$root/AGENTS.md" ] || return 3
+    [ -f "$root/.forge/version" ] && [ ! -L "$root/.forge/version" ] || {
+        echo "FORGE_VERSION: BLOCKED missing project release" >&2
+        return 6
+    }
+    version=$(tr -d '\r\n' < "$root/.forge/version")
+    [[ "$version" =~ ^[0-9]+\.[0-9]+$ ]] || {
+        echo "FORGE_VERSION: BLOCKED malformed project release" >&2
+        return 6
+    }
     grep -qF '.forge/instructions.md' "$root/CLAUDE.md" || return 4
     grep -qF '.forge/instructions.md' "$root/AGENTS.md" || return 4
     if [ -e "$root/.claude/commands/goal.md" ]; then
@@ -62,7 +71,7 @@ discovery_mode() {
         | while IFS= read -r relative; do basename "$relative"; done | sort | uniq -d > "$seen_file"
     duplicates=$(wc -l < "$seen_file" | tr -d ' ')
     rm -f "$seen_file"
-    printf 'canonical_rule_count=%s\nduplicate_rule_count=%s\n' "$count" "$duplicates"
+    printf 'FORGE_VERSION: %s\ncanonical_rule_count=%s\nduplicate_rule_count=%s\n' "$version" "$count" "$duplicates"
     [ "$duplicates" = 0 ]
 }
 

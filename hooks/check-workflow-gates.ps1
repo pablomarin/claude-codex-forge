@@ -127,7 +127,7 @@ $hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $configCheck = Join-Path $hookDir "check-config-change.ps1"
 $forgeVersionPath = Join-Path (Get-Location).Path ".forge\version"
 $forgeVersion = if (Test-Path -LiteralPath $forgeVersionPath -PathType Leaf) { (@(Get-Content -LiteralPath $forgeVersionPath)[0]).Trim() } else { "" }
-if ($forgeVersion -eq "6" -and (Test-Path -LiteralPath $configCheck)) {
+if ($forgeVersion -match '^6(\.\d+)?$' -and (Test-Path -LiteralPath $configCheck)) {
     $null = '{}' | & $configCheck -Mode boundary -Root (Get-Location).Path 2>$null
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -f and inspect the diff before shipping.")
@@ -162,7 +162,7 @@ if (Test-Path -LiteralPath $stateHelper) {
 }
 $stateIsV6 = (-not [string]::IsNullOrEmpty($stateFile)) -and (($stateFile -replace '\\', '/') -match '/\.forge/local/state\.md$')
 
-if (-not (Test-Path $stateFile)) {
+if ([string]::IsNullOrEmpty($stateFile) -or -not (Test-Path -LiteralPath $stateFile)) {
     # Hard-cut: do NOT fall back to CONTINUITY.md.
     # Breadcrumb wording byte-equivalent to bash variant for AC-4 parity.
     [Console]::Error.WriteLine("ℹ check-workflow-gates: Forge state.md not found.")

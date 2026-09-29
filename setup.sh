@@ -142,6 +142,21 @@ report_native_goal_collisions() {
     fi
 }
 
+# The first release heading is the single source of truth for the exact
+# repository-local Forge release. Every installation path receives this value
+# explicitly; no host-specific or machine-wide version stamp exists.
+forge_version() {
+    local top v
+    top=$(grep -m1 '^## ' "$SCRIPT_DIR/docs/CHANGELOG.md" 2>/dev/null)
+    v=$(printf '%s' "$top" | sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p')
+    if [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]]; then printf '%s' "$v"; else printf 'unknown'; fi
+}
+FORGE_VERSION="$(forge_version)"
+[[ "$FORGE_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || {
+    echo "BLOCKED: published Forge release is unavailable" >&2
+    exit 2
+}
+
 # Full refresh is a separate transaction. It exits before ordinary setup can
 # stamp, merge, or create any host surface.
 if [ "$FULL_REFRESH" = true ]; then
@@ -152,6 +167,7 @@ if [ "$FULL_REFRESH" = true ]; then
     else
         refresh_args=(--target "$(pwd -P)" --scope project)
     fi
+    refresh_args+=(--release-version "$FORGE_VERSION")
     [ "$DRY_RUN" = true ] && refresh_args+=(--dry-run)
     bash "$refresh_helper" "${refresh_args[@]}"
     if [ "$GLOBAL" != true ]; then
@@ -164,13 +180,19 @@ fi
 # recognizable or ambiguous v5 harness. Task 3 replaces this interim block
 # with the transactional full-refresh implementation and executable command.
 v6_preflight_no_legacy() {
-    local root="$1" scope="$2" manifest="$SCRIPT_DIR/manifests/legacy-v5.tsv"
+    local root="$1" scope="$2" manifest="$SCRIPT_DIR/manifests/legacy-v5.tsv" installed_version installed_major
     local kind source destination row_scope platform host ownership selector proof extra family mixed_path
     if [ -f "$root/.forge/version" ]; then
-        [ "$(cat "$root/.forge/version" 2>/dev/null)" = "6" ] || {
-            echo "BLOCKED: unsupported Forge layout version at $root/.forge/version" >&2
+        installed_version=$(tr -d '\r\n' < "$root/.forge/version" 2>/dev/null)
+        case "$installed_version" in 6|6.*) installed_major=6 ;; [0-9]*.*) installed_major=${installed_version%%.*} ;; *) installed_major="$installed_version" ;; esac
+        [ "$installed_major" = 6 ] || {
+            echo "BLOCKED: unsupported Forge layout major ${installed_major:-unknown}" >&2
             return 1
         }
+        case "$installed_version" in 6|6.[0-9]*) ;; *)
+            echo "BLOCKED: malformed Forge release at $root/.forge/version" >&2
+            return 1
+        esac
         return 0
     fi
     if [ "$scope" = project ] && { [ -e "$root/CONTINUITY.md" ] || [ -L "$root/CONTINUITY.md" ]; }; then
@@ -245,39 +267,6 @@ else
     v6_preflight_no_legacy "$(pwd)" project || exit 1
 fi
 
-# --- Forge version stamp (advisory drift detection) ------------------------
-# Read the Forge's own version from the top "## X.YY" line of its CHANGELOG —
-# single source of truth, no separate VERSION constant. Validated: a non-match
-# (e.g. "## [Unreleased]") yields "unknown" rather than echoing the heading.
-forge_version() {
-    # Inspect ONLY the FIRST "## " heading (the current entry). If it isn't a bare
-    # X.Y version (e.g. a future "## [Unreleased]"), fail open to "unknown" rather
-    # than scanning past it to a stale older release (Codex code-review P2-1).
-    local top v
-    top=$(grep -m1 '^## ' "$SCRIPT_DIR/docs/CHANGELOG.md" 2>/dev/null)
-    v=$(printf '%s' "$top" | sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p')
-    if [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]]; then printf '%s' "$v"; else printf 'unknown'; fi
-}
-FORGE_VERSION="$(forge_version)"
-
-# Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
-# ordinary install / --upgrade / --global invocation. The authoritative --force
-# path and retired --migrate command exit above without reaching this code.
-# Placed before the --global branch so both ordinary modes hit it.
-# Fail-open: the brace group silences a failed redirection too, and HOME is guarded,
-# so a stamp-write failure can never abort setup under `set -e`.
-if [[ -n "${HOME:-}" ]]; then
-    if [[ "$FORGE_VERSION" != "unknown" ]]; then
-        mkdir -p "$HOME/.claude" 2>/dev/null || true
-        { printf '%s\n' "$FORGE_VERSION" > "$HOME/.claude/.forge-version"; } 2>/dev/null || true
-    else
-        # Version unparseable → this machine's Forge version is genuinely unknown.
-        # Clear any stale machine stamp so session-start fails open instead of
-        # comparing project pins against a stale value (Codex code-review iter-3 P2).
-        { rm -f "$HOME/.claude/.forge-version"; } 2>/dev/null || true
-    fi
-fi
-
 # Copy function with force check
 copy_file() {
     local src="$1"
@@ -314,7 +303,8 @@ copy_file() {
 # ============================================================================
 if [[ "$GLOBAL" == true ]]; then
     bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
-        --repo-root "$SCRIPT_DIR" --target "$HOME" --scope global --platform unix
+        --repo-root "$SCRIPT_DIR" --target "$HOME" --scope global --platform unix \
+        --release-version "$FORGE_VERSION"
     echo "INSTALLATION: MATERIALIZED"
     echo "GLOBAL_HARNESS: MATERIALIZED"
     echo "NORMAL_PROJECT_WORKFLOWS: READY"
@@ -693,42 +683,17 @@ echo -e "${YELLOW}Copying configuration files...${NC}"
 if [[ -f "CLAUDE.md" ]]; then had_claude_md=true; else had_claude_md=false; fi
 if [[ -f "CONTINUITY.md" ]]; then had_continuity_md=true; else had_continuity_md=false; fi
 
-# Forge version pin: capture PRE-state for the advisory + lie-prevention.
-#  - prev_forge_version: the project's existing pin (for the drift warning).
-#  - had_forge_machinery: did Forge machinery already exist? (.claude/settings.json is
-#    the always-written project-mode sentinel.) Used so a plain non-force rerun that
-#    SKIPS existing files never fabricates/advances a pin (the stamp must reflect what's
-#    actually on disk). The pin itself is written LATE (after copies succeed) below.
-prev_forge_version=$(cat .claude/.forge-version 2>/dev/null || echo "")
-if [[ -f .claude/settings.json ]]; then had_forge_machinery=true; else had_forge_machinery=false; fi
-
-# Setup-time advisory warning: an --upgrade run rewrites the machinery and will
-# advance the pin, so warn if it differs from the project's existing pin. Advisory
-# only — setup continues. Printed here (before the rewrite) AND echoed in the upgrade
-# summary below so it isn't lost in scrollback.
-forge_drift_warn=""
-if [[ "$FORGE_VERSION" != "unknown" ]] \
-   && [[ "$prev_forge_version" =~ ^[0-9]+\.[0-9]+$ ]] \
-   && [[ "$prev_forge_version" != "$FORGE_VERSION" ]] \
-   && { [[ "$UPGRADE" == true ]] || [[ "$FORCE" == true ]]; }; then
-    # Portable numeric major.minor compare — `sort -V` is GNU-only and absent on stock
-    # macOS/BSD sort (Codex code-review iter-3 P2). Both sides are validated X.Y; 10#
-    # forces base-10 so a leading zero can't be read as octal.
-    if [ "$((10#${FORGE_VERSION%%.*}))" -lt "$((10#${prev_forge_version%%.*}))" ] \
-       || { [ "$((10#${FORGE_VERSION%%.*}))" -eq "$((10#${prev_forge_version%%.*}))" ] \
-            && [ "$((10#${FORGE_VERSION#*.}))" -lt "$((10#${prev_forge_version#*.}))" ]; }; then
-        forge_drift_warn="ℹ This project's .claude/ was pinned to Forge $prev_forge_version; you're running $FORGE_VERSION. This run will DOWNGRADE the project's .claude/ to $FORGE_VERSION. That's a shared change — other clones of this repo will pull it."
-    else
-        forge_drift_warn="ℹ This project's .claude/ was pinned to Forge $prev_forge_version; you're running $FORGE_VERSION. This run will UPGRADE the project's .claude/ to $FORGE_VERSION. That's a shared change — other clones of this repo will pull it."
-    fi
-    echo -e "${YELLOW}${forge_drift_warn}${NC}"
-fi
+prev_forge_version=$(tr -d '\r\n' < .forge/version 2>/dev/null || true)
 
 if [[ "$had_claude_md" == true ]]; then
     echo -e "  ${BLUE}○${NC} CLAUDE.md user text will be preserved outside the Forge block"
 fi
 bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
-    --repo-root "$SCRIPT_DIR" --target "$(pwd)" --scope project --platform unix
+    --repo-root "$SCRIPT_DIR" --target "$(pwd)" --scope project --platform unix \
+    --release-version "$FORGE_VERSION"
+if [[ -n "$prev_forge_version" && "$prev_forge_version" != "$FORGE_VERSION" ]]; then
+    echo "FORGE_VERSION_CHANGE: $prev_forge_version -> $FORGE_VERSION"
+fi
 report_native_goal_collisions "$(pwd -P)"
 
 # ADRs belong to the downstream project. Retire only byte-exact copies of
@@ -1035,37 +1000,12 @@ fi
 # The v6 marker materializer owns only the bounded Forge block. Text outside
 # that block is user-owned bytes and is never subject to project-name rewriting.
 
-# Forge version pin (project) — WRITE LATE, after all .claude/ copies have succeeded,
-# so a mid-copy abort under `set -e` never leaves the pin ahead of the actual files.
-# Only stamp when the machinery was actually (re)written this run: --upgrade
-# (rewritten), OR no machinery existed before (genuine fresh install). The --force
-# transaction owns its own late stamp. On a plain
-# non-force rerun that SKIPPED existing files, leave the pin untouched — never lie.
-if [[ -f .claude/settings.json ]] \
-   && { [[ "$FORCE" == true ]] || [[ "$UPGRADE" == true ]] || [[ "$had_forge_machinery" == false ]]; }; then
-    # Machinery was (re)written this run (the `.claude/settings.json` post-condition
-    # confirms it landed — never pin a project whose copy step left it incomplete).
-    if [[ "$FORGE_VERSION" != "unknown" ]]; then
-        { printf '%s\n' "$FORGE_VERSION" > .claude/.forge-version; } 2>/dev/null || true
-    else
-        # Version unparseable but machinery WAS rewritten → the old pin no longer
-        # reflects what's on disk. Clearing it (rather than leaving a stale pin) keeps
-        # the pin from lying; session-start then fails open (Codex code-review iter-2 P2).
-        { rm -f .claude/.forge-version; } 2>/dev/null || true
-    fi
-fi
-
 echo ""
 if [[ "$UPGRADE" == true ]]; then
     echo -e "${GREEN}============================================${NC}"
     echo -e "${GREEN}  Upgrade Complete!${NC}"
     echo -e "${GREEN}============================================${NC}"
     echo ""
-    # Re-surface the version-drift advisory here so it isn't lost in scrollback.
-    if [[ -n "$forge_drift_warn" ]]; then
-        echo -e "${YELLOW}${forge_drift_warn}${NC}"
-        echo ""
-    fi
     echo -e "${YELLOW}What was updated:${NC}"
     echo ""
     echo "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and state template"

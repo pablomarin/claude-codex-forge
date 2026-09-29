@@ -236,6 +236,32 @@ assert_equals "$?" "1" "empty Forge version never downgrades to legacy state"
 assert_contains "$S2/empty-version-err" "invalid Forge v6 state" \
     "empty Forge version is treated as an invalid migrated surface"
 
+EXPECTED_RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' \
+    "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
+start_test "exact project release is published last and legacy V6 is adopted"
+V=$(scratch_dir exact-project-version)
+git -C "$V" init -q
+mkdir -p "$V/.forge"
+printf '6\n' > "$V/.forge/version"
+(cd "$V" && HOME="$V/home" "$REPO_ROOT/setup.sh" -f) > "$V/apply.log" 2>&1
+assert_equals "$?" "0" "unversioned V6 refresh succeeds"
+assert_equals "$(tr -d '\r\n' < "$V/.forge/version")" "$EXPECTED_RELEASE" \
+    "unversioned V6 becomes the exact release"
+assert_contains "$V/apply.log" "FORGE_VERSION_CHANGE: 6 -> $EXPECTED_RELEASE" \
+    "refresh reports the exact version transition"
+
+start_test "unsupported Forge layout major is rejected without mutation"
+BAD=$(scratch_dir unsupported-forge-major)
+git -C "$BAD" init -q
+mkdir -p "$BAD/.forge"
+printf '7.0\n' > "$BAD/.forge/version"
+before=$(hash_file "$BAD/.forge/version")
+(cd "$BAD" && HOME="$BAD/home" "$REPO_ROOT/setup.sh" -f) > "$BAD/apply.log" 2>&1
+assert_equals "$?" "1" "unsupported major blocks"
+assert_hash_equals "$BAD/.forge/version" "$before" "unsupported version remains unchanged"
+assert_contains "$BAD/apply.log" "BLOCKED: unsupported Forge layout major 7" \
+    "unsupported major is diagnosed"
+
 S2L=$(scratch_dir state-path-symlink)
 mkdir -p "$S2L/outside/local"
 printf '6\n' > "$S2L/outside/version"
@@ -857,7 +883,7 @@ make_git_repo "$S15"
 mkdir -p "$S15/no-python-bin"
 ln -s /usr/bin/dirname "$S15/no-python-bin/dirname"
 PATH="$S15/no-python-bin" /bin/bash "$REPO_ROOT/scripts/full-refresh.sh" \
-    --target "$S15" --scope project > "$S15/python.log" 2>&1
+    --target "$S15" --scope project --release-version "$EXPECTED_RELEASE" > "$S15/python.log" 2>&1
 assert_equals "$?" "1" "missing Python blocks authoritative migration"
 assert_contains "$S15/python.log" "Python 3 is required" "missing Python is explicit"
 assert_file_missing "$S15/.forge" "Python preflight mutates no Forge path"
@@ -1204,12 +1230,12 @@ assert_file_missing "$S22/root-python-invoked" "root rejection occurs before Pyt
 FORGE_FAKE_PYTHON_MARKER="$S22/noncanonical-python-invoked" \
     PATH="$S22/fake-bin:/usr/bin:/bin" \
     /bin/bash "$REPO_ROOT/scripts/full-refresh.sh" \
-    --target "$S22/real-home/../real-home" --scope global > "$S22/noncanonical.log" 2>&1
+    --target "$S22/real-home/../real-home" --scope global --release-version "$EXPECTED_RELEASE" > "$S22/noncanonical.log" 2>&1
 assert_equals "$?" "1" "noncanonical selected global home is rejected"
 assert_file_missing "$S22/noncanonical-python-invoked" \
     "noncanonical-home rejection occurs before Python or transaction writes"
 /bin/bash "$REPO_ROOT/scripts/full-refresh.sh" \
-    --target "$S22/missing-home" --scope global > "$S22/missing.log" 2>&1
+    --target "$S22/missing-home" --scope global --release-version "$EXPECTED_RELEASE" > "$S22/missing.log" 2>&1
 assert_equals "$?" "1" "nonexistent selected global home is rejected"
 
 start_test "sanitized downstream profiles preview, reconcile, and converge on one active Forge"

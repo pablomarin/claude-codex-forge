@@ -59,7 +59,7 @@ function Get-ForgeStatePath {
     }
 
     if ((Test-Path -LiteralPath $canonical) -or $versionPresent) {
-        if ($versionPresent -and $version -ne "6") {
+        if ($versionPresent -and $version -notmatch '^6(\.\d+)?$') {
             throw "BLOCKED: invalid Forge v6 state at $canonical"
         }
         if (-not (Test-ForgeStateV6 $canonical)) {
