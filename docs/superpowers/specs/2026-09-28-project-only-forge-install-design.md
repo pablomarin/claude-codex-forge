@@ -222,7 +222,7 @@ When native goal work begins, Forge records in `.forge/local/state.md`:
 
 - a UUIDv4 nonce;
 - a normalized objective hash;
-- native activation host and timestamp;
+- a fresh UUIDv4 activation ID plus native activation host and timestamp;
 - workflow command, immutable base ref, and base SHA;
 - consumed Forge turn count and ceiling;
 - checklist, exact next step, status, and evidence paths; and
@@ -246,6 +246,7 @@ The Stop hook stores turn records under:
 ```text
 <git-common-dir>/forge-goals/<nonce>/
 ├── binding
+├── activations/
 ├── turns/
 ├── checkpoint
 └── exhausted
@@ -256,9 +257,13 @@ when one worktree is closed. Hook and settings policy deny ordinary agent tools 
 ledger directly; the hook owns no-clobber turn publication. Unix and PowerShell implement the same
 record schema and validation.
 
-The ledger binds repository identity, nonce, objective hash, ceiling, and turn records. State shows
-the derived count, but state alone cannot lower the ledger count or ceiling. Missing, malformed,
-aliased, divergent, or backward records fail closed with a concrete tamper diagnostic.
+The immutable binding records repository identity, nonce, objective hash, and the fixed 20-turn
+tranche size. Each human native-goal activation publishes one immutable, sequential activation
+record. The authoritative ceiling is `20 × valid activation records`; it is never rewritten in
+place. Turn records are also immutable and no-clobber. State shows the derived activation count,
+ceiling, and consumed turn count, but state alone cannot lower or raise any of them. Missing,
+malformed, aliased, divergent, duplicate, or non-sequential records fail closed with a concrete
+tamper diagnostic.
 
 This ledger is budget accounting and cross-worktree continuity, not proof that the native host Goal
 is active. Forge makes no stronger claim than the host interface supports.
@@ -459,6 +464,8 @@ database, service, package dependency, or replacement configuration framework.
 7. A changed objective receives a new nonce and no stale external authorization.
 8. Stuck warnings remain advisory and do not extend the budget.
 9. Ordinary non-goal workflows do not create or charge a goal ledger.
+10. Deleting, duplicating, renumbering, or fabricating a gap in activation records fails closed; the
+    displayed state cannot change the ceiling independently of those records.
 
 ### Global retirement
 
