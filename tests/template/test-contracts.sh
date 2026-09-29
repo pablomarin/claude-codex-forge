@@ -2805,6 +2805,10 @@ for adapter in "$REPO_ROOT/CLAUDE.md" "$REPO_ROOT/AGENTS.md"; do
 done
 assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`FORGE.template.md` is the canonical policy installed into downstream projects' \
     "contributor guide distinguishes source-repository guidance from installed policy"
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`AGENTS.md` is the canonical installed project adapter' \
+    "contributor guide names AGENTS as the canonical installed adapter"
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`CLAUDE.md` is only the compatibility bridge' \
+    "contributor guide names CLAUDE as the compatibility bridge"
 assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`manifests/managed-v6.tsv`' \
     "contributor guide names the installation ownership manifest"
 assert_contains "$REPO_ROOT/CLAUDE.template.md" 'v5 compatibility' \
@@ -2823,6 +2827,23 @@ if [ -z "$SOURCE_PRIVATE_POLICY" ]; then
 else
     fail "Forge source mode contains tracked generated or host-private policy: $SOURCE_PRIVATE_POLICY"
 fi
+
+start_test "installed root templates use one canonical project adapter"
+assert_contains "$REPO_ROOT/templates/adapters/AGENTS.block.template.md" \
+    'Read `.forge/instructions.md` completely before taking project action.' \
+    "AGENTS template discovers complete project policy"
+assert_contains "$REPO_ROOT/templates/adapters/AGENTS.block.template.md" \
+    'If `docs/agent-context.md` exists, read it as project-owned context. Do not create or overwrite it.' \
+    "AGENTS template discovers optional project context without owning it"
+assert_contains "$REPO_ROOT/templates/adapters/AGENTS.block.template.md" \
+    'This adapter contains no Forge policy; `.forge/instructions.md` is canonical.' \
+    "AGENTS template declares its discovery-only boundary"
+assert_contains "$REPO_ROOT/templates/adapters/CLAUDE.block.template.md" '@AGENTS.md' \
+    "Claude template imports AGENTS"
+assert_not_contains "$REPO_ROOT/templates/adapters/CLAUDE.block.template.md" '@.forge/instructions.md' \
+    "Claude template does not bypass AGENTS"
+assert_not_contains "$REPO_ROOT/templates/adapters/CLAUDE.block.template.md" 'FORGE_GOAL_BUDGET_EXHAUSTED' \
+    "Claude template duplicates no goal policy"
 
 start_test "README presents a readable workflow and one-source instruction mapping"
 assert_contains "$README" 'flowchart TB' \

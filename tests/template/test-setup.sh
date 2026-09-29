@@ -1200,6 +1200,10 @@ for combo in both claude-only codex-only neither; do
         codex-only) make_fake_engine_path "$fake" absent present ;;
         neither) make_fake_engine_path "$fake" absent absent ;;
     esac
+    if [ "$combo" = both ]; then
+        printf 'PROJECT CLAUDE PERSONAL CONTEXT\n' > "$project/CLAUDE.md"
+        printf 'PROJECT AGENTS PERSONAL CONTEXT\n' > "$project/AGENTS.md"
+    fi
     mkdir -p "$project/.fakehome"
     (cd "$project" && PATH="$fake:/usr/bin:/bin" HOME="$project/.fakehome" \
         "$REPO_ROOT/setup.sh" -p "Matrix $combo" -t fullstack >"$project/setup.log" 2>&1)
@@ -1234,6 +1238,22 @@ start_test "v6 root adapters preserve project text and expose canonical rules on
 ROOT_CASE="$V6_BASE/both/project with spaces"
 assert_contains "$ROOT_CASE/CLAUDE.md" '<!-- forge:begin v6 -->' "Claude root has bounded Forge block"
 assert_contains "$ROOT_CASE/AGENTS.md" '<!-- forge:begin v6 -->' "Codex root has bounded Forge block"
+assert_equals "$(sed -n '1p' "$ROOT_CASE/CLAUDE.md")" 'PROJECT CLAUDE PERSONAL CONTEXT' \
+    "Claude personal root text remains byte-preserved outside the Forge marker"
+assert_equals "$(sed -n '1p' "$ROOT_CASE/AGENTS.md")" 'PROJECT AGENTS PERSONAL CONTEXT' \
+    "Codex personal root text remains byte-preserved outside the Forge marker"
+assert_contains "$ROOT_CASE/AGENTS.md" '`.forge/instructions.md`' \
+    "AGENTS discovers canonical project policy"
+assert_contains "$ROOT_CASE/AGENTS.md" '`docs/agent-context.md` exists' \
+    "AGENTS conditionally discovers project context"
+assert_contains "$ROOT_CASE/CLAUDE.md" '@AGENTS.md' \
+    "Claude imports the canonical adapter"
+assert_not_contains "$ROOT_CASE/CLAUDE.md" '@.forge/instructions.md' \
+    "Claude does not bypass the canonical adapter"
+assert_not_contains "$ROOT_CASE/CLAUDE.md" 'FORGE_GOAL_BUDGET_EXHAUSTED' \
+    "Claude bridge duplicates no goal policy"
+assert_file_missing "$ROOT_CASE/docs/agent-context.md" \
+    "setup does not invent project-specific context"
 ROOT_CANONICAL_REVISION=$(hash_file "$ROOT_CASE/.forge/instructions.md")
 assert_contains "$ROOT_CASE/CLAUDE.md" "canonical-revision: $ROOT_CANONICAL_REVISION" "Claude root binds the canonical content revision"
 assert_contains "$ROOT_CASE/AGENTS.md" "canonical-revision: $ROOT_CANONICAL_REVISION" "Codex root binds the same canonical content revision"

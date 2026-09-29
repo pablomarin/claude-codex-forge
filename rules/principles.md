@@ -15,10 +15,13 @@ goal. Stop review churn at the bounded closure rule and surface a real remaining
 
 ## Resource Discipline
 
-Build the smallest correct solution. Treat developer time, session length, tokens, and money as
-finite engineering resources. Do not pursue perfection, cosmetic polish, speculative hardening, or
-edge cases without a concrete supported trigger, explicit acceptance criterion, material
-likelihood, security impact, or data-integrity impact.
+Apply KISS and YAGNI: build the smallest correct solution required by current evidence and
+acceptance criteria. Do not add speculative abstractions, compatibility layers, hardening, or
+edge-case machinery without a concrete supported need.
+
+Treat developer time, session length, tokens, and money as finite engineering resources. Do not
+pursue perfection or cosmetic polish without a concrete supported trigger, explicit acceptance
+criterion, material likelihood, security impact, or data-integrity impact.
 
 Default to one broad review, one repair pass, and one closure review limited to named findings and
 direct regressions. One still-open reachable P0/P1 may receive one surgical repair and verification;

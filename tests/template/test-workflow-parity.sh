@@ -89,6 +89,21 @@ for surface in "$REPO_ROOT/rules/workflow.md" "$REPO_ROOT/FORGE.template.md"; do
         "$(basename "$surface") does not instruct a direct canonical state read"
 done
 
+start_test "project instructions preserve complete global policy and KISS/YAGNI"
+for text in \
+  'Apply KISS and YAGNI' \
+  'Ground Your Claims' \
+  'Host Neutrality' \
+  'never save secrets or speculative conclusions' \
+  'before context compaction or the end of substantial work'; do
+    assert_contains "$REPO_ROOT/FORGE.template.md" "$text" \
+        "project instructions preserve global policy: $text"
+done
+assert_contains "$REPO_ROOT/rules/principles.md" 'Apply KISS and YAGNI' \
+    "principles name KISS and YAGNI"
+assert_contains "$REPO_ROOT/rules/critical-rules.md" 'KISS AND YAGNI' \
+    "critical rules name KISS and YAGNI"
+
 start_test "development entrypoints load the shared startup boundary before workflow steps"
 for workflow in new-feature fix-bug quick-fix; do
     entry=$(sed '/^## /q' "$REPO_ROOT/commands/$workflow.md")
@@ -141,7 +156,7 @@ if [[ "$stage" == complete ]]; then
         assert_not_contains "$REPO_ROOT/$settings" 'pr-review-toolkit@claude-plugins-official' "$settings removes the PR toolkit dependency"
         assert_not_contains "$REPO_ROOT/$settings" '"type": "prompt"' "$settings uses receipt-only subagent evaluation"
     done
-    for surface in FORGE.template.md templates/adapters/CLAUDE.block.template.md templates/adapters/AGENTS.block.template.md commands/forge-goal.md; do
+    for surface in FORGE.template.md commands/forge-goal.md; do
         assert_contains "$REPO_ROOT/$surface" 'native `/goal`' "$surface composes native goal"
         assert_contains "$REPO_ROOT/$surface" 'FORGE_GOAL_BUDGET_EXHAUSTED' "$surface consumes budget exhaustion"
         assert_contains "$REPO_ROOT/$surface" 'FORGE_GOAL_STUCK_WARNING' "$surface consumes stuck warning"
@@ -278,8 +293,8 @@ if [[ "$stage" == complete ]]; then
     fi
     assert_not_contains "$INSTALL/.forge/installed-files.tsv" $'.claude/commands/goal.md\t' "custom Claude goal is not Forge-owned"
     assert_not_contains "$INSTALL/.forge/installed-files.tsv" $'.agents/skills/goal/SKILL.md\t' "custom Codex goal is not Forge-owned"
-    assert_contains "$INSTALL/CLAUDE.md" 'native `/goal`' "Claude root composes its native goal"
-    assert_contains "$INSTALL/AGENTS.md" 'native `/goal`' "Codex root composes its native goal"
+    assert_contains "$INSTALL/CLAUDE.md" '@AGENTS.md' "Claude root imports the canonical adapter"
+    assert_contains "$INSTALL/AGENTS.md" '.forge/instructions.md' "Codex root discovers canonical project policy"
     assert_contains "$LOG" "RUNTIME_READY=BLOCKED host=claude" "Claude collision blocks host readiness"
     assert_contains "$LOG" "rename .claude/commands/goal.md" "Claude collision prints exact rename guidance"
     assert_contains "$LOG" "RUNTIME_READY=BLOCKED host=codex" "Codex collision blocks host readiness"

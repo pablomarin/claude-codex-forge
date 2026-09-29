@@ -5,10 +5,13 @@ read it completely; adapters may translate discovery metadata but may not restat
 
 ## Resource Discipline
 
-Build the smallest correct solution. Treat developer time, session length, tokens, and money as
-finite engineering resources. Do not pursue perfection, cosmetic polish, speculative hardening, or
-edge cases without a concrete supported trigger, explicit acceptance criterion, material
-likelihood, security impact, or data-integrity impact.
+Apply KISS and YAGNI: build the smallest correct solution required by current evidence and
+acceptance criteria. Do not add speculative abstractions, compatibility layers, hardening, or
+edge-case machinery without a concrete supported need.
+
+Treat developer time, session length, tokens, and money as finite engineering resources. Do not
+pursue perfection or cosmetic polish without a concrete supported trigger, explicit acceptance
+criterion, material likelihood, security impact, or data-integrity impact.
 
 Default to one broad review, one repair pass, and one closure review limited to named findings and
 direct regressions. One still-open reachable P0/P1 may receive one surgical repair and verification;
@@ -34,6 +37,24 @@ criterion.
   Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
 - Keep developer state, receipts, and local memories under `.forge/local/`; never overwrite them
   during setup. Keep project-owned durable memory under `.forge/memory/`.
+
+## Memory Management
+
+Keep current progress and the exact next step in `.forge/local/state.md`. Store worktree-local
+learning under `.forge/local/memory/`; promote only reviewed project knowledge to `.forge/memory/`.
+Forge must never save secrets or speculative conclusions as memory.
+
+When a useful durable learning exists, preserve it before context compaction or the end of substantial work
+without duplicating project instructions. Native private host memory is optional; it is never Forge
+evidence and never a runtime dependency.
+
+## Host Neutrality
+
+Claude Code and Codex are interchangeable entry points into the same project harness. The host in
+which the developer is working is the main engine for that session. Reviewer and council dispatch
+use the other qualified engine when available and visibly fall back to a fresh same-engine process.
+Persisted project state and evidence enable continuation; private conversation context does not
+transfer between hosts.
 
 ## Branch Naming
 
