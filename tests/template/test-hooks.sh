@@ -991,8 +991,8 @@ if command -v pwsh >/dev/null 2>&1; then
 
     (cd "$S_GATE2" && pwsh -NoProfile -File "$REPO_ROOT/hooks/check-workflow-gates.ps1" < "$S_GATE2/.hook-input.json") > "$S_GATE2/.hook-ps-stdout" 2> "$S_GATE2/.hook-ps-stderr"
     rc_ps_gate2=$?
-    assert_equals "$rc_ps_gate2" "0" \
-        ".ps1 check-workflow-gates: stray '- [ ]' in Done does not block ship"
+    assert_equals "$rc_ps_gate2" "2" \
+        ".ps1 ignores stray '- [ ]' in Done but still enforces strict receipts"
 else
     printf "  %s·%s skipped: pwsh not installed\n" "$C_DIM" "$C_RESET"
 fi
@@ -2816,257 +2816,57 @@ printf '%s' "$PATCH_ESCAPE" | (cd "$PATCH_S" && PATH="$PATCH_S/bin:$PATH" \
     FORGE_FORMAT_TRACE="$PATCH_S/trace" bash "$REPO_ROOT/hooks/post-tool-format.sh") >/dev/null
 assert_file_missing "$PATCH_S/trace" "formatter rejects a patch path that escapes through a symlinked parent"
 
-start_test "goal turn budget is external, no-clobber, host-neutral, and checkpoint-first"
+start_test "Stop hook delegates active native Goal accounting to the repository ledger"
 GB=$(scratch_dir goal-budget-hook)
 GB_HOME=$(scratch_dir goal-budget-home)
-mkdir -p "$GB/.forge/local" "$GB_HOME/.forge/goal-authorizations"
+mkdir -p "$GB/.forge/local" "$GB_HOME"
 (cd "$GB" && git init -q --initial-branch=main && git -c user.email=t@t -c user.name=t \
     commit -q --allow-empty -m init)
 printf '6\n' > "$GB/.forge/version"
 GB_NONCE=88888888-8888-4888-8888-888888888888
-GB_OBJECTIVE=objective-42
+GB_ACTIVATION=77777777-7777-4777-8777-777777777777
 cat > "$GB/.forge/local/state.md" <<EOF
 <!-- forge:state-schema v6 -->
 ## Workflow
 | Field | Value |
 | Command | /new-feature budget |
-| Phase | 4 — Implementation |
+| Phase | implementation |
 | Next step | resume-exact-checkpoint |
 ## /goal session
 | Field | Value |
 | nonce | $GB_NONCE |
-| objective_hash | $GB_OBJECTIVE |
-| turn_count | 0 |
-| turn_ceiling | 99 |
+| objective_hash | objective-42 |
+| activation_id | $GB_ACTIVATION |
+| activation_host | claude |
+| activated_at | 2026-09-28T00:00:00Z |
 | workflow_command | /new-feature budget |
-EOF
-GB_ROOT=$(cd "$GB" && pwd -P)
-GB_COMMON=$(git -C "$GB" rev-parse --git-common-dir); case "$GB_COMMON" in /*) ;; *) GB_COMMON="$GB_ROOT/$GB_COMMON";; esac
-GB_COMMON=$(cd "$GB_COMMON" && pwd -P)
-GB_PID=$(printf '%s\n%s\n' "$GB_ROOT" "$GB_COMMON" | shasum -a 256 | awk '{print $1}')
-mkdir -p "$GB_HOME/.forge/goal-authorizations/$GB_PID" "$GB_HOME/.forge/bin"
-GB_WRITER_REV=$(shasum -a 256 "$REPO_ROOT/scripts/forge-goal-authorize.sh" | awk '{print $1}')
-GB_WRITER="$GB_HOME/.forge/bin/forge-goal-authorize"
-sed -e "s|__FORGE_WRITER_PATH__|$GB_WRITER|g" \
-    -e "s|__FORGE_AUTHORIZATION_ROOT__|$GB_HOME/.forge/goal-authorizations|g" \
-    -e "s|__FORGE_WRITER_REVISION__|$GB_WRITER_REV|g" \
-    "$REPO_ROOT/scripts/forge-goal-authorize.sh" > "$GB_WRITER"
-chmod +x "$GB_WRITER"
-shasum -a 256 "$GB_WRITER" | awk '{print $1}' > "$GB_WRITER.sha256"
-cat > "$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE.auth" <<EOF
-format=forge-goal-authorization-v1
-project_root=$GB_ROOT
-git_common_dir=$GB_COMMON
-project_id=$GB_PID
-objective_hash=$GB_OBJECTIVE
-nonce=$GB_NONCE
-ceiling=2
-approval_channel=physical-operator-action
-issue_id=test-human-1
-writer_revision=$GB_WRITER_REV
-EOF
-GB_PAYLOAD_1=$(printf '{"cwd":"%s","host":"claude","session_id":"s1","turn_id":"turn-1","stop_hook_active":true}' "$GB")
-(printf '%s' "$GB_PAYLOAD_1" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/t1a.out" 2>&1; echo $? > "$GB/t1a.rc") &
-g1=$!
-(printf '%s' "$GB_PAYLOAD_1" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/t1b.out" 2>&1; echo $? > "$GB/t1b.rc") &
-g2=$!
-wait "$g1"; wait "$g2"
-assert_equals "$(cat "$GB/t1a.rc"):$(cat "$GB/t1b.rc")" "0:0" \
-    "concurrent duplicate Stop events both complete without an authority race"
-TURN_DIR="$GB/.forge/local/goal-counters/$GB_NONCE/turns"
-PROTECTED_TURN_DIR="$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE.ledger/turns"
-assert_not_contains "$GB/t1a.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
-    "first concurrent duplicate Stop never observes a partial mirror"
-assert_not_contains "$GB/t1b.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
-    "second concurrent duplicate Stop never observes a partial mirror"
-assert_equals "$(find "$TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "1" \
-    "duplicate concurrent Stop events charge one canonical local turn"
-assert_equals "$(find "$PROTECTED_TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "1" \
-    "protected ledger mirrors the Task 2 local turn contract"
-assert_contains "$TURN_DIR/turn-1" 'format=forge-goal-turn-v1' \
-    "local record uses the Task 2 no-clobber turn schema"
-assert_contains "$TURN_DIR/turn-1" 'host=claude' \
-    "turn record binds the host that actually advanced the goal"
-GB_AUTH="$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE.auth"
-cp "$GB_AUTH" "$GB/auth.original"
-python3 - "$GB_AUTH" <<'PY'
-import pathlib, sys
-p = pathlib.Path(sys.argv[1])
-p.write_text(p.read_text().replace("ceiling=2\n", "ceiling=99\n"))
-PY
-GB_PAYLOAD_AUTH_TAMPER=$(printf '{"cwd":"%s","host":"codex","session_id":"s2","turn_id":"turn-auth-tamper","stop_hook_active":true}' "$GB")
-printf '%s' "$GB_PAYLOAD_AUTH_TAMPER" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
-    > "$GB/auth-tamper.out" 2>&1
-assert_equals "$?" "2" "ceiling replacement is a blocking authority failure"
-assert_contains "$GB/auth-tamper.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
-    "protected activation binding rejects a valid-shaped ceiling replacement"
-assert_equals "$(find "$PROTECTED_TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "1" \
-    "authorization replacement cannot increase the protected count"
-cp "$GB/auth.original" "$GB_AUTH"
-GB_PAYLOAD_2=$(printf '{"cwd":"%s","host":"codex","session_id":"s2","turn_id":"turn-2","stop_hook_active":true}' "$GB")
-printf '%s' "$GB_PAYLOAD_2" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
-    > "$GB/t2.out" 2>&1
-assert_contains "$GB/t2.out" 'FORGE_GOAL_BUDGET_EXHAUSTED' \
-    "host switch continues the same nonce and emits exhaustion at the external ceiling"
-MARKER="$GB/.forge/local/goal-counters/$GB_NONCE/budget-exhausted.marker"
-assert_contains "$MARKER" 'next_step=resume-exact-checkpoint' \
-    "exact next-step checkpoint is persisted before exhaustion is emitted"
-assert_contains "$MARKER" 'paused=true' \
-    "marker contract matches the native feasibility pause oracle"
-assert_equals "$(head -1 "$MARKER")" 'FORGE_GOAL_BUDGET_EXHAUSTED' \
-    "Task 4 producer emits the exact Task 2 and Task 9 marker sentinel"
-assert_contains "$GB/.forge/local/goal-counters/$GB_NONCE/checkpoint" 'turn_count=2' \
-    "checkpoint records the externally derived count before the marker"
-assert_contains "$GB/.forge/local/goal-counters/$GB_NONCE/checkpoint" 'host=codex' \
-    "Claude plan checkpoint resumes in Codex without resetting completed turns"
-sed -i.bak 's/objective_hash | objective-42/objective_hash | forged-objective/' "$GB/.forge/local/state.md"
-GB_PAYLOAD_3=$(printf '{"cwd":"%s","host":"codex","session_id":"s2","turn_id":"turn-3","stop_hook_active":true}' "$GB")
-printf '%s' "$GB_PAYLOAD_3" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
-    > "$GB/tamper.out" 2>&1
-assert_equals "$?" "2" "state/objective rebinding is a blocking authority failure"
-assert_contains "$GB/tamper.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
-    "project state cannot reset or rebind the immutable authorization"
-assert_equals "$(find "$TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "2" \
-    "tampered state cannot increase the charged count"
-mv "$GB/.forge/local/state.md.bak" "$GB/.forge/local/state.md"
-rm -f "$TURN_DIR/turn-1"
-GB_PAYLOAD_4=$(printf '{"cwd":"%s","host":"claude","session_id":"s3","turn_id":"turn-4","stop_hook_active":true}' "$GB")
-printf '%s' "$GB_PAYLOAD_4" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
-    > "$GB/deletion-tamper.out" 2>&1
-assert_equals "$?" "0" "a missing local mirror is recovered from protected authority"
-assert_contains "$TURN_DIR/turn-1" 'format=forge-goal-turn-v1' \
-    "recoverable local deletion is restored from the protected ledger"
-rm -f "$PROTECTED_TURN_DIR/turn-2"
-GB_PAYLOAD_PROTECTED_DELETE=$(printf '{"cwd":"%s","host":"claude","session_id":"s3","turn_id":"turn-protected-delete","stop_hook_active":true}' "$GB")
-printf '%s' "$GB_PAYLOAD_PROTECTED_DELETE" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
-    > "$GB/protected-deletion.out" 2>&1
-assert_equals "$?" "2" "deleting protected authority is a blocking failure"
-assert_contains "$GB/protected-deletion.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
-    "protected deletion is never repaired from the editable local mirror"
-# Restore the protected record solely to isolate the fresh-nonce fixtures below.
-cp "$TURN_DIR/turn-2" "$PROTECTED_TURN_DIR/turn-2"
-
-GB_NONCE_2=99999999-9999-4999-8999-999999999999
-GB_OBJECTIVE_2=objective-43
-cat > "$GB/.forge/local/state.md" <<EOF
-<!-- forge:state-schema v6 -->
-## Workflow
-| Field | Value |
-| Command | /new-feature budget-two |
-| Phase | 4 — Implementation |
-| Next step | new-human-goal |
-## /goal session
-| Field | Value |
-| nonce | $GB_NONCE_2 |
-| objective_hash | $GB_OBJECTIVE_2 |
 | turn_count | 0 |
-| turn_ceiling | 999 |
-| workflow_command | /new-feature budget-two |
+| turn_ceiling | 20 |
+| activation_count | 1 |
+| evidence_path | .forge/local/evidence/latest.json |
 EOF
-cat > "$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE_2.auth" <<EOF
-format=forge-goal-authorization-v1
-project_root=$GB_ROOT
-git_common_dir=$GB_COMMON
-project_id=$GB_PID
-objective_hash=$GB_OBJECTIVE_2
-nonce=$GB_NONCE_2
-ceiling=1
-approval_channel=physical-operator-action
-issue_id=test-human-2
-writer_revision=$GB_WRITER_REV
-EOF
-GB_AUTH_2="$GB_HOME/.forge/goal-authorizations/$GB_PID/$GB_NONCE_2.auth"
-cp "$GB_AUTH_2" "$GB/auth-two.original"
-sed -i.bak "s/writer_revision=$GB_WRITER_REV/writer_revision=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/" "$GB_AUTH_2"
-GB_PAYLOAD_WRITER_TAMPER=$(printf '{"cwd":"%s","host":"claude","session_id":"s4","turn_id":"turn-writer-tamper","stop_hook_active":true}' "$GB")
-printf '%s' "$GB_PAYLOAD_WRITER_TAMPER" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
-    > "$GB/writer-tamper.out" 2>&1
-assert_equals "$?" "2" "authorization must bind the exact sealed installed writer revision"
-assert_contains "$GB/writer-tamper.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
-    "valid-shaped but unsealed writer revision is rejected"
-cp "$GB/auth-two.original" "$GB_AUTH_2"
-GB_PAYLOAD_NEW=$(printf '{"cwd":"%s","host":"claude","session_id":"s4","turn_id":"turn-1","stop_hook_active":true}' "$GB")
-printf '%s' "$GB_PAYLOAD_NEW" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" \
-    > "$GB/new-nonce.out" 2>&1
-NEW_TURN_DIR="$GB/.forge/local/goal-counters/$GB_NONCE_2/turns"
-assert_equals "$(find "$NEW_TURN_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')" "1" \
-    "only a separately human-authorized nonce starts a fresh budget"
-assert_contains "$GB/.forge/local/goal-counters/$GB_NONCE_2/budget-exhausted.marker" 'turn_ceiling=1' \
-    "new nonce still derives its ceiling only from the immutable authorization"
-
-write_goal_fixture() {
-    local nonce="$1" objective="$2" next="$3"
-    cat > "$GB/.forge/local/state.md" <<EOF
-<!-- forge:state-schema v6 -->
-## Workflow
-| Field | Value |
-| Command | /new-feature hardening |
-| Phase | 4 — Implementation |
-| Next step | $next |
-## /goal session
-| Field | Value |
-| nonce | $nonce |
-| objective_hash | $objective |
-| workflow_command | /new-feature hardening |
-EOF
-    cat > "$GB_HOME/.forge/goal-authorizations/$GB_PID/$nonce.auth" <<EOF
-format=forge-goal-authorization-v1
-project_root=$GB_ROOT
-git_common_dir=$GB_COMMON
-project_id=$GB_PID
-objective_hash=$objective
-nonce=$nonce
-ceiling=1
-approval_channel=physical-operator-action
-issue_id=test-$nonce
-writer_revision=$GB_WRITER_REV
-EOF
-}
-
-GB_NONCE_3=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
-write_goal_fixture "$GB_NONCE_3" objective-ancestor ancestor-checkpoint
-mkdir -p "$GB/outside-counter"
-ln -s "$GB/outside-counter" "$GB/.forge/local/goal-counters/$GB_NONCE_3"
-printf '{"cwd":"%s","host":"claude","session_id":"s5","turn_id":"turn-ancestor","stop_hook_active":true}' "$GB" \
-    | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/ancestor.out" 2>&1
-assert_equals "$?" "2" "aliased goal-counter ancestor blocks before charging"
-assert_contains "$GB/ancestor.out" 'FORGE_GOAL_AUTHORIZATION_TAMPERED' \
-    "goal-counter ancestor alias is reported as authority tampering"
-
-GB_NONCE_4=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
-write_goal_fixture "$GB_NONCE_4" objective-checkpoint publish-checkpoint
-mkdir -p "$GB/.forge/local/goal-counters/$GB_NONCE_4/checkpoint"
-printf '{"cwd":"%s","host":"codex","session_id":"s6","turn_id":"turn-checkpoint","stop_hook_active":true}' "$GB" \
-    | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/checkpoint-failure.out" 2>&1
-assert_equals "$?" "2" "checkpoint no-clobber failure blocks exhaustion publication"
-assert_file_missing "$GB/.forge/local/goal-counters/$GB_NONCE_4/budget-exhausted.marker" \
-    "marker is absent when checkpoint publication cannot be verified"
-assert_not_contains "$GB/checkpoint-failure.out" 'FORGE_GOAL_BUDGET_EXHAUSTED:' \
-    "checkpoint failure never emits a lying exhaustion sentinel"
-
-GB_NONCE_5=cccccccc-cccc-4ccc-8ccc-cccccccccccc
-write_goal_fixture "$GB_NONCE_5" objective-marker publish-marker
-mkdir -p "$GB/.forge/local/goal-counters/$GB_NONCE_5/budget-exhausted.marker"
-printf '{"cwd":"%s","host":"codex","session_id":"s7","turn_id":"turn-marker","stop_hook_active":true}' "$GB" \
-    | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/marker-failure.out" 2>&1
-assert_equals "$?" "2" "marker no-clobber failure blocks the Stop boundary"
-assert_file_missing "$GB/.forge/local/goal-counters/$GB_NONCE_5/checkpoint" \
-    "a pre-existing partial marker blocks before any checkpoint publication"
-assert_not_contains "$GB/marker-failure.out" 'FORGE_GOAL_BUDGET_EXHAUSTED:' \
-    "marker failure never emits a lying exhaustion sentinel"
-
-GB_NONCE_6=dddddddd-dddd-4ddd-8ddd-dddddddddddd
-write_goal_fixture "$GB_NONCE_6" objective-race concurrent-checkpoint
-GB_RACE_PAYLOAD=$(printf '{"cwd":"%s","host":"codex","session_id":"s8","turn_id":"turn-race","stop_hook_active":true}' "$GB")
-(printf '%s' "$GB_RACE_PAYLOAD" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/race-a.out" 2>&1; echo $? > "$GB/race-a.rc") & gr1=$!
-(printf '%s' "$GB_RACE_PAYLOAD" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/race-b.out" 2>&1; echo $? > "$GB/race-b.rc") & gr2=$!
-wait "$gr1"; wait "$gr2"
-assert_equals "$(cat "$GB/race-a.rc"):$(cat "$GB/race-b.rc")" "0:0" \
-    "concurrent checkpoint publication is idempotent"
-assert_contains "$GB/.forge/local/goal-counters/$GB_NONCE_6/checkpoint" 'turn_count=1' \
-    "concurrent Stop publishes one verified checkpoint"
-assert_equals "$(head -1 "$GB/.forge/local/goal-counters/$GB_NONCE_6/budget-exhausted.marker")" \
-    'FORGE_GOAL_BUDGET_EXHAUSTED' "concurrent Stop publishes one truthful marker"
+bash "$REPO_ROOT/hooks/lib/goal-ledger.sh" activate --project "$GB" --state "$GB/.forge/local/state.md"
+assert_equals "$?" "0" "native activation creates the repository ledger"
+GB_COMMON_RAW=$(git -C "$GB" rev-parse --git-common-dir)
+case "$GB_COMMON_RAW" in /*) ;; *) GB_COMMON_RAW="$GB/$GB_COMMON_RAW" ;; esac
+GB_COMMON=$(cd "$GB_COMMON_RAW" && pwd -P)
+GB_TURNS="$GB_COMMON/forge-goals/$GB_NONCE/turns"
+GB_PAYLOAD=$(printf '{"cwd":"%s","host":"claude","session_id":"s1","turn_id":"turn-1","stop_hook_active":true}' "$GB")
+printf '%s' "$GB_PAYLOAD" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/first.out" 2>&1
+assert_equals "$?" "0" "Stop hook charges an activated native Goal"
+printf '%s' "$GB_PAYLOAD" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/duplicate.out" 2>&1
+assert_equals "$?" "0" "duplicate Stop delivery is idempotent through the hook"
+assert_equals "$(find "$GB_TURNS" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" "1" \
+    "Stop hook passes the same event exactly once to the ledger"
+assert_contains "$GB_TURNS/00000001" 'format=forge-goal-turn-v2' \
+    "hook-produced turn uses the repository ledger schema"
+assert_contains "$GB_TURNS/00000001" 'host=claude' \
+    "hook-produced turn binds the active host"
+if find "$GB_HOME" -mindepth 1 -print -quit | grep -q .; then
+    fail "native Goal accounting wrote into HOME"
+else
+    pass "native Goal accounting has no HOME runtime dependency"
+fi
 
 # ===========================================================================
 # Report

@@ -92,9 +92,12 @@ affected libraries/APIs. Dispatch `research-first` when current external behavio
 proven local pattern where it fits; do not copy a superficially similar fix without checking its
 invariants.
 
-If autonomous execution would help, offer the active host's native `/goal`. Persistent Forge state,
-not resettable native counters, remains authoritative for the objective, nonce, budget, checklist,
-evidence, authorization, and terminal status.
+If autonomous execution would help, offer the active host's native `/goal`. Populate `## /goal
+session` only after the developer invokes `/goal` or explicitly requests native Goal autonomy, then
+publish the activation with `.forge/hooks/lib/goal-ledger.sh activate` (or the PowerShell twin).
+That human action is activation authority; persistent Forge state and the Git-common ledger provide
+the objective, nonce, activation/count/ceiling, checklist, evidence, and terminal status. External
+mutations retain their separate authorization boundaries.
 
 ## 3. Plan the Minimal Fix
 
@@ -185,8 +188,9 @@ unsupported claimed-current edge is P1.
 Use `workflow-state.sh checkpoint` for workflow control, update checklist/narrative content,
 changelog, and project memory with verified facts, and finish with `workflow-state.sh checkpoint
 --host <claude|codex> --phase complete --next-step none`. Show the exact PR
-mutation and pause. Only a human-created authorization record bound to the active nonce/candidate
-permits push and `gh pr create`. Reviewer engine fallback is automatic; PR creation is not.
+mutation and pause. Only fresh human authorization bound to the active nonce/candidate permits push
+and `gh pr create`. Native Goal activation does not grant it. Reviewer engine fallback is automatic;
+PR creation is not.
 
 If E2E truly does not apply, use the canonical checklist form
 `- [x] E2E verified — N/A: <concrete supported reason>` and persist the matching

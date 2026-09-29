@@ -40,12 +40,12 @@ for suite in test-lint.sh test-platform-parity.sh test-contracts.sh test-worktre
 done
 
 PS_GOAL_TEST="$REPO_ROOT/tests/template/test-goal-feasibility.ps1"
-assert_contains "$PS_GOAL_TEST" 'setup\.ps1.*-Force.*-DryRun' \
-    "PowerShell legacy-harness test expects the canonical preview command"
-assert_not_contains "$PS_GOAL_TEST" 'setup\.ps1.*-FullRefresh.*-DryRun' \
-    "PowerShell legacy-harness test does not require the retired preview alias"
-assert_not_contains "$PS_GOAL_TEST" 'foreach ($mode in @("default", "force", "upgrade"))' \
-    "PowerShell ordinary-mode preflight test does not treat authoritative force as a preflight"
+assert_contains "$PS_GOAL_TEST" 'test-goal-ledger.ps1' \
+    "PowerShell goal feasibility runs the repository-ledger contract"
+assert_not_contains "$PS_GOAL_TEST" 'setup\.ps1.*-(Force|FullRefresh).*DryRun' \
+    "PowerShell goal feasibility no longer depends on legacy setup previews"
+assert_not_contains "$PS_GOAL_TEST" 'goal-authorizations' \
+    "PowerShell goal feasibility has no machine-global authorization fixture"
 for suite in \
     test-fixtures.sh \
     test-dual-layout.sh \
@@ -2412,12 +2412,43 @@ assert_contains "$REPO_ROOT/hooks/post-tool-format.sh" '.tool_input.command // .
     "Bash formatter reads documented Codex apply_patch command text first"
 assert_contains "$REPO_ROOT/hooks/post-tool-format.ps1" 'tool_input.command' \
     "PowerShell formatter reads documented Codex apply_patch command text"
-assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'forge-goal-authorize.ps1.sha256' \
-    "PowerShell goal hook verifies the installed writer seal"
-assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'ReparsePoint' \
-    "PowerShell goal hook rejects reparse-point ancestors"
-assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'CreateNew' \
-    "PowerShell checkpoint and marker publication uses no-clobber writes"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'lib\goal-ledger.ps1' \
+    "PowerShell Stop hook delegates to the repository-local goal ledger"
+assert_contains "$REPO_ROOT/hooks/lib/goal-ledger.ps1" 'ReparsePoint' \
+    "PowerShell goal ledger rejects reparse-point ancestors"
+assert_contains "$REPO_ROOT/hooks/lib/goal-ledger.ps1" 'FileMode]::CreateNew' \
+    "PowerShell goal ledger uses no-clobber writes"
+assert_not_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'forge-goal-authorize' \
+    "PowerShell Stop hook has no global authorizer dependency"
+
+start_test "Task 5 native Goal accounting is repository-local on both platforms"
+for helper in hooks/lib/goal-ledger.sh hooks/lib/goal-ledger.ps1; do
+    assert_file_exists "$REPO_ROOT/$helper" "$helper exists"
+    assert_contains "$REPO_ROOT/manifests/managed-v6.tsv" "$helper" \
+        "$helper has an installed v6 destination"
+    assert_contains "$REPO_ROOT/$helper" 'forge-goal-ledger-v2' \
+        "$helper uses the repository ledger schema"
+    assert_contains "$REPO_ROOT/$helper" 'forge-goals' \
+        "$helper stores evidence under the Git common directory"
+done
+for field in activation_id activation_host activated_at activation_count; do
+    assert_contains "$REPO_ROOT/state.template.md" "| $field" \
+        "state template carries native Goal field $field"
+done
+for active in hooks/check-state-updated.sh hooks/check-state-updated.ps1 \
+  settings/settings.template.json settings/settings-windows.template.json \
+  commands/forge-goal.md FORGE.template.md; do
+    assert_not_contains "$REPO_ROOT/$active" 'goal-authorizations' \
+        "$active has no global goal authorization dependency"
+    assert_not_contains "$REPO_ROOT/$active" 'goal-captures' \
+        "$active has no global goal capture dependency"
+    assert_not_contains "$REPO_ROOT/$active" 'forge-goal-authorize' \
+        "$active has no global goal authorizer dependency"
+done
+assert_contains "$REPO_ROOT/settings/settings.template.json" 'Edit(**/.git/forge-goals/**)' \
+    "Unix settings protect the worktree-shared ledger"
+assert_contains "$REPO_ROOT/settings/settings-windows.template.json" 'forge-goals' \
+    "Windows settings protect the worktree-shared ledger"
 
 start_test "Task 5 dispatcher surfaces are installed and every canonical workflow reference resolves"
 MANAGED_V6="$REPO_ROOT/manifests/managed-v6.tsv"

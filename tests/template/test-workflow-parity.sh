@@ -28,6 +28,16 @@ for behavior in "Objective/nonce creation" "Budget exhaustion" "Stuck warning" "
     assert_contains "$REPO_ROOT/docs/prds/forge-goal.md" "| $behavior |" "goal PRD covers $behavior"
 done
 assert_contains "$REPO_ROOT/docs/prds/forge-goal.md" "Native host counters may reset; the authoritative Forge ceiling and consumed count never reset" "resume never resets the Forge budget"
+assert_contains "$REPO_ROOT/commands/forge-goal.md" "explicit native Goal request is the human activation" \
+    "native Goal action is the human activation"
+assert_contains "$REPO_ROOT/commands/forge-goal.md" 'activation_count' \
+    "goal workflow records monotonic activations"
+assert_contains "$REPO_ROOT/commands/forge-goal.md" '20 * activation_count' \
+    "goal workflow derives a fixed 20-turn tranche per activation"
+assert_contains "$MANAGED" $'canonical\thooks/lib/goal-ledger.sh\t.forge/hooks/lib/goal-ledger.sh' \
+    "Bash repository ledger helper is installed"
+assert_contains "$MANAGED" $'canonical\thooks/lib/goal-ledger.ps1\t.forge/hooks/lib/goal-ledger.ps1' \
+    "PowerShell repository ledger helper is installed"
 
 start_test "bounded stage rejects unresolved external runtime dependencies"
 scan_files="commands/opinion.md commands/prd/discuss.md commands/prd/create.md agents/research-first.md agents/verify-app.md agents/verify-e2e.md rules/workflow.md rules/critical-rules.md"

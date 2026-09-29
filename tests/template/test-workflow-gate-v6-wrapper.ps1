@@ -8,5 +8,6 @@ if((Test-Path $legacy -PathType Leaf)-and -not(Test-Path $canonical)){
     [IO.File]::WriteAllText($canonical,"<!-- forge:state-schema v6 -->`n"+[IO.File]::ReadAllText($legacy),(New-Object Text.UTF8Encoding($false)))
 }
 $repoRoot=(Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$raw|& (Join-Path $repoRoot "hooks\check-workflow-gates.ps1")
+$runner=(Get-Process -Id $PID).Path
+$raw|& $runner -NoProfile -File (Join-Path $repoRoot "hooks\check-workflow-gates.ps1")
 exit $LASTEXITCODE

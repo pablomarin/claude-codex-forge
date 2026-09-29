@@ -75,9 +75,13 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
 Run `/prd:discuss <feature>` and `/prd:create <feature>`. Do not design implementation details in
 the PRD. Continue only after explicit PRD approval and record the approved PRD path/version.
 
-If autonomous execution would help, offer the active host's native `/goal`. Forge state remains the
-authority for objective, nonce, persistent turn ceiling/count, checklist, evidence, authorization,
-and terminal status. Native counters may reset; the Forge record never does.
+If autonomous execution would help, offer the active host's native `/goal`. Populate `## /goal
+session` only after the developer invokes `/goal` or explicitly requests native Goal autonomy, then
+publish the activation with `.forge/hooks/lib/goal-ledger.sh activate` (or the PowerShell twin).
+That human action is activation authority; Forge state and the Git-common ledger provide persistent
+objective, nonce, activation/count/ceiling, checklist, evidence, and terminal status. Native counters
+may reset; the repository ledger never does. External mutations retain their separate authorization
+boundaries.
 
 ## 2. Research
 

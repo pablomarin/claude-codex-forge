@@ -13,5 +13,5 @@ args = ["@playwright/mcp@latest"]
 writable_roots = [".forge/local"]
 network_access = false
 
-# Goal authorization deliberately remains outside project workspace-write roots.
+# The immutable Goal ledger stays under Git's common directory, outside this writable root.
 # forge:end v6

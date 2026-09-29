@@ -51,8 +51,23 @@ RETIRED_FORGE_PERMISSION_DENIES = {
     "Read(~/.forge/host-contexts/**)",
     "Edit(~/.forge/host-contexts/**)",
     "Bash(*.forge/host-contexts*:*)",
+    "Edit(~/.forge/bin/**)",
+    "Bash(*.forge/bin*:*)",
+    "Read(~/.forge/goal-captures/**)",
+    "Edit(~/.forge/goal-captures/**)",
+    "Edit(~/.forge/goal-authorizations/**)",
+    "Bash(*.forge/goal-captures*:*)",
+    "Bash(*.forge/goal-authorizations*:*)",
+    "Bash(*forge-goal-authorize*:*)",
+    "Bash(*forge-goal-capture*:*)",
 }
-RETIRED_FORGE_SANDBOX_DENY_WRITES = {"~/.forge/host-contexts"}
+RETIRED_FORGE_SANDBOX_DENY_READS = {"~/.forge/goal-captures"}
+RETIRED_FORGE_SANDBOX_DENY_WRITES = {
+    "~/.forge/host-contexts",
+    "~/.forge/bin",
+    "~/.forge/goal-captures",
+    "~/.forge/goal-authorizations",
+}
 
 
 class RefreshBlocked(RuntimeError):
@@ -2629,8 +2644,8 @@ def is_forge_project_settings_template(template):
     )
 
 
-def retire_forge_host_context_permissions(user):
-    """Remove only Forge's obsolete host-receipt permission values."""
+def retire_forge_obsolete_permissions(user):
+    """Remove only exact permission values emitted by retired Forge runtimes."""
     changes = []
     permissions = user.get("permissions")
     if isinstance(permissions, dict):
@@ -2643,10 +2658,20 @@ def retire_forge_host_context_permissions(user):
             ]
             if retained != denied:
                 permissions["deny"] = retained
-                changes.append("  Retired obsolete Forge host-context permission denies")
+                changes.append("  Retired obsolete Forge permission denies")
 
     sandbox = user.get("sandbox")
     filesystem = sandbox.get("filesystem") if isinstance(sandbox, dict) else None
+    deny_read = filesystem.get("denyRead") if isinstance(filesystem, dict) else None
+    if isinstance(deny_read, list):
+        retained = [
+            value
+            for value in deny_read
+            if value not in RETIRED_FORGE_SANDBOX_DENY_READS
+        ]
+        if retained != deny_read:
+            filesystem["denyRead"] = retained
+            changes.append("  Retired obsolete Forge sandbox denyRead")
     deny_write = filesystem.get("denyWrite") if isinstance(filesystem, dict) else None
     if isinstance(deny_write, list):
         retained = [
@@ -2656,7 +2681,7 @@ def retire_forge_host_context_permissions(user):
         ]
         if retained != deny_write:
             filesystem["denyWrite"] = retained
-            changes.append("  Retired obsolete Forge host-context sandbox denyWrite")
+            changes.append("  Retired obsolete Forge sandbox denyWrite")
     return changes
 
 
@@ -2665,7 +2690,7 @@ def merge_settings(template, user):
     changes = []
 
     if is_forge_project_settings_template(template):
-        changes.extend(retire_forge_host_context_permissions(user))
+        changes.extend(retire_forge_obsolete_permissions(user))
 
     # Forge v6 initially emitted a non-native Codex hook shape. Retire only
     # the entries carrying Forge's own stable ids, then install the native

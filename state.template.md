@@ -40,28 +40,40 @@ unchanged candidate linkage, and it never restarts completed gates.
 ## /goal session
 
 (populated by `/new-feature` at the PRD-complete checkpoint, or by `/fix-bug` at the
-Plan-Approved checkpoint, when the user opts into the `/forge-goal` autonomous loop)
+Plan-Approved checkpoint, after the user invokes the host's native `/goal` or explicitly requests
+native Goal autonomy)
 
 Format when active:
 
 | Field            | Value                                  |
 | ---------------- | -------------------------------------- |
 | nonce            | <uuid-v4-lowercase>                    |
-| objective_hash   | <externally-authorized-objective-hash> |
+| objective_hash   | <sha256-of-stable-objective>            |
+| activation_id    | <uuid-v4-lowercase>                    |
+| activation_host  | claude OR codex                        |
+| activated_at     | <ISO-8601-UTC-timestamp>               |
 | workflow_command | /new-feature <name> OR /fix-bug <name> |
-| issued_at        | <ISO-8601-UTC-timestamp>               |
-| turn_count       | <derived-from-hook-owned-records>       |
-| turn_ceiling     | <derived-from-external-authorization>   |
+| turn_count       | <validated-repository-ledger-count>     |
+| turn_ceiling     | <20-times-activation-count>             |
+| activation_count | <positive-monotonic-integer>            |
 | evidence_path    | .forge/local/evidence/latest.json       |
 
-**REPLACE semantics:** the entire `## /goal session` block (heading + table) is
-replaced atomically on each new autonomous-loop kickoff. A stale session from a
-previous run is never appended to — it is overwritten in full. When no session is
-active, this section is absent from the file.
+**Activation semantics:** native `/goal` or an explicit native Goal request is the human activation.
+For a new objective, replace the entire block atomically with a new nonce, activation UUID, zero
+turns, activation count `1`, and ceiling `20`, then run `.forge/hooks/lib/goal-ledger.sh activate`
+(or the PowerShell twin). A same-objective reactivation retains the nonce and validated turn count,
+generates a new activation UUID, increments `activation_count`, and sets `turn_ceiling` to
+`20 * activation_count` before calling the helper. Agent-authored state records accounting; it is
+never authority to start or resume native autonomy.
 
 **Guard "active" definition:** the `/goal session` is considered ACTIVE when the nonce
 row is non-empty (`nonce` column has a UUID value). A heading with no nonce row, or a
 missing section entirely, is treated as INACTIVE by all guards and hooks.
+
+The immutable ledger lives under the physical Git common directory at
+`forge-goals/<nonce>/`, so linked worktrees and both engines share one monotonic count. User input,
+PR creation, merge, deployment, publishing, destructive work, and other external mutations retain
+their normal explicit-authorization pauses.
 
 ---
 

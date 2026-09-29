@@ -125,18 +125,21 @@ another reviewer-transport consent request; keep completed reviews and failed ev
 ## Native Goal Composition
 
 Claude Code and Codex keep their own native `/goal`; Forge never shadows it with a command or skill.
-When the developer activates native autonomy, read `.forge/workflows/goal.md` and compose the native
-goal over its persistent objective, nonce, turn ceiling/count, checklist, next step, evidence, and
-authorization contract. Require the human-created trusted goal authorization record and authenticated
-host qualification before activation. Native counters may reset; persistent Forge counters do not.
+The developer's native `/goal` invocation or explicit native Goal request is the activation authority.
+After that action, read `.forge/workflows/goal.md`, record the activation in `.forge/local/state.md`,
+and publish it through `.forge/hooks/lib/goal-ledger.*`. Compose native Goal over the persistent
+objective, nonce, activation sequence, turn ceiling/count, checklist, next step, and evidence.
+Authenticated host qualification controls readiness claims, not human authorization. Native counters
+may reset; the repository ledger under the physical Git common directory does not.
 
 On `FORGE_GOAL_BUDGET_EXHAUSTED`, checkpoint and stop native autonomy. Treat
 `FORGE_GOAL_STUCK_WARNING` as an advisory to inspect progress, not permission to reset the budget.
 Resume the exact next unchecked durable step on the same host or a fresh session on the other host;
-never claim native session transfer. User input, PR creation, merge, deploy, publish, destructive
-work, and any new external mutation pause for explicit human authorization. Ordinary reviewer engine
-failure follows automatic visible fallback. If any authenticated native-goal Must behavior is not
-proven, report `BLOCKED` and do not claim that host is runtime-ready.
+never claim native session transfer. Same-objective reactivation retains consumed turns and adds one
+fixed 20-turn tranche. User input, PR creation, merge, deploy, publish, destructive work, and any new
+external mutation pause for explicit human authorization. Ordinary reviewer engine failure follows
+automatic visible fallback. If any authenticated native-goal Must behavior is not proven, report
+`BLOCKED` and do not claim that host is runtime-ready.
 
 For the Forge opinion workflow, Claude Code uses `/opinion`; Codex uses `$opinion`. Both entry
 points load the same canonical `.forge/workflows/opinion.md` contract.
