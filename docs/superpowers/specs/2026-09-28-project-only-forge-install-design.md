@@ -113,6 +113,24 @@ Both installers require the canonical Git root and materialize only project-scop
 active manifest. They do not inspect, require, refresh, or repair a home-directory Forge harness.
 Legacy/mixed project ownership continues to use the existing preview-first full-refresh path.
 
+Each installed repository records the exact published Forge release in the tracked
+`.forge/version` file using `MAJOR.MINOR` form, for example `6.3`. That file is the single
+engine-neutral project version pin. Two repositories may intentionally remain on different Forge
+versions because each changes only when its own installation is upgraded.
+
+The existing `.forge/version` value `6` is treated as an older unpinned V6 layout during migration.
+Setup accepts it, derives the layout generation from the major component, and replaces it with the
+exact release only after a successful install, upgrade, or full-refresh transaction. Validators use
+the major component for layout compatibility and the complete value for release identity; no second
+schema-version file is added.
+
+The older `.claude/.forge-version` project pin and `~/.claude/.forge-version` machine stamp are
+retired. Keeping either would duplicate the canonical version or recreate a home-directory
+dependency. Upgrade compares the repository's current `.forge/version` directly with the release
+being installed, reports the exact `current -> target` transition, and writes the target version
+last so a failed transaction cannot claim an upgrade that did not complete. Setup completion and
+runtime verification display the installed project version.
+
 The old `--global` and `-Global` spellings become non-mutating diagnostics. They explain that global
 installation is retired and point to either project setup or the explicit legacy-global retirement
 command. They never silently reinterpret a global request as a project installation.
@@ -336,6 +354,7 @@ canonical Git root
   -> project manifest
   -> .forge + host adapters/settings
   -> deterministic validation
+  -> write exact .forge/version last
   -> live qualification remains an explicit readiness fact
 ```
 
@@ -394,6 +413,8 @@ The implementation plan must account for at least:
 - `hooks/check-state-updated.sh` and `.ps1`, plus ship/evidence consumers of goal state;
 - project and global settings templates, removing obsolete home-goal denies;
 - goal qualification scripts and fixtures;
+- project-version detection, late publication, session-start diagnostics, and retirement of the
+  Claude-specific project and machine stamps;
 - setup, refresh, contract, parity, hook, goal, Unix, and Windows tests; and
 - README, getting-started, upgrade, setup-scenario, command-reference, troubleshooting, and
   changelog documentation.
@@ -419,6 +440,13 @@ database, service, package dependency, or replacement configuration framework.
 3. Project A installation leaves Project B and home Forge paths byte-for-byte unchanged.
 4. Project upgrade changes only proven project-owned surfaces and preserves local state and memory.
 5. `--global` / `-Global` exits nonzero without mutation and gives the migration message.
+6. `.forge/version` contains the exact installed `MAJOR.MINOR` release and setup output reports it.
+7. Repositories installed at different times retain independent version pins until explicitly
+   upgraded.
+8. A legacy `.forge/version` value of `6` upgrades safely to the exact release, while an unsupported
+   major blocks without mutation.
+9. `.claude/.forge-version` and `~/.claude/.forge-version` are no longer written or read; proven old
+   project stamps are retired and personal/ambiguous home content is handled only by global cleanup.
 
 ### Goal accounting
 
@@ -477,7 +505,9 @@ cd /path/to/project
 
 for routine upgrade, with PowerShell equivalents adjacent. Global retirement appears in a separate
 legacy-cleanup section and is never described as required for normal use. Reference and
-troubleshooting documents use the same terminology and command surface.
+troubleshooting documents use the same terminology and command surface. The README also states
+that Forge is pinned per repository, shows `cat .forge/version` / `Get-Content .forge\version`, and
+explains that different repositories may intentionally run different releases.
 
 ## Completion Boundary
 
@@ -485,6 +515,7 @@ The change is complete only when:
 
 - all global policy outcomes are proven present project-locally;
 - no active project runtime or documentation path requires `~/.forge`;
+- `.forge/version` truthfully identifies the complete installed release in every project;
 - project install, upgrade, and cross-project isolation pass on Unix and Windows;
 - cleanup preview/apply preservation tests pass;
 - exact-candidate reviews and verification are clean;
