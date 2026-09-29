@@ -2,7 +2,25 @@
 
 All notable changes to claude-codex-forge.
 
-**Unreleased changes**
+## 6.3 — 2026-09-28
+
+**Forge is complete per repository.** Fresh installation and routine upgrade no longer require or
+create a machine-wide harness. Every installed project receives the complete shared policy,
+workflows, rules, agents, hooks, memory, and native Goal composition contract. `AGENTS.md` is the
+canonical project adapter, while `CLAUDE.md` is the one-line `@AGENTS.md` compatibility bridge.
+The exact `6.3` release is committed in `.forge/version`, so projects upgrade independently.
+
+**Native Goal accounting is repository-local and worktree-shared.** A native Goal request grants a
+20-turn autonomous tranche recorded under the repository's Git common directory. Duplicate turn
+identities are idempotent, checkpoints preserve continuity, and exhaustion stops honestly.
+PR creation, push, merge, deployment, and other external mutations still require their separate
+explicit authorizations. Deterministic and native qualification no longer depend on machine-global
+authorization or capture directories.
+
+**Legacy machine-wide Forge can be retired safely.** The new Bash and PowerShell retirement modes
+preview exact `REMOVE`, `PRESERVE`, `BLOCKED`, and `ABSENT` classifications, bind the result to a
+SHA-256 digest, and apply only when the confirmed inventory is unchanged. Personal, modified,
+unknown, linked, or structurally unsafe content is preserved or blocks instead of being guessed.
 
 - Codex workflow skills now use short names such as `$fix-bug` and `$new-feature`,
   matching Claude's command vocabulary. All seven formerly prefixed entry points,

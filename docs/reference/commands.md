@@ -39,6 +39,8 @@ the updated skill inventory.
 The root adapter composes native autonomy over `.forge/workflows/goal.md`, including persistent
 budget, exact resume, evidence, and human-authorization boundaries. The Forge objective, nonce, and
 next step survive a host switch; the native Claude Code or Codex session does not transfer.
+Each native Goal request authorizes one 20-turn tranche. Another request is needed after exhaustion.
+Push, PR, merge, deployment, and other external mutations remain separately authorized.
 
 ## Decision Analysis
 
@@ -139,13 +141,14 @@ Run from a fresh `claude-codex-forge` clone.
 | `-u`, `--upgrade`                  | Update an existing v6 installation while preserving project-owned settings, MCP entries, and content                                                                                                                                                                                                                 |
 | `-f`, `--force`                    | Authoritative full installation/reconciliation from any state, with ownership checks and transactional rollback                                                                                                                                                                                                       |
 | `--dry-run`                        | With `-f` / `--force`, run complete discovery and staging validation without writing target files; rerun without this flag only after `UPGRADE: READY`                                                                                                                                                                  |
-| `--global`                         | Install canonical global policy under `~/.forge/` plus bounded Claude Code and Codex adapters                                                                                                                                                                                                                         |
+| `--retire-global`                  | Preview one-time removal of legacy machine-wide Forge-owned files; never required for project installation                                                                                                                                                                                                            |
+| `--apply --confirm <digest>`       | Apply that retirement only when the current inventory exactly matches the preview digest                                                                                                                                                                                                                              |
 | `--with-playwright`                | Scaffold Playwright config + auth fixture + reference CI workflow                                                                                                                                                                                                                                                     |
 | `--playwright-dir <path>`          | Override autodetected scaffolding directory for monorepos                                                                                                                                                                                                                                                             |
 
-PowerShell uses `-Upgrade`, `-Force`, and `-DryRun`. The former Bash `-F` / `--full-refresh` and
+PowerShell uses `-Upgrade`, `-Force`, `-DryRun`, `-RetireGlobal`, `-Apply`, and `-Confirm`. The former Bash `-F` / `--full-refresh` and
 PowerShell `-FullRefresh` / `-R` spellings remain deprecated compatibility aliases. Project and
-global full reconciliations are separate transactions, and preview does not certify host
+legacy-retirement operations are separate transactions, and preview does not certify host
 `RUNTIME_READY` status. A project preview also blocks on an active user-owned `post-checkout` hook
 that still references retired v5 state paths; the operator must migrate or retire that hook because
 full refresh deliberately does not mutate `.git/hooks`.

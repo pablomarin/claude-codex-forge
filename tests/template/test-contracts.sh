@@ -2804,25 +2804,56 @@ assert_not_contains "$REPO_ROOT/state.template.md" 'Codex is mandatory in this r
 assert_contains "$REPO_ROOT/state.template.md" 'fresh same-engine reviewer' \
     "state template documents visible same-engine reviewer fallback"
 
+start_test "normal setup documentation requires no global Forge installation"
+for project_only_doc in \
+    "$GETTING_STARTED" \
+    "$REPO_ROOT/docs/guides/setup-scenarios.md" \
+    "$REPO_ROOT/docs/guides/agent-assisted-setup.md" \
+    "$COMMANDS_DOC" \
+    "$CHEATSHEET_DOC" \
+    "$STRUCTURE_DOC"; do
+    assert_not_contains "$project_only_doc" 'setup.sh --global' \
+        "$(basename "$project_only_doc") does not prescribe the retired global Bash install"
+    assert_not_contains "$project_only_doc" 'setup.ps1 -Global' \
+        "$(basename "$project_only_doc") does not prescribe the retired global PowerShell install"
+    assert_not_contains "$project_only_doc" '~/.forge/' \
+        "$(basename "$project_only_doc") does not require home-directory Forge runtime state"
+done
+if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh --global|setup\.ps1 -Global|~/.forge/'; then
+    fail "README active guidance does not require the retired global Forge harness"
+else
+    pass "README active guidance does not require the retired global Forge harness"
+fi
+assert_contains "$README" 'setup.sh --upgrade' \
+    "README gives the routine Bash upgrade command"
+assert_contains "$README" 'cat .forge/version' \
+    "README shows how to read the installed repository version"
+assert_contains "$README" 'different repositories may run different Forge versions' \
+    "README explains independent per-repository Forge versions"
+assert_contains "$README" 'setup.sh --retire-global' \
+    "README documents the one-time Bash global retirement preview"
+assert_contains "$UPGRADING" 'setup.sh --retire-global --apply --confirm' \
+    "upgrade guide documents digest-confirmed global retirement"
+
 start_test "release version is synchronized across installer source and README"
 assert_contains "$REPO_ROOT/docs/adr/README.md" '0010-dual-engine-canonical-harness.md' \
     "ADR index includes the dual-engine decision"
-EXPECTED_FORGE_VERSION='6.2'
+EXPECTED_FORGE_VERSION='6.3'
 FIRST_CHANGELOG_RELEASE=$(grep -m1 '^## ' "$REPO_ROOT/docs/CHANGELOG.md")
 FIRST_CHANGELOG_VERSION=$(printf '%s\n' "$FIRST_CHANGELOG_RELEASE" | sed -E 's/^## ([0-9]+\.[0-9]+).*/\1/')
 README_BADGE_VERSION=$(sed -n 's/.*badge\/version-\([0-9][0-9.]*\)-blue.*/\1/p' "$README" | head -1)
 README_HISTORY_VERSION=$(sed -n '/^## Version history/,$p' "$README" \
     | sed -n 's/^| \([0-9][0-9.]*\)[[:space:]]*|.*/\1/p' | head -1)
-assert_equals "$FIRST_CHANGELOG_RELEASE" '## 6.2 — 2026-09-10' \
-    "6.2 is the top changelog release"
+assert_equals "$FIRST_CHANGELOG_RELEASE" '## 6.3 — 2026-09-28' \
+    "6.3 is the top changelog release"
 assert_equals "$FIRST_CHANGELOG_VERSION" "$EXPECTED_FORGE_VERSION" \
     "top changelog release carries the expected version"
 assert_equals "$README_BADGE_VERSION" "$EXPECTED_FORGE_VERSION" \
     "README badge matches the release version"
 assert_equals "$README_HISTORY_VERSION" "$EXPECTED_FORGE_VERSION" \
     "first README history row matches the release version"
-assert_contains "$README" 'Strict V6 structured receipts with cross-host continuation' \
-    "README 6.2 history describes strict receipts and host continuation"
+assert_contains "$README" 'Project-only complete installation' \
+    "README 6.3 history describes the project-only complete installation"
 
 start_test "Forge source repository uses one contributor guide with thin host adapters"
 assert_file_exists "$REPO_ROOT/CONTRIBUTING.md" \

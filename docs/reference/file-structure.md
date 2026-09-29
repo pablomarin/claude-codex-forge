@@ -6,8 +6,8 @@ Canonical project instructions live at `.forge/instructions.md`.
 
 ```
 your-project/
-├── CLAUDE.md                          # Shared-context pointer + bounded Claude adapter
-├── AGENTS.md                          # Shared-context pointer + bounded Codex adapter
+├── CLAUDE.md                          # One-line @AGENTS.md compatibility bridge
+├── AGENTS.md                          # Canonical project discovery adapter
 ├── .mcp.json                          # Shared MCP server definitions
 ├── docs/
 │   ├── agent-context.md               # Optional team-owned shared project knowledge
@@ -71,36 +71,19 @@ The ownership hierarchy is:
 
 ```text
 .forge/                     Forge-owned engineering policy
-docs/agent-context.md       Team-owned shared project knowledge
-CLAUDE.md                   Thin Claude discovery adapter + shared-context pointer
-AGENTS.md                   Thin Codex discovery adapter + shared-context pointer
+docs/agent-context.md       Optional team-owned shared project knowledge
+AGENTS.md                   Canonical project discovery adapter
+CLAUDE.md                   Compatibility bridge containing only @AGENTS.md
 ```
 
-Forge creates and refreshes its bounded root blocks, but it does not invent the project's domain
-knowledge. When a project needs shared instructions, the team creates `docs/agent-context.md` and
-places this pointer outside the Forge block in both root files:
-
-```markdown
-Read `docs/agent-context.md` completely before acting.
-```
-
-Shared changes then happen once in that document; only genuinely host-specific text belongs
-exclusively in one root.
+Forge creates and refreshes the canonical adapter and bridge, but it does not invent the project's
+domain knowledge. When a project needs shared instructions, the team creates
+`docs/agent-context.md`; the installed `AGENTS.md` already loads it when present. Shared changes
+then happen once in that document.
 
 The Codex hook registration may originate in the primary checkout, but
 `codex-worktree-dispatch.{sh,ps1}` validates the event's absolute `cwd`, Git common directory, and
 non-symlink canonical hook before routing execution to that linked worktree's `.forge/hooks/`.
 
-## Global Files
-
-```
-~/.forge/
-├── instructions.md                    # Canonical global engine-neutral policy
-└── bin/                               # Trusted goal authorization/capture helpers
-
-~/.claude/CLAUDE.md                  # Bounded Claude Code adapter
-~/.codex/AGENTS.md                   # Bounded Codex adapter
-```
-
-Setup preserves personal text outside Forge-owned marker blocks. `.forge/local/` and
+There are no required Forge runtime files outside the repository. `.forge/local/` and
 `.forge/memory/` are protected ownership boundaries and are never wholesale overwritten.

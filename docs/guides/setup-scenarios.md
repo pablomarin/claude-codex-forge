@@ -55,19 +55,13 @@ Preview is read-only. The transaction preserves user-owned content, migrates act
 only proven Forge-owned legacy files, and reports all ambiguous ownership together. Read
 [Upgrading](upgrading.md) before resolving an `UPGRADE: BLOCKED` report.
 
-## Global Refresh
+## Independent Projects
 
-Global files have their own transaction and are never changed by project setup:
-
-```bash
-~/claude-codex-forge/setup.sh --global -f --dry-run
-~/claude-codex-forge/setup.sh --global -f
-```
-
-```powershell
-& $HOME\claude-codex-forge\setup.ps1 -Global -Force -DryRun
-& $HOME\claude-codex-forge\setup.ps1 -Global -Force
-```
+Forge is complete inside each repository. Installing or upgrading one project never changes
+another project, and each committed `.forge/version` records that repository's exact release.
+If an older Forge release left machine-wide files, use the optional
+[one-time retirement procedure](upgrading.md#one-time-legacy-global-retirement); it is not an
+installation step.
 
 ## Linked Worktree
 

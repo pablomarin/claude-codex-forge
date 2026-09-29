@@ -66,32 +66,22 @@ command without the dry-run flag only after `UPGRADE: READY`.
 “No agent harness” means no existing agent instruction/configuration surfaces such as `CLAUDE.md`,
 `AGENTS.md`, `.claude/`, `.codex/`, or custom agent workflows. An established application can still
 be a first installation. If you cannot classify the setup, or managed Forge files were customized,
-choose [4C](#4c-migrate-older-custom-or-unknown-harnesses). A `.forge/version` value of `6` identifies
-the v6 layout family, not the exact installed release or proof that a mixed setup is safe.
+choose [4C](#4c-migrate-older-custom-or-unknown-harnesses). `.forge/version` records the exact
+installed Forge release; its presence alone does not prove that a mixed or customized setup is safe.
 
 For all project paths: work from the target project's Git root, save existing changes in a commit
 or backup, use a dedicated setup/update branch, and stop other sessions editing those files.
 Do not run project setup in the Forge clone. Run each command separately and stop on an error.
 
-## 3. Install the global harness
+## 3. Each project is complete
 
-Global setup changes your home-directory agent configuration, not your project. The commands below
-are for the first global installation with no existing harness. If global agent configuration
-already exists or you are unsure, use the separate
-[global preview and reconciliation](guides/upgrading.md#project-and-global-scopes) first; do not
-silently replace it. A confirmed global v6 install can use `--global --upgrade` / `-Global -Upgrade`.
+There is no machine-wide Forge prerequisite. A project installation includes the full policy,
+workflows, rules, agents, hooks, local state and memory, and native Goal support. It affects only
+that repository. Another repository may stay uninstalled or run a different Forge release.
 
-```bash
-~/claude-codex-forge/setup.sh --global
-```
-
-```powershell
-& $HOME\claude-codex-forge\setup.ps1 -Global
-```
-
-Global and project scopes are separate. Installing global first is the clearest path, but a project
-install may come first; a later `--global` / `-Global` recognizes the advisory machine stamp and
-materializes the global harness normally. A project refresh never rewrites global policy.
+A native Goal request authorizes one 20-turn autonomous tranche. Forge keeps its objective, count,
+checkpoint, and evidence in repository-local, worktree-shared state. Push, PR, merge, deployment,
+and other external mutations retain their separate authorization gates.
 
 ## 4A. Install Forge for the first time
 
@@ -100,12 +90,12 @@ Create the project folder first if needed; if it is not yet a Git repository, ru
 
 ```bash
 cd /path/to/your/project
-~/claude-codex-forge/setup.sh -p "My Project"
+~/claude-codex-forge/setup.sh
 ```
 
 ```powershell
 Set-Location C:\path\to\your-project
-& $HOME\claude-codex-forge\setup.ps1 -Project "My Project"
+& $HOME\claude-codex-forge\setup.ps1
 ```
 
 Both adapters are installed even when only one CLI is available. Continue to step 5; do not run
@@ -120,12 +110,14 @@ clone**, then update the **project**:
 git -C ~/claude-codex-forge pull --ff-only
 cd /path/to/your/project
 ~/claude-codex-forge/setup.sh --upgrade
+cat .forge/version
 ```
 
 ```powershell
 git -C $HOME\claude-codex-forge pull --ff-only
 Set-Location C:\path\to\your-project
 & $HOME\claude-codex-forge\setup.ps1 -Upgrade
+Get-Content .forge\version
 ```
 
 Pulling the clone alone does not update the project. `--upgrade` refreshes managed files while
@@ -216,21 +208,17 @@ sentinel are observed, setup truthfully reports `RUNTIME_READY: BLOCKED`.
 - Commit the reviewed project harness changes on the setup/update branch. Never commit
   `.forge/local/`, credentials, or unrelated files. Teams use one upgrader and review the change as
   a dedicated PR; other developers pull it.
-- Project setup does not refresh global configuration or sibling worktrees. For linked worktrees,
+- Project setup does not change unrelated repositories or sibling worktrees. For linked worktrees,
   follow [the worktree instructions](guides/setup-scenarios.md#linked-worktree).
 
 ## Shared project instructions after setup
 
-Forge policy belongs to `.forge/`. Team-owned project context belongs in one neutral file such as
-`docs/agent-context.md`. When that context is needed, create the file and put this same line outside
-the Forge-managed block in both `CLAUDE.md` and `AGENTS.md`:
-
-```markdown
-Read `docs/agent-context.md` completely before acting.
-```
+Forge policy belongs to `.forge/`. `AGENTS.md` is the canonical project adapter: it loads
+`.forge/instructions.md` and loads `docs/agent-context.md` when that optional team-owned file exists.
+`CLAUDE.md` contains only `@AGENTS.md`, providing compatibility without duplicating policy.
 
 Forge does not generate your architecture or domain knowledge. Maintain it once in
-`docs/agent-context.md`; do not synchronize duplicate copies between the native root files.
+`docs/agent-context.md`; do not synchronize duplicate copies between native root files.
 
 ## Next
 

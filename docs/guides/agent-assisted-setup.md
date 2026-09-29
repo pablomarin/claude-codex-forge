@@ -49,8 +49,8 @@ Install or upgrade Forge in this repository using the Forge checkout at <path-to
 3. Run the read-only full-refresh preview first for Forge v5, Claude-only, Codex-only, mixed, custom, or unknown harnesses.
 4. Preserve the exact installer output and explain every result or blocker in plain language.
 5. Do not bypass ownership blockers or guess which project content may be removed.
-6. Keep shared project knowledge in docs/agent-context.md and keep CLAUDE.md and AGENTS.md as thin
-   native discovery adapters.
+6. Keep shared project knowledge in docs/agent-context.md. Keep AGENTS.md as the canonical project
+   discovery adapter and CLAUDE.md as its one-line @AGENTS.md compatibility bridge.
 7. If a blocker appears to describe valid Forge-generated output, stop and report a possible Forge
    upgrader defect instead of working around it.
 8. Show the proposed command and reconciliation changes. Ask for my approval before modifying files or running the non-preview command.
@@ -60,9 +60,8 @@ Install or upgrade Forge in this repository using the Forge checkout at <path-to
 10. Review the final Git diff and per-host readiness diagnostics. Run the documented discovery
     check, but do not call it live runtime certification. Follow RUNTIME_QUALIFICATION guidance;
     report installed files and each host's readiness separately, including unverified checks.
-11. Treat global setup as a separate home-directory change requiring separate approval. Preserve
-    existing global configuration and preview legacy/custom/unknown global setups first. Do not
-    update sibling worktrees or commit/push the project changes without my authorization.
+11. Do not change unrelated repositories, sibling worktrees, or home-directory agent configuration.
+    Do not commit or push the project changes without my authorization.
 ```
 
 Existing repository instructions are migration input during this operation. They do not authorize
@@ -73,15 +72,14 @@ ready.
 
 | Repository state | Deterministic installer action |
 | --- | --- |
-| fresh project | `setup.sh -p "My Project"` or `setup.ps1 -Project "My Project"` |
+| fresh project | `setup.sh` or `setup.ps1` from the target project root |
 | existing Forge v6 | `setup.sh --upgrade` or `setup.ps1 -Upgrade` |
 | Forge v5, Claude-only, Codex-only, mixed, custom, or unknown | Preview with `setup.sh -f --dry-run` or `setup.ps1 -Force -DryRun`; execute only after `UPGRADE: READY` |
-| global harness | `setup.sh --global` or `setup.ps1 -Global`; approve home-directory changes separately |
 
 These are mode summaries, not commands to run from the Forge clone. The complete target-directory
-commands are in [Getting Started](../getting-started.md). First global setup is for an absent
-harness; use a separate global preview for legacy/custom/unknown configurations. Do not combine
-`--upgrade` with `-f` or `--dry-run`.
+commands are in [Getting Started](../getting-started.md). Do not combine `--upgrade` with `-f` or
+`--dry-run`. Legacy machine-wide Forge cleanup is a separate optional retirement operation, not a
+project installation mode.
 
 ## What a successful handoff tells you
 
