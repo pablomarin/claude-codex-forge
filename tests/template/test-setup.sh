@@ -1098,36 +1098,8 @@ test_copy_file_self_copy_guard
 test_copy_file_normal_copy_still_works
 test_copy_file_ps1_self_copy_guard
 
-# Global CLAUDE.md must NEVER be overwritten (user content), even under --upgrade
-# (which sets FORCE=true) or -f — mirroring the project-mode CLAUDE.md guard.
-# Regression for the data-loss bug where `setup.sh --global --upgrade` clobbered
-# a customized ~/.claude/CLAUDE.md with the template.
-test_global_preserves_existing_claudemd() {
-    local scratch; scratch=$(scratch_dir global-preserves-claudemd)
-    local fakehome="$scratch/.fakehome"
-    mkdir -p "$fakehome/.claude"
-    # Developer's customized global CLAUDE.md.
-    printf '# Global Claude Code Instructions\n\n## Personal Preferences\n\nMY GLOBAL PREFS SENTINEL - uv, pnpm, Next.js stack. DO NOT CLOBBER.\n' > "$fakehome/.claude/CLAUDE.md"
-    local before_line; before_line=$(sed -n '1p' "$fakehome/.claude/CLAUDE.md")
-    # --global --upgrade sets FORCE=true; the existing global CLAUDE.md must survive.
-    ( cd "$scratch" && HOME="$fakehome" bash "$REPO_ROOT/setup.sh" --global --upgrade >/dev/null 2>&1 )
-    if [ -f "$fakehome/.claude/CLAUDE.md" ]; then
-        local after_line; after_line=$(sed -n '1p' "$fakehome/.claude/CLAUDE.md")
-        assert_equals "$before_line" "$after_line" "existing personal text stays byte-preserved outside the global Forge block"
-        assert_contains "$fakehome/.claude/CLAUDE.md" "MY GLOBAL PREFS SENTINEL" "global CLAUDE.md user content survives --global --upgrade"
-    else
-        fail "~/.claude/CLAUDE.md was deleted by --global --upgrade"
-    fi
-    # First-time install (no existing global CLAUDE.md) must still CREATE it.
-    local scratch2; scratch2=$(scratch_dir global-creates-claudemd)
-    local fh2="$scratch2/.fakehome"
-    ( cd "$scratch2" && HOME="$fh2" bash "$REPO_ROOT/setup.sh" --global >/dev/null 2>&1 )
-    assert_file_exists "$fh2/.claude/CLAUDE.md" "fresh --global still creates ~/.claude/CLAUDE.md"
-}
-test_global_preserves_existing_claudemd
-
 # ===========================================================================
-# v6 dual-host materialization contracts (Task 2)
+# v6 dual-host materialization contracts
 # ===========================================================================
 make_fake_engine_path() {
     local dir="$1" claude_state="$2" codex_state="$3"
@@ -1379,52 +1351,6 @@ for mode in default upgrade; do
     assert_file_missing "$legacy/.forge/version" "$mode writes no v6 version beside v5"
 done
 
-start_test "global setup preserves personal text and installs both global hosts"
-GLOBAL_CASE=$(scratch_dir v6-global)
-GLOBAL_HOME="$GLOBAL_CASE/home"
-mkdir -p "$GLOBAL_HOME/.claude" "$GLOBAL_HOME/.codex"
-printf 'CLAUDE PERSONAL BEFORE\n' > "$GLOBAL_HOME/.claude/CLAUDE.md"
-printf 'CODEX PERSONAL BEFORE\n' > "$GLOBAL_HOME/.codex/AGENTS.md"
-HOME="$GLOBAL_HOME" "$REPO_ROOT/setup.sh" --global > "$GLOBAL_CASE/setup.log" 2>&1
-assert_equals "$?" "0" "global v6 setup exits zero"
-assert_contains "$GLOBAL_HOME/.claude/CLAUDE.md" 'CLAUDE PERSONAL BEFORE' "global Claude personal text preserved"
-assert_contains "$GLOBAL_HOME/.claude/CLAUDE.md" '<!-- forge:begin v6 -->' "global Claude Forge block installed"
-assert_contains "$GLOBAL_HOME/.codex/AGENTS.md" 'CODEX PERSONAL BEFORE' "global Codex personal text preserved"
-assert_contains "$GLOBAL_HOME/.codex/AGENTS.md" '<!-- forge:begin v6 -->' "global Codex Forge block installed"
-assert_file_exists "$GLOBAL_HOME/.forge/instructions.md" "global canonical instructions installed"
-assert_file_exists "$GLOBAL_HOME/.forge/bin/forge-goal-authorize" "global authorization writer installed"
-assert_file_exists "$GLOBAL_HOME/.forge/bin/forge-goal-capture" "global trusted goal capture helper installed"
-assert_file_exists "$GLOBAL_HOME/.forge/bin/codex.identity" "global setup records the independently selected Codex identity"
-assert_file_exists "$GLOBAL_HOME/.forge/bin/codex.identity.sha256" "global setup seals the Codex identity record"
-HOME="$GLOBAL_HOME" "$REPO_ROOT/setup.sh" --global > "$GLOBAL_CASE/setup-2.log" 2>&1
-assert_equals "$?" "0" "second global setup exits zero"
-CLAUDE_GLOBAL_MARKERS=$(grep -cF '<!-- forge:begin v6 -->' "$GLOBAL_HOME/.claude/CLAUDE.md")
-CODEX_GLOBAL_MARKERS=$(grep -cF '<!-- forge:begin v6 -->' "$GLOBAL_HOME/.codex/AGENTS.md")
-CODEX_CONFIG_MARKERS=$(grep -cF '# forge:begin v6' "$GLOBAL_HOME/.codex/config.toml")
-assert_equals "$CLAUDE_GLOBAL_MARKERS" "1" "global Claude Forge block remains bounded and unique"
-assert_equals "$CODEX_GLOBAL_MARKERS" "1" "global Codex Forge block remains bounded and unique"
-assert_equals "$CODEX_CONFIG_MARKERS" "1" "global Codex config block remains bounded and unique"
-
-start_test "Task 2 preflight blocks global v5 before ordinary write modes"
-for mode in default upgrade; do
-    global_legacy="$GLOBAL_CASE/legacy-$mode"
-    mkdir -p "$global_legacy/.claude"
-    printf '{"user_setting":"KEEP-GLOBAL-V5"}\n' > "$global_legacy/.claude/settings.json"
-    global_before=$(hash_file "$global_legacy/.claude/settings.json")
-    case "$mode" in
-        default) HOME="$global_legacy" "$REPO_ROOT/setup.sh" --global > "$global_legacy/setup.log" 2>&1 ;;
-        upgrade) HOME="$global_legacy" "$REPO_ROOT/setup.sh" --global --upgrade > "$global_legacy/setup.log" 2>&1 ;;
-    esac
-    rc=$?
-    [ "$rc" -ne 0 ] && pass "$mode global v5 preflight exits nonzero" || fail "$mode global v5 preflight unexpectedly succeeded"
-    assert_contains "$global_legacy/setup.log" 'Preview first' "$mode global mode points to preview before mutation"
-    assert_contains "$global_legacy/setup.log" '--dry-run' "$mode global remediation is explicitly read-only"
-    assert_contains "$global_legacy/setup.log" '--global' "$mode global remediation preserves global scope"
-    assert_contains "$global_legacy/setup.log" '-f' "$mode global remediation uses authoritative -f"
-    assert_hash_equals "$global_legacy/.claude/settings.json" "$global_before" "$mode global mode preserves v5 settings bytes"
-    assert_file_missing "$global_legacy/.forge/version" "$mode global mode writes no v6 surface"
-done
-
 start_test "primary Codex router delegates only to the trusted current worktree"
 ROUTER_REPO=$(scratch_dir v6-router)
 mkdir -p "$ROUTER_REPO/main"
@@ -1566,18 +1492,6 @@ for name in ("CLAUDE.md", "AGENTS.md"):
 print("preserved")
 PY
 assert_equals "$(cat "$BYTE_CASE/bytes.out")" "preserved" "BOM, CRLF prefix, suffix, placeholder text, and no-final-newline remain byte-identical"
-
-start_test "project setup followed by first global setup is a supported path"
-PROJECT_FIRST=$(scratch_dir project-first-global)
-make_project "$PROJECT_FIRST/project" flat
-mkdir -p "$PROJECT_FIRST/home"
-(cd "$PROJECT_FIRST/project" && HOME="$PROJECT_FIRST/home" "$REPO_ROOT/setup.sh" -p ProjectFirst > "$PROJECT_FIRST/project.log" 2>&1)
-assert_equals "$?" "0" "project setup succeeds before global setup"
-HOME="$PROJECT_FIRST/home" "$REPO_ROOT/setup.sh" --global > "$PROJECT_FIRST/global.log" 2>&1
-assert_equals "$?" "0" "global setup accepts the lone advisory machine stamp from project setup"
-assert_file_exists "$PROJECT_FIRST/home/.forge/version" "global setup materializes the canonical global harness"
-assert_file_exists "$PROJECT_FIRST/home/.claude/CLAUDE.md" "global setup installs the Claude global adapter"
-assert_file_exists "$PROJECT_FIRST/home/.codex/AGENTS.md" "global setup installs the Codex global adapter"
 
 start_test "fresh setup summary gives complete v6 commit guidance"
 SUMMARY_CASE=$(scratch_dir v6-summary)

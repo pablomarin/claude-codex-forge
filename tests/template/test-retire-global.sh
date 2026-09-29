@@ -164,20 +164,5 @@ assert_file_exists "$REPO_ROOT/tests/template/test-retire-global.ps1" \
 assert_contains "$REPO_ROOT/tests/template/run-all.ps1" '-Filter "test-*.ps1"' \
     "PowerShell runner auto-discovers the retirement suite"
 
-start_test "current global materialization retires completely"
-LIVE=$(scratch_dir retire-global-live)
-RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' \
-    "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
-bash "$REPO_ROOT/scripts/materialize-adapters.sh" \
-    --repo-root "$REPO_ROOT" --target "$LIVE/home" --scope global \
-    --platform unix --release-version "$RELEASE" > "$LIVE/install.log" 2>&1
-assert_equals "$?" "0" "current global harness fixture materializes"
-run_retire "$LIVE/home" "$LIVE/preview.log"
-assert_equals "$?" "0" "current global harness preview succeeds"
-LIVE_DIGEST=$(sed -n 's/^RETIRE_GLOBAL_DIGEST=//p' "$LIVE/preview.log")
-run_retire "$LIVE/home" "$LIVE/apply.log" --apply --digest "$LIVE_DIGEST"
-assert_equals "$?" "0" "current global harness retirement succeeds"
-LIVE_FILES=$(find "$LIVE/home" -type f -o -type l | wc -l | tr -d ' ')
-assert_equals "$LIVE_FILES" "0" "current global harness leaves no machine-wide Forge files"
 
 report "test-retire-global.sh"

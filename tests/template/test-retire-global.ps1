@@ -100,17 +100,6 @@ try {
         Write-Host "SKIP: runner did not permit reparse-point fixture"
     }
 
-    $liveTarget = Join-Path $scratch "live"
-    New-Item -ItemType Directory -Path $liveTarget -Force | Out-Null
-    $release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root "docs\CHANGELOG.md")), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
-    & (Join-Path $root "scripts\materialize-adapters.ps1") -RepoRoot $root -Target $liveTarget -Scope global -Platform windows -ReleaseVersion $release | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "PowerShell current global harness fixture did not materialize" }
-    $livePreview = Invoke-Retire $liveTarget
-    $liveDigest = ([regex]::Match($livePreview.Output, 'RETIRE_GLOBAL_DIGEST=([0-9a-f]{64})')).Groups[1].Value
-    $liveApply = Invoke-Retire $liveTarget @("--apply", "--digest", $liveDigest)
-    $liveFiles = @(Get-ChildItem -LiteralPath $liveTarget -File -Recurse -Force -ErrorAction SilentlyContinue)
-    Require ($livePreview.Code -eq 0 -and $liveApply.Code -eq 0 -and $liveFiles.Count -eq 0) "PowerShell current global harness did not retire completely: $($livePreview.Output) $($liveApply.Output)"
-
     Write-Host "PASS test-retire-global.ps1"
 } finally {
     Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue

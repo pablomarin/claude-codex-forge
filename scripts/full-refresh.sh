@@ -18,7 +18,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 [ -n "$TARGET" ] || TARGET=$(pwd -P)
-case "$SCOPE" in project|global) ;; *) echo "BLOCKED: invalid full-refresh scope: $SCOPE" >&2; exit 1 ;; esac
+case "$SCOPE" in project) ;; *) echo "BLOCKED: active full refresh is project-only" >&2; exit 1 ;; esac
 [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "BLOCKED: invalid release version" >&2; exit 2; }
 
 if ! command -v python3 >/dev/null 2>&1; then
@@ -35,17 +35,6 @@ case "$SELECTED_TARGET" in
     *) LEXICAL_TARGET="$(pwd -P)/$SELECTED_TARGET" ;;
 esac
 TARGET=$(cd "$SELECTED_TARGET" 2>/dev/null && pwd -P) || exit 1
-if [ "$SCOPE" = global ]; then
-    if [ "$TARGET" = / ]; then
-        echo "BLOCKED: filesystem root cannot be selected as the global Forge home" >&2
-        exit 1
-    fi
-    if [ "$LEXICAL_TARGET" != "$TARGET" ]; then
-        echo "BLOCKED: selected global Forge home is not canonical: $SELECTED_TARGET" >&2
-        exit 1
-    fi
-fi
-
 refresh_args=(full-refresh --repo-root "$SCRIPT_DIR" --target "$TARGET" --scope "$SCOPE" --platform unix --release-version "$RELEASE_VERSION")
 [ "$DRY_RUN" = true ] && refresh_args+=(--dry-run)
 export PYTHONDONTWRITEBYTECODE=1

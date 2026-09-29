@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory=$true)][string]$RepoRoot,
     [Parameter(Mandatory=$true)][string]$Target,
     [Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+$')][string]$ReleaseVersion,
-    [ValidateSet("project", "global")][string]$Scope = "project",
+    [ValidateSet("project")][string]$Scope = "project",
     [ValidateSet("windows")][string]$Platform = "windows"
 )
 
@@ -31,7 +31,7 @@ function Read-ManagedManifest {
         if (-not (Test-SafeRelativePath $fields[2])) { throw "unsafe manifest destination on row $line" }
         if (@("canonical", "adapter", "merge", "marker", "protected", "tombstone") -notcontains $fields[0]) { throw "invalid manifest kind on row $line" }
         if (@("all", "windows", "unix") -notcontains $fields[3]) { throw "invalid manifest platform on row $line" }
-        if (@("project", "global") -notcontains $fields[5]) { throw "invalid manifest scope on row $line" }
+        if ($fields[5] -ne "project") { throw "active managed manifest contains non-project scope on row $line" }
         $rows += [pscustomobject]@{
             Kind=$fields[0]; Source=$fields[1]; Destination=$fields[2]; Platform=$fields[3]
             Host=$fields[4]; Scope=$fields[5]; Ownership=$fields[6]
@@ -670,47 +670,22 @@ foreach ($row in $rows) {
     }
 }
 
-if ($Scope -eq "project") {
-    foreach ($relative in @(".forge\local\state.md", ".claude\settings.json", ".mcp.json", ".codex\hooks.json", ".codex\config.toml")) { Assert-NoLinkAncestor $Target $relative }
-    New-Item -ItemType Directory -Path (Join-Path $Target ".forge\local") -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $Target ".forge\memory") -Force | Out-Null
-    $state = Join-Path $Target ".forge\local\state.md"
-    if (-not (Test-Path $state)) { Copy-Item (Join-Path $RepoRoot "state.template.md") $state }
-    Merge-JsonManagedEntries (Join-Path $RepoRoot "settings\settings-windows.template.json") (Join-Path $Target ".claude\settings.json")
-    Merge-JsonManagedEntries (Join-Path $RepoRoot "mcp.template.json") (Join-Path $Target ".mcp.json")
-    Merge-CodexHookEntries (Join-Path $RepoRoot "settings\codex-hooks.template.json") (Join-Path $Target ".codex\hooks.json")
-    Set-CodexTomlBlock (Join-Path $RepoRoot "settings\codex-config.template.toml") (Join-Path $Target ".codex\config.toml") (Join-Path $Target ".mcp.json")
-    Invoke-LegacyAliasCleanup "apply"
-    foreach ($relative in $retiredWorkflowSkills.Keys) {
-        Assert-NoLinkAncestor $Target $relative
-        $path = Join-Path $Target $relative
-        if ((Get-FileRevision $path) -cne $retiredWorkflowSkills[$relative]) { throw "workflow skill changed before cleanup: $relative" }
-        Remove-Item -LiteralPath $path
-        Write-Host "RETIRED_COMPAT: $relative"
-    }
-} else {
-    foreach ($relative in @(".claude\settings.json", ".codex\config.toml", ".forge\goal-authorizations", ".forge\goal-captures")) { Assert-NoLinkAncestor $Target $relative }
-    New-Item -ItemType Directory -Path (Join-Path $Target ".forge\goal-authorizations") -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $Target ".forge\goal-captures") -Force | Out-Null
-    $writerRevision = Get-FileRevision (Join-Path $RepoRoot "scripts\forge-goal-authorize.ps1")
-    $captureRevision = Get-FileRevision (Join-Path $RepoRoot "scripts\forge-goal-capture.ps1")
-    $writer = Join-Path $Target ".forge\bin\forge-goal-authorize.ps1"
-    if (Test-Path $writer) {
-        $sealed = [IO.File]::ReadAllText($writer).Replace('__FORGE_WRITER_PATH__', $writer).Replace('__FORGE_AUTHORIZATION_ROOT__', (Join-Path $Target ".forge\goal-authorizations")).Replace('__FORGE_WRITER_REVISION__', $writerRevision)
-        [IO.File]::WriteAllText($writer, $sealed, $Utf8NoBom)
-        [IO.File]::WriteAllText("$writer.sha256", (Get-FileRevision $writer) + "`n", $Utf8NoBom)
-    }
-    Write-CodexIdentity $writerRevision $captureRevision
-    $Installed += [pscustomobject]@{ Path=".forge/bin/codex.identity"; CanonicalRevision="-" }
-    $Installed += [pscustomobject]@{ Path=".forge/bin/codex.identity.sha256"; CanonicalRevision="-" }
-    $capture = Join-Path $Target ".forge\bin\forge-goal-capture.ps1"
-    if (Test-Path $capture) {
-        $sealed = [IO.File]::ReadAllText($capture).Replace('__FORGE_CAPTURE_PATH__', $capture).Replace('__FORGE_CAPTURE_ROOT__', (Join-Path $Target ".forge\goal-captures")).Replace('__FORGE_CODEX_IDENTITY__', (Join-Path $Target ".forge\bin\codex.identity")).Replace('__FORGE_CAPTURE_REVISION__', $captureRevision).Replace('__FORGE_WRITER_REVISION__', $writerRevision)
-        [IO.File]::WriteAllText($capture, $sealed, $Utf8NoBom)
-        [IO.File]::WriteAllText("$capture.sha256", (Get-FileRevision $capture) + "`n", $Utf8NoBom)
-    }
-    Merge-JsonManagedEntries (Join-Path $RepoRoot "settings\global-settings.template.json") (Join-Path $Target ".claude\settings.json")
-    Set-CodexTomlBlock (Join-Path $RepoRoot "settings\codex-config.template.toml") (Join-Path $Target ".codex\config.toml")
+foreach ($relative in @(".forge\local\state.md", ".claude\settings.json", ".mcp.json", ".codex\hooks.json", ".codex\config.toml")) { Assert-NoLinkAncestor $Target $relative }
+New-Item -ItemType Directory -Path (Join-Path $Target ".forge\local") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $Target ".forge\memory") -Force | Out-Null
+$state = Join-Path $Target ".forge\local\state.md"
+if (-not (Test-Path $state)) { Copy-Item (Join-Path $RepoRoot "state.template.md") $state }
+Merge-JsonManagedEntries (Join-Path $RepoRoot "settings\settings-windows.template.json") (Join-Path $Target ".claude\settings.json")
+Merge-JsonManagedEntries (Join-Path $RepoRoot "mcp.template.json") (Join-Path $Target ".mcp.json")
+Merge-CodexHookEntries (Join-Path $RepoRoot "settings\codex-hooks.template.json") (Join-Path $Target ".codex\hooks.json")
+Set-CodexTomlBlock (Join-Path $RepoRoot "settings\codex-config.template.toml") (Join-Path $Target ".codex\config.toml") (Join-Path $Target ".mcp.json")
+Invoke-LegacyAliasCleanup "apply"
+foreach ($relative in $retiredWorkflowSkills.Keys) {
+    Assert-NoLinkAncestor $Target $relative
+    $path = Join-Path $Target $relative
+    if ((Get-FileRevision $path) -cne $retiredWorkflowSkills[$relative]) { throw "workflow skill changed before cleanup: $relative" }
+    Remove-Item -LiteralPath $path
+    Write-Host "RETIRED_COMPAT: $relative"
 }
 $Installed += [pscustomobject]@{ Path=".forge/version"; CanonicalRevision="-" }
 Write-InstallManifest -Records $Installed
@@ -722,44 +697,19 @@ foreach ($engine in Get-EngineAvailability) {
     elseif ($engine.Availability -eq "PRESENT_CAPABILITY_GAP") { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED $($engine.Diagnostic)" }
     else { Write-Host "$($engine.Engine) RUNTIME_READY: BLOCKED pending authenticated final runtime qualification ($($engine.Path); $($engine.Version))" }
 }
-if ($Scope -eq "project") {
-    $diagnosticTarget = if ($env:FORGE_DIAGNOSTIC_TARGET) {
-        (Resolve-Path -LiteralPath $env:FORGE_DIAGNOSTIC_TARGET).Path
-    } else {
-        (Resolve-Path -LiteralPath $Target).Path
-    }
-    $diagnosticHome = if ($env:FORGE_DIAGNOSTIC_HOME) { $env:FORGE_DIAGNOSTIC_HOME } else { $HOME }
-    $primary = Get-PrimaryCheckout $diagnosticTarget
-    if ($primary) { $primary = (Resolve-Path -LiteralPath $primary).Path }
-    if ($primary -and -not [string]::Equals($primary, $diagnosticTarget, [StringComparison]::OrdinalIgnoreCase)) {
-        Write-Host "CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration"
-        Write-Host "Run: Set-Location '$primary'; & '$RepoRoot\setup.ps1'"
-    } else {
-        Write-Host "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
-    }
-    $globalVersionPath = Join-Path $diagnosticHome ".forge\version"
-    $globalAuthorizerPath = Join-Path $diagnosticHome ".forge\bin\forge-goal-authorize.ps1"
-    $globalVersionItem = Get-Item -LiteralPath $globalVersionPath -Force -ErrorAction SilentlyContinue
-    $globalAuthorizerItem = Get-Item -LiteralPath $globalAuthorizerPath -Force -ErrorAction SilentlyContinue
-    $globalVersionReady = $false
-    if ($globalVersionItem -and -not $globalVersionItem.PSIsContainer -and
-        -not ($globalVersionItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        $globalVersionReady = ([IO.File]::ReadAllText($globalVersionPath).Trim() -match '^6(\.\d+)?$')
-    }
-    $globalAuthorizerReady = $globalAuthorizerItem -and -not $globalAuthorizerItem.PSIsContainer -and
-        -not ($globalAuthorizerItem.Attributes -band [IO.FileAttributes]::ReparsePoint)
-    if ($globalVersionReady -and $globalAuthorizerReady) {
-        Write-Host "GLOBAL_HARNESS: MATERIALIZED"
-        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
-        Write-Host "NATIVE_GOAL_RUNTIME: PENDING qualification via qualify-goal-feasibility.ps1"
-    } elseif ($globalVersionItem -or $globalAuthorizerItem) {
-        Write-Host "GLOBAL_HARNESS: PARTIAL canonical version stamp or goal authorization helper missing or invalid"
-        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
-        Write-Host "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; preview repair with '$RepoRoot\setup.ps1 -Global -Force -DryRun'"
-    } else {
-        Write-Host "GLOBAL_HARNESS: NOT_INSTALLED optional"
-        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
-        Write-Host "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; run '$RepoRoot\setup.ps1 -Global' from a separate terminal to install protected native /goal support"
-    }
-    Write-Host "RUNTIME_QUALIFICATION: final owner '$(Join-Path $RepoRoot 'scripts\qualify-runtime-final.ps1')'; live project '$diagnosticTarget'; command and required operator evidence: '$(Join-Path $RepoRoot 'docs\qualification\agent-mode-selection.md')'"
+$diagnosticTarget = if ($env:FORGE_DIAGNOSTIC_TARGET) {
+    (Resolve-Path -LiteralPath $env:FORGE_DIAGNOSTIC_TARGET).Path
+} else {
+    (Resolve-Path -LiteralPath $Target).Path
 }
+$primary = Get-PrimaryCheckout $diagnosticTarget
+if ($primary) { $primary = (Resolve-Path -LiteralPath $primary).Path }
+if ($primary -and -not [string]::Equals($primary, $diagnosticTarget, [StringComparison]::OrdinalIgnoreCase)) {
+    Write-Host "CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration"
+    Write-Host "Run: Set-Location '$primary'; & '$RepoRoot\setup.ps1'"
+} else {
+    Write-Host "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
+}
+Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+Write-Host "NATIVE_GOAL_RUNTIME: PENDING reason=live-qualification-not-run"
+Write-Host "RUNTIME_QUALIFICATION: final owner '$(Join-Path $RepoRoot 'scripts\qualify-runtime-final.ps1')'; live project '$diagnosticTarget'; command and required operator evidence: '$(Join-Path $RepoRoot 'docs\qualification\agent-mode-selection.md')'"

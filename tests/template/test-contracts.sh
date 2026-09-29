@@ -610,7 +610,7 @@ else
 fi
 
 start_test "Claude permission templates use the effective Edit deny vocabulary"
-for settings_file in settings/settings.template.json settings/settings-windows.template.json settings/global-settings.template.json; do
+for settings_file in settings/settings.template.json settings/settings-windows.template.json; do
     if jq -e '.permissions.deny[]? | select(startswith("Write(~/.forge/"))' "$REPO_ROOT/$settings_file" >/dev/null; then
         fail "$settings_file contains an ignored Write(~/.forge/...) deny rule"
     else
@@ -1996,28 +1996,27 @@ done
 [ "$ok" = "1" ] && pass "structured review lenses remain bound to one candidate"
 
 # ---------------------------------------------------------------------------
-# Contract: "Ground Your Claims" rule parity across its three shipping copies
+# Contract: "Ground Your Claims" rule parity across project shipping copies
 # ---------------------------------------------------------------------------
 # The rule lives canonically in rules/critical-rules.md (sibling of CHALLENGE ME
 # / NO BUGS LEFT BEHIND), is mirrored as a headline policy in CLAUDE.template.md
-# (matching the No Bugs Left Behind pattern), and ships globally via
-# GLOBAL-CLAUDE.template.md. Duplicated prose drifts silently — bind the copies
+# (matching the No Bugs Left Behind pattern). Duplicated prose drifts silently — bind the copies
 # on a shared title stem + an exact link phrase so an edit to one fails CI until
 # the others follow.
-start_test "Ground Your Claims rule parity (critical-rules ↔ CLAUDE template ↔ global)"
+start_test "Ground Your Claims rule parity (critical-rules ↔ CLAUDE template)"
 
 # Case-insensitive: critical-rules.md uses the ALL-CAPS bullet convention
 # (GROUND YOUR CLAIMS), the templates use Title-Case headings.
 GYC_STEM='ground your claims'
 GYC_LINK='Confident guessing is a defect'
 ok=1
-for f in rules/critical-rules.md CLAUDE.template.md GLOBAL-CLAUDE.template.md; do
+for f in rules/critical-rules.md CLAUDE.template.md; do
     grep -qiE "$GYC_STEM" "$REPO_ROOT/$f" \
         || { fail "$f missing 'Ground Your Claims' rule stem"; ok=0; }
     grep -qF "$GYC_LINK" "$REPO_ROOT/$f" \
         || { fail "$f missing canonical '$GYC_LINK' link phrase"; ok=0; }
 done
-[ "$ok" = "1" ] && pass "3 files carry the Ground Your Claims rule + link phrase"
+[ "$ok" = "1" ] && pass "project policy copies carry the Ground Your Claims rule + link phrase"
 
 # ---------------------------------------------------------------------------
 # Contract: Developer Demo block parity + Gate-2 diagram-honesty rule

@@ -1666,14 +1666,18 @@ def prepare_project_gitignore(
 
 def selected_materializer(repo_root: Path, platform: str) -> list[str]:
     if platform == "windows":
-        return [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(repo_root / "scripts/materialize-adapters.ps1"),
-        ]
+        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        if powershell is None:
+            raise RefreshBlocked(
+                "PowerShell is required for Windows adapter materialization"
+            )
+        command = [powershell, "-NoProfile"]
+        if Path(powershell).name.lower() == "powershell.exe":
+            command.extend(["-ExecutionPolicy", "Bypass"])
+        command.extend(
+            ["-File", str(repo_root / "scripts/materialize-adapters.ps1")]
+        )
+        return command
     return ["bash", str(repo_root / "scripts/materialize-adapters.sh")]
 
 
@@ -1693,9 +1697,6 @@ def materialize_stage(
     environment = os.environ.copy()
     environment["FORGE_TRANSACTION_STAGE"] = "1"
     environment["FORGE_DIAGNOSTIC_TARGET"] = str(target)
-    environment["FORGE_DIAGNOSTIC_HOME"] = environment.get(
-        "HOME", environment.get("USERPROFILE", "")
-    )
     runtime_home = stage.parent / "runtime-home"
     environment["HOME"] = str(runtime_home)
     environment["USERPROFILE"] = str(runtime_home)
@@ -2024,7 +2025,7 @@ def full_refresh(
     dry_run: bool = False,
 ) -> None:
     repo_root = repo_root.resolve(strict=True)
-    if scope not in {"project", "global"} or platform not in {"unix", "windows"}:
+    if scope != "project" or platform not in {"unix", "windows"}:
         raise RefreshBlocked("invalid full-refresh scope or platform")
     if re.fullmatch(r"[0-9]+\.[0-9]+", release_version) is None:
         raise RefreshBlocked("invalid release version")
@@ -2289,7 +2290,7 @@ def full_refresh_cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="merge-settings.py full-refresh")
     parser.add_argument("--repo-root", required=True, type=Path)
     parser.add_argument("--target", required=True, type=Path)
-    parser.add_argument("--scope", required=True, choices=("project", "global"))
+    parser.add_argument("--scope", required=True, choices=("project",))
     parser.add_argument("--platform", required=True, choices=("unix", "windows"))
     parser.add_argument("--release-version", required=True)
     parser.add_argument("--dry-run", action="store_true")
