@@ -1031,6 +1031,8 @@ test_forge_version_stamp() {
         "fv: project pin equals CHANGELOG release"
     assert_contains "$S/.setup.log" "FORGE_VERSION: $EXPECT" \
         "fv: setup reports exact installed release"
+    assert_not_contains "$S/.setup.log" '.forge/version: No such file or directory' \
+        "fv: fresh install does not emit a missing version-file diagnostic"
     assert_file_missing "$S/.claude/.forge-version" \
         "fv: Claude-specific project pin is retired"
     assert_file_missing "$S/.fakehome/.claude/.forge-version" \

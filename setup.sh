@@ -569,7 +569,10 @@ echo -e "${YELLOW}Copying configuration files...${NC}"
 if [[ -f "CLAUDE.md" ]]; then had_claude_md=true; else had_claude_md=false; fi
 if [[ -f "CONTINUITY.md" ]]; then had_continuity_md=true; else had_continuity_md=false; fi
 
-prev_forge_version=$(tr -d '\r\n' < .forge/version 2>/dev/null || true)
+prev_forge_version=""
+if [[ -f ".forge/version" ]]; then
+    prev_forge_version=$(tr -d '\r\n' < .forge/version)
+fi
 
 if [[ "$had_claude_md" == true ]]; then
     echo -e "  ${BLUE}○${NC} CLAUDE.md user text will be preserved outside the Forge block"
