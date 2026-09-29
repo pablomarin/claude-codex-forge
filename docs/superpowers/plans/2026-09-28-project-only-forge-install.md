@@ -407,10 +407,10 @@ canonical	.forge/instructions.md	all	installed-hash
 canonical	.forge/version	all	exact-version
 canonical	.forge/managed-files.tsv	all	installed-hash
 canonical	.forge/installed-files.tsv	all	self
-canonical	.forge/bin/forge-goal-authorize	unix	installed-hash
-canonical	.forge/bin/forge-goal-authorize.ps1	windows	installed-hash
-canonical	.forge/bin/forge-goal-capture	unix	installed-hash
-canonical	.forge/bin/forge-goal-capture.ps1	windows	installed-hash
+canonical	.forge/bin/forge-goal-authorize	all	installed-hash
+canonical	.forge/bin/forge-goal-authorize.ps1	all	installed-hash
+canonical	.forge/bin/forge-goal-capture	all	installed-hash
+canonical	.forge/bin/forge-goal-capture.ps1	all	installed-hash
 generated	.forge/bin/codex.identity	all	recognized-schema
 generated	.forge/bin/codex.identity.sha256	all	recognized-seal
 generated	.forge/goal-authorizations	all	recognized-tree
@@ -421,6 +421,10 @@ marker	.codex/config.toml	all	forge-toml-marker-v6
 merge	.claude/settings.json	all	legacy-v6-global-settings
 generated	.claude/.forge-version	all	exact-release
 ```
+
+The historical global materializer installed both shell and PowerShell goal helpers on every
+platform so the same home could continue across hosts. Retirement therefore proves and removes both
+helper variants on every platform.
 
 Copy only the exact historical Forge-managed JSON values needed for inverse removal into
 `manifests/legacy-v6-global-settings.json`. It is cleanup data, not an active settings template.

@@ -36,6 +36,7 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-review-breaker.sh"
     "$REPO_ROOT/tests/template/test-merge-settings.sh"
     "$REPO_ROOT/tests/template/test-runtime-identity.sh"
+    "$REPO_ROOT/tests/template/test-retire-global.sh"
     "$REPO_ROOT/tests/template/test-goal-feasibility.sh"
     "$REPO_ROOT/tests/template/test-runtime-qualification-schema.sh"
     "$REPO_ROOT/tests/template/test-dual-engine-e2e.sh"
