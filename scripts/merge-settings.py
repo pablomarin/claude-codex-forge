@@ -444,8 +444,6 @@ def transaction_destination_allowed(
     repo_root: Path, scope: str, txid: str, relative: Path, operation: dict
 ) -> bool:
     value = relative.as_posix()
-    if scope == "global" and relative.parts[0] not in {".forge", ".claude", ".codex"}:
-        return False
     backup_prefix = f".forge/local/migration-backups/{txid}/"
     if value.startswith(backup_prefix):
         return True
@@ -460,8 +458,6 @@ def transaction_destination_allowed(
         CONTINUITY_RECEIPT_RELATIVE.as_posix(),
         ".claude/local/state.md",
         ".claude/local/.state-seed-snapshot.md",
-        ".forge/bin/forge-goal-authorize.sha256",
-        ".forge/bin/forge-goal-capture.sha256",
     }
     for row in read_tsv(repo_root / "manifests/managed-v6.tsv", 9):
         destination, row_scope = row[2], row[5]
@@ -478,11 +474,7 @@ def transaction_destination_allowed(
     if value in allowed:
         return True
 
-    protected_prefixes = (
-        (".forge/local/memory/", ".forge/memory/")
-        if scope == "project"
-        else (".forge/goal-authorizations/", ".forge/goal-captures/")
-    )
+    protected_prefixes = (".forge/local/memory/", ".forge/memory/")
     if value.startswith(protected_prefixes):
         # Full refresh only carries existing developer-owned protected-tree
         # files. It never creates or tombstones arbitrary paths in those trees.
@@ -2162,14 +2154,6 @@ def full_refresh(
                 if source.exists():
                     copy_preserved(source, stage / relative)
                     report["PRESERVED"].append(relative)
-        else:
-            for relative in (".codex/AGENTS.md", ".codex/config.toml", ".forge/goal-authorizations", ".forge/goal-captures"):
-                source = target / relative
-                if source.exists():
-                    reject_link_ancestors(target, relative_path(relative))
-                    copy_preserved(source, stage / relative)
-                    report["PRESERVED"].append(relative)
-
         materializer_output = materialize_stage(
             repo_root, target, stage, scope, platform, release_version
         )

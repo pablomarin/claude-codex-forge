@@ -582,14 +582,16 @@ for relative in \
     scripts/render-codex-config.py scripts/verify-runtime.sh scripts/verify-runtime.ps1 \
     scripts/qualify-dispatch-isolation.sh scripts/qualify-dispatch-isolation.ps1 \
     scripts/qualify-goal-feasibility.sh scripts/qualify-goal-feasibility.ps1 \
-    scripts/forge-goal-authorize.sh scripts/forge-goal-authorize.ps1 \
-    scripts/forge-goal-capture.sh scripts/forge-goal-capture.ps1 \
     hooks/lib/codex-worktree-dispatch.sh hooks/lib/codex-worktree-dispatch.ps1 \
     settings/codex-config.template.toml settings/codex-hooks.template.json \
     tests/template/test-runtime-identity.sh tests/template/test-runtime-identity.ps1 \
     tests/template/test-goal-feasibility.sh tests/template/test-goal-feasibility.ps1 \
     tests/template/run-all.ps1 .github/workflows/windows-parity.yml; do
     assert_file_exists "$REPO_ROOT/$relative" "Task 2 artifact exists: $relative"
+done
+for retired in scripts/forge-goal-authorize.sh scripts/forge-goal-authorize.ps1 \
+  scripts/forge-goal-capture.sh scripts/forge-goal-capture.ps1; do
+    assert_file_missing "$REPO_ROOT/$retired" "retired active helper is absent: $retired"
 done
 
 if [ -f "$MANIFEST" ]; then

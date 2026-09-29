@@ -46,6 +46,18 @@ assert_not_contains "$PS_GOAL_TEST" 'setup\.ps1.*-(Force|FullRefresh).*DryRun' \
     "PowerShell goal feasibility no longer depends on legacy setup previews"
 assert_not_contains "$PS_GOAL_TEST" 'goal-authorizations' \
     "PowerShell goal feasibility has no machine-global authorization fixture"
+for retired in scripts/forge-goal-authorize.sh scripts/forge-goal-authorize.ps1 \
+  scripts/forge-goal-capture.sh scripts/forge-goal-capture.ps1; do
+    assert_file_missing "$REPO_ROOT/$retired" "$retired is retired from active source"
+done
+assert_not_contains "$REPO_ROOT/manifests/managed-v6.tsv" 'goal-authorize' \
+    "active manifest installs no global Goal authorizer"
+for qualifier in scripts/qualify-goal-feasibility.sh scripts/qualify-goal-feasibility.ps1; do
+    assert_not_contains "$REPO_ROOT/$qualifier" 'goal-authorizations' \
+        "$qualifier has no global authorization dependency"
+    assert_not_contains "$REPO_ROOT/$qualifier" 'goal-captures' \
+        "$qualifier has no global capture dependency"
+done
 for suite in \
     test-fixtures.sh \
     test-dual-layout.sh \

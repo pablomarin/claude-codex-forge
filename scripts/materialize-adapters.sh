@@ -14,63 +14,6 @@ hash_file_materializer() {
     fi
 }
 
-physical_file_materializer() { (cd "$(dirname "$1")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")"); }
-
-resolve_cli_materializer() {
-    local path="$1" target
-    case "$path" in /*) ;; *) path=$(physical_file_materializer "$path") ;; esac
-    while [ -L "$path" ]; do
-        target=$(readlink "$path") || return 1
-        case "$target" in /*) path="$target" ;; *) path="$(dirname "$path")/$target" ;; esac
-    done
-    physical_file_materializer "$path"
-}
-
-hash_codex_capability_materializer() {
-    local binary="$1" root_help exec_help flag state
-    root_help=$($binary --help 2>&1 || true)
-    exec_help=$($binary exec --help 2>&1 || true)
-    if command -v shasum >/dev/null 2>&1; then
-        { printf 'forge-codex-capability-v1\n'; for flag in --ignore-user-config --ignore-rules --ephemeral --sandbox --add-dir; do state=absent; case "$root_help$exec_help" in *"$flag"*) state=present ;; esac; printf '%s=%s\n' "$flag" "$state"; done; } | shasum -a 256 | awk '{print $1}'
-    else
-        { printf 'forge-codex-capability-v1\n'; for flag in --ignore-user-config --ignore-rules --ephemeral --sandbox --add-dir; do state=absent; case "$root_help$exec_help" in *"$flag"*) state=present ;; esac; printf '%s=%s\n' "$flag" "$state"; done; } | sha256sum | awk '{print $1}'
-    fi
-}
-
-write_codex_identity_materializer() {
-    local writer_revision="$1" capture_revision="$2" identity invocation binary version root_help exec_help missing status identity_class tmp
-    identity="$MATERIALIZE_TARGET/.forge/bin/codex.identity"
-    assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/bin/codex.identity"
-    assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/bin/codex.identity.sha256"
-    mkdir -p "$(dirname "$identity")"
-    invocation=$(command -v codex 2>/dev/null || true)
-    binary=""; version=""; capability_revision=""; binary_sha256=""; missing=" binary-unavailable"; status=BLOCKED
-    identity_class=operator-setup
-    [ "${FORGE_ENGINE_IDENTITY_FIXTURE:-0}" != 1 ] || identity_class=fixture-only
-    if [ -n "$invocation" ]; then
-        case "$invocation" in /*) ;; *) invocation=$(physical_file_materializer "$invocation") ;; esac
-        binary=$(resolve_cli_materializer "$invocation" 2>/dev/null || true)
-        if [ -n "$binary" ] && [ -x "$binary" ] && [ ! -L "$binary" ]; then
-            version=$($binary --version 2>/dev/null | head -1 || true)
-            root_help=$($binary --help 2>&1 || true); exec_help=$($binary exec --help 2>&1 || true); missing=""
-            for flag in --ignore-user-config --ignore-rules --ephemeral --sandbox --add-dir; do
-                case "$root_help$exec_help" in *"$flag"*) ;; *) missing="$missing $flag" ;; esac
-            done
-            binary_sha256=$(hash_file_materializer "$binary")
-            capability_revision=$(hash_codex_capability_materializer "$binary")
-            if [ -z "$missing" ] && [ -n "$version" ]; then status=QUALIFIED; fi
-        fi
-    fi
-    tmp="$identity.tmp.$$"
-    {
-        printf 'format=forge-codex-identity-v1\nengine=codex\nidentity_class=%s\nstatus=%s\n' "$identity_class" "$status"
-        printf 'invocation_path=%s\nbinary_path=%s\nbinary_sha256=%s\nversion=%s\ncapability_revision=%s\n' "$invocation" "$binary" "$binary_sha256" "$version" "$capability_revision"
-        printf 'capture_revision=%s\nwriter_revision=%s\ndiagnostic=%s\n' "$capture_revision" "$writer_revision" "${missing# }"
-    } > "$tmp"
-    if [ -f "$identity" ] && cmp -s "$identity" "$tmp"; then rm -f "$tmp"; else mv "$tmp" "$identity"; fi
-    hash_file_materializer "$identity" > "$identity.sha256"
-}
-
 safe_relative_materializer_path() {
     case "$1" in ""|/*|~*|\\*|[A-Za-z]:*|*\\*|*/../*|../*|*/..|.|..|*//* ) return 1 ;; esac
     return 0

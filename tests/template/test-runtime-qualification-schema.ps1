@@ -5,6 +5,9 @@ $temporary = Join-Path ([IO.Path]::GetTempPath()) ('forge-runtime-schema-' + [Gu
 function Assert-True([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message};Write-Host "  PASS: $Message"}
 
 Assert-True (Test-Path -LiteralPath $runner -PathType Leaf) 'PowerShell final qualifier exists'
+$runnerSource = Get-Content -LiteralPath $runner -Raw
+Assert-True (-not $runnerSource.Contains('ClaudeGoalAuthorization') -and -not $runnerSource.Contains('CodexGoalCapture')) 'PowerShell final qualifier has no global Goal evidence parameters'
+Assert-True ($runnerSource.Contains('native_goal_runtime') -and $runnerSource.Contains('NATIVE_GOAL_RUNTIME')) 'PowerShell final qualifier classifies native Goal per host'
 New-Item -ItemType Directory -Path $temporary -Force | Out-Null
 try {
     $project=Join-Path $temporary 'project';$bin=Join-Path $temporary 'bin';$output=Join-Path $temporary 'final.receipt'
@@ -39,6 +42,8 @@ public static class ForgeRuntimeFake {
     Assert-True ($LASTEXITCODE -ne 0) 'fixture qualification stays non-certifying'
     Assert-True ((Get-Content -Raw $output) -match '(?m)^evidence_mode=fixture\r?$') 'fixture source is explicit'
     Assert-True ((Get-Content -Raw $output) -match '(?m)^overall_status=BLOCKED\r?$') 'fixture cannot certify PASS'
+    Assert-True ((Get-Content -Raw $output) -match '(?m)^claude_native_goal_runtime=NOT_TESTED\r?$') 'fixture does not claim Claude live readiness'
+    Assert-True ((Get-Content -Raw $output) -match '(?m)^codex_native_goal_runtime=NOT_TESTED\r?$') 'fixture does not claim Codex live readiness'
     $validationOutput=(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -Validate -Input $output 2>&1 | Out-String);$validationCode=$LASTEXITCODE
     Assert-True ($validationCode -eq 0) "fixture receipt validates structurally: $($validationOutput.Trim())"
     $fakePass=Join-Path $temporary 'fake-pass.receipt';(Get-Content $output)|ForEach-Object{if($_ -eq 'overall_status=BLOCKED'){'overall_status=PASS'}else{$_}}|Set-Content $fakePass

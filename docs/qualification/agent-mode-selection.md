@@ -30,12 +30,12 @@ report after the bytes freeze; this tracked document does not self-certify a lat
 | Codex authentication | `PASS` | `codex login status` returned `Logged in using ChatGPT` |
 | Codex guarded dispatch | `PASS` | Authenticated opinion, full-agent investigation, exact-id resume, and both mixed-council topologies passed in a disposable project |
 | Codex Desktop Auto-review transport | `PENDING` | Deterministic tests prove installed disclosure and user-provenance policy, not whether the Desktop approval reviewer recognizes or reuses that consent |
-| Codex native `/goal` | `BLOCKED` | No sealed physical operator TUI capture; `codex exec` and fake output are not substitutes |
+| Codex native `/goal` | `BLOCKED` | Requires an authenticated native interactive Goal run; `codex exec` and agent-authored substitutes do not certify it |
 | Claude Code identity | `PASS` | `2.1.237 (Claude Code)`; physical binary SHA-256 `338901351d4ff17495738c67fc3e12a32c1b506738ac5e012eb782d3d8b5be43` |
 | Claude authentication | `PASS` | Physical operator login completed; `claude auth status` returned `loggedIn: true`, `authMethod: claude.ai` |
 | Claude guarded dispatch | `PASS` | Authenticated opinion, full-agent investigation, exact-id resume, and both mixed-council topologies passed in a disposable project |
 | Claude Desktop command shaping | `PENDING` | Deterministic tests prove installed instructions, not whether the current Auto-mode classifier accepts the resulting literal, single-purpose shell calls |
-| Claude native `/goal` | `BLOCKED` | Not invoked: the live oracle requires a separate operator-issued goal authorization receipt |
+| Claude native `/goal` | `PENDING` | The project-local deterministic ledger is qualified; the current candidate still needs an authenticated native `/goal` run |
 | Live Windows/native qualification | `PENDING` | Requires Windows PowerShell 5.1 plus authenticated host execution on the release candidate |
 
 Authenticated Claude and Codex models were called only through disposable qualification projects.
@@ -97,22 +97,21 @@ and materialization tests cannot prove a live Auto-mode classifier decision.
 ## Final qualification command
 
 `scripts/qualify-runtime-final.sh` and `.ps1` are thin release wrappers over
-`qualify-dispatch-isolation.*` and `qualify-goal-feasibility.*`. Their deterministic fixture mode
-always returns `BLOCKED`. `--live` is the only mode that may invoke authenticated hosts, and a
-`PASS` additionally requires the sealed Codex goal capture and the matching Windows PowerShell 5.1
-attestation. Validation rejects fixture-as-PASS, malformed child status/schema, changed child or
-engine hashes, a stale candidate, and a missing/stale Codex capture.
+`qualify-dispatch-isolation.*` and `qualify-goal-feasibility.*`. Goal qualification always proves
+the repository-local ledger first and records its receipt under the supplied project evidence
+directory. `--live` is the only mode that may invoke authenticated hosts. Each host is classified
+separately as `NATIVE_GOAL_RUNTIME: READY` or `BLOCKED`; unavailable or expired credentials produce
+a concrete blocker rather than fake evidence. Aggregate `PASS` additionally requires both supported
+hosts and the matching Windows PowerShell 5.1 attestation. Validation rejects fixture-as-PASS,
+malformed child status/schema, changed child or engine hashes, and a stale candidate.
 
 Example after the remaining operator evidence exists:
 
 ```bash
-FORGE_CODEX_AUTH_FILE=/operator/path/auth.json \
-  scripts/qualify-runtime-final.sh --live --project-root /path/to/project \
+scripts/qualify-runtime-final.sh --live --project-root /path/to/project \
   --output /operator/path/runtime-final.receipt \
-  --claude-goal-authorization /operator/path/claude-goal.authorization \
-  --codex-goal-capture /operator/path/codex-goal/capture.receipt \
   --windows-attestation /operator/path/windows-powershell-51.receipt
 ```
 
-Keep every operator path and credential outside the repository. The final receipt records hashes
-and statuses, not secrets or transcript contents.
+The authenticated clients keep their own credentials. Forge stores only project-local hashes and
+statuses, never secrets or private transcript contents.

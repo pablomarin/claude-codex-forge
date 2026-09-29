@@ -214,51 +214,6 @@ function Get-ForgeMaterializerTextHash([string]$Text) {
     finally { $sha.Dispose() }
 }
 
-function Get-CodexCapabilityRevision([string]$Path) {
-    $rootHelp = (& $Path --help 2>&1) -join "`n"
-    $execHelp = (& $Path exec --help 2>&1) -join "`n"
-    $combined = $rootHelp + $execHelp; $lines = @("forge-codex-capability-v1")
-    foreach ($flag in @("--ignore-user-config", "--ignore-rules", "--ephemeral", "--sandbox", "--add-dir")) { $lines += "$flag=" + $(if ($combined -match [regex]::Escape($flag)) { "present" } else { "absent" }) }
-    return Get-ForgeMaterializerTextHash (($lines -join "`n") + "`n")
-}
-
-function Write-CodexIdentity([string]$WriterRevision, [string]$CaptureRevision) {
-    $identity = Join-Path $Target ".forge\bin\codex.identity"
-    Assert-NoLinkAncestor $Target ".forge\bin\codex.identity"
-    Assert-NoLinkAncestor $Target ".forge\bin\codex.identity.sha256"
-    $parent = Split-Path -Parent $identity; if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    $invocation=""; $binary=""; $binaryHash=""; $version=""; $capability=""; $diagnostic="binary-unavailable"; $status="BLOCKED"
-    $identityClass = if ($env:FORGE_ENGINE_IDENTITY_FIXTURE -eq "1") { "fixture-only" } else { "operator-setup" }
-    $command = Get-Command codex -ErrorAction SilentlyContinue
-    if ($command) {
-        $invocation = if ($command.Path) { $command.Path } else { $command.Source }
-        try {
-            $invocation = [IO.Path]::GetFullPath($invocation)
-            $binary = (Resolve-Path $invocation).Path
-            $item = Get-Item -LiteralPath $binary -Force
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "resolved binary remains aliased" }
-            $binaryHash = Get-FileRevision $binary
-            $version = ((& $binary --version 2>$null) | Select-Object -First 1)
-            $rootHelp = (& $binary --help 2>&1) -join "`n"; $execHelp = (& $binary exec --help 2>&1) -join "`n"
-            $required = @("--ignore-user-config", "--ignore-rules", "--ephemeral", "--sandbox", "--add-dir")
-            $missing = @($required | Where-Object { ($rootHelp + $execHelp) -notmatch [regex]::Escape($_) })
-            $capability = Get-CodexCapabilityRevision $binary
-            $diagnostic = if ($missing.Count) { "missing: " + ($missing -join " ") } elseif (-not $version) { "version-unavailable" } else { "" }
-            if (-not $diagnostic) { $status = "QUALIFIED" }
-        } catch { $diagnostic = "identity-probe-failed: $($_.Exception.Message)"; $status = "BLOCKED" }
-    }
-    $lines = @(
-        "format=forge-codex-identity-v1", "engine=codex", "identity_class=$identityClass", "status=$status",
-        "invocation_path=$invocation", "binary_path=$binary", "binary_sha256=$binaryHash", "version=$version", "capability_revision=$capability",
-        "capture_revision=$CaptureRevision", "writer_revision=$WriterRevision", "diagnostic=$diagnostic"
-    )
-    $candidate = ($lines -join "`n") + "`n"; $temporary = "$identity.tmp.$PID"
-    [IO.File]::WriteAllText($temporary, $candidate, $Utf8NoBom)
-    if ((Test-Path $identity) -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($identity)) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($temporary))) { Remove-Item -LiteralPath $temporary -Force }
-    else { Move-Item -LiteralPath $temporary -Destination $identity -Force }
-    [IO.File]::WriteAllText("$identity.sha256", (Get-FileRevision $identity) + "`n", $Utf8NoBom)
-}
-
 function Render-Adapter {
     param([string]$Template, [string]$Destination, [string]$CanonicalPath, [string]$Revision)
     $name = [IO.Path]::GetFileNameWithoutExtension($Destination)
