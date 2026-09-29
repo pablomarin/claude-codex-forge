@@ -128,7 +128,7 @@ function Get-OptionalFirstCertifiedIteration {
 function Write-WorkflowStateLines {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string[]]$Lines
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$Lines
     )
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     [IO.File]::WriteAllText($Path, ([string]::Join("`n", $Lines) + "`n"), $utf8)
@@ -180,7 +180,7 @@ function Publish-ForgeWorkflowState {
     if ((Get-WorkflowStateHash -Path $State) -ne $ExpectedHash) {
         Throw-WorkflowStateBlocked "workflow state changed concurrently; retry from show"
     }
-    [IO.File]::Replace($Next, $State, $null)
+    [IO.File]::Replace($Next, $State, [System.Management.Automation.Language.NullString]::Value)
 }
 
 function Set-WorkflowStateActivationFile {

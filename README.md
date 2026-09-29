@@ -297,8 +297,8 @@ Do not combine `--upgrade` with `-f` or `--dry-run`.
 After verification, commit the reviewed harness changes in your project; `.forge/local/` stays
 gitignored. A project update does not update unrelated repositories or sibling worktrees.
 
-The exact release is committed in `.forge/version`. This means different repositories may run
-different Forge versions, and each repository upgrades only when its team chooses to run its own
+The exact release is committed in `.forge/version`. This means different repositories may run different Forge versions,
+and each repository upgrades only when its team chooses to run its own
 installer update.
 
 ## What setup installs
@@ -351,6 +351,7 @@ architecture, domain facts, repository maps, and project commands in the neutral
 `docs/agent-context.md`. Forge cannot infer project knowledge, so the team creates and maintains
 that file when shared context is needed. `AGENTS.md` already loads the optional file; do not
 duplicate its pointer or policy in `CLAUDE.md`.
+Do not copy shared policy between `CLAUDE.md` and `AGENTS.md`.
 
 Setup preserves user content according to explicit ownership:
 

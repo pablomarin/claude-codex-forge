@@ -2931,9 +2931,9 @@ assert_contains "$README" '### One source of truth, two native adapters' \
     "README explains the native-adapter architecture"
 assert_contains "$README" '`FORGE.template.md` | `.forge/instructions.md`' \
     "README maps canonical policy into downstream projects"
-assert_contains "$README" '`templates/adapters/CLAUDE.block.template.md` | Forge-owned block in `CLAUDE.md`' \
+assert_contains "$README" '`templates/adapters/CLAUDE.block.template.md` | `CLAUDE.md` | One-line `@AGENTS.md` compatibility bridge' \
     "README maps the Claude adapter source"
-assert_contains "$README" '`templates/adapters/AGENTS.block.template.md` | Forge-owned block in `AGENTS.md`' \
+assert_contains "$README" '`templates/adapters/AGENTS.block.template.md` | `AGENTS.md` | Canonical adapter loading Forge policy' \
     "README maps the Codex adapter source"
 assert_contains "$README" 'Do not copy shared policy between `CLAUDE.md` and `AGENTS.md`' \
     "README tells users not to maintain duplicated host instructions"

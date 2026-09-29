@@ -5,8 +5,8 @@ read it completely; adapters may translate discovery metadata but may not restat
 
 ## Resource Discipline
 
-Apply KISS and YAGNI: build the smallest correct solution required by current evidence and
-acceptance criteria. Do not add speculative abstractions, compatibility layers, hardening, or
+Apply KISS and YAGNI: build the smallest correct solution required by the current acceptance criterion
+and evidence. Do not add speculative abstractions, compatibility layers, hardening, or
 edge-case machinery without a concrete supported need.
 
 Treat developer time, session length, tokens, and money as finite engineering resources. Do not
