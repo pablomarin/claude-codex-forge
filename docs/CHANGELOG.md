@@ -44,6 +44,11 @@ single authoritative ledger-to-state synchronization point explicitly.
   current guides, setup messages, and capability metadata are updated; shared
   workflow behavior is unchanged. Upgrades retire only proven unchanged old
   wrappers, preserve custom content, and block collisions with custom short names.
+- Agent-assisted setup now prescribes neutral `chore/forge-install` and
+  `chore/forge-upgrade` branches instead of engine-prefixed names. Full reconciliation also moves
+  valid custom root policy into `docs/agent-context.md`, validates referenced repository paths,
+  removes stale or circular adapter references, and stops instead of guessing when missing policy
+  has no clear authoritative source.
 
 ## 6.2 — 2026-09-10
 

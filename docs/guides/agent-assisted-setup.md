@@ -38,8 +38,11 @@ Then paste this prompt, replacing the Forge checkout path:
 Install or upgrade Forge in this repository using the Forge checkout at <path-to-forge>.
 
 1. Confirm the target Git root and the separate Forge checkout path. Inspect git status; preserve
-   uncommitted work and use a dedicated setup/update branch. Confirm the Forge checkout revision;
-   if it needs updating, propose that separately and stop if the update fails.
+   uncommitted work and use a dedicated setup/update branch. Use `chore/forge-install` for a fresh
+   installation or full reconciliation and `chore/forge-upgrade` for an existing Forge v6 update.
+   Never use an engine or host name such as `codex/`, `claude/`, or `agent/` as the branch prefix.
+   Confirm the Forge checkout revision; if it needs updating, propose that separately and stop if
+   the update fails.
 2. Inspect the repository and choose the correct installer mode:
    - fresh project: normal project setup (a new or existing app with no agent harness);
    - existing Forge v6: routine update;
@@ -49,18 +52,23 @@ Install or upgrade Forge in this repository using the Forge checkout at <path-to
 3. Run the read-only full-refresh preview first for Forge v5, Claude-only, Codex-only, mixed, custom, or unknown harnesses.
 4. Preserve the exact installer output and explain every result or blocker in plain language.
 5. Do not bypass ownership blockers or guess which project content may be removed.
-6. Keep shared project knowledge in docs/agent-context.md. Keep AGENTS.md as the canonical project
-   discovery adapter and CLAUDE.md as its one-line @AGENTS.md compatibility bridge.
-7. If a blocker appears to describe valid Forge-generated output, stop and report a possible Forge
+6. Keep shared project knowledge in docs/agent-context.md.
+   Move still-valid custom root policy into docs/agent-context.md before replacing root instructions.
+   Keep AGENTS.md as the canonical project discovery adapter and CLAUDE.md as its one-line
+   @AGENTS.md compatibility bridge.
+7. Validate every repository path referenced by the existing root instructions; each must exist.
+   Remove circular or stale references between the root adapters and docs/agent-context.md.
+   If missing policy has no clear authoritative source, stop and ask the user instead of inventing it.
+8. If a blocker appears to describe valid Forge-generated output, stop and report a possible Forge
    upgrader defect instead of working around it.
-8. Show the proposed command and reconciliation changes. Ask for my approval before modifying files or running the non-preview command.
-9. After approval, run the deterministic installer from the target Git root using the full path
+9. Show the proposed command and reconciliation changes. Ask for my approval before modifying files or running the non-preview command.
+10. After approval, run the deterministic installer from the target Git root using the full path
    to setup.sh or setup.ps1 in the Forge clone. Stop on any failed command or BLOCKED migration;
    execute full reconciliation only after its preview says UPGRADE: READY.
-10. Review the final Git diff and per-host readiness diagnostics. Run the documented discovery
+11. Review the final Git diff and per-host readiness diagnostics. Run the documented discovery
     check, but do not call it live runtime certification. Follow RUNTIME_QUALIFICATION guidance;
     report installed files and each host's readiness separately, including unverified checks.
-11. Do not change unrelated repositories, sibling worktrees, or home-directory agent configuration.
+12. Do not change unrelated repositories, sibling worktrees, or home-directory agent configuration.
     Do not commit or push the project changes without my authorization.
 ```
 
