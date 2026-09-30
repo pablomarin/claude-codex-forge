@@ -284,7 +284,7 @@ A project exposes UI + API + CLI (`CLAUDE.md` says `fullstack` with a CLI). The 
 (a) Extend the CLI commands to expose the new modes (and write a CLI UC for them), OR
 (b) Substantively justify why CLI is out of scope (e.g., "Full mode requires interactive risk-policy preview; deferred to v2 with a `--full-config FILE` escape hatch tracked in TODO #1234.")
 
-The verify-e2e agent (Step 2c) emits a SURFACE_COVERAGE_WARNING when UCs cover fewer surfaces than the project exposes. The warning is informational — the human reviewer decides whether the gap is intentional. During an autonomous `/forge-goal` run, the agent treats this warning as a `/council` trigger if the gap was not pre-justified in the plan.
+The verify-e2e agent (Step 2c) emits a SURFACE_COVERAGE_WARNING when UCs cover fewer surfaces than the project exposes. The warning is informational — the human reviewer or owning bounded workflow decides whether the gap is intentional. The warning alone does not change the verdict or invoke council.
 
 ### When E2E is required
 

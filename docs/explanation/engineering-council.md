@@ -4,7 +4,10 @@
 
 A single agent — even a careful one — converges on the first plausible answer. Pair-of-eyes review helps but quickly settles on shared blind spots. The Council is the harness's answer to that drift: **structurally forced disagreement** between perspectives that have different incentives, run on models with different training data, before any code gets written.
 
-When it fires, you get five short verdicts in parallel, a synthesized chairman ruling, and — if dissent surfaced (an OBJECT verdict OR a plausible blocking concern raised under any verdict) — a mandatory minority report explaining what was overruled and why. You decide whether to act on it. The Council never decides for you.
+When it fires, you get five advisor verdicts, five anonymous peer-review turns, a synthesized
+chairman ruling, and — if dissent surfaced (an OBJECT verdict OR a plausible blocking concern raised
+under any verdict) — a mandatory minority report explaining what was overruled and why. You decide
+whether to act on it. The Council never decides for you.
 
 ---
 
@@ -96,9 +99,9 @@ This is the single most important contract in the protocol. Without it, synthesi
 
 ## When the Council fires
 
-There are two entry points.
+Council is exceptional rather than a routine review stage.
 
-### Standalone — you invoke it
+### Explicit invocation
 
 ```
 /council <question or decision>
@@ -112,30 +115,21 @@ opinion before committing. Examples that fit:
 - "Is this auth design sound, or am I missing a class of attack?"
 - "We're torn between two database schemas — what are we not seeing?"
 
-What doesn't fit: questions with a clear answer, requests for advice on tactics ("how should I refactor this loop"), or anything where you'd accept any reasonable answer. The Council is structurally heavy — five parallel calls plus a synthesis pass. Use it when being wrong is expensive.
+What doesn't fit: questions with a clear answer, ordinary plan/code-review findings, soft validation
+warnings, requests for advice on tactics ("how should I refactor this loop"), or anything where you'd
+accept any reasonable answer. The Council is structurally heavy: five advisor starts, five peer
+turns, and one chairman. Use it when being wrong is expensive.
 
-### Auto-trigger — `/new-feature` and `/fix-bug` Phase 3.1c
+### Exceptional workflow invocation
 
-The workflows fire the Council automatically, but with a cheaper gate first. The flow:
+`/new-feature`, `/fix-bug`, and native Goal do not invoke council as a routine contrarian or review
+step. They use the fresh plan reviewer and bounded broad-review → repair → focused-closure loop.
+Council becomes eligible when the developer explicitly requests it, a concrete high-impact
+architectural fork remains unresolved, or an active native Goal cannot continue without a genuine
+non-destructive product or engineering decision after the cheapest safe falsifying check. Findings,
+soft warnings, and engine failures are not council triggers by themselves.
 
-1. **Approach Comparison** (Phase 3.1b) — the main host fills a fixed-axis comparison table for 2-3 candidate approaches and picks a default.
-2. **Contrarian Gate** (Phase 3.1c) — a fresh opinion from the other engine (or visible fresh
-   same-engine fallback) validates the "default wins" claim. Returns one of:
-   - **VALIDATE** → skip the Council, proceed with default. This is the common case.
-   - **OBJECT** → check if there's a falsifying test under 30 minutes; if yes, run the spike instead. If no AND the decision touches a high-impact surface, fire the 3-advisor council.
-   - **INSUFFICIENT** → fire the 3-advisor council. Ambiguity = risk.
-3. **Quick Council (3 advisors)** — Simplifier + Contrarian + Pragmatist. Escalates to the full council if **any** of these triggers fire:
-   - Any advisor returns OBJECT
-   - Any advisor reports low confidence
-   - Decision affects an irreversible/high-impact surface (list below)
-   - No majority verdict (3-way split with no clear winner)
-4. **Full Council (5 advisors)** — adds Scalability Hawk + Maintainer.
-
-The 3-then-5 escalation keeps cost proportional to risk: low-stakes calls hit only the Contrarian
-gate (one fresh opinion), routine architectural calls fire three advisors, and only genuinely
-ambiguous high-impact decisions use all five.
-
-**High-impact surfaces** that automatically force escalation (canonical list — `.forge/skills/council/references/peer-review-protocol.md` is the single source of truth; if the two ever drift, that file wins):
+**High-impact surfaces** (canonical list — `.forge/skills/council/references/peer-review-protocol.md` is the single source of truth; if the two ever drift, that file wins):
 
 - **Schema/database migrations** — DDL changes, new tables, column alterations
 - **Public API contracts** — endpoint additions/removals, request/response shape changes
@@ -172,6 +166,6 @@ verdict rather than producing a partial council.
 
 - `/council <question>` — see [`docs/reference/commands.md`](../reference/commands.md) for invocation details
 - Persona definitions — `.forge/skills/council/references/advisors.md` (edit per project)
-- Dispatch and escalation rules — `.forge/skills/council/references/peer-review-protocol.md`
+- Eligibility, topology, and fallback rules — `.forge/skills/council/references/peer-review-protocol.md`
 - Output schema — `.forge/skills/council/references/output-schema.md`
 - Why two agents at all — [`docs/explanation/harness-philosophy.md`](harness-philosophy.md)

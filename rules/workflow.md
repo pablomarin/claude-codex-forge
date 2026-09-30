@@ -9,7 +9,7 @@
 | Trivial, low-risk change under the quick-fix limits | `/quick-fix <name>` |
 | Fresh second opinion or code review | Claude: `/opinion <request>`; Codex: `$opinion <request>` |
 | Investigation with disposable write/network capability | Claude: `/opinion investigate <request>`; Codex: `$opinion investigate <request>` |
-| Resolve engineering ambiguity | `/council <question>` |
+| Resolve an explicitly requested or still-unresolved high-impact architectural fork | `/council <question>` |
 | Process PR feedback | `/review-pr-comments` |
 | Merge and clean up after approval | `/finish-branch` |
 
@@ -204,7 +204,9 @@ exact terminal transition `workflow-state.sh checkpoint --host <claude|codex> --
 twin with the same action and arguments.
 
 - Research current documentation before design when a library, API, or provider is involved.
-- Compare viable approaches and send genuine ambiguity to `/council`.
+- Compare viable approaches and run the cheapest safe falsifying check first. Do not invoke /council
+  as a routine planning, review, or implementation step. Invoke it only when the developer explicitly requests it
+  or a concrete high-impact architectural fork remains unresolved after that check.
 - Freeze the exact staged-clean candidate before final review or verification.
 - Dispatch fresh independent `plan`, `code-spec`, and `code-quality` roles through the installed
   structured dispatcher. Automatic fallback is visible in its receipt.
@@ -224,7 +226,8 @@ for the objective, nonce, persistent budget ceiling, consumed durable turns, che
 candidate, evidence, authorization, and terminal status. Native counters may reset; Forge counters
 may not.
 
-The council resolves non-destructive workflow judgment without pausing. Stop autonomy for:
+Ordinary non-destructive workflow judgment stays inside the owning bounded workflow. Stop autonomy
+for:
 
 - explicit user input or authorization/cancellation;
 - PR creation or any other new external mutation requiring human authority;
@@ -238,7 +241,21 @@ workflow. If the active host cannot compose every Must goal behavior, mark runti
 
 ### Council During Autonomous Goal
 
-Use `/council` for non-PR doubts. PR creation authorization remains human-only. Ask-tier commands stall autonomous runs, so surface the deterministic action and pause instead of hiding a prompt.
+Do not invoke /council as a routine response to non-PR doubts, reviewer findings, soft warnings, or
+implementation choices. During an active native Goal,
+Council may resolve a genuine non-destructive decision. It must concern product or engineering
+judgment and be required to
+continue the active native Goal. First run the cheapest safe falsifying check; if it produces a
+deterministic smallest answer, use that answer instead. Otherwise apply the chairman's verdict and
+continue the owning workflow. Council also remains available when the developer explicitly requests
+it or a concrete high-impact architectural fork remains unresolved after that check.
+
+The decision requirement is the trigger: an ordinary plan/code-review finding, a soft E2E warning,
+an engine failure, or a convergence limit is not a council trigger by itself. Reviewer engine
+failure uses automatic fallback; unresolved convergence and every action requiring human authority
+still pause for the developer.
+PR creation authorization remains human-only. Ask-tier commands stall autonomous runs, so surface the
+deterministic action and pause instead of hiding a prompt.
 
 ### Severity and Convergence Compatibility
 

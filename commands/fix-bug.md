@@ -110,7 +110,10 @@ mutations retain their separate authorization boundaries.
 
 Write `docs/plans/<bug>.md` with reproduction, root cause, immutable base ref/SHA, changed paths,
 regression test, minimal production change, acceptance criteria, and user-journey coverage.
-Use `/council` only for a consequential design fork.
+Do not invoke /council as a routine planning or contrarian step. The fresh plan reviewer is the
+default independent challenge. Invoke council only when the developer explicitly requests it or a
+concrete high-impact architectural fork remains unresolved after the cheapest safe falsifying
+check.
 
 Freeze the plan hash and dispatch a fresh `plan` reviewer with `--engine auto`. Automatic
 same-engine fallback handles an unavailable/failed other engine without stopping. Findings are not
@@ -128,6 +131,8 @@ Closure checks only named findings and direct regressions; do not start a second
 still-open reachable P0/P1 may receive one surgical repair plus surgical verification, then surface
 the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and unchanged-candidate
 concerns do not keep the loop open; a concrete material P2 still prevents certification.
+An ordinary review finding is not a council trigger; keep plan findings in this bounded repair and
+closure loop.
 
 Review iterations remain subject to the canonical `POST_CERT_REVIEW_ROUND_LIMIT`
 convergence-breaker in `.forge/rules/workflow.md`; only a human may adjudicate a tripped breaker.
@@ -180,6 +185,8 @@ surface the blocker to the developer. P3, cosmetic, speculative, purely theoreti
 unchanged-candidate concerns do not keep the loop open; a concrete material P2 still prevents
 certification. Run focused owning checks during repair and one complete aggregate after final bytes
 freeze.
+A code-review finding is not a council trigger; keep findings in this bounded repair and closure
+loop, then surface a remaining blocker to the developer.
 
 A mutation invalidates only evidence whose boundary it can affect. Any candidate mutation
 invalidates final review and verifier receipts; any mutation in the exact-

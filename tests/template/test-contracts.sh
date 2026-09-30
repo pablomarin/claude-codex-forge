@@ -58,6 +58,7 @@ for qualifier in scripts/qualify-goal-feasibility.sh scripts/qualify-goal-feasib
     assert_not_contains "$REPO_ROOT/$qualifier" 'goal-captures' \
         "$qualifier has no global capture dependency"
 done
+
 for suite in \
     test-fixtures.sh \
     test-dual-layout.sh \
@@ -77,6 +78,115 @@ for suite in \
     assert_not_contains "$RUN_FAST" "$suite" "fast runner excludes slow suite $suite"
     assert_contains "$RUN_ALL" "$suite" "exhaustive runner retains slow suite $suite"
 done
+
+# ---------------------------------------------------------------------------
+# Contract 0b: the full Engineering Council is exceptional, never a routine
+# plan-review or code-review step. The ordinary fresh reviewer and bounded
+# repair/closure loop own normal findings.
+# ---------------------------------------------------------------------------
+start_test "council escalation stays exceptional across workflow surfaces"
+
+COUNCIL_EXCEPTION_STEM="Do not invoke /council as a routine"
+COUNCIL_EXPLICIT_STEM="developer explicitly requests it"
+COUNCIL_TRIGGER_STEM="concrete high-impact architectural fork remains unresolved"
+GOAL_DECISION_STEM="genuine non-destructive decision"
+GOAL_CONTINUE_STEM="continue the active native Goal"
+REVIEW_NOT_TRIGGER_STEM="review finding is not a council trigger"
+
+for workflow in \
+    "$REPO_ROOT/commands/new-feature.md" \
+    "$REPO_ROOT/commands/fix-bug.md"; do
+    assert_contains "$workflow" "$COUNCIL_EXCEPTION_STEM" \
+        "$(basename "$workflow") forbids routine council dispatch"
+    assert_contains "$workflow" "$COUNCIL_TRIGGER_STEM" \
+        "$(basename "$workflow") limits council to explicit or unresolved high-impact forks"
+    assert_contains "$workflow" "$COUNCIL_EXPLICIT_STEM" \
+        "$(basename "$workflow") preserves explicit developer council requests"
+    assert_contains "$workflow" "$REVIEW_NOT_TRIGGER_STEM" \
+        "$(basename "$workflow") keeps ordinary review findings in the bounded loop"
+    assert_not_contains "$workflow" 'Use `/council` for a consequential fork or a contrarian check' \
+        "$(basename "$workflow") does not restore the retired routine-council instruction"
+    assert_not_contains "$workflow" 'Use `/council` only for a consequential design fork' \
+        "$(basename "$workflow") does not restore the retired design-fork instruction"
+done
+
+assert_contains "$REPO_ROOT/rules/workflow.md" "$COUNCIL_EXCEPTION_STEM" \
+    "shared workflow policy forbids routine council dispatch"
+assert_contains "$REPO_ROOT/rules/workflow.md" "$COUNCIL_TRIGGER_STEM" \
+    "shared workflow policy limits council escalation"
+assert_contains "$REPO_ROOT/rules/workflow.md" "$COUNCIL_EXPLICIT_STEM" \
+    "shared workflow policy preserves explicit developer council requests"
+assert_not_contains "$REPO_ROOT/rules/workflow.md" 'Use `/council` for non-PR doubts' \
+    "autonomous goals do not send ordinary doubts to the full council"
+
+COUNCIL_SKILL="$REPO_ROOT/skills/council/SKILL.template.md"
+assert_not_contains "$COUNCIL_SKILL" 'automatically during brainstorming' \
+    "council skill frontmatter cannot auto-trigger from generic ambiguity"
+assert_not_contains "$COUNCIL_SKILL" 'what'\''s the best approach' \
+    "council skill frontmatter does not infer council from generic decision language"
+assert_not_contains "$COUNCIL_SKILL" 'Auto-trigger mode' \
+    "council skill no longer advertises an unimplemented quick auto-trigger mode"
+assert_not_contains "$COUNCIL_SKILL" 'Auto-Trigger Integration' \
+    "council skill has no stale workflow auto-trigger protocol"
+assert_contains "$COUNCIL_SKILL" 'eleven-turn council' \
+    "council skill truthfully states the full dispatcher cost"
+
+COUNCIL_PROTOCOL="$REPO_ROOT/skills/council/references/peer-review-protocol.md"
+assert_not_contains "$COUNCIL_PROTOCOL" 'auto-triggered council' \
+    "peer protocol has no stale automatic 3-then-5 topology"
+assert_not_contains "$COUNCIL_PROTOCOL" 'Quick Council' \
+    "peer protocol documents only the executable full topology"
+assert_not_contains "$COUNCIL_PROTOCOL" 'Contrarian Gate (Auto-Trigger Only)' \
+    "peer protocol has no retired automatic contrarian gate"
+assert_not_contains "$REPO_ROOT/skills/council/references/output-schema.md" 'auto-trigger detection' \
+    "output schema has no retired automatic approach-comparison mode"
+
+assert_not_contains "$REPO_ROOT/rules/testing.md" 'a `/council` trigger' \
+    "surface coverage warnings do not automatically invoke council"
+assert_not_contains "$REPO_ROOT/agents/verify-e2e.md" 'agent'\''s `/council` consultation' \
+    "verify-e2e keeps soft coverage warnings in its owning workflow"
+assert_not_contains "$REPO_ROOT/agents/verify-e2e.md" 'human/council review' \
+    "verify-e2e does not route soft warnings to council review"
+assert_not_contains "$REPO_ROOT/docs/explanation/autonomous-goal.md" 'a reviewer recommending a plan revision' \
+    "autonomous-goal docs do not escalate reviewer findings to council"
+assert_contains "$REPO_ROOT/docs/explanation/autonomous-goal.md" "$GOAL_DECISION_STEM" \
+    "autonomous-goal docs preserve council for a decision needed to continue"
+assert_contains "$REPO_ROOT/docs/explanation/autonomous-goal.md" "$GOAL_CONTINUE_STEM" \
+    "autonomous-goal docs bind the decision to active Goal continuation"
+assert_not_contains "$REPO_ROOT/rules/critical-rules.md" 'reviewer or council must challenge the plan' \
+    "critical rules require the fresh plan reviewer rather than a council substitute"
+assert_contains "$REPO_ROOT/rules/critical-rules.md" 'A fresh plan reviewer must challenge the plan' \
+    "critical rules retain independent plan review as a positive requirement"
+assert_contains "$REPO_ROOT/commands/forge-goal.md" "$GOAL_DECISION_STEM" \
+    "native goal guidance preserves council for a decision needed to continue"
+assert_contains "$REPO_ROOT/commands/forge-goal.md" "$GOAL_CONTINUE_STEM" \
+    "native goal guidance binds the decision to active Goal continuation"
+assert_not_contains "$REPO_ROOT/commands/forge-goal.md" 'resolve bounded engineering' \
+    "native goal guidance does not make council a default judgment tool"
+assert_contains "$COUNCIL_SKILL" "$GOAL_DECISION_STEM" \
+    "council skill permits a decision needed during active native Goal"
+assert_contains "$COUNCIL_SKILL" "$GOAL_CONTINUE_STEM" \
+    "council skill binds the decision to active Goal continuation"
+
+STUCK_COUNCIL_STEM="If progress is blocked because a genuine non-destructive decision is required to continue the active native Goal, invoke /council"
+for hook in \
+    "$REPO_ROOT/hooks/check-state-updated.sh" \
+    "$REPO_ROOT/hooks/check-state-updated.ps1"; do
+    assert_not_contains "$hook" 'Consider invoking /council' \
+        "$(basename "$hook") does not auto-suggest council on a stuck warning"
+    assert_contains "$hook" "$STUCK_COUNCIL_STEM" \
+        "$(basename "$hook") routes only a genuine Goal decision to council"
+done
+
+assert_not_contains "$REPO_ROOT/skills/council/references/output-schema.md" 'Without Codex (user-as-chairman)' \
+    "output schema matches dispatcher-owned whole-topology fallback"
+if [ "$(grep -c '^## Eligibility$' "$COUNCIL_PROTOCOL" || true)" -eq 1 ]; then
+    pass "peer protocol has exactly one eligibility section"
+else
+    fail "peer protocol must have exactly one eligibility section"
+fi
+assert_contains "$COUNCIL_PROTOCOL" 'smallest reversible check that can disprove' \
+    "peer protocol defines the cheapest safe falsifying check"
 
 # ---------------------------------------------------------------------------
 # Contract 1: verify-e2e VERDICT values must match caller branches
@@ -1676,15 +1786,21 @@ done
 fi
 
 # ---------------------------------------------------------------------------
-# Contract: /forge-goal Layer 2 — rules/workflow.md has council-during-/goal rule
+# Contract: /forge-goal Layer 2 — council owns genuine autonomous decisions,
+# not routine review or implementation work.
 # ---------------------------------------------------------------------------
-start_test "Layer 2 — rules/workflow.md has council-during-/goal trigger rule"
+start_test "Layer 2 — rules/workflow.md preserves decision-only council during native Goal"
 
 WF_RULE="$REPO_ROOT/rules/workflow.md"
 assert_file_exists "$WF_RULE" "rules/workflow.md exists"
 assert_contains "$WF_RULE" "Council During" "council section header present"
 assert_contains "$WF_RULE" "PR creation authorization" "PR-creation pause exception documented"
-assert_contains "$WF_RULE" "/council" "invokes /council for non-PR doubts"
+assert_contains "$WF_RULE" "$GOAL_DECISION_STEM" \
+    "native Goal uses council when a genuine decision is required to continue"
+assert_contains "$WF_RULE" "$GOAL_CONTINUE_STEM" \
+    "native Goal binds the decision to active Goal continuation"
+assert_not_contains "$WF_RULE" 'Use `/council` for non-PR doubts' \
+    "native Goal does not invoke council for ordinary uncertainty"
 
 # ---------------------------------------------------------------------------
 # Contract: /forge-goal Layer 2 — state.template.md has new section docs (no empty instance)

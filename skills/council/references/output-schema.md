@@ -84,38 +84,3 @@ The user always sees BOTH raw outputs and synthesis:
 [... all advisors ...]
 </details>
 ```
-
-**Without Codex (user-as-chairman):**
-
-Raw advisor outputs shown prominently (NOT collapsed), followed by:
-
-> "You are the chairman. Based on these perspectives, what's your verdict?"
-
----
-
-## Approach Comparison Format
-
-Used during auto-trigger detection (not for standalone `/council`):
-
-```
-## Approach Comparison
-
-### Chosen Default
-[The approach Claude recommends]
-
-### Best Credible Alternative
-[The strongest competing approach — not a strawman]
-
-### Scoring (fixed axes)
-| Axis                  | Default | Alternative |
-|-----------------------|---------|-------------|
-| Complexity            |  L/M/H  |   L/M/H     |
-| Blast Radius          |  L/M/H  |   L/M/H     |
-| Reversibility         |  L/M/H  |   L/M/H     |
-| Time to Validate      |  L/M/H  |   L/M/H     |
-| User/Correctness Risk |  L/M/H  |   L/M/H     |
-
-### Cheapest Falsifying Test
-[How to resolve ambiguity with a spike, benchmark, or code-reading test.
-Estimate: < 30 min or > 30 min.]
-```

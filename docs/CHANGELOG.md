@@ -49,6 +49,15 @@ single authoritative ledger-to-state synchronization point explicitly.
   valid custom root policy into `docs/agent-context.md`, validates referenced repository paths,
   removes stale or circular adapter references, and stops instead of guessing when missing policy
   has no clear authoritative source.
+- Engineering Council dispatch is now exceptional rather than a routine planning or review step.
+  Normal feature and bug-fix plans go directly to one fresh plan reviewer, and plan/code findings,
+  soft E2E coverage warnings, stuck warnings, and ordinary implementation choices remain inside
+  their bounded broad-review, repair, and focused-closure workflows. Council remains available when
+  the developer explicitly requests it or a concrete high-impact architectural fork remains
+  unresolved after the cheapest safe falsifying check. During active native Goal, it also resolves a
+  genuine non-destructive product or engineering decision required to continue when that check
+  yields no deterministic smallest answer. The installed council skill and protocol now truthfully
+  describe the executable eleven-turn topology; the stale automatic three-seat path is removed.
 
 ## 6.2 — 2026-09-10
 

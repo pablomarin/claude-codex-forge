@@ -33,8 +33,13 @@ On every turn:
    counters may reset; the Forge ceiling and consumed count never reset after interruption or host
    switching.
 4. Record measurable checklist progress and the next step. `FORGE_GOAL_STUCK_WARNING` is advisory:
-   inspect progress, use council for a genuine decision, or surface a blocker; it does not reset the
-   budget or authorize another broad loop.
+   inspect progress, run the cheapest safe falsifying check, or surface a blocker; it does not reset
+   the budget or authorize another broad loop. Do not invoke /council as a routine response. During
+   Goal, Council may resolve a genuine non-destructive decision. It must concern product or
+   engineering judgment and be required to continue the active native Goal. If the check produces a
+   deterministic smallest answer, use that instead. Otherwise apply the chairman's verdict and
+   continue. Council also remains available for an explicit developer request or a concrete
+   high-impact architectural fork that remains unresolved after the check.
 5. If `FORGE_GOAL_BUDGET_EXHAUSTED` appears, preserve the exact checkpoint and stop native autonomy.
    Resume requires a new native `/goal` invocation or explicit native Goal request. Same-objective
    reactivation adds exactly one 20-turn tranche and continues with the existing count; it never
@@ -42,9 +47,11 @@ On every turn:
 6. Invalidate only receipts whose candidate boundary changed and rerun the affected final gates.
 
 Ordinary reviewer/engine launch failure uses the workflow's visible automatic fallback to a fresh
-same-engine reviewer. Findings do not trigger fallback. A council may resolve bounded engineering
-judgment, but never user input, destructive action, secrets, PR creation, merge, publish, deploy, or
-another external mutation.
+same-engine reviewer. Findings do not trigger fallback or council. Ordinary engineering judgment
+stays in the owning bounded workflow unless a genuine decision is required to continue the active
+native Goal. A finding, warning, or failure is not itself that decision. Council never substitutes
+for user input or authorization for destructive action, secrets, PR creation, merge, publish,
+deploy, or another external mutation.
 
 ## Pause and Terminal Status
 
