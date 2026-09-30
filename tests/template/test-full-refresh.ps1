@@ -573,7 +573,7 @@ try {
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
         -Environment @{ HOME = $projectOperatorHome; USERPROFILE = $projectOperatorHome }
     Assert-True ($first.Code -eq 0) "setup.ps1 -R translates a project under Windows PowerShell 5.1: $($first.Output.Trim())"
-    $projectPhysical = (& git -C $project rev-parse --show-toplevel).Trim()
+    $projectPhysical = (Resolve-Path -LiteralPath $project).Path
     Assert-True ($first.Output.Contains("CODEX_HOOKS: MATERIALIZED primary worktree registration") -and
         -not $first.Output.Contains("CODEX_HOOKS: BLOCKED linked worktree") -and
         $first.Output.Contains("RUNTIME_QUALIFICATION: final owner '$(Join-Path $root 'scripts\qualify-runtime-final.ps1')'; live project '$projectPhysical'") -and

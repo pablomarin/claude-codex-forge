@@ -276,8 +276,8 @@ function Adopt-ForgeWorktree([string]$Requested, [string]$WorkKind, [string]$Wor
         Fail-ForgeLifecycle "ADOPT_BLOCKED: protected branch cannot be renamed: $current"
     }
     if ($current -and $current -ne $branch) {
-        $null = & git -C $target rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>$null
-        $hasUpstream = ($LASTEXITCODE -eq 0)
+        $upstream = ((& git -C $target for-each-ref '--format=%(upstream)' "refs/heads/$current" 2>$null) -join '').Trim()
+        $hasUpstream = [bool]$upstream
         $published = ((& git -C $target branch -r --list "*/$current" 2>$null) -join '').Trim()
         if ($hasUpstream -or $published) {
             Fail-ForgeLifecycle "ADOPT_BLOCKED: shared or published branch cannot be renamed automatically: $current"
