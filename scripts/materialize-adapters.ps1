@@ -276,8 +276,16 @@ function Set-ForgeMarkerBlock {
     $beginOffsets = @(Find-ForgeByteSequence $existing $beginBytes)
     $endOffsets = @(Find-ForgeByteSequence $existing $endBytes)
     if ($beginOffsets.Count -eq 0 -and $endOffsets.Count -eq 0) {
-        $separator = if ($existing.Length -eq 0) { [byte[]]@() } elseif ($existing[$existing.Length - 1] -eq 10) { [byte[]](10) } else { [byte[]](10,10) }
-        $candidate = Join-ForgeByteArrays -First $existing -Second $separator -Third $blockBytes
+        $existingText = [Text.Encoding]::UTF8.GetString($existing)
+        $meaningfulLines = @($existingText -split "`r?`n" | Where-Object { $_ -notmatch '^\s*$' })
+        $isExactClaudeBridge = (Split-Path -Leaf $Destination) -eq 'CLAUDE.md' -and
+            $meaningfulLines.Count -eq 1 -and $meaningfulLines[0] -ceq '@AGENTS.md'
+        if ($isExactClaudeBridge) {
+            $candidate = $blockBytes
+        } else {
+            $separator = if ($existing.Length -eq 0) { [byte[]]@() } elseif ($existing[$existing.Length - 1] -eq 10) { [byte[]](10) } else { [byte[]](10,10) }
+            $candidate = Join-ForgeByteArrays -First $existing -Second $separator -Third $blockBytes
+        }
     } elseif ($beginOffsets.Count -eq 1 -and $endOffsets.Count -eq 1 -and $endOffsets[0] -ge $beginOffsets[0]) {
         $replacementLength = $blockBytes.Length
         if ($replacementLength -gt 0 -and $blockBytes[$replacementLength - 1] -eq 10) { $replacementLength-- }
