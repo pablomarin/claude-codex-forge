@@ -66,8 +66,14 @@ try {
     $dirtyTarget = Join-Path $Primary '.claude\worktrees\dirty-feature'
     & git -C $Primary worktree add -q -b claude/dirty-feature $dirtyTarget $baseSha
     [IO.File]::AppendAllText((Join-Path $dirtyTarget 'app.txt'), "dirty`n")
-    & powershell.exe -NoProfile -File $Helper -Action Adopt -Kind feat -Name dirty-feature -Base main -Worktree $dirtyTarget 2>$null | Out-Null
-    Check ($LASTEXITCODE -ne 0) 'dirty native worktree adoption exits nonzero'
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $dirtyOutput = (& powershell.exe -NoProfile -File $Helper -Action Adopt -Kind feat -Name dirty-feature -Base main -Worktree $dirtyTarget *>&1 | Out-String)
+        $dirtyRc = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousPreference }
+    Check ($dirtyRc -ne 0) 'dirty native worktree adoption exits nonzero'
+    Check ($dirtyOutput -match 'ADOPT_BLOCKED: native worktree must be clean') 'dirty native worktree adoption explains the safe stop'
     Check ((& git -C $dirtyTarget branch --show-current) -eq 'claude/dirty-feature') 'dirty native branch is not renamed'
 
     $truncatedState = Join-Path $Scratch 'truncated-state.md'
