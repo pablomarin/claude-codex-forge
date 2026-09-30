@@ -100,8 +100,10 @@ must label that fallback. Do not turn missing research access into a verified re
 
 1. Produce at least two viable approaches when genuine alternatives exist. Compare complexity,
    blast radius, reversibility, time to validate, and user/correctness risk.
-2. Use `/council` for a consequential fork or a contrarian check. The council owns whole-topology
-   engine fallback; a missing other engine automatically becomes an all-main-engine council.
+2. Do not invoke /council as a routine planning or contrarian step. The fresh plan reviewer is the
+   default independent challenge. Invoke council only when the developer explicitly requests it or a
+   concrete high-impact architectural fork remains unresolved after the cheapest safe falsifying
+   check. The council owns whole-topology engine fallback.
 3. Write `docs/plans/<feature>.md` with goal, architecture, tech stack, immutable base ref/SHA,
    acceptance criteria, exact files, TDD steps, and E2E use cases.
 4. E2E use cases use Actor, Scenario, Intent, Interface, Setup, Steps, Verification, and Persistence.
@@ -123,6 +125,8 @@ Closure checks only named findings and direct regressions; do not start a second
 still-open reachable P0/P1 may receive one surgical repair plus surgical verification, then surface
 the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and unchanged-candidate
 concerns do not keep the loop open; a concrete material P2 still prevents certification.
+An ordinary review finding is not a council trigger; keep plan findings in this bounded repair and
+closure loop.
 
 Review iterations remain subject to the canonical `POST_CERT_REVIEW_ROUND_LIMIT`
 convergence-breaker in `.forge/rules/workflow.md`; only a human may adjudicate a tripped breaker.
@@ -188,6 +192,8 @@ surface the blocker to the developer. P3, cosmetic, speculative, purely theoreti
 unchanged-candidate concerns do not keep the loop open; a concrete material P2 still prevents
 certification. Run focused owning checks during repair and one complete aggregate after final bytes
 freeze.
+A code-review finding is not a council trigger; keep findings in this bounded repair and closure
+loop, then surface a remaining blocker to the developer.
 
 Human-readable reports and receipts remain local under `.forge/local/`; they are not post-verification
 source commits. Any candidate mutation invalidates final review and verifier receipts. A mutation in

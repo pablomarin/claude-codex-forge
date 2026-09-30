@@ -249,7 +249,7 @@ _forge_goal_stuck_check() {
 
     # Emit warning if threshold reached (>= 5 consecutive identical fingerprints).
     if [ "$new_count" -ge 5 ]; then
-        echo "FORGE_GOAL_STUCK_WARNING: no measurable progress for $new_count consecutive turns (fingerprint unchanged). Consider invoking /council, checkpointing state.md, or surfacing a blocker. Loop continues — this is informational only." >&2
+        echo "FORGE_GOAL_STUCK_WARNING: no measurable progress for $new_count consecutive turns (fingerprint unchanged). If progress is blocked because a genuine non-destructive decision is required to continue the active native Goal, invoke /council; otherwise checkpoint state.md or surface a blocker. Loop continues — this is informational only." >&2
     fi
     return 0
 }

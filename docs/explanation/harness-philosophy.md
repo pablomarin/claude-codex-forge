@@ -10,7 +10,12 @@ The harness uses **Claude Code** (Anthropic) and **OpenAI's Codex** together:
 
 - **The current host is main.** Claude Code or Codex proposes plans, writes code, and explains tradeoffs.
 - **A fresh reviewer checks independently.** Forge prefers the other engine and visibly falls back to a fresh same-engine reviewer on launch/capability failure.
-- **Engineering Council adjudicates ambiguity.** A healthy council runs three main-engine advisors, two other-engine advisors, and an other-engine chairman; an unavailable other engine triggers one all-main attempt.
+- **Engineering Council handles exceptional forks.** It runs only when the developer explicitly
+  requests it or a concrete high-impact architectural fork survives the cheapest safe falsifying
+  check. During active native Goal, it also resolves a genuine non-destructive product or
+  engineering decision required to continue when that check yields no deterministic smallest
+  answer. A healthy council uses three main-engine advisors, two other-engine advisors, and an
+  other-engine chairman; an unavailable other engine triggers one all-main attempt.
 
 This is not "more review is better." It's independent context and, when healthy, two engines with
 different failure modes. When the other engine is unavailable, Forge uses a visible fresh
@@ -20,7 +25,8 @@ same-engine reviewer or all-main council rather than pretending diversity.
 
 You can skip good practice when it feels optional. The harness makes it structural:
 
-- `/new-feature` and `/fix-bug` commands bake in TDD, research-before-design, approach comparison, and a contrarian gate — you follow them or you don't ship
+- `/new-feature` and `/fix-bug` commands bake in TDD, research-before-design, approach comparison,
+  and an independent plan review — you follow them or you don't ship
 - `check-workflow-gates.sh` blocks `git commit`, `git push`, and `gh pr create` until `.forge/local/state.md` contains candidate-bound review and verification evidence
 - `check-bash-safety.sh` blocks dangerous Bash patterns before they run (pipe-to-shell, reverse shells, credential exfiltration)
 - `ConfigChange` hook logs every modification to `.claude/settings.json` so permission escalation is auditable

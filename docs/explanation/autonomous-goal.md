@@ -26,11 +26,20 @@ There is no autonomous behavior before this point, and no surprise escalation of
 
 ## What runs without you — and what still stops for you
 
-During an autonomous run the agent makes progress and routes non-destructive judgment calls to the
-**Engineering Council** (whose chairman runs on the other engine when both are healthy — see
-[The Engineering Council](engineering-council.md)). Concretely:
+During an autonomous run the agent makes progress through the owning bounded workflow. The
+**Engineering Council** remains available for an explicit developer request, a concrete high-impact
+architectural fork, or a genuine non-destructive decision involving product or engineering judgment.
+That decision must be required to continue the active native Goal and survive the cheapest safe
+falsifying check (see [The Engineering Council](engineering-council.md)). Concretely:
 
-- **Big decisions → Council, not you.** An ambiguous product/technical choice, a reviewer recommending a plan revision, a high-impact fork — the agent invokes `/council`, applies the chairman's verdict, and continues. No prompt.
+- **Ordinary judgment stays bounded.** Plan and code-review findings, soft warnings, and normal
+  implementation choices stay inside their broad-review → repair → focused-closure workflow. They
+  do not invoke council.
+- **Goal decisions may use Council.** When autonomy cannot continue without a genuine
+  non-destructive product or engineering decision, Council decides after the cheapest safe
+  falsifying check fails to produce a deterministic smallest answer. The agent applies the verdict
+  and continues. Explicit requests and unresolved concrete high-impact architectural forks remain
+  eligible too.
 - **Review is bounded.** Each candidate gets one broad review, one repair, and one closure review;
   P3 or speculative concerns do not keep autonomy open. Reachable P0/P1 security, correctness, or
   data-integrity defects still block.
@@ -47,7 +56,8 @@ Autonomous is not unattended. **The recommended way to run `/goal` is to watch i
 
 This holds in **both** scenarios:
 
-- **Autonomous (`/goal`)** — watch the council verdicts and the review loops scroll by; jump in to steer or to answer the PR-creation gate.
+- **Autonomous (`/goal`)** — watch the bounded workflow and review loops scroll by; jump in to steer
+  or to answer the PR-creation gate.
 - **Manual** — you're driving each phase, so you're inherently watching; the same steer-by-prompt applies.
 
 The Forge's whole value is _discipline by construction_ — the autonomous loop extends that, it doesn't replace your judgment. Treat `/goal` as a powerful accelerator that you supervise, and the PRD as the contract you're holding it to.

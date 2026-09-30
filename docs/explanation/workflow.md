@@ -30,13 +30,13 @@ canonical workflows as skills such as `$fix-bug`; see the [commands map](../refe
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. DESIGN + BOUNDED REVIEW                                 │
+│ 4. DESIGN + BOUNDED REVIEW                                  │
 │                                                             │
 │    ┌───────────────────────────────────────────┐            │
 │    │ a. /superpowers:brainstorming             │            │
 │    │    → Interactive design exploration       │            │
-│    │    → Followed by /council contrarian gate │            │
-│    │      after approach comparison            │            │
+│    │    → Compare approaches and run the       │            │
+│    │      cheapest safe falsifying check       │            │
 │    └──────────────────┬────────────────────────┘            │
 │                       ▼                                     │
 │    ┌───────────────────────────────────────────┐            │
@@ -77,7 +77,7 @@ canonical workflows as skills such as `$fix-bug`; see the [commands map](../refe
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 6. PRELIMINARY REVIEW (fixes still allowed)                │
+│ 6. PRELIMINARY REVIEW (fixes still allowed)                 │
 │                                                             │
 │    ┌──────────────────────┐ ┌────────────────────────────┐  │
 │    │ Fresh code-spec lens │ │ Fresh code-quality lens     │ │
@@ -97,15 +97,15 @@ canonical workflows as skills such as `$fix-bug`; see the [commands map](../refe
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 7. SIMPLIFY + FREEZE                                       │
-│    Forge-owned simplification phase                        │
+│ 7. SIMPLIFY + FREEZE                                        │
+│    Forge-owned simplification phase                         │
 │    → Cleans up architecture, improves readability           │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ 8. FINAL REVIEW + VERIFY                                    │
-│    → Fresh opinion receipts over the frozen candidate      │
+│    → Fresh opinion receipts over the frozen candidate       │
 │    "Use the verify-app agent"                               │
 │    → Unit tests + migrations + lint + types                 │
 └─────────────────────────────────────────────────────────────┘
@@ -184,7 +184,10 @@ from that checkpoint.
 - Uses the active host's qualified native `/goal`; a native exit alone is never completion proof
 - Stops for user input, PR creation, merge/deploy/publish, destructive or security-sensitive work,
   and every new external mutation
-- Invokes `/council` instead of pausing for the user on any other ambiguous decision
+- Keeps ordinary uncertainty in the owning bounded workflow. During active native Goal, Council is
+  used when a genuine non-destructive product or engineering decision is required to continue and
+  the cheapest safe falsifying check does not produce a deterministic smallest answer. Explicit
+  requests and unresolved concrete high-impact architectural forks remain eligible too.
 
 ### When NOT to use it
 

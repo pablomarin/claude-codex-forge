@@ -156,9 +156,9 @@ Surfaced 2026-05-18 from downstream portfolio-backtest soak: the agent designed 
 SURFACE_COVERAGE_WARNING: Project exposes <SET>. UCs cover <COVERED>. Missing surface: <X>. No N/A justification found in plan. Confirm with the human reviewer whether <X> coverage is intentionally out of scope or this is a missed surface.
 ```
 
-**Crucially:** this is a SOFT warning. Do NOT classify any UC as `FAIL_INVALID_USE_CASE` for this. The exclusion may be legitimate (a UI-only visual element genuinely doesn't need CLI coverage). Surface as informational so the human reviewer — or, during an autonomous `/forge-goal` run, the agent's `/council` consultation — can decide.
+**Crucially:** this is a SOFT warning. Do NOT classify any UC as `FAIL_INVALID_USE_CASE` for this. The exclusion may be legitimate (a UI-only visual element genuinely doesn't need CLI coverage). Surface it as informational so the human reviewer or owning bounded workflow can decide.
 
-**Verdict impact:** SURFACE_COVERAGE_WARNING does NOT change the verdict on its own. A run with all UCs PASS + a SURFACE_COVERAGE_WARNING still returns `VERDICT: PASS`. The warning shows up in the report body for human/council review.
+**Verdict impact:** SURFACE_COVERAGE_WARNING does NOT change the verdict on its own. A run with all UCs PASS + a SURFACE_COVERAGE_WARNING still returns `VERDICT: PASS`. The warning shows up in the report body for human or owning-workflow review; it is not a council trigger.
 
 **When the warning fires alongside other issues:** still report it. The reviewer needs the full picture.
 

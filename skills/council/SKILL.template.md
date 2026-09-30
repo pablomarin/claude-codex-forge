@@ -2,13 +2,14 @@
 name: council
 description: >
   Engineering Council — multi-perspective decision analysis using model diversity
-  (Claude subagents + Codex CLI). Spawns 3-5 advisors with different thinking styles,
+  (Claude subagents + Codex CLI). Spawns five advisors with different thinking styles,
   runs anonymous peer review, and synthesizes a verdict with mandatory minority reports.
-  Use when facing architectural decisions, approach trade-offs, or any fork-in-the-road
-  where being wrong is expensive. Invoke with "/council <question>" or triggered
-  automatically during brainstorming when genuine ambiguity is detected.
-  Also triggers on: "council this", "get multiple perspectives", "should we use X or Y",
-  "what's the best approach", "I'm torn between", "need a second opinion on architecture".
+  Invoke when the developer explicitly asks for a council or when a concrete high-impact
+  architectural fork remains unresolved after the cheapest safe falsifying check. During active
+  native Goal, it may also resolve a genuine non-destructive decision. That decision must concern
+  product or engineering judgment and be required to continue the active native Goal. Do not
+  infer invocation from ordinary ambiguity, plan/code-review findings, soft warnings, engine
+  failures, or generic decision language.
 argument-hint: <question or decision to analyze>
 ---
 
@@ -16,25 +17,19 @@ argument-hint: <question or decision to analyze>
 
 > Fight sycophancy with model diversity. 5 advisors argue, a chairman from a different model synthesizes, disagreement is preserved.
 
-## Step 0: Detect Mode and Check Prerequisites
+## Step 0: Confirm Eligibility
 
-**Mode detection from `$ARGUMENTS`:**
+Run the council only when one condition is true:
 
-- If `$ARGUMENTS` contains a question/decision → **Standalone mode** (full 5 advisors)
-- If called from within `/new-feature` or `/fix-bug` with approach comparison data → **Auto-trigger mode** (3-then-5 escalation)
+- the developer explicitly requested a council; or
+- a concrete high-impact architectural fork remains unresolved after the cheapest safe falsifying
+  check; or
+- an active native Goal needs a genuine non-destructive product or engineering decision to continue,
+  and that check did not produce a deterministic smallest answer.
 
-**Check Codex availability:**
-
-```bash
-command -v codex &>/dev/null && echo "CODEX_AVAILABLE" || echo "CODEX_UNAVAILABLE"
-```
-
-**If CODEX_UNAVAILABLE:**
-
-- Claude advisors still run
-- Contrarian gate → user validates instead
-- Chairman → user is chairman (raw outputs shown, user decides)
-- Announce: "Codex not installed. Running Claude advisors only — you'll be the chairman."
+Do not invoke council for ordinary planning, reviewer findings, soft verification warnings,
+implementation choices, engine failures, or generic uncertainty. Keep those inside the owning
+bounded workflow. A signal may reveal a decision, but the signal alone is never the trigger.
 
 ## Step 1: Gather Context
 
@@ -45,7 +40,8 @@ git diff --stat
 git status --short
 ```
 
-Read any files referenced in the question. If an approach comparison table exists (auto-trigger mode), include it.
+Read any files referenced in the question. Include any already-produced approach comparison or
+falsifying-check evidence; do not manufacture extra prerequisites.
 
 ### Live-state fact-finding (when a verdict hinges on real system/data state)
 
@@ -72,15 +68,14 @@ session identity. Candidate and worktree evidence provide the review binding.
 The dispatcher uses three main-engine advisors, two other-engine advisors, and an other-engine
 chairman when healthy. It creates five fresh advisor sessions, resumes each for
 one anonymous peer-review turn, and creates a fresh chairman session.
+The executable topology is always the full eleven-turn council: five advisor starts, five
+peer-review resumes, and one chairman. There is no quick or three-seat mode.
 
 Every Task 5 dispatch must use `--fallback-policy none`, a distinct `--seat-id`,
 the stable question hash, and `--conversation new|resume` exact-id transport.
 Never dispatch a single advisor to a different engine after a failure: a
 non-main runtime failure discards the complete mixed attempt and reruns all
 eleven turns on main. A main-engine failure blocks the council.
-
-**For standalone mode:** Use all 5 advisors. If Codex is unavailable, use only the Claude-engine advisors (Simplifier, Scalability Hawk, Pragmatist).
-**For auto-trigger mode:** Start with the 3 quick-council advisors (Simplifier, Contrarian, Pragmatist). If Codex is unavailable, use Simplifier + Pragmatist only (skip Contrarian — user validates instead).
 
 ## Step 3: Legacy Manual Dispatch Reference (DO NOT EXECUTE)
 
@@ -106,22 +101,10 @@ See `references/peer-review-protocol.md` for exact dispatch commands.
 
 **Wait for ALL advisors to complete before proceeding.**
 
-## Step 4: Evaluate Responses (Auto-Trigger Mode Only)
+## Step 4: Chairman Synthesis
 
-If in auto-trigger mode with 3 advisors, check escalation triggers:
-
-- Any advisor returned OBJECT → escalate to 5
-- Any advisor reports low confidence → escalate to 5
-- Decision affects irreversible surface (see `references/peer-review-protocol.md` for canonical list) → escalate to 5
-- No majority verdict → escalate to 5
-
-If escalating: dispatch the 2 remaining advisors (Scalability Hawk + Maintainer) in parallel. Wait for completion.
-
-## Step 5: Chairman Synthesis
-
-**If Codex available:**
-
-Construct the chairman prompt with:
+The canonical dispatcher creates the chairman on the other engine when the mixed topology is
+healthy, or on the main engine when whole-topology fallback is required. Construct its prompt with:
 
 - All raw advisor outputs (complete, unedited)
 - The original question/decision
@@ -129,24 +112,11 @@ Construct the chairman prompt with:
 - Instruction to produce the Chairman Output Format from `references/output-schema.md`
 - Explicit instruction: "You MUST include a Minority Report section if any advisor OBJECTed"
 
-Run via `.forge/hooks/lib/codex-pty.sh exec` with `reasoning_effort=xhigh` AND `--output-last-message /tmp/council_chairman_response.txt`. Redirect stdout+stderr to `/tmp/council_chairman.txt`. Timeout: 1200000ms.
+The dispatcher owns output capture, identity verification, and failure reporting. Use its chairman
+output verbatim in Step 5. A blocked main engine blocks the council; do not synthesize a replacement
+in the orchestrating session.
 
-See `references/peer-review-protocol.md` for the exact chairman command and the two-file Output Capture pattern.
-
-**Reading the chairman's response:**
-
-After the call completes, read `/tmp/council_chairman_response.txt`:
-
-- **Non-empty** → that's the chairman's verdict. Use it verbatim in Step 6.
-- **Empty or missing** → codex did NOT produce a final agent message. Inspect `/tmp/council_chairman.txt` (full stdout capture) for partial response sections, shim diagnostics (lines prefixed `codex-pty:`), or error excerpts. Surface the diagnosis to the user — quote the relevant excerpt rather than reporting a generic "exited without producing analysis." Then offer the user-as-chairman fallback so they can decide whether to retry, accept the partial output, or proceed manually.
-
-**If Codex unavailable:**
-
-Skip synthesis. Present raw outputs to user (see Step 6).
-
-## Step 6: Present Results
-
-**With Codex chairman:**
+## Step 5: Present Results
 
 Display the chairman's output VERBATIM (do not rewrite, summarize, or editorialize). Then show raw advisor outputs in a collapsible section:
 
@@ -162,41 +132,3 @@ Display the chairman's output VERBATIM (do not rewrite, summarize, or editoriali
 
 </details>
 ```
-
-**Without Codex (user is chairman):**
-
-Display all raw advisor outputs prominently (not collapsed):
-
-```markdown
-## Council Perspectives
-
-### The Simplifier (Claude)
-
-[full response]
-
-### The Pragmatist (Claude)
-
-[full response]
-
----
-
-**You are the chairman.** Based on these perspectives:
-
-1. Which approach do you want to proceed with?
-2. Are there any blocking objections you want addressed first?
-```
-
-## Auto-Trigger Integration (called from workflows)
-
-When called from `/new-feature` or `/fix-bug` Phase 3.1, the approach comparison has already been filled. The flow is:
-
-1. **Contrarian Gate** — Single Codex call validates the "default wins" claim (see `references/peer-review-protocol.md`)
-2. **If VALIDATE** → return "Contrarian validated. Proceeding with default approach."
-3. **If OBJECT** → check cheapest falsifying test:
-   - If < 30 min → return "Run spike first: [test description]"
-   - If ≥ 30 min AND high-impact surface → fire 3-advisor council (Steps 3-6)
-   - If ≥ 30 min AND NOT high-impact → return "Proceed with default. Trade-off documented."
-4. **If INSUFFICIENT** → fire 3-advisor council (Steps 3-6)
-
-**High-impact surfaces** (canonical list — defined in `references/peer-review-protocol.md`):
-schema/migration, public API contract, authentication/permissions, payment/billing, configuration defaults affecting all users, rollout/deployment strategy, architecture boundaries (service boundaries, shared libraries, database ownership).

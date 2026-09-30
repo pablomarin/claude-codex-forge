@@ -4,7 +4,7 @@
 - **USE CANONICAL WORKFLOWS** — Use `/new-feature`, `/fix-bug`, or `/quick-fix` as appropriate.
 - **TDD** — Write and observe a failing behavior test before production changes.
 - **RESEARCH FIRST** — Verify current library/API/provider behavior before design.
-- **INDEPENDENT DESIGN REVIEW** — A fresh reviewer or council must challenge the plan before implementation.
+- **INDEPENDENT DESIGN REVIEW** — A fresh plan reviewer must challenge the plan before implementation. Council is exceptional, not a substitute for routine plan review.
 - **STRUCTURED REVIEW** — Final code review requires separate clean spec and quality receipts over one frozen candidate.
 - **E2E USER JOURNEYS** — Use `verify-e2e` for user-facing behavior. Arrange and verify only through sanctioned user interfaces; see `.forge/rules/testing.md`.
 - **UPDATE STATE** — Keep `.forge/local/state.md` and applicable changelog material current.

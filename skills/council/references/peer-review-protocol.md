@@ -1,8 +1,18 @@
 # Engineering Council — Peer Review Protocol
 
-> How the council runs: dispatch, anonymization, escalation, and synthesis rules.
+> How the council runs: eligibility, topology, anonymization, fallback, and synthesis rules.
 
 ---
+
+## Eligibility
+
+Run this full topology only for an explicit developer request, an unresolved concrete high-impact
+architectural fork, or a genuine non-destructive product or engineering decision required to
+continue an active native Goal. The cheapest safe falsifying check is the
+smallest reversible check that can disprove the disputed assumption without changing production.
+If it produces a deterministic smallest answer, use that answer instead of Council. Ordinary
+plan/code-review findings, soft warnings, implementation choices, and engine failures stay with
+their owning workflow and are not council triggers.
 
 ## Dispatch Rules
 
@@ -112,24 +122,12 @@ After the call completes, read `/tmp/council_chairman_response.txt` (the clean v
 
 ---
 
-## Escalation Rules
+## Full Topology
 
-### 3-then-5 Model (auto-triggered council only)
-
-**Quick Council (3 advisors):** Simplifier (Claude) + Contrarian (Codex) + Pragmatist (Claude)
-
-**Escalation triggers (any one is sufficient):**
-
-- Any advisor returns OBJECT
-- Any advisor reports low confidence
-- Decision affects irreversible surface (see High-Impact Surfaces below)
-- No majority verdict (3-way split)
-
-**Full Council (+2 advisors):** Add Scalability Hawk (Claude) + Maintainer (Codex)
-
-### Standalone `/council`
-
-Always uses all 5 advisors. No escalation needed.
+The executable dispatcher always runs five advisor starts, five anonymous peer-review resumes, and
+one fresh chairman synthesis. There is no quick or three-seat mode. If the other engine is known
+unavailable, the dispatcher starts one all-main-engine topology. If it fails during a mixed attempt,
+the dispatcher discards that attempt and reruns the complete topology on main.
 
 ---
 
@@ -144,60 +142,6 @@ This is the single source of truth for what constitutes a "high-impact surface."
 - **Configuration defaults affecting all users** — feature flags, rate limits, default settings
 - **Rollout/deployment strategy** — blue-green, canary, migration ordering
 - **Architecture boundaries** — service boundaries, shared libraries, database ownership, message contracts
-
----
-
-## Contrarian Gate (Auto-Trigger Only)
-
-Before firing the full council, the Contrarian/Codex validates the "default wins" claim:
-
-```bash
-.forge/hooks/lib/codex-pty.sh exec \
-  -m "gpt-5.6-sol" \
-  -c model_reasoning_effort="high" \
-  -c service_tier="fast" \
-  --sandbox read-only \
-  --ephemeral \
-  --color never \
-  --output-last-message /tmp/council_contrarian_gate_response.txt \
-  "Review this approach comparison for [project]. The author claims the Default approach dominates.
-
-[Insert approach comparison table here]
-
-Your job: validate or object.
-- If the default clearly wins on most axes: respond VALIDATE with a one-line rationale.
-- If the alternative has a credible case: respond OBJECT with your strongest counter-argument.
-- If you need more information to decide: respond INSUFFICIENT with what's missing.
-
-Respond with EXACTLY one of: VALIDATE, OBJECT, or INSUFFICIENT followed by your rationale." \
-  > /tmp/council_contrarian_gate.txt 2>&1
-```
-
-Read `/tmp/council_contrarian_gate_response.txt` for the verdict; fall back to the stdout capture for diagnostics if the response file is empty or missing (per "Output Capture").
-
-**Decision flow after Contrarian gate:**
-
-- VALIDATE → skip council, proceed with default
-- OBJECT → check cheapest falsifying test (< 30 min → spike first; else check high-impact surface → fire council)
-- INSUFFICIENT → fire council (ambiguity = risk)
-
----
-
-## Fallback (No Codex)
-
-When Codex CLI is not installed:
-
-| Component          | Replacement                                        |
-| ------------------ | -------------------------------------------------- |
-| Codex advisors     | Skipped (run Claude advisors only)                 |
-| Contrarian gate    | User validates the "default wins" claim            |
-| Chairman synthesis | User is chairman — raw outputs shown, user decides |
-
-**Detection:**
-
-```bash
-command -v codex &>/dev/null && echo "available" || echo "unavailable"
-```
 
 ---
 

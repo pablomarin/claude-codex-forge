@@ -233,7 +233,7 @@ function Invoke-ForgeGoalStuckCheck {
 
     # Emit warning if threshold reached (>= 5 consecutive identical fingerprints).
     if ($newCount -ge 5) {
-        [Console]::Error.WriteLine("FORGE_GOAL_STUCK_WARNING: no measurable progress for $newCount consecutive turns (fingerprint unchanged). Consider invoking /council, checkpointing state.md, or surfacing a blocker. Loop continues — this is informational only.")
+        [Console]::Error.WriteLine("FORGE_GOAL_STUCK_WARNING: no measurable progress for $newCount consecutive turns (fingerprint unchanged). If progress is blocked because a genuine non-destructive decision is required to continue the active native Goal, invoke /council; otherwise checkpoint state.md or surface a blocker. Loop continues — this is informational only.")
     }
 }
 Invoke-ForgeGoalStuckCheck
