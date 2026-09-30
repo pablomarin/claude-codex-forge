@@ -51,8 +51,23 @@ RETIRED_FORGE_PERMISSION_DENIES = {
     "Read(~/.forge/host-contexts/**)",
     "Edit(~/.forge/host-contexts/**)",
     "Bash(*.forge/host-contexts*:*)",
+    "Edit(~/.forge/bin/**)",
+    "Bash(*.forge/bin*:*)",
+    "Read(~/.forge/goal-captures/**)",
+    "Edit(~/.forge/goal-captures/**)",
+    "Edit(~/.forge/goal-authorizations/**)",
+    "Bash(*.forge/goal-captures*:*)",
+    "Bash(*.forge/goal-authorizations*:*)",
+    "Bash(*forge-goal-authorize*:*)",
+    "Bash(*forge-goal-capture*:*)",
 }
-RETIRED_FORGE_SANDBOX_DENY_WRITES = {"~/.forge/host-contexts"}
+RETIRED_FORGE_SANDBOX_DENY_READS = {"~/.forge/goal-captures"}
+RETIRED_FORGE_SANDBOX_DENY_WRITES = {
+    "~/.forge/host-contexts",
+    "~/.forge/bin",
+    "~/.forge/goal-captures",
+    "~/.forge/goal-authorizations",
+}
 
 
 class RefreshBlocked(RuntimeError):
@@ -429,8 +444,6 @@ def transaction_destination_allowed(
     repo_root: Path, scope: str, txid: str, relative: Path, operation: dict
 ) -> bool:
     value = relative.as_posix()
-    if scope == "global" and relative.parts[0] not in {".forge", ".claude", ".codex"}:
-        return False
     backup_prefix = f".forge/local/migration-backups/{txid}/"
     if value.startswith(backup_prefix):
         return True
@@ -445,8 +458,6 @@ def transaction_destination_allowed(
         CONTINUITY_RECEIPT_RELATIVE.as_posix(),
         ".claude/local/state.md",
         ".claude/local/.state-seed-snapshot.md",
-        ".forge/bin/forge-goal-authorize.sha256",
-        ".forge/bin/forge-goal-capture.sha256",
     }
     for row in read_tsv(repo_root / "manifests/managed-v6.tsv", 9):
         destination, row_scope = row[2], row[5]
@@ -463,11 +474,7 @@ def transaction_destination_allowed(
     if value in allowed:
         return True
 
-    protected_prefixes = (
-        (".forge/local/memory/", ".forge/memory/")
-        if scope == "project"
-        else (".forge/goal-authorizations/", ".forge/goal-captures/")
-    )
+    protected_prefixes = (".forge/local/memory/", ".forge/memory/")
     if value.startswith(protected_prefixes):
         # Full refresh only carries existing developer-owned protected-tree
         # files. It never creates or tombstones arbitrary paths in those trees.
@@ -497,7 +504,8 @@ def inventory_legacy(
     current_v6 = False
     v6_stamp = target / ".forge/version"
     if v6_stamp.is_file() and not v6_stamp.is_symlink():
-        current_v6 = v6_stamp.read_text(encoding="utf-8", errors="replace").strip() == "6"
+        current_version = v6_stamp.read_text(encoding="utf-8", errors="replace").strip()
+        current_v6 = current_version == "6" or re.fullmatch(r"6\.[0-9]+", current_version) is not None
 
     stamp_relative = ".claude/.forge-version"
     stamp = target / stamp_relative
@@ -1665,31 +1673,37 @@ def prepare_project_gitignore(
 
 def selected_materializer(repo_root: Path, platform: str) -> list[str]:
     if platform == "windows":
-        return [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(repo_root / "scripts/materialize-adapters.ps1"),
-        ]
+        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        if powershell is None:
+            raise RefreshBlocked(
+                "PowerShell is required for Windows adapter materialization"
+            )
+        command = [powershell, "-NoProfile"]
+        if Path(powershell).name.lower() == "powershell.exe":
+            command.extend(["-ExecutionPolicy", "Bypass"])
+        command.extend(
+            ["-File", str(repo_root / "scripts/materialize-adapters.ps1")]
+        )
+        return command
     return ["bash", str(repo_root / "scripts/materialize-adapters.sh")]
 
 
 def materialize_stage(
-    repo_root: Path, target: Path, stage: Path, scope: str, platform: str
+    repo_root: Path,
+    target: Path,
+    stage: Path,
+    scope: str,
+    platform: str,
+    release_version: str,
 ) -> str:
     command = selected_materializer(repo_root, platform)
     if platform == "windows":
-        command.extend(["-RepoRoot", str(repo_root), "-Target", str(stage), "-Scope", scope, "-Platform", platform])
+        command.extend(["-RepoRoot", str(repo_root), "-Target", str(stage), "-Scope", scope, "-Platform", platform, "-ReleaseVersion", release_version])
     else:
-        command.extend(["--repo-root", str(repo_root), "--target", str(stage), "--scope", scope, "--platform", platform])
+        command.extend(["--repo-root", str(repo_root), "--target", str(stage), "--scope", scope, "--platform", platform, "--release-version", release_version])
     environment = os.environ.copy()
     environment["FORGE_TRANSACTION_STAGE"] = "1"
     environment["FORGE_DIAGNOSTIC_TARGET"] = str(target)
-    environment["FORGE_DIAGNOSTIC_HOME"] = environment.get(
-        "HOME", environment.get("USERPROFILE", "")
-    )
     runtime_home = stage.parent / "runtime-home"
     environment["HOME"] = str(runtime_home)
     environment["USERPROFILE"] = str(runtime_home)
@@ -1725,11 +1739,12 @@ def reconcile_legacy_hook_settings(
     if not settings_path.is_file():
         return
     version_path = target / ".forge/version"
-    current_v6 = (
-        version_path.is_file()
-        and not version_path.is_symlink()
-        and version_path.read_text(encoding="utf-8", errors="replace").strip() == "6"
+    current_version = (
+        version_path.read_text(encoding="utf-8", errors="replace").strip()
+        if version_path.is_file() and not version_path.is_symlink()
+        else ""
     )
+    current_v6 = current_version == "6" or re.fullmatch(r"6\.[0-9]+", current_version) is not None
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -2013,15 +2028,31 @@ def full_refresh(
     target: Path,
     scope: str,
     platform: str,
+    release_version: str,
     dry_run: bool = False,
 ) -> None:
     repo_root = repo_root.resolve(strict=True)
-    if scope not in {"project", "global"} or platform not in {"unix", "windows"}:
+    if scope != "project" or platform not in {"unix", "windows"}:
         raise RefreshBlocked("invalid full-refresh scope or platform")
+    if re.fullmatch(r"[0-9]+\.[0-9]+", release_version) is None:
+        raise RefreshBlocked("invalid release version")
     lexical_target = target.absolute()
     if lexical_target.is_symlink():
         raise RefreshBlocked(f"symlink transaction root: {lexical_target}")
     target = target.resolve(strict=True)
+    installed_version_path = target / ".forge/version"
+    previous_version = ""
+    if installed_version_path.is_file() and not installed_version_path.is_symlink():
+        installed_version = installed_version_path.read_text(encoding="utf-8", errors="replace").strip()
+        previous_version = installed_version
+        if installed_version != "6":
+            installed_match = re.fullmatch(r"([0-9]+)\.([0-9]+)", installed_version)
+            if installed_match is None:
+                raise RefreshBlocked("malformed Forge release at .forge/version")
+            if installed_match.group(1) != "6":
+                raise RefreshBlocked(
+                    f"unsupported Forge layout major {installed_match.group(1)}"
+                )
     if scope == "global":
         if lexical_target != target:
             raise RefreshBlocked(f"selected global Forge home is not canonical: {lexical_target}")
@@ -2123,16 +2154,8 @@ def full_refresh(
                 if source.exists():
                     copy_preserved(source, stage / relative)
                     report["PRESERVED"].append(relative)
-        else:
-            for relative in (".codex/AGENTS.md", ".codex/config.toml", ".forge/goal-authorizations", ".forge/goal-captures"):
-                source = target / relative
-                if source.exists():
-                    reject_link_ancestors(target, relative_path(relative))
-                    copy_preserved(source, stage / relative)
-                    report["PRESERVED"].append(relative)
-
         materializer_output = materialize_stage(
-            repo_root, target, stage, scope, platform
+            repo_root, target, stage, scope, platform, release_version
         )
         reconcile_legacy_hook_settings(
             repo_root, target, stage, proven_legacy, scope, report
@@ -2150,8 +2173,8 @@ def full_refresh(
         if scope == "project" and (not state.is_file() or not state.read_bytes().startswith(STATE_SCHEMA)):
             raise RefreshBlocked("staged translated state failed v6 schema validation")
         version = stage / ".forge/version"
-        if not version.is_file() or version.read_text(encoding="utf-8").strip() != "6":
-            raise RefreshBlocked("staged materializer did not produce the v6 stamp")
+        if not version.is_file() or version.read_text(encoding="utf-8").strip() != release_version:
+            raise RefreshBlocked("staged materializer did not produce the exact release stamp")
 
         # Remove materializer-local backups: the transaction already keeps raw,
         # collision-free backups under .forge/local/migration-backups/<txid>.
@@ -2199,11 +2222,12 @@ def full_refresh(
                 for entry in entries:
                     handle.write(f"{category}\t{entry}\n")
         staged_operations = operation_files(stage, target, quarantine)
-        final_names = {".forge/version", ".forge/managed-files.tsv", ".forge/installed-files.tsv"}
+        manifest_names = {".forge/managed-files.tsv", ".forge/installed-files.tsv"}
         operations = (
-            [operation for operation in staged_operations if operation["relative"] not in final_names]
+            [operation for operation in staged_operations if operation["relative"] not in manifest_names | {".forge/version"}]
             + deletes
-            + [operation for operation in staged_operations if operation["relative"] in final_names]
+            + [operation for operation in staged_operations if operation["relative"] in manifest_names]
+            + [operation for operation in staged_operations if operation["relative"] == ".forge/version"]
         )
         operation_destinations = [operation["relative"] for operation in operations]
         if len(operation_destinations) != len(set(operation_destinations)):
@@ -2233,6 +2257,8 @@ def full_refresh(
         journal["phase"] = "committed"
         durable_json(journal_path, journal)
         print(materializer_output)
+        if previous_version and previous_version != release_version:
+            print(f"FORGE_VERSION_CHANGE: {previous_version} -> {release_version}")
         if report["PRESERVED_COMPAT_BLOCKED"]:
             print("claude RUNTIME_READY: BLOCKED preserved compatibility plugin requires qualification")
         print("INSTALLATION: MATERIALIZED")
@@ -2263,12 +2289,20 @@ def full_refresh_cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="merge-settings.py full-refresh")
     parser.add_argument("--repo-root", required=True, type=Path)
     parser.add_argument("--target", required=True, type=Path)
-    parser.add_argument("--scope", required=True, choices=("project", "global"))
+    parser.add_argument("--scope", required=True, choices=("project",))
     parser.add_argument("--platform", required=True, choices=("unix", "windows"))
+    parser.add_argument("--release-version", required=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     try:
-        full_refresh(args.repo_root, args.target, args.scope, args.platform, args.dry_run)
+        full_refresh(
+            args.repo_root,
+            args.target,
+            args.scope,
+            args.platform,
+            args.release_version,
+            args.dry_run,
+        )
     except (RefreshBlocked, OSError, ValueError, json.JSONDecodeError) as error:
         if not isinstance(error, ReportedRefreshBlocked):
             print(f"BLOCKED: {error}", file=sys.stderr)
@@ -2594,8 +2628,8 @@ def is_forge_project_settings_template(template):
     )
 
 
-def retire_forge_host_context_permissions(user):
-    """Remove only Forge's obsolete host-receipt permission values."""
+def retire_forge_obsolete_permissions(user):
+    """Remove only exact permission values emitted by retired Forge runtimes."""
     changes = []
     permissions = user.get("permissions")
     if isinstance(permissions, dict):
@@ -2608,10 +2642,20 @@ def retire_forge_host_context_permissions(user):
             ]
             if retained != denied:
                 permissions["deny"] = retained
-                changes.append("  Retired obsolete Forge host-context permission denies")
+                changes.append("  Retired obsolete Forge permission denies")
 
     sandbox = user.get("sandbox")
     filesystem = sandbox.get("filesystem") if isinstance(sandbox, dict) else None
+    deny_read = filesystem.get("denyRead") if isinstance(filesystem, dict) else None
+    if isinstance(deny_read, list):
+        retained = [
+            value
+            for value in deny_read
+            if value not in RETIRED_FORGE_SANDBOX_DENY_READS
+        ]
+        if retained != deny_read:
+            filesystem["denyRead"] = retained
+            changes.append("  Retired obsolete Forge sandbox denyRead")
     deny_write = filesystem.get("denyWrite") if isinstance(filesystem, dict) else None
     if isinstance(deny_write, list):
         retained = [
@@ -2621,7 +2665,7 @@ def retire_forge_host_context_permissions(user):
         ]
         if retained != deny_write:
             filesystem["denyWrite"] = retained
-            changes.append("  Retired obsolete Forge host-context sandbox denyWrite")
+            changes.append("  Retired obsolete Forge sandbox denyWrite")
     return changes
 
 
@@ -2630,7 +2674,7 @@ def merge_settings(template, user):
     changes = []
 
     if is_forge_project_settings_template(template):
-        changes.extend(retire_forge_host_context_permissions(user))
+        changes.extend(retire_forge_obsolete_permissions(user))
 
     # Forge v6 initially emitted a non-native Codex hook shape. Retire only
     # the entries carrying Forge's own stable ids, then install the native

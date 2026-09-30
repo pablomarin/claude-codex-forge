@@ -239,7 +239,7 @@ if [ "$WORKFLOW_STAGE" = "complete" ]; then
             "$workflow clears volatile Now content when seeding"
         assert_contains "$surface" 'never seeds workflow, goal, authorization, receipts' \
             "$workflow excludes gate and authority sections"
-        assert_contains "$surface" 'reconcile it explicitly' \
+        assert_contains "$surface" 'stop rather than guessing or overwriting it' \
             "$workflow refuses to guess a missing adopted-worktree baseline"
     done
     assert_contains "$FBR" 'worktree-lifecycle.sh fold' \

@@ -5,10 +5,13 @@ read it completely; adapters may translate discovery metadata but may not restat
 
 ## Resource Discipline
 
-Build the smallest correct solution. Treat developer time, session length, tokens, and money as
-finite engineering resources. Do not pursue perfection, cosmetic polish, speculative hardening, or
-edge cases without a concrete supported trigger, explicit acceptance criterion, material
-likelihood, security impact, or data-integrity impact.
+Apply KISS and YAGNI: build the smallest correct solution required by the current acceptance criterion
+and evidence. Do not add speculative abstractions, compatibility layers, hardening, or
+edge-case machinery without a concrete supported need.
+
+Treat developer time, session length, tokens, and money as finite engineering resources. Do not
+pursue perfection or cosmetic polish without a concrete supported trigger, explicit acceptance
+criterion, material likelihood, security impact, or data-integrity impact.
 
 Default to one broad review, one repair pass, and one closure review limited to named findings and
 direct regressions. One still-open reachable P0/P1 may receive one surgical repair and verification;
@@ -34,6 +37,24 @@ criterion.
   Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
 - Keep developer state, receipts, and local memories under `.forge/local/`; never overwrite them
   during setup. Keep project-owned durable memory under `.forge/memory/`.
+
+## Memory Management
+
+Keep current progress and the exact next step in `.forge/local/state.md`. Store worktree-local
+learning under `.forge/local/memory/`; promote only reviewed project knowledge to `.forge/memory/`.
+Forge must never save secrets or speculative conclusions as memory.
+
+When a useful durable learning exists, preserve it before context compaction or the end of substantial work
+without duplicating project instructions. Native private host memory is optional; it is never Forge
+evidence and never a runtime dependency.
+
+## Host Neutrality
+
+Claude Code and Codex are interchangeable entry points into the same project harness. The host in
+which the developer is working is the main engine for that session. Reviewer and council dispatch
+use the other qualified engine when available and visibly fall back to a fresh same-engine process.
+Persisted project state and evidence enable continuation; private conversation context does not
+transfer between hosts.
 
 ## Branch Naming
 
@@ -104,18 +125,21 @@ another reviewer-transport consent request; keep completed reviews and failed ev
 ## Native Goal Composition
 
 Claude Code and Codex keep their own native `/goal`; Forge never shadows it with a command or skill.
-When the developer activates native autonomy, read `.forge/workflows/goal.md` and compose the native
-goal over its persistent objective, nonce, turn ceiling/count, checklist, next step, evidence, and
-authorization contract. Require the human-created trusted goal authorization record and authenticated
-host qualification before activation. Native counters may reset; persistent Forge counters do not.
+The developer's native `/goal` invocation or explicit native Goal request is the activation authority.
+After that action, read `.forge/workflows/goal.md`, record the activation in `.forge/local/state.md`,
+and publish it through `.forge/hooks/lib/goal-ledger.*`. Compose native Goal over the persistent
+objective, nonce, activation sequence, turn ceiling/count, checklist, next step, and evidence.
+Authenticated host qualification controls readiness claims, not human authorization. Native counters
+may reset; the repository ledger under the physical Git common directory does not.
 
 On `FORGE_GOAL_BUDGET_EXHAUSTED`, checkpoint and stop native autonomy. Treat
 `FORGE_GOAL_STUCK_WARNING` as an advisory to inspect progress, not permission to reset the budget.
 Resume the exact next unchecked durable step on the same host or a fresh session on the other host;
-never claim native session transfer. User input, PR creation, merge, deploy, publish, destructive
-work, and any new external mutation pause for explicit human authorization. Ordinary reviewer engine
-failure follows automatic visible fallback. If any authenticated native-goal Must behavior is not
-proven, report `BLOCKED` and do not claim that host is runtime-ready.
+never claim native session transfer. Same-objective reactivation retains consumed turns and adds one
+fixed 20-turn tranche. User input, PR creation, merge, deploy, publish, destructive work, and any new
+external mutation pause for explicit human authorization. Ordinary reviewer engine failure follows
+automatic visible fallback. If any authenticated native-goal Must behavior is not proven, report
+`BLOCKED` and do not claim that host is runtime-ready.
 
 For the Forge opinion workflow, Claude Code uses `/opinion`; Codex uses `$opinion`. Both entry
 points load the same canonical `.forge/workflows/opinion.md` contract.

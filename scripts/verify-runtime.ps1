@@ -12,6 +12,10 @@ if ($Mode -eq "identity") {
         @{host="codex"; invocation_hash=$InvocationHash} | ConvertTo-Json -Compress
     } else { throw "unknown host" }
 } elseif ($Mode -eq "discovery") {
+    $versionPath = Join-Path $ProjectRoot ".forge\version"
+    if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) { throw "FORGE_VERSION: BLOCKED missing project release" }
+    $version = [IO.File]::ReadAllText($versionPath).Trim()
+    if ($version -notmatch '^\d+\.\d+$') { throw "FORGE_VERSION: BLOCKED malformed project release" }
     if (Test-Path -LiteralPath (Join-Path $ProjectRoot ".claude\commands\goal.md")) {
         [Console]::Error.WriteLine("RUNTIME_READY=BLOCKED host=claude custom native goal collision; rename .claude/commands/goal.md")
         exit 5
@@ -22,6 +26,7 @@ if ($Mode -eq "identity") {
     }
     $rules = @(Get-ChildItem (Join-Path $ProjectRoot ".forge\rules") -Filter "*.md" -File)
     $duplicates = @($rules | Group-Object Name | Where-Object Count -gt 1)
+    Write-Host "FORGE_VERSION: $version"
     Write-Host "canonical_rule_count=$($rules.Count)"
     Write-Host "duplicate_rule_count=$($duplicates.Count)"
 } elseif ($Mode -eq "live") {

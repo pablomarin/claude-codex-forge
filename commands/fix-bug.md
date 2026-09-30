@@ -22,8 +22,15 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
    prepared native worktree when present. If none exists, use the portable helper where allowed:
    `.forge/hooks/lib/worktree-lifecycle.sh create --kind fix --name <slug> --base
    <ref-or-sha>` (PowerShell: `worktree-lifecycle.ps1 -Action Create -Kind fix -Name <slug> -Base
-   <ref-or-sha>`). Only in the Forge source checkout, when the installed path is absent, use the
-   tracked `hooks/lib/worktree-lifecycle.sh` or `.ps1`. Native creation or adoption is optional only
+   <ref-or-sha>`).
+   In a fresh host-native worktree, normalize and seed it before activation with
+   `.forge/hooks/lib/worktree-lifecycle.sh adopt --kind fix --name <slug> --base <ref-or-sha>
+   --worktree "$PWD"` (PowerShell: `worktree-lifecycle.ps1 -Action Adopt -Kind fix -Name <slug>
+   -Base <ref-or-sha> -Worktree $PWD.Path`). This safely replaces a clean, unpublished
+   host-generated branch name with `fix/<slug>`; it never renames protected, dirty, shared, or
+   published work.
+   Only in the Forge source checkout, when the installed path is absent, use the tracked
+   `hooks/lib/worktree-lifecycle.sh` or `.ps1`. Native creation or adoption is optional only
    under the shared startup boundary; never create a second worktree for the same-directory handoff.
 4. Continue work in the linked worktree from the current or a later Claude Code or Codex session.
    A session opened in the primary checkout may continue the linked worktree by using it as the
@@ -33,9 +40,9 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
 5. The helper seeds only `## State` (with `### Now` cleared), `## Open Questions`, and `## Blockers`
    from the primary checkout and writes the exact baseline to
    `.forge/local/.state-seed-snapshot.md`. It never seeds workflow, goal, authorization, receipts,
-   evidence, or local memory. For an adopted inactive worktree that lacks seeded state, run the
-   helper's `seed` action once; if state or a snapshot already exists, reconcile it explicitly
-   rather than guessing or overwriting an active workflow.
+   evidence, or local memory. The `create` and `adopt` actions both seed state. If an inactive
+   native worktree already has both state and its snapshot, `adopt` preserves them; if only one
+   exists or a workflow is active, stop rather than guessing or overwriting it.
 6. In the target worktree, run `workflow-state.sh show` and resolve the intended base ref. If state
    is inactive, invoke `.forge/hooks/lib/workflow-state.sh activate --host <claude|codex> --workflow
    fix-bug --task <slug> --base-ref <ref-or-sha> --phase diagnosis --next-step 'reproduce the
@@ -92,9 +99,12 @@ affected libraries/APIs. Dispatch `research-first` when current external behavio
 proven local pattern where it fits; do not copy a superficially similar fix without checking its
 invariants.
 
-If autonomous execution would help, offer the active host's native `/goal`. Persistent Forge state,
-not resettable native counters, remains authoritative for the objective, nonce, budget, checklist,
-evidence, authorization, and terminal status.
+If autonomous execution would help, offer the active host's native `/goal`. Populate `## /goal
+session` only after the developer invokes `/goal` or explicitly requests native Goal autonomy, then
+publish the activation with `.forge/hooks/lib/goal-ledger.sh activate` (or the PowerShell twin).
+That human action is activation authority; persistent Forge state and the Git-common ledger provide
+the objective, nonce, activation/count/ceiling, checklist, evidence, and terminal status. External
+mutations retain their separate authorization boundaries.
 
 ## 3. Plan the Minimal Fix
 
@@ -185,8 +195,9 @@ unsupported claimed-current edge is P1.
 Use `workflow-state.sh checkpoint` for workflow control, update checklist/narrative content,
 changelog, and project memory with verified facts, and finish with `workflow-state.sh checkpoint
 --host <claude|codex> --phase complete --next-step none`. Show the exact PR
-mutation and pause. Only a human-created authorization record bound to the active nonce/candidate
-permits push and `gh pr create`. Reviewer engine fallback is automatic; PR creation is not.
+mutation and pause. Only fresh human authorization bound to the active nonce/candidate permits push
+and `gh pr create`. Native Goal activation does not grant it. Reviewer engine fallback is automatic;
+PR creation is not.
 
 If E2E truly does not apply, use the canonical checklist form
 `- [x] E2E verified — N/A: <concrete supported reason>` and persist the matching

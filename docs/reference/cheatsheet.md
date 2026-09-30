@@ -4,26 +4,18 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ FIRST TIME SETUP (once per machine)                         │
+│ FIRST TIME SETUP (once per project)                         │
 ├─────────────────────────────────────────────────────────────┤
 │ macOS/Linux:                                                │
 │   git clone ...claude-codex-forge ~/claude-codex-forge      │
 │   chmod +x ~/claude-codex-forge/setup.sh                    │
-│   ~/claude-codex-forge/setup.sh --global                    │
+│   cd /your/project                                          │
+│   ~/claude-codex-forge/setup.sh                             │
 │                                                             │
 │ Windows (PowerShell):                                       │
 │   git clone ...claude-codex-forge $HOME\claude-codex-forge  │
-│   & $HOME\claude-codex-forge\setup.ps1 -Global              │
-├─────────────────────────────────────────────────────────────┤
-│ ADD TO ANY PROJECT                                          │
-├─────────────────────────────────────────────────────────────┤
-│ macOS/Linux:                                                │
-│   cd /your/project                                          │
-│   ~/claude-codex-forge/setup.sh -p "Project Name"           │
-│                                                             │
-│ Windows (PowerShell):                                       │
 │   cd C:\your\project                                        │
-│   & $HOME\claude-codex-forge\setup.ps1 -p "Project Name"    │
+│   & $HOME\claude-codex-forge\setup.ps1                      │
 │                                                             │
 │ # Same harness is installed for Claude Code and Codex       │
 ├─────────────────────────────────────────────────────────────┤
@@ -32,6 +24,7 @@ Copy-paste friendly cheatsheet for the full daily workflow.
 │ cd ~/claude-codex-forge && git pull                         │
 │ cd /your/project                                            │
 │ ~/claude-codex-forge/setup.sh --upgrade                     │
+│ cat .forge/version                                          │
 │ # Unknown/v5/mixed: setup.sh -f --dry-run, then -f          │
 │                                                             │
 │ → Updates canonical .forge + generated host adapters       │

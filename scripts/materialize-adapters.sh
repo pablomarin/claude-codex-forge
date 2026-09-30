@@ -14,63 +14,6 @@ hash_file_materializer() {
     fi
 }
 
-physical_file_materializer() { (cd "$(dirname "$1")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")"); }
-
-resolve_cli_materializer() {
-    local path="$1" target
-    case "$path" in /*) ;; *) path=$(physical_file_materializer "$path") ;; esac
-    while [ -L "$path" ]; do
-        target=$(readlink "$path") || return 1
-        case "$target" in /*) path="$target" ;; *) path="$(dirname "$path")/$target" ;; esac
-    done
-    physical_file_materializer "$path"
-}
-
-hash_codex_capability_materializer() {
-    local binary="$1" root_help exec_help flag state
-    root_help=$($binary --help 2>&1 || true)
-    exec_help=$($binary exec --help 2>&1 || true)
-    if command -v shasum >/dev/null 2>&1; then
-        { printf 'forge-codex-capability-v1\n'; for flag in --ignore-user-config --ignore-rules --ephemeral --sandbox --add-dir; do state=absent; case "$root_help$exec_help" in *"$flag"*) state=present ;; esac; printf '%s=%s\n' "$flag" "$state"; done; } | shasum -a 256 | awk '{print $1}'
-    else
-        { printf 'forge-codex-capability-v1\n'; for flag in --ignore-user-config --ignore-rules --ephemeral --sandbox --add-dir; do state=absent; case "$root_help$exec_help" in *"$flag"*) state=present ;; esac; printf '%s=%s\n' "$flag" "$state"; done; } | sha256sum | awk '{print $1}'
-    fi
-}
-
-write_codex_identity_materializer() {
-    local writer_revision="$1" capture_revision="$2" identity invocation binary version root_help exec_help missing status identity_class tmp
-    identity="$MATERIALIZE_TARGET/.forge/bin/codex.identity"
-    assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/bin/codex.identity"
-    assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/bin/codex.identity.sha256"
-    mkdir -p "$(dirname "$identity")"
-    invocation=$(command -v codex 2>/dev/null || true)
-    binary=""; version=""; capability_revision=""; binary_sha256=""; missing=" binary-unavailable"; status=BLOCKED
-    identity_class=operator-setup
-    [ "${FORGE_ENGINE_IDENTITY_FIXTURE:-0}" != 1 ] || identity_class=fixture-only
-    if [ -n "$invocation" ]; then
-        case "$invocation" in /*) ;; *) invocation=$(physical_file_materializer "$invocation") ;; esac
-        binary=$(resolve_cli_materializer "$invocation" 2>/dev/null || true)
-        if [ -n "$binary" ] && [ -x "$binary" ] && [ ! -L "$binary" ]; then
-            version=$($binary --version 2>/dev/null | head -1 || true)
-            root_help=$($binary --help 2>&1 || true); exec_help=$($binary exec --help 2>&1 || true); missing=""
-            for flag in --ignore-user-config --ignore-rules --ephemeral --sandbox --add-dir; do
-                case "$root_help$exec_help" in *"$flag"*) ;; *) missing="$missing $flag" ;; esac
-            done
-            binary_sha256=$(hash_file_materializer "$binary")
-            capability_revision=$(hash_codex_capability_materializer "$binary")
-            if [ -z "$missing" ] && [ -n "$version" ]; then status=QUALIFIED; fi
-        fi
-    fi
-    tmp="$identity.tmp.$$"
-    {
-        printf 'format=forge-codex-identity-v1\nengine=codex\nidentity_class=%s\nstatus=%s\n' "$identity_class" "$status"
-        printf 'invocation_path=%s\nbinary_path=%s\nbinary_sha256=%s\nversion=%s\ncapability_revision=%s\n' "$invocation" "$binary" "$binary_sha256" "$version" "$capability_revision"
-        printf 'capture_revision=%s\nwriter_revision=%s\ndiagnostic=%s\n' "$capture_revision" "$writer_revision" "${missing# }"
-    } > "$tmp"
-    if [ -f "$identity" ] && cmp -s "$identity" "$tmp"; then rm -f "$tmp"; else mv "$tmp" "$identity"; fi
-    hash_file_materializer "$identity" > "$identity.sha256"
-}
-
 safe_relative_materializer_path() {
     case "$1" in ""|/*|~*|\\*|[A-Za-z]:*|*\\*|*/../*|../*|*/..|.|..|*//* ) return 1 ;; esac
     return 0
@@ -85,7 +28,7 @@ load_managed_manifest() {
         [ -z "$extra" ] || { echo "BLOCKED: manifest row $line has extra fields" >&2; return 1; }
         safe_relative_materializer_path "$destination" || { echo "BLOCKED: unsafe manifest destination on row $line" >&2; return 1; }
         case "$platform" in all|unix|windows) ;; *) return 1 ;; esac
-        case "$scope" in project|global) ;; *) return 1 ;; esac
+        [ "$scope" = project ] || { echo "BLOCKED: active managed manifest contains non-project scope" >&2; return 1; }
         case "$kind" in canonical|adapter|merge|marker|protected|tombstone) ;; *) return 1 ;; esac
     done < "$manifest"
 }
@@ -245,12 +188,22 @@ $($binary exec --help 2>&1 || true)"
 }
 
 write_install_manifest() {
-    local destination="$MATERIALIZE_TARGET/.forge/installed-files.tsv" relative canonical_revision
+    local destination="$MATERIALIZE_TARGET/.forge/installed-files.tsv" relative canonical_revision revision
     mkdir -p "$(dirname "$destination")"
     : > "$destination"
     while IFS=$'\t' read -r relative canonical_revision; do
-        [ -f "$MATERIALIZE_TARGET/$relative" ] || continue
-        printf '%s\t%s\t%s\n' "$relative" "$(hash_file_materializer "$MATERIALIZE_TARGET/$relative")" "$canonical_revision" >> "$destination"
+        if [ -f "$MATERIALIZE_TARGET/$relative" ]; then
+            revision=$(hash_file_materializer "$MATERIALIZE_TARGET/$relative")
+        elif [ "$relative" = .forge/version ]; then
+            if command -v shasum >/dev/null 2>&1; then
+                revision=$(printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" | shasum -a 256 | awk '{print $1}')
+            else
+                revision=$(printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" | sha256sum | awk '{print $1}')
+            fi
+        else
+            continue
+        fi
+        printf '%s\t%s\t%s\n' "$relative" "$revision" "$canonical_revision" >> "$destination"
     done < "$MATERIALIZE_INSTALLED_LIST"
 }
 
@@ -263,6 +216,7 @@ merge_json_config() {
         python3 "$MATERIALIZE_REPO/scripts/merge-settings.py" "$template" "$destination"
     else
         echo "CONFIG_READINESS: BLOCKED: python3 unavailable to merge existing JSON: $destination"
+        return 1
     fi
 }
 
@@ -350,35 +304,10 @@ materialize_project_config() {
     elif [ ! -f "$MATERIALIZE_TARGET/.codex/config.toml" ]; then
         cp "$MATERIALIZE_REPO/settings/codex-config.template.toml" "$MATERIALIZE_TARGET/.codex/config.toml"
         echo "CODEX_CONFIG_READINESS: BLOCKED: python3 unavailable for staged validation/translation"
+        return 1
     else
         echo "CODEX_CONFIG_READINESS: BLOCKED: python3 unavailable to preserve and merge existing TOML"
-    fi
-}
-
-materialize_global_config() {
-    local codex_binary codex_doctor_help
-    assert_no_link_ancestors "$MATERIALIZE_TARGET" ".claude/settings.json"
-    assert_no_link_ancestors "$MATERIALIZE_TARGET" ".codex/config.toml"
-    merge_json_config "$MATERIALIZE_REPO/settings/global-settings.template.json" "$MATERIALIZE_TARGET/.claude/settings.json"
-    if command -v python3 >/dev/null 2>&1; then
-        codex_binary=$(command -v codex 2>/dev/null || true)
-        codex_doctor_help=""
-        [ -z "$codex_binary" ] || codex_doctor_help=$($codex_binary doctor --help 2>&1 || true)
-        if [ -n "$codex_binary" ] && printf '%s' "$codex_doctor_help" | grep -q -- '--json'; then
-            python3 "$MATERIALIZE_REPO/scripts/render-codex-config.py" \
-                --template "$MATERIALIZE_REPO/settings/codex-config.template.toml" \
-                --existing "$MATERIALIZE_TARGET/.codex/config.toml" \
-                --output "$MATERIALIZE_TARGET/.codex/config.toml" \
-                --codex-validator "$codex_binary"
-        else
-            python3 "$MATERIALIZE_REPO/scripts/render-codex-config.py" \
-                --template "$MATERIALIZE_REPO/settings/codex-config.template.toml" \
-                --existing "$MATERIALIZE_TARGET/.codex/config.toml" \
-                --output "$MATERIALIZE_TARGET/.codex/config.toml"
-        fi
-    elif [ ! -f "$MATERIALIZE_TARGET/.codex/config.toml" ]; then
-        cp "$MATERIALIZE_REPO/settings/codex-config.template.toml" "$MATERIALIZE_TARGET/.codex/config.toml"
-        echo "CODEX_CONFIG_READINESS: BLOCKED: python3 unavailable for staged validation"
+        return 1
     fi
 }
 
@@ -416,80 +345,62 @@ materialize_scope() {
         esac
     done < "$MATERIALIZE_MANIFEST"
 
-    if [ "$MATERIALIZE_SCOPE" = project ]; then
         assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/local/state.md"
         mkdir -p "$MATERIALIZE_TARGET/.forge/local" "$MATERIALIZE_TARGET/.forge/memory"
         [ -f "$MATERIALIZE_TARGET/.forge/local/state.md" ] || cp "$MATERIALIZE_REPO/state.template.md" "$MATERIALIZE_TARGET/.forge/local/state.md"
         materialize_project_config
         legacy_alias_cleanup apply
         workflow_skill_cleanup apply
-    else
-        assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/goal-authorizations"
-        assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/goal-captures"
-        mkdir -p "$MATERIALIZE_TARGET/.forge/goal-authorizations" "$MATERIALIZE_TARGET/.forge/goal-captures"
-        writer_revision=$(hash_file_materializer "$MATERIALIZE_REPO/scripts/forge-goal-authorize.sh")
-        capture_revision=$(hash_file_materializer "$MATERIALIZE_REPO/scripts/forge-goal-capture.sh")
-        writer="$MATERIALIZE_TARGET/.forge/bin/forge-goal-authorize"
-        auth_root="$MATERIALIZE_TARGET/.forge/goal-authorizations"
-        if [ -f "$writer" ]; then
-            escaped_writer=${writer//\\/\\\\}; escaped_writer=${escaped_writer//&/\\&}; escaped_writer=${escaped_writer//|/\\|}
-            escaped_auth=${auth_root//\\/\\\\}; escaped_auth=${escaped_auth//&/\\&}; escaped_auth=${escaped_auth//|/\\|}
-            sed -e "s|__FORGE_WRITER_PATH__|$escaped_writer|g" \
-                -e "s|__FORGE_AUTHORIZATION_ROOT__|$escaped_auth|g" \
-                -e "s|__FORGE_WRITER_REVISION__|$writer_revision|g" "$writer" > "$writer.tmp.$$"
-            mv "$writer.tmp.$$" "$writer"
-            chmod +x "$writer"
-            hash_file_materializer "$writer" > "$writer.sha256"
-        fi
-        write_codex_identity_materializer "$writer_revision" "$capture_revision"
-        printf '.forge/bin/codex.identity\t-\n.forge/bin/codex.identity.sha256\t-\n' >> "$MATERIALIZE_INSTALLED_LIST"
-        capture="$MATERIALIZE_TARGET/.forge/bin/forge-goal-capture"
-        if [ -f "$capture" ]; then
-            capture_root="$MATERIALIZE_TARGET/.forge/goal-captures"
-            codex_identity="$MATERIALIZE_TARGET/.forge/bin/codex.identity"
-            escaped_capture=${capture//\\/\\\\}; escaped_capture=${escaped_capture//&/\\&}; escaped_capture=${escaped_capture//|/\\|}
-            escaped_capture_root=${capture_root//\\/\\\\}; escaped_capture_root=${escaped_capture_root//&/\\&}; escaped_capture_root=${escaped_capture_root//|/\\|}
-            escaped_codex_identity=${codex_identity//\\/\\\\}; escaped_codex_identity=${escaped_codex_identity//&/\\&}; escaped_codex_identity=${escaped_codex_identity//|/\\|}
-            sed -e "s|__FORGE_CAPTURE_PATH__|$escaped_capture|g" \
-                -e "s|__FORGE_CAPTURE_ROOT__|$escaped_capture_root|g" \
-                -e "s|__FORGE_CODEX_IDENTITY__|$escaped_codex_identity|g" \
-                -e "s|__FORGE_CAPTURE_REVISION__|$capture_revision|g" \
-                -e "s|__FORGE_WRITER_REVISION__|$writer_revision|g" "$capture" > "$capture.tmp.$$"
-            mv "$capture.tmp.$$" "$capture"
-            chmod +x "$capture"
-            hash_file_materializer "$capture" > "$capture.sha256"
-        fi
-        materialize_global_config
-    fi
-    printf '6\n' > "$MATERIALIZE_TARGET/.forge/version"
     printf '.forge/version\t-\n' >> "$MATERIALIZE_INSTALLED_LIST"
     write_install_manifest
+    printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" > "$MATERIALIZE_TARGET/.forge/version"
+    echo "FORGE_VERSION: $MATERIALIZE_RELEASE_VERSION"
 }
 
 MATERIALIZE_REPO=""
 MATERIALIZE_TARGET=""
 MATERIALIZE_SCOPE=project
 MATERIALIZE_PLATFORM=unix
+MATERIALIZE_RELEASE_VERSION=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --repo-root) MATERIALIZE_REPO="$2"; shift 2 ;;
         --target) MATERIALIZE_TARGET="$2"; shift 2 ;;
         --scope) MATERIALIZE_SCOPE="$2"; shift 2 ;;
         --platform) MATERIALIZE_PLATFORM="$2"; shift 2 ;;
+        --release-version) MATERIALIZE_RELEASE_VERSION="$2"; shift 2 ;;
         *) echo "Unknown materializer option: $1" >&2; exit 2 ;;
     esac
 done
 
 [ -n "$MATERIALIZE_REPO" ] && [ -n "$MATERIALIZE_TARGET" ] || {
-    echo "Usage: materialize-adapters.sh --repo-root DIR --target DIR --scope project|global" >&2
+    echo "Usage: materialize-adapters.sh --repo-root DIR --target DIR --scope project --release-version MAJOR.MINOR" >&2
     exit 2
 }
+[ "$MATERIALIZE_SCOPE" = project ] || {
+    echo "BLOCKED: active Forge materialization is project-only" >&2
+    exit 1
+}
+[[ "$MATERIALIZE_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || {
+    echo "BLOCKED: invalid release version" >&2
+    exit 2
+}
+case "$MATERIALIZE_PLATFORM" in
+    unix|windows) ;;
+    *)
+        echo "BLOCKED: invalid materializer platform '$MATERIALIZE_PLATFORM' (expected unix or windows)" >&2
+        exit 2
+        ;;
+esac
+if [ "$MATERIALIZE_PLATFORM" = unix ] && ! command -v python3 >/dev/null 2>&1; then
+    echo "CONFIG_READINESS: BLOCKED: python3 is required before Forge materialization" >&2
+    exit 1
+fi
 mkdir -p "$MATERIALIZE_TARGET"
 MATERIALIZE_REPO=$(cd "$MATERIALIZE_REPO" && pwd -P)
 MATERIALIZE_TARGET=$(cd "$MATERIALIZE_TARGET" && pwd -P)
 MATERIALIZE_DIAGNOSTIC_TARGET=${FORGE_DIAGNOSTIC_TARGET:-$MATERIALIZE_TARGET}
 MATERIALIZE_DIAGNOSTIC_TARGET=$(cd "$MATERIALIZE_DIAGNOSTIC_TARGET" && pwd -P)
-MATERIALIZE_DIAGNOSTIC_HOME=${FORGE_DIAGNOSTIC_HOME:-${HOME:-}}
 MATERIALIZE_MANIFEST="$MATERIALIZE_REPO/manifests/managed-v6.tsv"
 load_managed_manifest "$MATERIALIZE_MANIFEST"
 legacy_alias_cleanup check
@@ -511,35 +422,14 @@ detect_engines | while IFS=$'\t' read -r engine availability binary version diag
     esac
 done
 
-if [ "$MATERIALIZE_SCOPE" = project ]; then
-    primary=$(primary_checkout_for "$MATERIALIZE_DIAGNOSTIC_TARGET" || true)
-    current=$MATERIALIZE_DIAGNOSTIC_TARGET
-    if [ -n "$primary" ] && [ "$(cd "$primary" 2>/dev/null && pwd -P)" != "$current" ]; then
-        echo "CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration"
-        echo "Run: cd '$primary' && '$MATERIALIZE_REPO/setup.sh'"
-    else
-        echo "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
-    fi
-    global_version="$MATERIALIZE_DIAGNOSTIC_HOME/.forge/version"
-    global_authorizer="$MATERIALIZE_DIAGNOSTIC_HOME/.forge/bin/forge-goal-authorize"
-    global_version_ready=false
-    if [ -f "$global_version" ] && [ ! -L "$global_version" ] \
-        && [ "$(tr -d '\r\n' < "$global_version")" = 6 ]; then
-        global_version_ready=true
-    fi
-    if [ "$global_version_ready" = true ] && [ -x "$global_authorizer" ] && [ ! -L "$global_authorizer" ]; then
-        echo "GLOBAL_HARNESS: MATERIALIZED"
-        echo "NORMAL_PROJECT_WORKFLOWS: READY"
-        echo "NATIVE_GOAL_RUNTIME: PENDING qualification via scripts/qualify-goal-feasibility.sh"
-    elif [ -e "$global_version" ] || [ -L "$global_version" ] \
-        || [ -e "$global_authorizer" ] || [ -L "$global_authorizer" ]; then
-        echo "GLOBAL_HARNESS: PARTIAL canonical version stamp or goal authorization helper missing or invalid"
-        echo "NORMAL_PROJECT_WORKFLOWS: READY"
-        echo "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; preview repair with '$MATERIALIZE_REPO/setup.sh --global -f --dry-run'"
-    else
-        echo "GLOBAL_HARNESS: NOT_INSTALLED optional"
-        echo "NORMAL_PROJECT_WORKFLOWS: READY"
-        echo "NATIVE_GOAL_RUNTIME: NOT_AVAILABLE optional; run '$MATERIALIZE_REPO/setup.sh --global' from a separate terminal to install protected native /goal support"
-    fi
-    echo "RUNTIME_QUALIFICATION: final owner '$MATERIALIZE_REPO/scripts/qualify-runtime-final.sh'; live project '$MATERIALIZE_DIAGNOSTIC_TARGET'; command and required operator evidence: '$MATERIALIZE_REPO/docs/qualification/agent-mode-selection.md'"
+primary=$(primary_checkout_for "$MATERIALIZE_DIAGNOSTIC_TARGET" || true)
+current=$MATERIALIZE_DIAGNOSTIC_TARGET
+if [ -n "$primary" ] && [ "$(cd "$primary" 2>/dev/null && pwd -P)" != "$current" ]; then
+    echo "CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration"
+    echo "Run: cd '$primary' && '$MATERIALIZE_REPO/setup.sh'"
+else
+    echo "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
 fi
+echo "NORMAL_PROJECT_WORKFLOWS: READY"
+echo "NATIVE_GOAL_RUNTIME: PENDING reason=live-qualification-not-run"
+echo "RUNTIME_QUALIFICATION: final owner '$MATERIALIZE_REPO/scripts/qualify-runtime-final.sh'; live project '$MATERIALIZE_DIAGNOSTIC_TARGET'; command and required operator evidence: '$MATERIALIZE_REPO/docs/qualification/agent-mode-selection.md'"

@@ -52,6 +52,30 @@ try {
     Check ((Get-Content (Join-Path $Target '.forge\local\state.md') -Raw) -match [regex]::Escape("| Worktree root | $Target |")) 'worktree identity bound'
     Check ((Get-Content (Join-Path $Target '.forge\local\state.md') -Raw) -match [regex]::Escape("| Workflow base SHA | $baseSha |")) 'base SHA frozen'
 
+    $nativeTarget = Join-Path $Primary '.claude\worktrees\native-feature'
+    & git -C $Primary worktree add -q -b claude/native-feature $nativeTarget $baseSha
+    & git -C $Primary config branch.claude/native-feature.description 'host-native metadata'
+    $nativeConfigHash = (Get-FileHash -Algorithm SHA256 (Join-Path $Primary '.git\config')).Hash
+    & powershell.exe -NoProfile -File $Helper -Action Adopt -Kind feat -Name native-feature -Base main -Worktree $nativeTarget | Out-Null
+    Check ($LASTEXITCODE -eq 0) 'clean native worktree adoption succeeds'
+    Check ((& git -C $nativeTarget branch --show-current) -eq 'feat/native-feature') 'native host prefix is normalized to feat/<slug>'
+    Check (Test-Path (Join-Path $nativeTarget '.forge\local\.state-seed-snapshot.md')) 'native adoption seeds the fold baseline'
+    Check ((Get-Content (Join-Path $nativeTarget '.forge\local\state.md') -Raw) -match [regex]::Escape("| Workflow base SHA | $baseSha |")) 'native adoption freezes the verified base SHA'
+    Check ((Get-FileHash -Algorithm SHA256 (Join-Path $Primary '.git\config')).Hash -eq $nativeConfigHash) 'native adoption never writes shared Git config'
+
+    $dirtyTarget = Join-Path $Primary '.claude\worktrees\dirty-feature'
+    & git -C $Primary worktree add -q -b claude/dirty-feature $dirtyTarget $baseSha
+    [IO.File]::AppendAllText((Join-Path $dirtyTarget 'app.txt'), "dirty`n")
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $dirtyOutput = (& powershell.exe -NoProfile -File $Helper -Action Adopt -Kind feat -Name dirty-feature -Base main -Worktree $dirtyTarget *>&1 | Out-String)
+        $dirtyRc = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousPreference }
+    Check ($dirtyRc -ne 0) 'dirty native worktree adoption exits nonzero'
+    Check ($dirtyOutput -match 'ADOPT_BLOCKED: native worktree must be clean') 'dirty native worktree adoption explains the safe stop'
+    Check ((& git -C $dirtyTarget branch --show-current) -eq 'claude/dirty-feature') 'dirty native branch is not renamed'
+
     $truncatedState = Join-Path $Scratch 'truncated-state.md'
     [IO.File]::WriteAllText($truncatedState, "<!-- forge:state-schema v6 -->`n## Workflow`n| Field | Value |`n| Command | /fix-bug truncated |`n")
     Copy-Item -LiteralPath $truncatedState -Destination (Join-Path $Target '.forge\local\state.md') -Force

@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
-  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-6.2-blue?style=flat-square"></a>
+  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-6.3-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
   <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-supported-orange?style=flat-square"></a>
@@ -168,9 +168,19 @@ The main workflows are:
 | Engineering Council | `/council <question>` | `$council <question>` |
 | Autonomous execution | Native `/goal` | Native `/goal` |
 
+In Claude Desktop, start a new-feature or bug-fix session from the project and turn on **worktree** before sending the first prompt. Claude then creates the isolated checkout outside its
+protected agent sandbox; Forge verifies the requested base, seeds local state, and normalizes the
+host-generated branch to `feat/<slug>` or `fix/<slug>` before activation. Quick fixes do not need
+this option. Other supported hosts may use their native isolated-worktree mode or Forge's portable
+worktree helper.
+
 Forge never shadows either host’s native `/goal`. It supplies the shared composition contract in
 `.forge/workflows/goal.md`; native session history stays host-specific while the Forge objective,
 nonce, persistent turn count, evidence, and next step survive a host switch.
+Starting native Goal is the human authorization for one 20-turn autonomous tranche. Forge records
+that budget in repository-local, worktree-shared state. Continuing after exhaustion needs another
+native Goal request; push, PR, merge, deployment, and other external mutations still need their own
+explicit authorization.
 
 ## Quick start
 
@@ -190,8 +200,8 @@ correct preview or setup command, explains blockers, and asks before changing fi
 not implement setup itself: `setup.sh` and `setup.ps1` remain the sole deterministic installers.
 
 Use the copy-paste prompt in [Agent-assisted setup](docs/guides/agent-assisted-setup.md). It covers
-fresh projects, existing Forge v6 refreshes, Forge v5 and mixed-harness migrations, global setup,
-approval boundaries, and final diff/readiness review.
+fresh projects, existing Forge v6 refreshes, Forge v5 and mixed-harness migrations, approval
+boundaries, and final diff/readiness review.
 
 ### CLI and automation: choose the correct installation path
 
@@ -219,18 +229,15 @@ unresolved legacy or custom machinery.
 
 Use a separate project folder that is already a Git repository (`git init` there if needed).
 If you already cloned Forge, reuse/update that clone instead of cloning over it. Run each command
-separately and stop on any error; existing global configuration uses the separate preview below.
+separately and stop on any error. Forge is installed completely inside each project; it does not
+need a machine-wide harness.
 
 ```bash
 git clone https://github.com/pablomarin/claude-codex-forge.git ~/claude-codex-forge
 chmod +x ~/claude-codex-forge/setup.sh
 
-# First global setup only; preview existing global agent configuration separately.
-~/claude-codex-forge/setup.sh --global
-
-# Once per fresh project
 cd /path/to/your/project
-~/claude-codex-forge/setup.sh -p "My Project"
+~/claude-codex-forge/setup.sh
 
 # Check installed discovery (not full runtime readiness)
 ~/claude-codex-forge/scripts/verify-runtime.sh discovery --project-root "$(pwd -P)"
@@ -246,12 +253,8 @@ codex
 ```powershell
 git clone https://github.com/pablomarin/claude-codex-forge.git $HOME\claude-codex-forge
 
-# First global setup only; preview existing global agent configuration separately.
-& $HOME\claude-codex-forge\setup.ps1 -Global
-
-# Once per fresh project
 Set-Location C:\path\to\your-project
-& $HOME\claude-codex-forge\setup.ps1 -Project "My Project"
+& $HOME\claude-codex-forge\setup.ps1
 
 # Check installed discovery (not full runtime readiness)
 & $HOME\claude-codex-forge\scripts\verify-runtime.ps1 discovery -ProjectRoot (Get-Location).Path
@@ -269,12 +272,14 @@ run each command separately and stop if the pull or setup fails.
 git -C ~/claude-codex-forge pull --ff-only
 cd /path/to/your/project
 ~/claude-codex-forge/setup.sh --upgrade
+cat .forge/version
 ```
 
 ```powershell
 git -C $HOME\claude-codex-forge pull --ff-only
 Set-Location C:\path\to\your-project
 & $HOME\claude-codex-forge\setup.ps1 -Upgrade
+Get-Content .forge\version
 ```
 
 Pulling Forge alone does **not** update your project. If you have v5, customizations to the
@@ -296,7 +301,11 @@ Do not combine `--upgrade` with `-f` or `--dry-run`.
   proof of a working runtime. Discovery alone does not test live hooks or authenticated reviewers.
 
 After verification, commit the reviewed harness changes in your project; `.forge/local/` stays
-gitignored. A project update does not update global configuration or sibling worktrees.
+gitignored. A project update does not update unrelated repositories or sibling worktrees.
+
+The exact release is committed in `.forge/version`. This means different repositories may run different Forge versions,
+and each repository upgrades only when its team chooses to run its own
+installer update.
 
 ## What setup installs
 
@@ -324,9 +333,6 @@ your-project/
 └── tests/e2e/                      # Use cases and local reports
 ```
 
-Global setup adds canonical policy and trusted native-goal helpers under `~/.forge/`, plus bounded
-global adapters at `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
-
 ### One source of truth, two native adapters
 
 Forge does **not** ask teams to keep two copies of the same instructions synchronized. Both hosts
@@ -334,36 +340,24 @@ discover the filename they support natively, and each root file points into one 
 
 ```text
 .forge/                     Forge-owned engineering policy
-docs/agent-context.md       Team-owned shared project knowledge
-CLAUDE.md                   Thin Claude discovery adapter + shared-context pointer
-AGENTS.md                   Thin Codex discovery adapter + shared-context pointer
+docs/agent-context.md       Optional team-owned shared project knowledge
+AGENTS.md                   Canonical project discovery adapter
+CLAUDE.md                   Compatibility bridge containing only @AGENTS.md
 ```
 
 | Setup-managed component | Installed destination | Role |
 | --- | --- | --- |
 | `FORGE.template.md` | `.forge/instructions.md` | Canonical shared policy for both engines |
-| `templates/adapters/CLAUDE.block.template.md` | Forge-owned block in `CLAUDE.md` | Claude Code discovery and host-specific composition |
-| `templates/adapters/AGENTS.block.template.md` | Forge-owned block in `AGENTS.md` | Codex discovery and host-specific composition |
+| `templates/adapters/AGENTS.block.template.md` | `AGENTS.md` | Canonical adapter loading Forge policy and optional project context |
+| `templates/adapters/CLAUDE.block.template.md` | `CLAUDE.md` | One-line `@AGENTS.md` compatibility bridge |
 | `CLAUDE.template.md` | No new v6 destination | Retained only to reconcile proven v5 installations |
 
 `.forge/instructions.md` is setup-managed and should not be edited directly. Keep shared
 architecture, domain facts, repository maps, and project commands in the neutral tracked file
-`docs/agent-context.md`. Forge cannot infer that project knowledge, so the team creates and
-maintains this file when shared context is needed.
-
-Put this same project-owned pointer outside the Forge-managed block in both root files:
-
-```markdown
-Read `docs/agent-context.md` completely before acting.
-```
-
-After that, edit shared knowledge only in `docs/agent-context.md`. Do not duplicate it between the
-two root files.
-
-For a genuinely Claude-only instruction, use the user-owned part of `CLAUDE.md`; for a genuinely
-Codex-only instruction, use the user-owned part of `AGENTS.md`.
-Do not copy shared policy between `CLAUDE.md` and `AGENTS.md`. Setup refreshes only the Forge-owned
-blocks and preserves user-authored text outside them.
+`docs/agent-context.md`. Forge cannot infer project knowledge, so the team creates and maintains
+that file when shared context is needed. `AGENTS.md` already loads the optional file; do not
+duplicate its pointer or policy in `CLAUDE.md`.
+Do not copy shared policy between `CLAUDE.md` and `AGENTS.md`.
 
 Setup preserves user content according to explicit ownership:
 
@@ -393,13 +387,10 @@ not your Forge clone.
 
 | Task | macOS/Linux | Windows PowerShell |
 | --- | --- | --- |
-| First project installation (no harness) | `~/claude-codex-forge/setup.sh -p "My Project"` | `& $HOME\claude-codex-forge\setup.ps1 -Project "My Project"` |
-| First global install (no harness) | `~/claude-codex-forge/setup.sh --global` | `& $HOME\claude-codex-forge\setup.ps1 -Global` |
+| First project installation (no harness) | `~/claude-codex-forge/setup.sh` | `& $HOME\claude-codex-forge\setup.ps1` |
 | Update an existing v6 install | `~/claude-codex-forge/setup.sh --upgrade` | `& $HOME\claude-codex-forge\setup.ps1 -Upgrade` |
 | Preview a full project reconciliation | `~/claude-codex-forge/setup.sh -f --dry-run` | `& $HOME\claude-codex-forge\setup.ps1 -Force -DryRun` |
 | Execute a ready project reconciliation | `~/claude-codex-forge/setup.sh -f` | `& $HOME\claude-codex-forge\setup.ps1 -Force` |
-| Preview a global reconciliation | `~/claude-codex-forge/setup.sh --global -f --dry-run` | `& $HOME\claude-codex-forge\setup.ps1 -Global -Force -DryRun` |
-| Execute a ready global reconciliation | `~/claude-codex-forge/setup.sh --global -f` | `& $HOME\claude-codex-forge\setup.ps1 -Global -Force` |
 | Playwright scaffold (first install only) | `~/claude-codex-forge/setup.sh -t fullstack --with-playwright` | `& $HOME\claude-codex-forge\setup.ps1 -Tech fullstack -WithPlaywright` |
 
 Use `--upgrade` for a routine update of an existing v6 install. Use `-f` / `--force` for an
@@ -426,6 +417,25 @@ git commit -m "chore: add Forge engineering harness"
 `.forge/local/` remains gitignored. Teams should use one designated upgrader and land harness
 refreshes as dedicated PRs; everyone else pulls that committed version.
 
+### One-time cleanup for an old machine-wide install
+
+Forge 6.3 never needs a machine-wide install. If an older Forge release created home-directory
+files, retire only proven Forge-owned content with a preview, copied digest, and explicit apply:
+
+```bash
+~/claude-codex-forge/setup.sh --retire-global
+~/claude-codex-forge/setup.sh --retire-global --apply --confirm <digest-from-preview>
+```
+
+```powershell
+& $HOME\claude-codex-forge\setup.ps1 -RetireGlobal
+& $HOME\claude-codex-forge\setup.ps1 -RetireGlobal -Apply -Confirm <digest-from-preview>
+```
+
+This cleanup is optional and never part of a fresh project install. It preserves personal or
+modified content, blocks ambiguous ownership, and rejects a stale digest. See
+[Upgrading](docs/guides/upgrading.md#one-time-legacy-global-retirement).
+
 See [Upgrading](docs/guides/upgrading.md) for ownership reports and transaction recovery, and
 [Setup Scenarios](docs/guides/setup-scenarios.md) for common installations.
 
@@ -436,7 +446,8 @@ See [Upgrading](docs/guides/upgrading.md) for ownership reports and transaction 
 - `.forge/local/memory/` contains volatile worktree-local drafts.
 - `.forge/memory/`, `docs/adr/`, and `docs/solutions/` contain verified project knowledge that can
   be committed.
-- Global memory stores stable cross-project patterns, never current-task progress or secrets.
+- Native host memory remains host-owned and optional; Forge creates no cross-project runtime state
+  outside the repository.
 - If canonical state stays unchanged across normal active-workflow stops, Forge gives the model one
   visible checkpoint turn to update state or memory; a newly changed checkpoint stops normally.
   After compaction, SessionStart points it back to the exact next step and any concise local/durable
@@ -469,6 +480,7 @@ Recent releases:
 
 | Version | Date       | Highlights                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6.3     | 2026-09-28 | **Project-only complete installation.** Every repository carries the complete Forge policy, workflows, rules, agents, hooks, memory, native Goal accounting, and exact release in `.forge/version`; no home-directory harness is required. `AGENTS.md` is the canonical project adapter and `CLAUDE.md` is the one-line `@AGENTS.md` compatibility bridge. Native Goal authority is recorded in repository-local, worktree-shared 20-turn tranches, while PRs, merges, deployments, and other external mutations retain separate authorization gates. Legacy machine-wide Forge files have a safe preview/digest/apply retirement command that removes only proven Forge-owned content and preserves or blocks everything ambiguous. Fresh install and routine upgrade are one project command on Bash or PowerShell, and different repositories can intentionally remain on different releases. |
 | 6.2     | 2026-09-10 | **Strict V6 structured receipts with cross-host continuation.** Active canonical V6 state now selects candidate-bound receipt validation immediately across ship, Stop, and convergence boundaries. Installed Bash/PowerShell `workflow-state` twins make continuation executable through only `show`, atomic `activate`, and allowlisted `checkpoint`; `--begin-review` increments monotonically, the first valid paired review is anchored against breaker resets, and `complete`/`none` explicitly ends a task. Claude and Codex can resume the same worktree while retaining base SHA, iteration, next step, and candidate linkage; an identical V6.1 placeholder state is safely adopted, and UTF-8/LF normalization keeps Windows-to-Bash handoff stable without weakening targeted direct local-state shell denial. Release qualification includes a real installed-host handoff; unavailable PowerShell runtime stays explicitly unverified. Existing V6 projects upgrade normally; V5/mixed/custom/unknown trees still use the read-only full-refresh preview first. |
 | 6.1     | 2026-09-10 | **Review authorization and permission-prompt correction.** Native review-capable Forge entries now disclose the bounded reviewer payload so explicit invocation supplies user-originated consent; workflows inferred from prose ask once, reuse that consent only in the current workflow segment, and ask again in a fresh session. Claude-facing workflow policy now favors literal, single-purpose shell calls and fresh outputs to reduce avoidable static-analysis prompts, while real recursive deletion remains separately host-gated. Codex Desktop consent reuse and Claude Desktop prompt reduction remain live qualification boundaries rather than claims inferred from deterministic tests. Reaches existing v6 installs through `setup.sh --upgrade` or `setup.ps1 -Upgrade`. |
 | 6.0     | 2026-08-27 | **One canonical dual-engine harness.** Claude Code or Codex can lead any action; the other engine is preferred for fresh review and council diversity, with visible fresh same-engine fallback. An ownership-aware `-f` / `-Force` transaction replaces proven v5 machinery while preserving user content, state, and compatible configuration. Shared policy and evidence now live under `.forge/`; host directories contain thin native adapters. |

@@ -40,12 +40,24 @@ for suite in test-lint.sh test-platform-parity.sh test-contracts.sh test-worktre
 done
 
 PS_GOAL_TEST="$REPO_ROOT/tests/template/test-goal-feasibility.ps1"
-assert_contains "$PS_GOAL_TEST" 'setup\.ps1.*-Force.*-DryRun' \
-    "PowerShell legacy-harness test expects the canonical preview command"
-assert_not_contains "$PS_GOAL_TEST" 'setup\.ps1.*-FullRefresh.*-DryRun' \
-    "PowerShell legacy-harness test does not require the retired preview alias"
-assert_not_contains "$PS_GOAL_TEST" 'foreach ($mode in @("default", "force", "upgrade"))' \
-    "PowerShell ordinary-mode preflight test does not treat authoritative force as a preflight"
+assert_contains "$PS_GOAL_TEST" 'test-goal-ledger.ps1' \
+    "PowerShell goal feasibility runs the repository-ledger contract"
+assert_not_contains "$PS_GOAL_TEST" 'setup\.ps1.*-(Force|FullRefresh).*DryRun' \
+    "PowerShell goal feasibility no longer depends on legacy setup previews"
+assert_not_contains "$PS_GOAL_TEST" 'goal-authorizations' \
+    "PowerShell goal feasibility has no machine-global authorization fixture"
+for retired in scripts/forge-goal-authorize.sh scripts/forge-goal-authorize.ps1 \
+  scripts/forge-goal-capture.sh scripts/forge-goal-capture.ps1; do
+    assert_file_missing "$REPO_ROOT/$retired" "$retired is retired from active source"
+done
+assert_not_contains "$REPO_ROOT/manifests/managed-v6.tsv" 'goal-authorize' \
+    "active manifest installs no global Goal authorizer"
+for qualifier in scripts/qualify-goal-feasibility.sh scripts/qualify-goal-feasibility.ps1; do
+    assert_not_contains "$REPO_ROOT/$qualifier" 'goal-authorizations' \
+        "$qualifier has no global authorization dependency"
+    assert_not_contains "$REPO_ROOT/$qualifier" 'goal-captures' \
+        "$qualifier has no global capture dependency"
+done
 for suite in \
     test-fixtures.sh \
     test-dual-layout.sh \
@@ -610,7 +622,7 @@ else
 fi
 
 start_test "Claude permission templates use the effective Edit deny vocabulary"
-for settings_file in settings/settings.template.json settings/settings-windows.template.json settings/global-settings.template.json; do
+for settings_file in settings/settings.template.json settings/settings-windows.template.json; do
     if jq -e '.permissions.deny[]? | select(startswith("Write(~/.forge/"))' "$REPO_ROOT/$settings_file" >/dev/null; then
         fail "$settings_file contains an ignored Write(~/.forge/...) deny rule"
     else
@@ -839,37 +851,28 @@ assert_contains "$SETUP_SH" '-f --dry-run' "setup.sh points preserved continuity
 assert_contains "$SETUP_PS1" '-Force -DryRun' "setup.ps1 points preserved continuity to preview"
 
 # ---------------------------------------------------------------------------
-# Contract: Forge version stamp + advisory drift warning (v5.51) — parity.
-# Both installers write `.claude/.forge-version` (project pin) + a machine stamp,
-# read the version from the CHANGELOG top line, and warn (advisory) on mismatch.
-# Both session-start hooks emit a direction-aware drift line. Advisory only:
-# the version logic must NOT introduce a blocking exit/throw. PowerShell must use
-# a numeric ([version]) compare, not a string compare (else 5.50 vs 5.9 reverses).
+# Contract: one exact repository-local Forge release, no machine stamp.
 # ---------------------------------------------------------------------------
-start_test "Forge version-stamp + drift advisory parity (setup + session-start, sh ↔ ps1)"
+start_test "exact project Forge release parity (setup + materializer + verifier, sh ↔ ps1)"
 SS_SH="$REPO_ROOT/hooks/session-start.sh"
 SS_PS1="$REPO_ROOT/hooks/session-start.ps1"
 fv_ok=1
-# Both installers reference the stamp file + read the CHANGELOG version line.
 for f in "$SETUP_SH" "$SETUP_PS1"; do
-    grep -qF -- ".forge-version" "$f" || { fail "$(basename "$f") missing .forge-version stamp write (5.51)"; fv_ok=0; }
-    grep -qF -- 'CHANGELOG.md' "$f"   || { fail "$(basename "$f") missing CHANGELOG version source (5.51)"; fv_ok=0; }
+    grep -qF -- 'CHANGELOG.md' "$f" || { fail "$(basename "$f") missing CHANGELOG release source"; fv_ok=0; }
+    grep -qF -- 'FORGE_VERSION_CHANGE:' "$f" || { fail "$(basename "$f") missing exact transition diagnostic"; fv_ok=0; }
 done
-# Both session-start hooks carry the drift advisory (stable phrase) + read the stamp.
 for f in "$SS_SH" "$SS_PS1"; do
-    grep -qF -- "pins Forge" "$f"      || { fail "$(basename "$f") missing drift advisory phrase 'pins Forge' (5.51)"; fv_ok=0; }
-    grep -qF -- ".forge-version" "$f"  || { fail "$(basename "$f") missing .forge-version read (5.51)"; fv_ok=0; }
+    grep -qF -- '.claude/.forge-version' "$f" && { fail "$(basename "$f") still reads retired Claude version pin"; fv_ok=0; }
+    grep -qF -- 'pins Forge' "$f" && { fail "$(basename "$f") still emits machine drift advice"; fv_ok=0; }
 done
-# PowerShell numeric compare (NOT string) in BOTH ps1 files — guards 5.50 vs 5.9.
-for f in "$SETUP_PS1" "$SS_PS1"; do
-    grep -qF -- "[version]" "$f" || { fail "$(basename "$f") must use a [version] numeric compare for the stamp (5.51)"; fv_ok=0; }
+for f in "$REPO_ROOT/scripts/materialize-adapters.sh" "$REPO_ROOT/scripts/materialize-adapters.ps1"; do
+    grep -qF -- 'release-version' "$f" || grep -qF -- 'ReleaseVersion' "$f" \
+        || { fail "$(basename "$f") missing required exact release input"; fv_ok=0; }
 done
-# Advisory-only guard: the drift hooks must never block — no real `exit 2` STATEMENT
-# (line-anchored so the "exit 2 is advisory" explanatory comment doesn't false-match).
-for f in "$SS_SH" "$SS_PS1"; do
-    grep -qE '^[[:space:]]*exit[[:space:]]+2([[:space:]]|$)' "$f" && { fail "$(basename "$f") has a real 'exit 2' — drift signal must stay advisory (5.51)"; fv_ok=0; }
+for f in "$REPO_ROOT/scripts/verify-runtime.sh" "$REPO_ROOT/scripts/verify-runtime.ps1"; do
+    grep -qF -- 'FORGE_VERSION:' "$f" || { fail "$(basename "$f") does not report project release"; fv_ok=0; }
 done
-[ "$fv_ok" = "1" ] && pass "version-stamp + drift advisory present in all 4 files, numeric PS compare, advisory-only"
+[ "$fv_ok" = "1" ] && pass "exact project release is canonical and machine drift dependency is absent"
 
 # ---------------------------------------------------------------------------
 # Contract 4: CI template placeholder ↔ setup.sh substitution
@@ -1074,7 +1077,10 @@ else
     ( cd "$scratch" && git init -q )
     sh_out=$(cd "$scratch" && echo '{"tool_input":{"command":"git commit -m x"}}' | bash "$REPO_ROOT/hooks/check-workflow-gates.sh" 2>&1)
     ps_out=$(cd "$scratch" && echo '{"tool_input":{"command":"git commit -m x"}}' | "$ps_runner" -NoProfile -File "$REPO_ROOT/hooks/check-workflow-gates.ps1" 2>&1)
-    assert_equals "$sh_out" "$ps_out" "bash and PS check-workflow-gates emit byte-equivalent missing-state breadcrumb"
+    ps_out_normalized=$(printf '%s\n' "$ps_out" \
+        | sed -e 's/setup -Force -DryRun/setup -f --dry-run/g' -e 's/setup -Force/setup -f/g')
+    assert_equals "$sh_out" "$ps_out_normalized" \
+        "bash and PS check-workflow-gates emit equivalent missing-state breadcrumbs"
     rm -rf "$scratch"
 
     # AC-4 broadened — also cover check-state-updated parity.
@@ -1790,7 +1796,8 @@ if command -v pwsh > /dev/null 2>&1; then
     # Test 1: nonce mismatch → both guards must exit 2 with "nonce mismatch" in stderr
     scratch=$(scratch_dir parity-nonce-mismatch)
     mkdir -p "$scratch/.forge/local"
-    cat > "$scratch/.claude/local/state.md" <<'EOF'
+    cat > "$scratch/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -1798,6 +1805,12 @@ if command -v pwsh > /dev/null 2>&1; then
 | nonce            | correct-session-nonce |
 | workflow_command | /new-feature foo |
 | issued_at        | 2026-05-16T10:00:00Z |
+
+## Workflow
+
+| Field   | Value            |
+| ------- | ---------------- |
+| Command | /new-feature foo |
 
 ## PR authorization
 
@@ -1820,10 +1833,12 @@ EOF
     assert_contains "$scratch/.bash_out" "nonce mismatch" "Bash guard mentions nonce mismatch"
     assert_contains "$scratch/.ps_out" "nonce mismatch" "PS guard mentions nonce mismatch (parity)"
 
-    # Test 2: empty nonce row → both guards treat session as INACTIVE (exit 0)
+    # Test 2: empty nonce row → the goal-specific PR-auth guard is INACTIVE,
+    # but the ordinary ship-evidence gate still applies to an active workflow.
     scratch2=$(scratch_dir parity-empty-nonce)
-    mkdir -p "$scratch2/.claude/local"
-    cat > "$scratch2/.claude/local/state.md" <<'EOF'
+    mkdir -p "$scratch2/.forge/local"
+    cat > "$scratch2/.forge/local/state.md" <<'EOF'
+<!-- forge:state-schema v6 -->
 ## /goal session
 
 | Field            | Value |
@@ -1842,7 +1857,10 @@ EOF
 
 ### Checklist
 
-- [x] E2E verified via verify-e2e agent (Phase 5.4)
+- [x] Code review loop — N/A: nonce parity fixture
+- [x] Simplified
+- [x] Verified (tests, lint, types)
+- [x] E2E verified — N/A: nonce parity fixture
 EOF
 
     (
@@ -1856,8 +1874,16 @@ EOF
 
     BASH_EXIT2=$(cat "$scratch2/.bash_exit")
     PS_EXIT2=$(cat "$scratch2/.ps_exit")
-    assert_equals "$BASH_EXIT2" "0" "Bash guard exits 0 on empty nonce (INACTIVE)"
-    assert_equals "$PS_EXIT2" "0" "PS guard exits 0 on empty nonce (INACTIVE, parity)"
+    assert_equals "$BASH_EXIT2" "2" "Bash empty nonce falls through to ordinary ship evidence"
+    assert_equals "$PS_EXIT2" "2" "PS empty nonce falls through to ordinary ship evidence (parity)"
+    assert_contains "$scratch2/.bash_out" "final receipt set" \
+        "Bash empty nonce is blocked by evidence rather than PR authorization"
+    assert_contains "$scratch2/.ps_out" "final receipt set" \
+        "PS empty nonce is blocked by evidence rather than PR authorization (parity)"
+    assert_not_contains "$scratch2/.bash_out" "PR authorization" \
+        "Bash empty nonce does not activate the PR authorization guard"
+    assert_not_contains "$scratch2/.ps_out" "PR authorization" \
+        "PS empty nonce does not activate the PR authorization guard (parity)"
 
 else
     pass "pwsh not available — PS runtime parity tests skipped (not a failure)"
@@ -1982,28 +2008,27 @@ done
 [ "$ok" = "1" ] && pass "structured review lenses remain bound to one candidate"
 
 # ---------------------------------------------------------------------------
-# Contract: "Ground Your Claims" rule parity across its three shipping copies
+# Contract: "Ground Your Claims" rule parity across project shipping copies
 # ---------------------------------------------------------------------------
 # The rule lives canonically in rules/critical-rules.md (sibling of CHALLENGE ME
 # / NO BUGS LEFT BEHIND), is mirrored as a headline policy in CLAUDE.template.md
-# (matching the No Bugs Left Behind pattern), and ships globally via
-# GLOBAL-CLAUDE.template.md. Duplicated prose drifts silently — bind the copies
+# (matching the No Bugs Left Behind pattern). Duplicated prose drifts silently — bind the copies
 # on a shared title stem + an exact link phrase so an edit to one fails CI until
 # the others follow.
-start_test "Ground Your Claims rule parity (critical-rules ↔ CLAUDE template ↔ global)"
+start_test "Ground Your Claims rule parity (critical-rules ↔ CLAUDE template)"
 
 # Case-insensitive: critical-rules.md uses the ALL-CAPS bullet convention
 # (GROUND YOUR CLAIMS), the templates use Title-Case headings.
 GYC_STEM='ground your claims'
 GYC_LINK='Confident guessing is a defect'
 ok=1
-for f in rules/critical-rules.md CLAUDE.template.md GLOBAL-CLAUDE.template.md; do
+for f in rules/critical-rules.md CLAUDE.template.md; do
     grep -qiE "$GYC_STEM" "$REPO_ROOT/$f" \
         || { fail "$f missing 'Ground Your Claims' rule stem"; ok=0; }
     grep -qF "$GYC_LINK" "$REPO_ROOT/$f" \
         || { fail "$f missing canonical '$GYC_LINK' link phrase"; ok=0; }
 done
-[ "$ok" = "1" ] && pass "3 files carry the Ground Your Claims rule + link phrase"
+[ "$ok" = "1" ] && pass "project policy copies carry the Ground Your Claims rule + link phrase"
 
 # ---------------------------------------------------------------------------
 # Contract: Developer Demo block parity + Gate-2 diagram-honesty rule
@@ -2399,12 +2424,43 @@ assert_contains "$REPO_ROOT/hooks/post-tool-format.sh" '.tool_input.command // .
     "Bash formatter reads documented Codex apply_patch command text first"
 assert_contains "$REPO_ROOT/hooks/post-tool-format.ps1" 'tool_input.command' \
     "PowerShell formatter reads documented Codex apply_patch command text"
-assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'forge-goal-authorize.ps1.sha256' \
-    "PowerShell goal hook verifies the installed writer seal"
-assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'ReparsePoint' \
-    "PowerShell goal hook rejects reparse-point ancestors"
-assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'CreateNew' \
-    "PowerShell checkpoint and marker publication uses no-clobber writes"
+assert_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'lib\goal-ledger.ps1' \
+    "PowerShell Stop hook delegates to the repository-local goal ledger"
+assert_contains "$REPO_ROOT/hooks/lib/goal-ledger.ps1" 'ReparsePoint' \
+    "PowerShell goal ledger rejects reparse-point ancestors"
+assert_contains "$REPO_ROOT/hooks/lib/goal-ledger.ps1" 'FileMode]::CreateNew' \
+    "PowerShell goal ledger uses no-clobber writes"
+assert_not_contains "$REPO_ROOT/hooks/check-state-updated.ps1" 'forge-goal-authorize' \
+    "PowerShell Stop hook has no global authorizer dependency"
+
+start_test "Task 5 native Goal accounting is repository-local on both platforms"
+for helper in hooks/lib/goal-ledger.sh hooks/lib/goal-ledger.ps1; do
+    assert_file_exists "$REPO_ROOT/$helper" "$helper exists"
+    assert_contains "$REPO_ROOT/manifests/managed-v6.tsv" "$helper" \
+        "$helper has an installed v6 destination"
+    assert_contains "$REPO_ROOT/$helper" 'forge-goal-ledger-v2' \
+        "$helper uses the repository ledger schema"
+    assert_contains "$REPO_ROOT/$helper" 'forge-goals' \
+        "$helper stores evidence under the Git common directory"
+done
+for field in activation_id activation_host activated_at activation_count; do
+    assert_contains "$REPO_ROOT/state.template.md" "| $field" \
+        "state template carries native Goal field $field"
+done
+for active in hooks/check-state-updated.sh hooks/check-state-updated.ps1 \
+  settings/settings.template.json settings/settings-windows.template.json \
+  commands/forge-goal.md FORGE.template.md; do
+    assert_not_contains "$REPO_ROOT/$active" 'goal-authorizations' \
+        "$active has no global goal authorization dependency"
+    assert_not_contains "$REPO_ROOT/$active" 'goal-captures' \
+        "$active has no global goal capture dependency"
+    assert_not_contains "$REPO_ROOT/$active" 'forge-goal-authorize' \
+        "$active has no global goal authorizer dependency"
+done
+assert_contains "$REPO_ROOT/settings/settings.template.json" 'Edit(**/.git/forge-goals/**)' \
+    "Unix settings protect the worktree-shared ledger"
+assert_contains "$REPO_ROOT/settings/settings-windows.template.json" 'forge-goals' \
+    "Windows settings protect the worktree-shared ledger"
 
 start_test "Task 5 dispatcher surfaces are installed and every canonical workflow reference resolves"
 MANAGED_V6="$REPO_ROOT/manifests/managed-v6.tsv"
@@ -2748,25 +2804,56 @@ assert_not_contains "$REPO_ROOT/state.template.md" 'Codex is mandatory in this r
 assert_contains "$REPO_ROOT/state.template.md" 'fresh same-engine reviewer' \
     "state template documents visible same-engine reviewer fallback"
 
+start_test "normal setup documentation requires no global Forge installation"
+for project_only_doc in \
+    "$GETTING_STARTED" \
+    "$REPO_ROOT/docs/guides/setup-scenarios.md" \
+    "$REPO_ROOT/docs/guides/agent-assisted-setup.md" \
+    "$COMMANDS_DOC" \
+    "$CHEATSHEET_DOC" \
+    "$STRUCTURE_DOC"; do
+    assert_not_contains "$project_only_doc" 'setup.sh --global' \
+        "$(basename "$project_only_doc") does not prescribe the retired global Bash install"
+    assert_not_contains "$project_only_doc" 'setup.ps1 -Global' \
+        "$(basename "$project_only_doc") does not prescribe the retired global PowerShell install"
+    assert_not_contains "$project_only_doc" '~/.forge/' \
+        "$(basename "$project_only_doc") does not require home-directory Forge runtime state"
+done
+if printf '%s\n' "$README_ACTIVE" | grep -qE 'setup\.sh --global|setup\.ps1 -Global|~/.forge/'; then
+    fail "README active guidance does not require the retired global Forge harness"
+else
+    pass "README active guidance does not require the retired global Forge harness"
+fi
+assert_contains "$README" 'setup.sh --upgrade' \
+    "README gives the routine Bash upgrade command"
+assert_contains "$README" 'cat .forge/version' \
+    "README shows how to read the installed repository version"
+assert_contains "$README" 'different repositories may run different Forge versions' \
+    "README explains independent per-repository Forge versions"
+assert_contains "$README" 'setup.sh --retire-global' \
+    "README documents the one-time Bash global retirement preview"
+assert_contains "$UPGRADING" 'setup.sh --retire-global --apply --confirm' \
+    "upgrade guide documents digest-confirmed global retirement"
+
 start_test "release version is synchronized across installer source and README"
 assert_contains "$REPO_ROOT/docs/adr/README.md" '0010-dual-engine-canonical-harness.md' \
     "ADR index includes the dual-engine decision"
-EXPECTED_FORGE_VERSION='6.2'
+EXPECTED_FORGE_VERSION='6.3'
 FIRST_CHANGELOG_RELEASE=$(grep -m1 '^## ' "$REPO_ROOT/docs/CHANGELOG.md")
 FIRST_CHANGELOG_VERSION=$(printf '%s\n' "$FIRST_CHANGELOG_RELEASE" | sed -E 's/^## ([0-9]+\.[0-9]+).*/\1/')
 README_BADGE_VERSION=$(sed -n 's/.*badge\/version-\([0-9][0-9.]*\)-blue.*/\1/p' "$README" | head -1)
 README_HISTORY_VERSION=$(sed -n '/^## Version history/,$p' "$README" \
     | sed -n 's/^| \([0-9][0-9.]*\)[[:space:]]*|.*/\1/p' | head -1)
-assert_equals "$FIRST_CHANGELOG_RELEASE" '## 6.2 — 2026-09-10' \
-    "6.2 is the top changelog release"
+assert_equals "$FIRST_CHANGELOG_RELEASE" '## 6.3 — 2026-09-28' \
+    "6.3 is the top changelog release"
 assert_equals "$FIRST_CHANGELOG_VERSION" "$EXPECTED_FORGE_VERSION" \
     "top changelog release carries the expected version"
 assert_equals "$README_BADGE_VERSION" "$EXPECTED_FORGE_VERSION" \
     "README badge matches the release version"
 assert_equals "$README_HISTORY_VERSION" "$EXPECTED_FORGE_VERSION" \
     "first README history row matches the release version"
-assert_contains "$README" 'Strict V6 structured receipts with cross-host continuation' \
-    "README 6.2 history describes strict receipts and host continuation"
+assert_contains "$README" 'Project-only complete installation' \
+    "README 6.3 history describes the project-only complete installation"
 
 start_test "Forge source repository uses one contributor guide with thin host adapters"
 assert_file_exists "$REPO_ROOT/CONTRIBUTING.md" \
@@ -2791,6 +2878,10 @@ for adapter in "$REPO_ROOT/CLAUDE.md" "$REPO_ROOT/AGENTS.md"; do
 done
 assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`FORGE.template.md` is the canonical policy installed into downstream projects' \
     "contributor guide distinguishes source-repository guidance from installed policy"
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`AGENTS.md` is the canonical installed project adapter' \
+    "contributor guide names AGENTS as the canonical installed adapter"
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`CLAUDE.md` is only the compatibility bridge' \
+    "contributor guide names CLAUDE as the compatibility bridge"
 assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`manifests/managed-v6.tsv`' \
     "contributor guide names the installation ownership manifest"
 assert_contains "$REPO_ROOT/CLAUDE.template.md" 'v5 compatibility' \
@@ -2810,6 +2901,23 @@ else
     fail "Forge source mode contains tracked generated or host-private policy: $SOURCE_PRIVATE_POLICY"
 fi
 
+start_test "installed root templates use one canonical project adapter"
+assert_contains "$REPO_ROOT/templates/adapters/AGENTS.block.template.md" \
+    'Read `.forge/instructions.md` completely before taking project action.' \
+    "AGENTS template discovers complete project policy"
+assert_contains "$REPO_ROOT/templates/adapters/AGENTS.block.template.md" \
+    'If `docs/agent-context.md` exists, read it as project-owned context. Do not create or overwrite it.' \
+    "AGENTS template discovers optional project context without owning it"
+assert_contains "$REPO_ROOT/templates/adapters/AGENTS.block.template.md" \
+    'This adapter contains no Forge policy; `.forge/instructions.md` is canonical.' \
+    "AGENTS template declares its discovery-only boundary"
+assert_contains "$REPO_ROOT/templates/adapters/CLAUDE.block.template.md" '@AGENTS.md' \
+    "Claude template imports AGENTS"
+assert_not_contains "$REPO_ROOT/templates/adapters/CLAUDE.block.template.md" '@.forge/instructions.md' \
+    "Claude template does not bypass AGENTS"
+assert_not_contains "$REPO_ROOT/templates/adapters/CLAUDE.block.template.md" 'FORGE_GOAL_BUDGET_EXHAUSTED' \
+    "Claude template duplicates no goal policy"
+
 start_test "README presents a readable workflow and one-source instruction mapping"
 assert_contains "$README" 'flowchart TB' \
     "engineering workflow uses a vertical Mermaid layout"
@@ -2823,9 +2931,9 @@ assert_contains "$README" '### One source of truth, two native adapters' \
     "README explains the native-adapter architecture"
 assert_contains "$README" '`FORGE.template.md` | `.forge/instructions.md`' \
     "README maps canonical policy into downstream projects"
-assert_contains "$README" '`templates/adapters/CLAUDE.block.template.md` | Forge-owned block in `CLAUDE.md`' \
+assert_contains "$README" '`templates/adapters/CLAUDE.block.template.md` | `CLAUDE.md` | One-line `@AGENTS.md` compatibility bridge' \
     "README maps the Claude adapter source"
-assert_contains "$README" '`templates/adapters/AGENTS.block.template.md` | Forge-owned block in `AGENTS.md`' \
+assert_contains "$README" '`templates/adapters/AGENTS.block.template.md` | `AGENTS.md` | Canonical adapter loading Forge policy' \
     "README maps the Codex adapter source"
 assert_contains "$README" 'Do not copy shared policy between `CLAUDE.md` and `AGENTS.md`' \
     "README tells users not to maintain duplicated host instructions"

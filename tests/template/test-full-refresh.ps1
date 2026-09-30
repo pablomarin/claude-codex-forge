@@ -4,6 +4,7 @@ $setup = Join-Path $root "setup.ps1"
 $refresh = Join-Path $root "scripts\full-refresh.ps1"
 $recover = Join-Path $root "scripts\recover-full-refresh.ps1"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$expectedRelease = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-full-refresh-ps51-" + [Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($scratch) | Out-Null
 $passes = 0
@@ -41,6 +42,7 @@ function Write-V5State {
 
 function Record-PriorContinuityMigration {
     param([string]$Project)
+    $Project = (& git -C $Project rev-parse --show-toplevel).Trim()
     $python = Get-Command python3 -ErrorAction SilentlyContinue
     if (-not $python) { $python = Get-Command python -ErrorAction Stop }
     $merge = Join-Path $script:root "scripts\merge-settings.py"
@@ -121,7 +123,7 @@ function Assert-OneActiveForge {
     $manifest = Join-Path $Project ".forge\managed-files.tsv"
     $claudeRoot = [IO.File]::ReadAllText((Join-Path $Project "CLAUDE.md"))
     $codexRoot = [IO.File]::ReadAllText((Join-Path $Project "AGENTS.md"))
-    Assert-True ((Test-Path -LiteralPath $version -PathType Leaf) -and ([IO.File]::ReadAllText($version).Trim() -eq "6")) "$Label has the v6 stamp"
+    Assert-True ((Test-Path -LiteralPath $version -PathType Leaf) -and ([IO.File]::ReadAllText($version).Trim() -eq $script:expectedRelease)) "$Label has the exact Forge release stamp"
     Assert-True ((Test-Path -LiteralPath $instructions -PathType Leaf) -and (Test-Path -LiteralPath $manifest -PathType Leaf)) "$Label has one canonical Forge source and ownership manifest"
     Assert-True (([regex]::Matches($claudeRoot, '<!-- forge:begin v6 -->').Count -eq 1) -and ([regex]::Matches($codexRoot, '<!-- forge:begin v6 -->').Count -eq 1)) "$Label has one bounded adapter per native root"
     $commands = @(Get-ChildItem -LiteralPath (Join-Path $Project ".claude\commands") -Filter "*.md" -File -Recurse -ErrorAction SilentlyContinue)
@@ -187,7 +189,13 @@ function Invoke-IsolatedPowerShell {
         $previousPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
-            $output = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script @Arguments 2>&1 | Out-String)
+            $hostShell = Get-Command powershell.exe -ErrorAction SilentlyContinue
+            if (-not $hostShell) { $hostShell = Get-Command pwsh -ErrorAction Stop }
+            $hostArguments = @("-NoProfile")
+            if ($hostShell.Name -ieq "powershell.exe") {
+                $hostArguments += @("-ExecutionPolicy", "Bypass")
+            }
+            $output = (& $hostShell.Source @hostArguments -File $Script @Arguments *>&1 | Out-String)
             $code = $LASTEXITCODE
         } finally { $ErrorActionPreference = $previousPreference }
     } finally {
@@ -200,6 +208,26 @@ function Invoke-IsolatedPowerShell {
 }
 
 try {
+    $exactProject = New-Project "exact-project-version"
+    Write-Text (Join-Path $exactProject ".forge\version") "6`n"
+    $exactResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Force") -WorkingDirectory $exactProject `
+        -Environment @{ HOME = (Join-Path $scratch "exact-home"); USERPROFILE = (Join-Path $scratch "exact-home") }
+    Assert-True ($exactResult.Code -eq 0) "PowerShell major-only V6 refresh succeeds"
+    Assert-True ([IO.File]::ReadAllText((Join-Path $exactProject ".forge\version")).Trim() -eq $expectedRelease) `
+        "PowerShell refresh publishes the exact Forge release"
+    Assert-True ($exactResult.Output.Contains("FORGE_VERSION_CHANGE: 6 -> $expectedRelease")) `
+        "PowerShell refresh reports the exact version transition"
+
+    $unsupportedProject = New-Project "unsupported-project-version"
+    Write-Text (Join-Path $unsupportedProject ".forge\version") "7.0`n"
+    $unsupportedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $unsupportedProject ".forge\version")).Hash
+    $unsupportedResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Force") -WorkingDirectory $unsupportedProject `
+        -Environment @{ HOME = (Join-Path $scratch "unsupported-home"); USERPROFILE = (Join-Path $scratch "unsupported-home") }
+    Assert-True ($unsupportedResult.Code -ne 0 -and $unsupportedResult.Output.Contains("unsupported Forge layout major 7")) `
+        "PowerShell unsupported major blocks with a concrete diagnostic"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $unsupportedProject ".forge\version")).Hash -eq $unsupportedHash) `
+        "PowerShell unsupported version remains unchanged"
+
     $previewProject = New-Project "preview"
     Write-Text (Join-Path $previewProject ".claude\.forge-version") "5.61`n"
     Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/session-start.ps1" `
@@ -324,8 +352,9 @@ try {
 
     $managedCompat = New-Project "managed-cross-host-compat"
     $materializer = Join-Path $root "scripts\materialize-adapters.ps1"
+    $release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
     $managedFirst = Invoke-IsolatedPowerShell -Script $materializer -Arguments @(
-        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows"
+        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows", "-ReleaseVersion", $release
     ) -WorkingDirectory $managedCompat
     Assert-True ($managedFirst.Code -eq 0) "PowerShell managed compatibility fixture starts as v6"
     $managedLegacyHook = Join-Path $managedCompat ".codex\hooks\session-start.ps1"
@@ -348,7 +377,8 @@ try {
     }) -Force
     Write-Text $managedHooksPath (($managedHooks | ConvertTo-Json -Depth 30) + "`n")
     $managedSecond = Invoke-IsolatedPowerShell -Script $materializer -Arguments @(
-        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows"
+        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows",
+        "-ReleaseVersion", $release
     ) -WorkingDirectory $managedCompat
     $managedInstalled = Get-Content -LiteralPath $managedHooksPath -Raw | ConvertFrom-Json
     $managedProperties = @($managedInstalled.hooks.PSObject.Properties.Name)
@@ -371,7 +401,8 @@ try {
     }) -Force
     Write-Text $managedHooksPath (($managedInstalled | ConvertTo-Json -Depth 30) + "`n")
     $managedBlocked = Invoke-IsolatedPowerShell -Script $materializer -Arguments @(
-        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows"
+        "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows",
+        "-ReleaseVersion", $release
     ) -WorkingDirectory $managedCompat
     Assert-True ($managedBlocked.Code -ne 0 -and
         $managedBlocked.Output.Contains("referenced legacy cross-host hook is missing, modified, or ambiguous") -and
@@ -534,23 +565,27 @@ try {
     $project = New-Project "project"
     Write-AdversarialV5State $project
     $projectOperatorHome = Join-Path $scratch "unused-home"
-    Write-Text (Join-Path $projectOperatorHome ".forge\bin\forge-goal-authorize.ps1") "# operator helper`n"
-    Write-Text (Join-Path $projectOperatorHome ".forge\version") "6`n"
+    $projectOperatorSentinel = Join-Path $projectOperatorHome ".claude\personal.txt"
+    Write-Text $projectOperatorSentinel "OPERATOR_HOME_SENTINEL`n"
+    $projectOperatorSentinelHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $projectOperatorSentinel).Hash
     Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/README.md" `
         (Join-Path $project "docs\adr\README.md")
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
         -Environment @{ HOME = $projectOperatorHome; USERPROFILE = $projectOperatorHome }
     Assert-True ($first.Code -eq 0) "setup.ps1 -R translates a project under Windows PowerShell 5.1: $($first.Output.Trim())"
+    $projectPhysical = (Resolve-Path -LiteralPath $project).Path
     Assert-True ($first.Output.Contains("CODEX_HOOKS: MATERIALIZED primary worktree registration") -and
         -not $first.Output.Contains("CODEX_HOOKS: BLOCKED linked worktree") -and
-        $first.Output.Contains("RUNTIME_QUALIFICATION: final owner '$(Join-Path $root 'scripts\qualify-runtime-final.ps1')'; live project '$project'") -and
+        $first.Output.Contains("RUNTIME_QUALIFICATION: final owner '$(Join-Path $root 'scripts\qualify-runtime-final.ps1')'; live project '$projectPhysical'") -and
         -not $first.Output.Contains("VERIFY_RUNTIME:")) `
         "PowerShell transaction diagnostics name the final qualifier and live primary project"
-    Assert-True ($first.Output.Contains("GLOBAL_HARNESS: MATERIALIZED") -and
+    Assert-True (-not $first.Output.Contains("GLOBAL_HARNESS:") -and
         $first.Output.Contains("NORMAL_PROJECT_WORKFLOWS: READY") -and
-        $first.Output.Contains("NATIVE_GOAL_RUNTIME: PENDING qualification via qualify-goal-feasibility.ps1") -and
+        $first.Output.Contains("NATIVE_GOAL_RUNTIME: PENDING reason=live-qualification-not-run") -and
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $projectOperatorSentinel).Hash -eq $projectOperatorSentinelHash -and
+        -not (Test-Path -LiteralPath (Join-Path $projectOperatorHome ".forge")) -and
         -not $first.Output.Contains("GOAL_OVERLAY: BLOCKED")) `
-        "PowerShell transaction diagnostics separate global harness, project workflows, and native goal qualification"
+        "PowerShell transaction diagnostics are project-only and leave operator HOME unchanged"
     Assert-True ($first.Output.Contains("DELETED: docs/adr/README.md (exact released Forge seed)") -and
         -not (Test-Path -LiteralPath (Join-Path $project "docs\adr\README.md"))) `
         "PowerShell report distinguishes exact retired Forge seed deletion"
@@ -654,44 +689,51 @@ try {
     $tamperResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $tampered
     Assert-True ($tamperResult.Code -ne 0 -and $tamperResult.Output.Contains("continuity translation receipt")) "tampered PowerShell continuity receipt blocks before mutation"
 
-    $globalPreviewHome = Join-Path $scratch "global-preview"
-    Write-Text (Join-Path $globalPreviewHome ".claude\.forge-version") "5.61`n"
-    $globalPreviewBefore = Get-ProjectSnapshot $globalPreviewHome
-    $globalPreview = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R", "-DryRun") `
-        -Environment @{ HOME = $globalPreviewHome; USERPROFILE = $globalPreviewHome }
-    Assert-True ($globalPreview.Code -eq 0 -and $globalPreview.Output.Contains("UPGRADE: READY") -and ((Get-ProjectSnapshot $globalPreviewHome) -ceq $globalPreviewBefore)) "setup.ps1 routes global preview to the canonical Windows home without writes"
+    $retiredGlobal = New-Project "retired-global"
+    $retiredGlobalHome = Join-Path $scratch "retired-global-home"
+    $retiredGlobalSentinel = Join-Path $retiredGlobalHome ".claude\personal.txt"
+    Write-Text $retiredGlobalSentinel "HOME_SENTINEL`n"
+    $retiredGlobalBefore = Get-ProjectSnapshot $retiredGlobal
+    $retiredGlobalSentinelHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $retiredGlobalSentinel).Hash
+    $retiredGlobalResult = Invoke-IsolatedPowerShell -Script $setup `
+        -Arguments @("-Global", "-Force", "-DryRun") -WorkingDirectory $retiredGlobal `
+        -Environment @{ HOME = $retiredGlobalHome; USERPROFILE = $retiredGlobalHome }
+    Assert-True ($retiredGlobalResult.Code -ne 0 -and
+        $retiredGlobalResult.Output.Contains("global installation is retired") -and
+        $retiredGlobalResult.Output.Contains("-RetireGlobal") -and
+        ((Get-ProjectSnapshot $retiredGlobal) -ceq $retiredGlobalBefore) -and
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $retiredGlobalSentinel).Hash -eq $retiredGlobalSentinelHash -and
+        -not (Test-Path -LiteralPath (Join-Path $retiredGlobalHome ".forge"))) `
+        "retired PowerShell global full refresh is non-mutating and points to cleanup"
 
-    $globalAdvisoryHome = Join-Path $scratch "global-current-advisory"
-    Export-GitBlob "d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.template.md" `
-        (Join-Path $globalAdvisoryHome ".claude\CLAUDE.md")
-    Write-Text (Join-Path $globalAdvisoryHome ".claude\.forge-version") "6.0`n"
-    $globalAdvisoryBefore = Get-ProjectSnapshot $globalAdvisoryHome
-    $globalAdvisory = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Global", "-R", "-DryRun") `
-        -Environment @{ HOME = $globalAdvisoryHome; USERPROFILE = $globalAdvisoryHome }
-    Assert-True ($globalAdvisory.Code -ne 0 -and
-        $globalAdvisory.Output.Contains("ROOT_POLICY_AMBIGUOUS") -and
-        -not $globalAdvisory.Output.Contains("UNSUPPORTED_LEGACY_RELEASE") -and
-        ((Get-ProjectSnapshot $globalAdvisoryHome) -ceq $globalAdvisoryBefore)) `
-        "current project advisory is not treated as Windows global release authority"
-    $fixtureHome = Join-Path $scratch "home"
-    [IO.Directory]::CreateDirectory($fixtureHome) | Out-Null
-    $noncanonicalHome = Join-Path $fixtureHome "..\home"
-    $noncanonicalResult = Invoke-IsolatedPowerShell -Script $refresh -Arguments @("-Target", $noncanonicalHome, "-Scope", "global")
-    Assert-True ($noncanonicalResult.Code -ne 0) "noncanonical selected Windows home is rejected"
+    $projectOnly = New-Project "project-only-home-isolation"
+    $projectOnlyHome = Join-Path $scratch "project-only-home"
+    $projectOnlySentinel = Join-Path $projectOnlyHome ".claude\personal.txt"
+    Write-Text $projectOnlySentinel "HOME_SENTINEL`n"
+    $projectOnlySentinelHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $projectOnlySentinel).Hash
+    $projectOnlyResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Force") `
+        -WorkingDirectory $projectOnly `
+        -Environment @{ HOME = $projectOnlyHome; USERPROFILE = $projectOnlyHome }
+    Assert-True ($projectOnlyResult.Code -eq 0 -and
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $projectOnlySentinel).Hash -eq $projectOnlySentinelHash -and
+        -not (Test-Path -LiteralPath (Join-Path $projectOnlyHome ".forge"))) `
+        "PowerShell project full refresh never writes HOME"
 
-    $driveRoot = [IO.Path]::GetPathRoot($scratch)
-    $rootResult = Invoke-IsolatedPowerShell -Script $refresh -Arguments @("-Target", $driveRoot, "-Scope", "global")
-    Assert-True ($rootResult.Code -ne 0) "drive root is rejected as a global transaction home"
     $junctionOutside = Join-Path $scratch "junction-outside"
     $junction = Join-Path $scratch "junction-home"
     [IO.Directory]::CreateDirectory($junctionOutside) | Out-Null
-    & cmd.exe /c "mklink /J `"$junction`" `"$junctionOutside`"" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "failed to create test junction" }
-    $junctionResult = Invoke-IsolatedPowerShell -Script $refresh -Arguments @("-Target", $junction, "-Scope", "global")
+    if ($env:OS -eq "Windows_NT") {
+        & cmd.exe /c "mklink /J `"$junction`" `"$junctionOutside`"" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "failed to create test junction" }
+    } else {
+        New-Item -ItemType SymbolicLink -Path $junction -Target $junctionOutside | Out-Null
+    }
+    $junctionResult = Invoke-IsolatedPowerShell -Script $refresh `
+        -Arguments @("-Target", $junction, "-Scope", "project", "-ReleaseVersion", $expectedRelease)
     Assert-True ($junctionResult.Code -ne 0 -and $junctionResult.Output.Contains("reparse-point")) "real junction transaction root is rejected"
     [IO.Directory]::CreateDirectory((Join-Path $junctionOutside "nested-home")) | Out-Null
     $junctionAncestorResult = Invoke-IsolatedPowerShell -Script $refresh `
-        -Arguments @("-Target", (Join-Path $junction "nested-home"), "-Scope", "global")
+        -Arguments @("-Target", (Join-Path $junction "nested-home"), "-Scope", "project", "-ReleaseVersion", $expectedRelease)
     Assert-True ($junctionAncestorResult.Code -ne 0 -and $junctionAncestorResult.Output.Contains("reparse-point")) "real junction transaction-root ancestor is rejected"
 
     $destinationRace = New-Project "destination-race"

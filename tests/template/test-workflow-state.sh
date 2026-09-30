@@ -139,6 +139,33 @@ assert_dir_exists "$ACT_REPO/.forge/local/reviews/handoff-smoke" \
 assert_file_missing "$ACT_REPO/.forge/local/council" \
     "activate does not allocate a Council directory"
 
+start_test "activate preserves a prebound native-worktree base instead of re-resolving it"
+PREBOUND_PRIMARY=$(make_repo)
+PREBOUND_BASE=$(git -C "$PREBOUND_PRIMARY" rev-parse main)
+PREBOUND_WORKTREE="$PREBOUND_PRIMARY/native-worktree"
+git -C "$PREBOUND_PRIMARY" worktree add -q -b claude/native "$PREBOUND_WORKTREE" "$PREBOUND_BASE"
+mkdir -p "$PREBOUND_WORKTREE/.forge/local"
+cp "$REPO_ROOT/state.template.md" "$PREBOUND_WORKTREE/.forge/local/state.md"
+PREBOUND_COMMON=$(cd "$(git -C "$PREBOUND_WORKTREE" rev-parse --git-common-dir)" && pwd -P)
+awk -v root="$PREBOUND_WORKTREE" -v common="$PREBOUND_COMMON" -v sha="$PREBOUND_BASE" '
+    /^\| Worktree root /        { print "| Worktree root        | " root " |"; next }
+    /^\| Git common directory / { print "| Git common directory | " common " |"; next }
+    /^\| Workflow base ref /    { print "| Workflow base ref    | main |"; next }
+    /^\| Workflow base SHA /    { print "| Workflow base SHA    | " sha " |"; next }
+    { print }
+' "$PREBOUND_WORKTREE/.forge/local/state.md" > "$PREBOUND_WORKTREE/.forge/local/state.next"
+mv "$PREBOUND_WORKTREE/.forge/local/state.next" "$PREBOUND_WORKTREE/.forge/local/state.md"
+printf 'advanced\n' > "$PREBOUND_PRIMARY/advanced.txt"
+git -C "$PREBOUND_PRIMARY" add advanced.txt
+git -C "$PREBOUND_PRIMARY" commit -q -m advance-main
+run_sh "$PREBOUND_WORKTREE" activate --host claude --workflow new-feature --task native \
+    --base-ref main --phase requirements --next-step 'complete approved PRD'
+assert_equals "$?" "0" "moved ref does not replace the adopted immutable base"
+assert_contains "$PREBOUND_WORKTREE/.forge/local/state.md" "| Workflow base SHA    | $PREBOUND_BASE |" \
+    "activation retains the adopted base SHA"
+assert_equals "$(git -C "$PREBOUND_WORKTREE" rev-parse HEAD)" "$PREBOUND_BASE" \
+    "native activation leaves the checked-out adopted base unchanged"
+
 start_test "non-terminal identical activation preserves review progress"
 awk '{ if ($0 == "| Review iteration       | 0 |") print "| Review iteration       | 2 |"; else print }' \
     "$ACT_REPO/.forge/local/state.md" > "$ACT_REPO/.forge/local/state.next"
@@ -239,6 +266,21 @@ else
     assert_equals "$?" "0" "PowerShell activate exits zero"
     assert_contains "$PS_REPO/.forge/local/state.md" '| Command   | /quick-fix handoff-smoke |' \
         "PowerShell activate records the workflow"
+    cp "$REPO_ROOT/state.template.md" "$PREBOUND_WORKTREE/.forge/local/state.md"
+    awk -v root="$PREBOUND_WORKTREE" -v common="$PREBOUND_COMMON" -v sha="$PREBOUND_BASE" '
+        /^\| Worktree root /        { print "| Worktree root        | " root " |"; next }
+        /^\| Git common directory / { print "| Git common directory | " common " |"; next }
+        /^\| Workflow base ref /    { print "| Workflow base ref    | main |"; next }
+        /^\| Workflow base SHA /    { print "| Workflow base SHA    | " sha " |"; next }
+        { print }
+    ' "$PREBOUND_WORKTREE/.forge/local/state.md" > "$PREBOUND_WORKTREE/.forge/local/state.next"
+    mv "$PREBOUND_WORKTREE/.forge/local/state.next" "$PREBOUND_WORKTREE/.forge/local/state.md"
+    (cd "$PREBOUND_WORKTREE" && "$PWSH" -NoProfile -File "$HELPER_PS1" activate --host claude \
+        --workflow new-feature --task native --base-ref main --phase requirements \
+        --next-step 'complete approved PRD') > "$PREBOUND_WORKTREE/helper.out" 2> "$PREBOUND_WORKTREE/helper.err"
+    assert_equals "$?" "0" "PowerShell retains a moved prebound base"
+    assert_contains "$PREBOUND_WORKTREE/.forge/local/state.md" "| Workflow base SHA    | $PREBOUND_BASE |" \
+        "PowerShell activation retains the adopted base SHA"
 fi
 
 if [ "$GROUP" = "all" ]; then

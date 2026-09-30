@@ -88,7 +88,7 @@ $stateLocalDir = ".forge/local"
 if (($stateMd -replace '\\', '/') -match '/\.claude/local/state\.md$') { $stateLocalDir = ".claude/local" }
 
 # Stop is self-sufficient when the side channel is missing or older than state.
-if ($stateLocalDir -eq ".forge/local" -and (Test-Path -LiteralPath $stateMd -PathType Leaf)) {
+if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd) -and (Test-Path -LiteralPath $stateMd -PathType Leaf)) {
     $fp = Join-Path $stateLocalDir "forge-goal-last-fingerprint"
     $needsEvidence = -not (Test-Path -LiteralPath $fp -PathType Leaf)
     if (-not $needsEvidence) { $needsEvidence = (Get-Item -LiteralPath $stateMd).LastWriteTimeUtc -gt (Get-Item -LiteralPath $fp).LastWriteTimeUtc }
@@ -121,126 +121,33 @@ if ($stateLocalDir -eq ".forge/local" -and (Test-Path -LiteralPath $stateMd -Pat
     }
 }
 
-function Write-ForgeGoalTamper([string]$Reason) { [Console]::Error.WriteLine("FORGE_GOAL_AUTHORIZATION_TAMPERED: $Reason"); exit 2 }
-function Get-ForgeShaText([string]$Text) {
-    $sha=[Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace("-","").ToLowerInvariant() } finally { $sha.Dispose() }
-}
-function Get-ForgeGoalValue([string]$Path,[string]$Key) {
-    foreach($line in @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)){if($line -match ('^'+[regex]::Escape($Key)+'=(.*)$')){return $matches[1]}}
-    return ""
-}
-function New-ForgeNoClobber([string]$Path,[byte[]]$Bytes) {
-    try { $stream=[IO.File]::Open($Path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None); try{$stream.Write($Bytes,0,$Bytes.Length)}finally{$stream.Dispose()}; return $true } catch { return $false }
-}
-function Get-ForgeFileSha([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
-function Assert-ForgePhysicalDirectory([string]$Path,[string]$Prefix) {
-    if(-not (Test-Path -LiteralPath $Path -PathType Container)){Write-ForgeGoalTamper "missing ledger ancestor: $Path"}
-    $item=Get-Item -LiteralPath $Path -Force
-    if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){Write-ForgeGoalTamper "reparse-point ledger ancestor: $Path"}
-    $physical=(Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
-    $prefixPath=$Prefix.TrimEnd('\','/');$prefixWithSep=$prefixPath+[IO.Path]::DirectorySeparatorChar
-    if($physical -ne $prefixPath -and -not $physical.StartsWith($prefixWithSep,[StringComparison]::OrdinalIgnoreCase)){Write-ForgeGoalTamper "ledger ancestor escapes trusted root: $Path"}
-}
-function Test-ForgeBytesEqual([string]$Path,[byte[]]$Bytes) {
-    if(-not (Test-Path -LiteralPath $Path -PathType Leaf)){return $false}
-    if((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){return $false}
-    return [Convert]::ToBase64String([IO.File]::ReadAllBytes($Path)) -ceq [Convert]::ToBase64String($Bytes)
-}
-function Publish-ForgeNoClobber([string]$Path,[byte[]]$Bytes,[string]$Label) {
-    if(Test-Path -LiteralPath $Path){if(-not (Test-ForgeBytesEqual $Path $Bytes)){Write-ForgeGoalTamper "$Label already exists with different or invalid content"}}
-    elseif(-not (New-ForgeNoClobber $Path $Bytes)){if(-not (Test-ForgeBytesEqual $Path $Bytes)){Write-ForgeGoalTamper "$Label no-clobber publication failed"}}
-    if(-not (Test-ForgeBytesEqual $Path $Bytes)){Write-ForgeGoalTamper "$Label read verification failed"}
-    (Get-Item -LiteralPath $Path).IsReadOnly=$true
-}
-function Invoke-ForgeGoalChargeTurn {
-    if ($stateLocalDir -ne ".forge/local" -or -not (Test-Path -LiteralPath $stateMd -PathType Leaf)) { return }
-    $rawState=(Get-Content -LiteralPath $stateMd -Raw) -replace "`r",""; $lines=$rawState -split "`n"; $inside=$false; $goal=@{}
-    foreach($line in $lines){if($line -match '^## /goal session$'){$inside=$true;continue};if($inside -and $line -match '^## '){break};if($inside -and $line -match '^\|\s*([^|]+?)\s*\|\s*([^|]*?)\s*\|'){$goal[$matches[1].Trim().ToLowerInvariant()]=$matches[2].Trim()}}
-    $nonce=[string]$goal["nonce"]; if(-not $nonce -or $nonce -eq "<uuid-v4-lowercase>"){return}; $objective=[string]$goal["objective_hash"]
-    if($nonce -notmatch '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-4[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$' -or $objective -notmatch '^[A-Za-z0-9._-]+$'){Write-ForgeGoalTamper "invalid active nonce or objective hash";return}
-    $turnId=""; foreach($name in @("turn_id","hook_turn_id","assistant_message_id")){if($data.PSObject.Properties[$name] -and $data.$name){$turnId=[string]$data.$name;break}}
-    $session=if($data.session_id){[string]$data.session_id}else{"unknown"}; $host=if($data.host){[string]$data.host}elseif($data.engine){[string]$data.engine}else{"unknown"}
-    if(-not $turnId -and $data.last_assistant_message){$turnId=Get-ForgeShaText ($session+"`n"+[string]$data.last_assistant_message+"`n")}; if(-not $turnId){return}
-    $turnKey=if($turnId -match '^[A-Za-z0-9._-]+$'){$turnId}else{Get-ForgeShaText $turnId}; if($host -notin @("claude","codex")){$host="unknown"}
-    $root=git rev-parse --show-toplevel 2>$null; if($LASTEXITCODE -ne 0 -or -not $root){return}; $root=(Resolve-Path -LiteralPath $root).Path
-    $common=git rev-parse --git-common-dir 2>$null; if(-not [IO.Path]::IsPathRooted($common)){$common=Join-Path $root $common}; $common=(Resolve-Path -LiteralPath $common).Path
-    $projectId=Get-ForgeShaText ($root+"`n"+$common+"`n")
-    $homeRoot=if($env:USERPROFILE){$env:USERPROFILE}else{$HOME};if(-not $homeRoot){Write-ForgeGoalTamper "trusted home unavailable"}
-    $homePhysical=(Resolve-Path -LiteralPath $homeRoot -ErrorAction Stop).Path;$homeForge=Join-Path $homeRoot ".forge";$bin=Join-Path $homeForge "bin"
-    Assert-ForgePhysicalDirectory $homeForge $homePhysical;Assert-ForgePhysicalDirectory $bin (Resolve-Path -LiteralPath $homeForge).Path
-    $writer=Join-Path $bin "forge-goal-authorize.ps1";$writerSeal=Join-Path $bin "forge-goal-authorize.ps1.sha256"
-    if(-not (Test-Path -LiteralPath $writer -PathType Leaf) -or -not (Test-Path -LiteralPath $writerSeal -PathType Leaf) -or ((Get-Item $writer -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or ((Get-Item $writerSeal -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){Write-ForgeGoalTamper "sealed authorization writer unavailable or aliased"}
-    if(([IO.File]::ReadAllText($writerSeal)).Trim() -cne (Get-ForgeFileSha $writer)){Write-ForgeGoalTamper "authorization writer revision seal mismatch"}
-    $writerRevision="";foreach($writerLine in @(Get-Content -LiteralPath $writer)){if($writerLine -match '^\$WriterRevision = ''([^'']+)''$'){ $writerRevision=$matches[1];break }}
-    if($writerRevision -notmatch '^[0-9a-fA-F]{64}$'){Write-ForgeGoalTamper "installed writer identity is unsealed"}
-    $authRoot=Join-Path $homeForge "goal-authorizations";Assert-ForgePhysicalDirectory $authRoot (Resolve-Path -LiteralPath $homeForge).Path
-    $authRootPhysical=(Resolve-Path -LiteralPath $authRoot).Path
-    $rootPrefix=$root.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar;$commonPrefix=$common.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
-    if($authRootPhysical -eq $root -or $authRootPhysical.StartsWith($rootPrefix,[StringComparison]::OrdinalIgnoreCase) -or $authRootPhysical -eq $common -or $authRootPhysical.StartsWith($commonPrefix,[StringComparison]::OrdinalIgnoreCase)){Write-ForgeGoalTamper "authorization root overlaps project authority"}
-    $authProject=Join-Path $authRoot $projectId
-    Assert-ForgePhysicalDirectory $authProject $authRootPhysical
-    $auth=Join-Path $authProject "$nonce.auth"
-    if(-not (Test-Path -LiteralPath $auth -PathType Leaf) -or ((Get-Item -LiteralPath $auth -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){Write-ForgeGoalTamper "authorization record missing or aliased";return}
-    $ceiling=0; [void][int]::TryParse((Get-ForgeGoalValue $auth "ceiling"),[ref]$ceiling)
-    $valid=(Get-ForgeGoalValue $auth "format") -eq "forge-goal-authorization-v1" -and (Get-ForgeGoalValue $auth "project_root") -eq $root -and (Get-ForgeGoalValue $auth "git_common_dir") -eq $common -and (Get-ForgeGoalValue $auth "project_id") -eq $projectId -and (Get-ForgeGoalValue $auth "nonce") -eq $nonce -and (Get-ForgeGoalValue $auth "objective_hash") -eq $objective -and (Get-ForgeGoalValue $auth "approval_channel") -eq "physical-operator-action" -and -not [string]::IsNullOrEmpty((Get-ForgeGoalValue $auth "issue_id")) -and (Get-ForgeGoalValue $auth "writer_revision") -ceq $writerRevision -and $ceiling -gt 0
-    if(-not $valid){Write-ForgeGoalTamper "state/authorization binding mismatch";return}
-    $forge=Join-Path $root ".forge";$local=Join-Path $forge "local";Assert-ForgePhysicalDirectory $forge $root;Assert-ForgePhysicalDirectory $local $root
-    $goalCounters=Join-Path $local "goal-counters";$counter=Join-Path $goalCounters $nonce;$localTurns=Join-Path $counter "turns";$ledger=Join-Path $authProject "$nonce.ledger";$externalTurns=Join-Path $ledger "turns"
-    foreach($path in @($goalCounters,$counter,$localTurns)){if(Test-Path -LiteralPath $path){if((Get-Item $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){Write-ForgeGoalTamper "aliased turn ledger"}}else{New-Item -ItemType Directory -Path $path -ErrorAction Stop|Out-Null};Assert-ForgePhysicalDirectory $path $root}
-    foreach($path in @($ledger,$externalTurns)){if(Test-Path -LiteralPath $path){if((Get-Item $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){Write-ForgeGoalTamper "aliased protected ledger"}}else{New-Item -ItemType Directory -Path $path -ErrorAction Stop|Out-Null};Assert-ForgePhysicalDirectory $path $authRootPhysical}
-    $lock=Join-Path $counter ".goal-charge.lock";$lockBytes=[Text.Encoding]::UTF8.GetBytes("$PID`n");$locked=$false
-    for($attempt=0;$attempt -lt 200 -and -not $locked;$attempt++){if(New-ForgeNoClobber $lock $lockBytes){$locked=$true}else{if((Test-Path $lock) -and ((Get-Item $lock -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){Write-ForgeGoalTamper "aliased checkpoint lock"};Start-Sleep -Milliseconds 10}}
-    if(-not $locked){Write-ForgeGoalTamper "checkpoint publication lock unavailable"}
-    try {
-    $binding=Join-Path $ledger "authorization.binding"
-    $authSha=(Get-FileHash -LiteralPath $auth -Algorithm SHA256).Hash.ToLowerInvariant()
-    $bindingText="format=forge-goal-ledger-v1`nauthorization_sha256=$authSha`nnonce=$nonce`nobjective_hash=$objective`nceiling=$ceiling`nissue_id=$(Get-ForgeGoalValue $auth 'issue_id')`nwriter_revision=$(Get-ForgeGoalValue $auth 'writer_revision')`nproject_id=$projectId`n"
-    $bindingBytes=[Text.Encoding]::UTF8.GetBytes($bindingText)
-    if(-not (Test-Path -LiteralPath $binding -PathType Leaf)){
-        if(@(Get-ChildItem -LiteralPath $externalTurns -File -ErrorAction SilentlyContinue).Count -gt 0){Write-ForgeGoalTamper "authorization binding deleted after charging";return}
-        [void](New-ForgeNoClobber $binding $bindingBytes)
+# Native Goal accounting is repository-local and shared through Git's common
+# directory, so the same objective continues across linked worktrees and engines.
+if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd) -and (Test-Path -LiteralPath $stateMd -PathType Leaf)) {
+    $goalNonce = ""
+    $insideGoal = $false
+    foreach ($line in @(((Get-Content -LiteralPath $stateMd -Raw) -replace "`r", "") -split "`n")) {
+        if ($line -ceq "## /goal session") { $insideGoal = $true; continue }
+        if ($insideGoal -and $line.StartsWith("## ", [StringComparison]::Ordinal)) { $insideGoal = $false }
+        if ($insideGoal -and $line -match '^\|\s*nonce\s*\|\s*([^|]*?)\s*\|$') { $goalNonce = $Matches[1].Trim(); break }
     }
-    if(-not (Test-Path -LiteralPath $binding -PathType Leaf) -or ((Get-Item -LiteralPath $binding -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or [IO.File]::ReadAllText($binding) -cne $bindingText){Write-ForgeGoalTamper "authorization record changed after activation";return}
-    (Get-Item -LiteralPath $binding).IsReadOnly=$true
-    foreach($externalItem in @(Get-ChildItem -LiteralPath $externalTurns -Force -ErrorAction SilentlyContinue)){
-        if($externalItem.PSIsContainer -or ($externalItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $externalItem.Name -notmatch '^[A-Za-z0-9._-]+$'){Write-ForgeGoalTamper "invalid protected turn entry"}
-        $ep=$externalItem.FullName
-        if((Get-ForgeGoalValue $ep "format") -ne "forge-goal-turn-v1" -or (Get-ForgeGoalValue $ep "nonce") -ne $nonce -or (Get-ForgeGoalValue $ep "objective_hash") -ne $objective -or -not (Get-ForgeGoalValue $ep "turn_id")){Write-ForgeGoalTamper "malformed protected turn record"}
-        $lp=Join-Path $localTurns $externalItem.Name;$eb=[IO.File]::ReadAllBytes($ep)
-        if(Test-Path -LiteralPath $lp){if(-not (Test-ForgeBytesEqual $lp $eb)){Write-ForgeGoalTamper "turn record content diverged"}}
-        elseif(-not (New-ForgeNoClobber $lp $eb)){Write-ForgeGoalTamper "local turn recovery collision"}
+    if ($goalNonce -and $goalNonce -ne "<uuid-v4-lowercase>") {
+        $goalEventId = ""
+        foreach ($name in @("turn_id", "hook_turn_id", "assistant_message_id", "last_assistant_message")) {
+            if ($data.PSObject.Properties[$name] -and $data.$name) { $goalEventId = [string]$data.$name; break }
+        }
+        if (-not $goalEventId) { $goalNonce = "" }
     }
-    foreach($localItem in @(Get-ChildItem -LiteralPath $localTurns -Force -ErrorAction SilentlyContinue)){
-        $ep=Join-Path $externalTurns $localItem.Name
-        if($localItem.PSIsContainer -or ($localItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-Path -LiteralPath $ep -PathType Leaf) -or -not (Test-ForgeBytesEqual $ep ([IO.File]::ReadAllBytes($localItem.FullName)))){Write-ForgeGoalTamper "local and protected turn ledgers diverged"}
+    if ($goalNonce -and $goalNonce -ne "<uuid-v4-lowercase>") {
+        $goalLedger = Join-Path $hookDir "lib\goal-ledger.ps1"
+        if (-not (Test-Path -LiteralPath $goalLedger -PathType Leaf)) {
+            [Console]::Error.WriteLine("FORGE_GOAL_LEDGER_TAMPERED: repository-local goal ledger helper is missing")
+            exit 2
+        }
+        $jsonInput | & $goalLedger charge -Project (Get-Location).Path -State $stateMd -EventJson -
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
-    $count=@(Get-ChildItem -LiteralPath $externalTurns -File -Force).Count;$checkpoint=Join-Path $counter "checkpoint";$marker=Join-Path $counter "budget-exhausted.marker"
-    if((Test-Path -LiteralPath $checkpoint) -or (Test-Path -LiteralPath $marker)){
-        if(-not (Test-Path $checkpoint -PathType Leaf) -or -not (Test-Path $marker -PathType Leaf) -or ((Get-Item $checkpoint -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or ((Get-Item $marker -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){Write-ForgeGoalTamper "partial or aliased exhaustion publication"}
-        if((Get-ForgeGoalValue $checkpoint "format") -ne "forge-goal-checkpoint-v1" -or (Get-ForgeGoalValue $checkpoint "nonce") -ne $nonce -or (Get-ForgeGoalValue $checkpoint "objective_hash") -ne $objective -or (Get-ForgeGoalValue $checkpoint "turn_count") -ne [string]$count -or (Get-ForgeGoalValue $checkpoint "turn_ceiling") -ne [string]$ceiling -or $count -lt $ceiling){Write-ForgeGoalTamper "checkpoint authority mismatch"}
-        $first=@(Get-Content -LiteralPath $marker -TotalCount 1)[0]
-        if($first -ne "FORGE_GOAL_BUDGET_EXHAUSTED" -or (Get-ForgeGoalValue $marker "nonce") -ne $nonce -or (Get-ForgeGoalValue $marker "turn_count") -ne [string]$count -or (Get-ForgeGoalValue $marker "turn_ceiling") -ne [string]$ceiling -or (Get-ForgeGoalValue $marker "checkpoint") -ne $checkpoint -or (Get-ForgeGoalValue $marker "checkpoint_sha256") -ne (Get-ForgeFileSha $checkpoint)){Write-ForgeGoalTamper "marker/checkpoint binding mismatch"}
-        [Console]::Error.WriteLine("FORGE_GOAL_BUDGET_EXHAUSTED: checkpoint=$checkpoint");return
-    }
-    $phase="";$next="";foreach($line in $lines){if($line -match '^\|\s*Phase\s*\|\s*([^|]*?)\s*\|'){$phase=$matches[1].Trim()};if($line -match '^\|\s*Next step\s*\|\s*([^|]*?)\s*\|'){$next=$matches[1].Trim()}}
-    $stateSha=(Get-FileHash -LiteralPath $stateMd -Algorithm SHA256).Hash.ToLowerInvariant();$record="format=forge-goal-turn-v1`nnonce=$nonce`nobjective_hash=$objective`nturn_id=$turnId`nhost=$host`nsession_id=$session`nstate_sha256=$stateSha`nnext_step=$next`n";$bytes=[Text.Encoding]::UTF8.GetBytes($record)
-    $externalRecord=Join-Path $externalTurns $turnKey;$localRecord=Join-Path $localTurns $turnKey
-    if(-not (Test-Path -LiteralPath $externalRecord)){[void](New-ForgeNoClobber $externalRecord $bytes)}
-    if(-not (Test-Path -LiteralPath $externalRecord -PathType Leaf) -or ((Get-Item $externalRecord -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){Write-ForgeGoalTamper "protected turn publication incomplete"}
-    $externalBytes=[IO.File]::ReadAllBytes($externalRecord)
-    if(-not (Test-Path -LiteralPath $localRecord)){[void](New-ForgeNoClobber $localRecord $externalBytes)}
-    if(-not (Test-ForgeBytesEqual $localRecord $externalBytes)){Write-ForgeGoalTamper "turn mirror incomplete"}
-    $count=@(Get-ChildItem -LiteralPath $externalTurns -File -Force).Count
-    if($count -lt $ceiling){if((Test-Path $checkpoint) -or (Test-Path $marker)){Write-ForgeGoalTamper "premature checkpoint or marker exists"};return}
-    $checkpointText="format=forge-goal-checkpoint-v1`nnonce=$nonce`nobjective_hash=$objective`nturn_count=$count`nturn_ceiling=$ceiling`nturn_id=$turnId`nhost=$host`nworkflow_command=$($goal['workflow_command'])`nphase=$phase`nnext_step=$next`nstate_sha256=$stateSha`n";$checkpointBytes=[Text.Encoding]::UTF8.GetBytes($checkpointText)
-    Publish-ForgeNoClobber $checkpoint $checkpointBytes "checkpoint";$checkpointSha=Get-ForgeFileSha $checkpoint
-    $markerText="FORGE_GOAL_BUDGET_EXHAUSTED`npaused=true`nnext_step=$next`nnonce=$nonce`nturn_count=$count`nturn_ceiling=$ceiling`ncheckpoint=$checkpoint`ncheckpoint_sha256=$checkpointSha`n";$markerBytes=[Text.Encoding]::UTF8.GetBytes($markerText)
-    Publish-ForgeNoClobber $marker $markerBytes "marker"
-    if((Get-ForgeGoalValue $marker "checkpoint_sha256") -ne (Get-ForgeFileSha $checkpoint)){Write-ForgeGoalTamper "marker/checkpoint binding mismatch"}
-    [Console]::Error.WriteLine("FORGE_GOAL_BUDGET_EXHAUSTED: checkpoint=$checkpoint")
-    } finally { Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue }
 }
-Invoke-ForgeGoalChargeTurn
 
 # Note: build-evidence is no longer invoked inline. It runs as its own Stop
 # hook entry (registered in settings.template.json) BEFORE this one — so its
@@ -267,7 +174,7 @@ function Invoke-ForgeGoalStuckCheck {
 
     # Only proceed if /forge-goal is active: state.md must have a non-empty
     # nonce in the ## /goal session table.
-    if (-not (Test-Path $stateMd)) { return }
+    if ([string]::IsNullOrEmpty($stateMd) -or -not (Test-Path -LiteralPath $stateMd)) { return }
 
     $raw = Get-Content $stateMd -Raw -ErrorAction SilentlyContinue
     if ([string]::IsNullOrEmpty($raw)) { return }

@@ -3,7 +3,7 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet("Create", "Seed", "Fold")][string]$Action,
+    [Parameter(Mandatory = $true)][ValidateSet("Create", "Adopt", "Seed", "Fold")][string]$Action,
     [ValidateSet("feat", "fix")][string]$Kind,
     [string]$Name,
     [string]$Base,
@@ -222,6 +222,110 @@ function Set-ForgeWorktreeIdentity([string]$Target, [string]$BaseRef, [string]$B
     Publish-State (($lines -join "`n") + "`n") $statePath
 }
 
+function Set-NativeCanonicalBranch([string]$Target, [string]$Primary, [string]$Branch, [string]$Current, [string]$Resolved) {
+    & git -C $Primary update-ref "refs/heads/$Branch" $Resolved
+    if ($LASTEXITCODE -ne 0) { return $false }
+    & git -C $Target symbolic-ref HEAD "refs/heads/$Branch"
+    if ($LASTEXITCODE -ne 0) {
+        & git -C $Primary update-ref -d "refs/heads/$Branch" $Resolved 2>$null | Out-Null
+        return $false
+    }
+    if ($Current) {
+        & git -C $Primary update-ref -d "refs/heads/$Current" $Resolved
+        if ($LASTEXITCODE -ne 0) {
+            & git -C $Target symbolic-ref HEAD "refs/heads/$Current" 2>$null | Out-Null
+            & git -C $Primary update-ref -d "refs/heads/$Branch" $Resolved 2>$null | Out-Null
+            return $false
+        }
+    }
+    return $true
+}
+
+function Restore-NativeBranch([string]$Target, [string]$Primary, [string]$Branch, [string]$Current, [string]$Resolved) {
+    if ($Current) {
+        & git -C $Primary update-ref "refs/heads/$Current" $Resolved 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { return }
+        & git -C $Target symbolic-ref HEAD "refs/heads/$Current" 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { return }
+    } else {
+        & git -C $Target update-ref --no-deref HEAD $Resolved 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { return }
+    }
+    & git -C $Primary update-ref -d "refs/heads/$Branch" $Resolved 2>$null | Out-Null
+}
+
+function Adopt-ForgeWorktree([string]$Requested, [string]$WorkKind, [string]$WorkName, [string]$BaseRef) {
+    if (-not $Requested -or -not $WorkKind -or
+        $WorkName -notmatch '^[a-z0-9][a-z0-9._-]*$' -or $WorkName.EndsWith('..') -or
+        -not $BaseRef) {
+        Fail-ForgeLifecycle "ADOPT_BLOCKED: Worktree, Kind, lowercase Name, and Base are required"
+    }
+    $pair = Resolve-LinkedWorktree $Requested; $target = $pair[0]; $primary = $pair[1]
+    if ($target -eq $primary) { Fail-ForgeLifecycle "ADOPT_BLOCKED: target must be a linked worktree" }
+    $resolved = ((& git -C $primary rev-parse --verify "$BaseRef^{commit}" 2>$null) -join '').Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $resolved) { Fail-ForgeLifecycle "ADOPT_BLOCKED: base does not resolve to a commit: $BaseRef" }
+    $head = ((& git -C $target rev-parse --verify HEAD 2>$null) -join '').Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $head) { Fail-ForgeLifecycle "ADOPT_BLOCKED: native worktree has no HEAD" }
+    if ($head -ne $resolved) { Fail-ForgeLifecycle "ADOPT_BLOCKED: native worktree HEAD does not match base $BaseRef" }
+    $status = ((& git -C $target status --porcelain --untracked-files=all 2>$null) -join '').Trim()
+    if ($LASTEXITCODE -ne 0 -or $status) { Fail-ForgeLifecycle "ADOPT_BLOCKED: native worktree must be clean before branch normalization" }
+
+    $branch = "$WorkKind/$WorkName"
+    $current = ((& git -C $target branch --show-current 2>$null) -join '').Trim()
+    if ($current -in @('main', 'master', 'develop', 'development', 'production', 'release')) {
+        Fail-ForgeLifecycle "ADOPT_BLOCKED: protected branch cannot be renamed: $current"
+    }
+    if ($current -and $current -ne $branch) {
+        $upstream = ((& git -C $target for-each-ref '--format=%(upstream)' "refs/heads/$current" 2>$null) -join '').Trim()
+        $hasUpstream = [bool]$upstream
+        $published = ((& git -C $target branch -r --list "*/$current" 2>$null) -join '').Trim()
+        if ($hasUpstream -or $published) {
+            Fail-ForgeLifecycle "ADOPT_BLOCKED: shared or published branch cannot be renamed automatically: $current"
+        }
+    }
+    if ($current -ne $branch) {
+        $null = & git -C $primary show-ref --verify --quiet "refs/heads/$branch" 2>$null
+        if ($LASTEXITCODE -eq 0) { Fail-ForgeLifecycle "ADOPT_BLOCKED: branch already exists: $branch" }
+    }
+
+    $state = Join-Path $target '.forge\local\state.md'
+    $snapshot = Join-Path $target '.forge\local\.state-seed-snapshot.md'
+    $hasState = (Test-Path -LiteralPath $state) -or (Test-Reparse $state)
+    $hasSnapshot = (Test-Path -LiteralPath $snapshot) -or (Test-Reparse $snapshot)
+    if ($hasState -or $hasSnapshot) {
+        if (-not (Test-Path -LiteralPath $state -PathType Leaf) -or (Test-Reparse $state) -or
+            -not (Test-Path -LiteralPath $snapshot -PathType Leaf) -or (Test-Reparse $snapshot)) {
+            Fail-ForgeLifecycle "ADOPT_BLOCKED: state and seed snapshot must both be present or absent"
+        }
+        $stateText = [IO.File]::ReadAllText($state)
+        if ($stateText -notmatch '(?m)^\|\s*Command\s*\|\s*none\s*\|\s*$') {
+            Fail-ForgeLifecycle "ADOPT_BLOCKED: worktree workflow is already active"
+        }
+    }
+
+    $renamed = $false; $initiallyUnseeded = (-not $hasState -and -not $hasSnapshot)
+    try {
+        if ($current -ne $branch) {
+            if (-not (Set-NativeCanonicalBranch $target $primary $branch $current $resolved)) {
+                Fail-ForgeLifecycle "ADOPT_BLOCKED: cannot attach canonical branch $branch"
+            }
+            $renamed = $true
+        }
+        if ($initiallyUnseeded) { Seed-ForgeWorktree $target }
+        Set-ForgeWorktreeIdentity $target $BaseRef $resolved
+    } catch {
+        if ($initiallyUnseeded) {
+            Remove-Item -LiteralPath $state -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $snapshot -Force -ErrorAction SilentlyContinue
+        }
+        if ($renamed) {
+            Restore-NativeBranch $target $primary $branch $current $resolved
+        }
+        throw
+    }
+    Write-Output "ADOPT_OK: branch=$branch worktree=$target base=$resolved"
+}
+
 try {
     switch ($Action) {
         'Create' {
@@ -251,12 +355,14 @@ try {
             }
             Write-Output "CREATE_OK: branch=$branch worktree=$target base=$resolved"
         }
+        'Adopt' { Adopt-ForgeWorktree $Worktree $Kind $Name $Base }
         'Seed' { if (-not $Worktree) { Fail-ForgeLifecycle "SEED_BLOCKED: Worktree is required" }; Seed-ForgeWorktree $Worktree }
         'Fold' { if (-not $Worktree) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: Worktree is required" }; Fold-ForgeWorktree $Worktree }
     }
     exit 0
 } catch {
     if (-not $_.Exception.Message.StartsWith('CREATE_BLOCKED') -and
+        -not $_.Exception.Message.StartsWith('ADOPT_BLOCKED') -and
         -not $_.Exception.Message.StartsWith('SEED_BLOCKED') -and
         -not $_.Exception.Message.StartsWith('FOLD_')) {
         [Console]::Error.WriteLine($_.Exception.Message)

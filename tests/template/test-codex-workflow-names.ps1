@@ -2,13 +2,14 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('forge-short-names-' + [Guid]::NewGuid().ToString('N'))
 $utf8 = New-Object System.Text.UTF8Encoding($false)
+$release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
 $names = @('finish-branch', 'fix-bug', 'new-feature', 'prd-create', 'prd-discuss', 'quick-fix', 'review-pr-comments')
 function Assert-True([bool]$Value, [string]$Message) { if (-not $Value) { throw $Message }; Write-Host "PASS $Message" }
 function Install-Fixture {
     $previousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts/materialize-adapters.ps1') -RepoRoot $root -Target $temporary *> (Join-Path $temporary 'install.log')
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts/materialize-adapters.ps1') -RepoRoot $root -Target $temporary -ReleaseVersion $release *> (Join-Path $temporary 'install.log')
         return $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousPreference }
 }

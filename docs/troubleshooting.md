@@ -51,18 +51,25 @@ For a root-policy reconciliation, use this ownership model:
 
 ```text
 .forge/                     Forge-owned engineering policy
-docs/agent-context.md       Team-owned shared project knowledge
-CLAUDE.md                   Thin Claude discovery adapter + shared-context pointer
-AGENTS.md                   Thin Codex discovery adapter + shared-context pointer
+docs/agent-context.md       Optional team-owned shared project knowledge
+AGENTS.md                   Canonical project discovery adapter
+CLAUDE.md                   Compatibility bridge containing only @AGENTS.md
 ```
 
 Forge does not populate project knowledge automatically. Preserve useful architecture, commands,
-and domain facts in `docs/agent-context.md`, then put the following line outside the managed block
-in both root files:
+and domain facts in `docs/agent-context.md`. The installed `AGENTS.md` loads that optional file;
+`CLAUDE.md` imports `AGENTS.md` and contains no second policy copy.
 
-```markdown
-Read `docs/agent-context.md` completely before acting.
-```
+## Legacy global retirement is blocked
+
+Run the retirement command without apply first. `REMOVE` is safe Forge-owned content, `PRESERVE`
+is personal or unknown content left untouched, `ABSENT` needs no action, and `BLOCKED` requires a
+manual ownership or filesystem decision. Never delete a blocked path merely to make the preview
+green.
+
+Apply only with the exact lowercase `RETIRE_GLOBAL_DIGEST` from the latest preview. A
+`digest-mismatch` result means the inventory changed; preview again and review the new result.
+This cleanup is optional and has no effect on whether any project-local Forge installation works.
 
 ## Memory not persisting?
 

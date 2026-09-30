@@ -2,7 +2,42 @@
 
 All notable changes to claude-codex-forge.
 
-**Unreleased changes**
+## 6.3 — 2026-09-28
+
+**Forge is complete per repository.** Fresh installation and routine upgrade no longer require or
+create a machine-wide harness. Every installed project receives the complete shared policy,
+workflows, rules, agents, hooks, memory, and native Goal composition contract. `AGENTS.md` is the
+canonical project adapter, while `CLAUDE.md` is the one-line `@AGENTS.md` compatibility bridge.
+The exact `6.3` release is committed in `.forge/version`, so projects upgrade independently.
+
+**Native Goal accounting is repository-local and worktree-shared.** A native Goal request grants a
+20-turn autonomous tranche recorded under the repository's Git common directory. Duplicate turn
+identities are idempotent, checkpoints preserve continuity, and exhaustion stops honestly.
+PR creation, push, merge, deployment, and other external mutations still require their separate
+explicit authorizations. Deterministic and native qualification no longer depend on machine-global
+authorization or capture directories.
+
+**Legacy machine-wide Forge can be retired safely.** The new Bash and PowerShell retirement modes
+preview exact `REMOVE`, `PRESERVE`, `BLOCKED`, and `ABSENT` classifications, bind the result to a
+SHA-256 digest, and apply only when the confirmed inventory is unchanged. Personal, modified,
+unknown, linked, or structurally unsafe content is preserved or blocks instead of being guessed.
+
+**Host-native worktrees retain Forge branch names without weakening the sandbox.** Current Claude
+Desktop protects tracked `.claude/**` files from an agent-created checkout, while its native
+worktree option materializes them before the agent starts. The lifecycle helper now adopts that
+clean exact-base checkout, moves only Git refs without writing shared `.git/config`, seeds local
+state, and activates on `feat/<slug>` or `fix/<slug>`. Dirty, protected, shared, published,
+wrong-base, or already-active worktrees stop safely. Bash and PowerShell contracts cover creation,
+adoption, branch normalization, config immutability, seeding, and rejection of dirty work; a fresh
+Claude Desktop natural-language run proved one-pass adoption and activation before application code.
+
+**Closeout checks fail closed on real repository boundaries.** Activation preserves the immutable
+base bound during native-worktree adoption even if the named base ref moves before the workflow
+starts. Setup refuses nested repository directories, an existing JSON/TOML configuration cannot be
+partially installed without Python, and automated native Goal qualification no longer treats a
+zero-exit host process as proof of interactive Goal behavior. Exact candidate-bound operator
+evidence is required to mark an observed native Goal `READY`. Goal continuation also states the
+single authoritative ledger-to-state synchronization point explicitly.
 
 - Codex workflow skills now use short names such as `$fix-bug` and `$new-feature`,
   matching Claude's command vocabulary. All seven formerly prefixed entry points,

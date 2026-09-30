@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Target,
-    [Parameter(Mandatory = $false)][ValidateSet("project", "global")][string]$Scope = "project",
+    [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+$')][string]$ReleaseVersion,
+    [Parameter(Mandatory = $false)][ValidateSet("project")][string]$Scope = "project",
     [switch]$DryRun
 )
 
@@ -20,19 +21,6 @@ while ($null -ne $targetAncestor) {
     $targetAncestor = $targetAncestor.Parent
 }
 $targetRoot = (Resolve-Path -LiteralPath $Target).Path
-if ($Scope -eq "global") {
-    if (-not [IO.Path]::IsPathRooted($Target) -or $Target -cne $targetRoot) {
-        [Console]::Error.WriteLine("BLOCKED: selected global Forge home is not canonical: $Target")
-        exit 1
-    }
-    $trimmedTarget = $targetRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    $trimmedRoot = [IO.Path]::GetPathRoot($targetRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    if ($trimmedTarget -eq $trimmedRoot) {
-        [Console]::Error.WriteLine("BLOCKED: drive/UNC root cannot be selected as the global Forge home: $Target")
-        exit 1
-    }
-}
-
 # PowerShell 5.1 exposes symlinks, junctions, and other reparse points through
 # FileAttributes.ReparsePoint. Reject every host root before Python creates the
 # transaction guard; the shared engine repeats the no-follow checks per file.
@@ -56,7 +44,7 @@ if (-not $python) {
 
 $refreshArguments = @(
     "full-refresh", "--repo-root", $repoRoot, "--target", $targetRoot,
-    "--scope", $Scope, "--platform", "windows"
+    "--scope", $Scope, "--platform", "windows", "--release-version", $ReleaseVersion
 )
 if ($DryRun) { $refreshArguments += "--dry-run" }
 [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")

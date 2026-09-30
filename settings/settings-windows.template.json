@@ -31,15 +31,8 @@
       "Bash(mkfs:*)",
       "Bash(Remove-Item -Recurse -Force C:\\:*)",
       "Bash(Remove-Item -Recurse -Force $env:USERPROFILE:*)",
-      "Edit(~/.forge/bin/**)",
-      "Bash(*.forge/bin*:*)",
-      "Read(~/.forge/goal-captures/**)",
-      "Edit(~/.forge/goal-captures/**)",
-      "Edit(~/.forge/goal-authorizations/**)",
-      "Bash(*.forge/goal-captures*:*)",
-      "Bash(*.forge/goal-authorizations*:*)",
-      "Bash(*forge-goal-authorize*:*)",
-      "Bash(*forge-goal-capture*:*)"
+      "Edit(**\\.git\\forge-goals\\**)",
+      "Bash(*forge-goals*:*)"
     ],
     "ask": [
       "Bash(gh pr create:*)",
@@ -55,8 +48,8 @@
     "failIfUnavailable": true,
     "allowUnsandboxedCommands": false,
     "filesystem": {
-      "denyRead": ["~/.forge/goal-captures"],
-      "denyWrite": ["~/.forge/bin", "~/.forge/goal-captures", "~/.forge/goal-authorizations"]
+      "denyRead": [],
+      "denyWrite": []
     }
   },
   "hooks": {

@@ -29,6 +29,12 @@ param(
     [Alias("g")]
     [switch]$Global,
 
+    [switch]$RetireGlobal,
+
+    [switch]$Apply,
+
+    [string]$Confirm = "",
+
     [Alias("w")]
     [switch]$WithPlaywright,
 
@@ -37,6 +43,22 @@ param(
 
 # Script directory (where templates live)
 $ScriptDir = $PSScriptRoot
+
+function Get-ForgeVersion {
+    try {
+        $top = Select-String -Path (Join-Path $ScriptDir "docs/CHANGELOG.md") -Pattern '^##\s' -List 2>$null
+        if ($top -and $top.Line -match '^##\s+([0-9]+\.[0-9]+)') {
+            $v = $Matches[1]
+            if ($v -match '^\d+\.\d+$') { return $v }
+        }
+    } catch {}
+    return "unknown"
+}
+$ForgeVersion = Get-ForgeVersion
+if ($ForgeVersion -notmatch '^\d+\.\d+$') {
+    [Console]::Error.WriteLine('BLOCKED: published Forge release is unavailable')
+    exit 2
+}
 
 if ($Migrate) {
     [Console]::Error.WriteLine("ERROR: -Migrate was retired in Forge 6; no files changed. Run .\setup.ps1 -Force -DryRun.")
@@ -89,7 +111,7 @@ function Write-Color {
 function Show-Usage {
     Write-Host "Usage: .\setup.ps1 [OPTIONS]"
     Write-Host ""
-    Write-Host "Set up Claude Code configuration for a project or globally."
+    Write-Host "Set up Forge configuration in the current project."
     Write-Host ""
     Write-Host "Options:"
     Write-Host "  -h, -Help           Show this help message"
@@ -98,7 +120,10 @@ function Show-Usage {
     Write-Host "  -u, -Upgrade        Update an existing v6 install; preserve project configuration"
     Write-Host "  -f, -Force          Authoritative transactional full installation/reconciliation"
     Write-Host "      -DryRun         Preview -Force without writing target files"
-    Write-Host "  -g, -Global         Set up global memory system (~/.claude/)"
+    Write-Host "  -g, -Global         Retired; prints the project-only migration path"
+    Write-Host "      -RetireGlobal   Preview removal of a legacy global Forge harness"
+    Write-Host "      -Apply          Apply -RetireGlobal after a matching preview"
+    Write-Host "      -Confirm SHA    Confirm the exact retirement preview digest"
     Write-Host "  -w, -WithPlaywright Install Playwright framework templates (requires -Tech fullstack or typescript)"
     Write-Host ""
     Write-Host "Examples:"
@@ -108,8 +133,8 @@ function Show-Usage {
     Write-Host "  .\setup.ps1 -Upgrade                 # Update an existing v6 install"
     Write-Host "  .\setup.ps1 -Force -DryRun           # Preview full reconciliation"
     Write-Host "  .\setup.ps1 -Force                   # Execute full reconciliation"
-    Write-Host "  .\setup.ps1 -Global                  # Set up global memory (run once per machine)"
-    Write-Host "  .\setup.ps1 -Global -Upgrade         # Update an existing global v6 install"
+    Write-Host "  .\setup.ps1 -RetireGlobal            # Preview legacy machine-wide cleanup"
+    Write-Host "  .\setup.ps1 -RetireGlobal -Apply -Confirm SHA256"
     Write-Host "  .\setup.ps1 -Tech fullstack -WithPlaywright  # Install Playwright framework templates"
 }
 
@@ -119,27 +144,63 @@ if ($Help) {
     exit 0
 }
 
+if ($Global) {
+    [Console]::Error.WriteLine("ERROR: global installation is retired; Forge is installed per project. Use -RetireGlobal to preview cleanup of a legacy machine-wide harness.")
+    exit 1
+}
+if ($Apply -and -not $RetireGlobal) {
+    [Console]::Error.WriteLine("ERROR: -Apply is valid only with -RetireGlobal.")
+    exit 1
+}
+if ($Confirm -and -not $RetireGlobal) {
+    [Console]::Error.WriteLine("ERROR: -Confirm is valid only with -RetireGlobal.")
+    exit 1
+}
+if ($RetireGlobal) {
+    if ($Apply -and $Confirm -cnotmatch '^[0-9a-f]{64}$') {
+        [Console]::Error.WriteLine("ERROR: -RetireGlobal -Apply requires -Confirm with the preview's lowercase SHA-256.")
+        exit 1
+    }
+    if (-not $Apply -and $Confirm) {
+        [Console]::Error.WriteLine("ERROR: -Confirm requires -Apply.")
+        exit 1
+    }
+    $python = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
+    if (-not $python) {
+        [Console]::Error.WriteLine("BLOCKED: Python 3 is required only for legacy global retirement")
+        exit 2
+    }
+    $retireArgs = @((Join-Path $ScriptDir "scripts\retire-global.py"), "--repo-root", $ScriptDir, "--home", $HOME, "--platform", "windows")
+    if ($Apply) { $retireArgs += @("--apply", "--digest", $Confirm) }
+    & $python.Source @retireArgs
+    exit $LASTEXITCODE
+}
+
 if ($FullRefresh) {
     $refreshHelper = Join-Path (Join-Path $ScriptDir "scripts") "full-refresh.ps1"
     if (-not (Test-Path -LiteralPath $refreshHelper -PathType Leaf)) {
         [Console]::Error.WriteLine("BLOCKED: full-refresh helper not found: $refreshHelper")
         exit 1
     }
-    if ($Global) { $refreshArguments = @{ Target = $HOME; Scope = "global" } }
-    else { $refreshArguments = @{ Target = (Get-Location).Path; Scope = "project" } }
+    $refreshArguments = @{ Target = (Get-Location).Path; Scope = "project"; ReleaseVersion = $ForgeVersion }
     if ($DryRun) { $refreshArguments["DryRun"] = $true }
     & $refreshHelper @refreshArguments
-    if (-not $Global) {
-        if ($LASTEXITCODE -eq 0) { Write-NativeGoalCollisions (Get-Location).Path }
-    }
+    if ($LASTEXITCODE -eq 0) { Write-NativeGoalCollisions (Get-Location).Path }
     exit $LASTEXITCODE
 }
 
 function Test-V6PreflightNoLegacy {
-    param([string]$Root, [ValidateSet("project", "global")][string]$Scope)
+    param([string]$Root, [ValidateSet("project")][string]$Scope)
     $version = Join-Path $Root ".forge\version"
     if (Test-Path $version) {
-        if (((Get-Content -Raw $version).Trim()) -ne "6") { throw "BLOCKED: unsupported Forge layout version at $version" }
+        $installedVersion = ((Get-Content -Raw $version).Trim())
+        if ($installedVersion -eq "6") { return }
+        if ($installedVersion -match '^(\d+)\.(\d+)$') {
+            if ($Matches[1] -ne "6") { throw "BLOCKED: unsupported Forge layout major $($Matches[1])" }
+            return
+        }
+        throw "BLOCKED: malformed Forge release at $version"
         return
     }
     if ($Scope -eq "project" -and (Test-Path -LiteralPath (Join-Path $Root "CONTINUITY.md"))) {
@@ -158,31 +219,13 @@ function Test-V6PreflightNoLegacy {
             $mixed = Join-Path $Root ($destination -replace '/', '\')
             if (-not (Test-Path $mixed -PathType Leaf)) { continue }
             $text = [IO.File]::ReadAllText($mixed)
-            $recognizable = if ($Scope -eq "project") {
-                $text -match '(?m)^# CLAUDE\.md - |^## Project Overview$|^### Research Enforcement$|^## Detailed Rules$|\.claude/(commands|rules|hooks|skills|agents)/'
-            } else {
-                $text -match '(?m)^# Global Claude Code Instructions$|^## Ground Your Claims$|^## Memory Management$'
-            }
+            $recognizable = $text -match '(?m)^# CLAUDE\.md - |^## Project Overview$|^### Research Enforcement$|^## Detailed Rules$|\.claude/(commands|rules|hooks|skills|agents)/'
             if (-not $recognizable) { continue }
         } elseif ($destination.StartsWith(".claude/")) {
             $tail = $destination.Substring(8)
             $family = $tail.Split('/')[0]
             $familyPath = Join-Path $Root ".claude\$family"
             if (-not (Test-Path $familyPath)) { continue }
-            # Project setup may create only the advisory machine stamp before
-            # global setup runs. That lone regular file is not a v5 global
-            # harness and must not block the documented project-first path.
-            if ($Scope -eq "global" -and $destination -eq ".claude/.forge-version") {
-                $claudeRoot = Join-Path $Root ".claude"
-                $claudeRootItem = Get-Item -LiteralPath $claudeRoot -Force -ErrorAction SilentlyContinue
-                $members = @(Get-ChildItem -Force $claudeRoot)
-                $stamp = Join-Path $claudeRoot ".forge-version"
-                $stampItem = Get-Item -LiteralPath $stamp -Force -ErrorAction SilentlyContinue
-                if ($claudeRootItem -and -not ($claudeRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
-                    $members.Count -eq 1 -and $members[0].Name -eq ".forge-version" -and
-                    $stampItem -and -not $stampItem.PSIsContainer -and
-                    -not ($stampItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
-            }
             # A lone custom native goal is not a legacy Forge harness. Let
             # setup preserve it and report the explicit goal collision.
             if ($Scope -eq "project" -and $family -eq "commands") {
@@ -191,59 +234,16 @@ function Test-V6PreflightNoLegacy {
                 if ((Test-Path $goalPath -PathType Leaf) -and $members.Count -eq 1 -and $members[0].Name -eq "goal.md") { continue }
             }
         } else { continue }
-        if ($Upgrade) {
-            if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: & '$ScriptDir\setup.ps1' -Global -Force -DryRun" }
-            throw "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: & '$ScriptDir\setup.ps1' -Force -DryRun"
-        }
-        if ($Scope -eq "global") { throw "BLOCKED: legacy Forge harness detected. Preview first: & '$ScriptDir\setup.ps1' -Global -Force -DryRun" }
+        if ($Upgrade) { throw "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: & '$ScriptDir\setup.ps1' -Force -DryRun" }
         throw "BLOCKED: legacy Forge harness detected. Preview first: & '$ScriptDir\setup.ps1' -Force -DryRun"
     }
 }
 
 try {
-    if ($Global) { Test-V6PreflightNoLegacy $HOME "global" }
-    else { Test-V6PreflightNoLegacy (Get-Location).Path "project" }
+    Test-V6PreflightNoLegacy (Get-Location).Path "project"
 } catch {
     [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
-}
-
-# --- Forge version stamp (advisory drift detection) ------------------------
-# Mirror of setup.sh: read the Forge version from the top "## X.YY" line of its
-# CHANGELOG (single source of truth). Validated -> "unknown" on a non-match.
-function Get-ForgeVersion {
-    # Inspect ONLY the first "## " heading (mirror of setup.sh forge_version): if it
-    # isn't a bare X.Y version, fail open to "unknown" rather than scanning past a
-    # "## [Unreleased]" to a stale older release (Codex code-review P2-1).
-    try {
-        $top = Select-String -Path (Join-Path $ScriptDir "docs/CHANGELOG.md") -Pattern '^##\s' -List 2>$null
-        if ($top -and $top.Line -match '^##\s+([0-9]+\.[0-9]+)') {
-            $v = $Matches[1]
-            if ($v -match '^\d+\.\d+$') { return $v }
-        }
-    } catch {}
-    return "unknown"
-}
-$ForgeVersion = Get-ForgeVersion
-
-# Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
-# ordinary install / -Upgrade / -Global run. The authoritative -Force path and
-# retired -Migrate command exit above without reaching this code. Placed before
-# the -Global branch so both ordinary modes hit it. Fail-open via
-# try/catch + $HOME guard so a stamp-write failure never aborts setup.
-if ($HOME) {
-    try {
-        $machineClaude = Join-Path $HOME ".claude"
-        $machineStamp  = Join-Path $machineClaude ".forge-version"
-        if ($ForgeVersion -ne "unknown") {
-            if (-not (Test-Path $machineClaude)) { New-Item -ItemType Directory -Path $machineClaude -Force | Out-Null }
-            [System.IO.File]::WriteAllText($machineStamp, "$ForgeVersion`n")
-        } else {
-            # Unparseable version → clear any stale machine stamp (mirror of setup.sh;
-            # Codex code-review iter-3 P2) so session-start fails open.
-            Remove-Item $machineStamp -Force -ErrorAction SilentlyContinue
-        }
-    } catch {}
 }
 
 # Tracks template-copy failures so the project version pin is only written after a
@@ -311,123 +311,7 @@ function Copy-TemplateFile {
 }
 
 # ============================================================================
-# GLOBAL SETUP (-Global flag)
-# ============================================================================
-if ($Global) {
-    & (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target $HOME -Scope global -Platform windows
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "GLOBAL_HARNESS: MATERIALIZED"
-    Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
-    Write-Host "NATIVE_GOAL_RUNTIME: PENDING qualification via qualify-goal-feasibility.ps1"
-    Write-Host "Global Forge v6 materialized for Claude Code and Codex. No permanent main agent was selected."
-    exit 0
-
-    Write-Color "============================================" "Blue"
-    Write-Color "  Claude Code Global Setup" "Blue"
-    Write-Color "============================================" "Blue"
-    Write-Host ""
-    Write-Host "This sets up Claude Code's memory system for " -NoNewline
-    Write-Color "ALL" "Green"
-    Write-Host " your projects."
-    Write-Host "After this, Claude will remember learnings across sessions and projects."
-    Write-Host ""
-
-    # Create global directories
-    Write-Color "Step 1: Creating global directories..." "Yellow"
-
-    $globalDirs = @(
-        (Join-Path $HOME ".claude"),
-        (Join-Path (Join-Path $HOME ".claude") "hooks"),
-        (Join-Path (Join-Path $HOME ".claude") "rules")
-    )
-
-    foreach ($dir in $globalDirs) {
-        if (-not (Test-Path $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-            Write-Host "  " -NoNewline
-            Write-Color "+" "Green"
-            Write-Host " Created $dir"
-        }
-        else {
-            Write-Host "  " -NoNewline
-            Write-Color "o" "Blue"
-            Write-Host " $dir already exists"
-        }
-    }
-    Write-Host ""
-
-    # Copy global CLAUDE.md
-    Write-Color "Step 2: Installing global configuration..." "Yellow"
-    Write-Host "  These files tell Claude how to manage its memory."
-    # CLAUDE.md is USER CONTENT — NEVER overwrite it, even under -Force/-Upgrade
-    # (both set $Force). Copy-TemplateFile's skip-guard is $Force-gated, so a plain
-    # copy here clobbers a customized ~\.claude\CLAUDE.md on upgrade — the data-loss
-    # bug this guard fixes. Mirrors the project-mode guard. First install still creates it.
-    $globalClaudeMd = Join-Path (Join-Path $HOME ".claude") "CLAUDE.md"
-    if (Test-Path $globalClaudeMd) {
-        Write-Host "  " -NoNewline; Write-Color "o" "Blue"; Write-Host " ~\.claude\CLAUDE.md already exists (never overwritten - user content)"
-    } else {
-        Copy-TemplateFile (Join-Path $ScriptDir "GLOBAL-CLAUDE.template.md") $globalClaudeMd "~\.claude\CLAUDE.md (global instructions)"
-    }
-
-    # Copy global hooks
-    Copy-TemplateFile (Join-Path (Join-Path $ScriptDir "hooks") "pre-compact-memory.ps1") (Join-Path (Join-Path (Join-Path $HOME ".claude") "hooks") "pre-compact-memory.ps1") "~\.claude\hooks\pre-compact-memory.ps1"
-
-    # Merge global hooks into existing settings (preserves user's plugins, statusLine, etc.)
-    $globalSettings = Join-Path (Join-Path $HOME ".claude") "settings.json"
-    $templateSettings = Join-Path (Join-Path $ScriptDir "settings") "global-settings.template.json"
-    if (Test-Path $globalSettings) {
-        try {
-            $existing = Get-Content $globalSettings -Raw | ConvertFrom-Json
-            $template = Get-Content $templateSettings -Raw | ConvertFrom-Json
-            # Merge just the hooks key, preserving everything else
-            $existing | Add-Member -MemberType NoteProperty -Name "hooks" -Value $template.hooks -Force
-            $existing | ConvertTo-Json -Depth 10 | Set-Content $globalSettings -Encoding UTF8
-            Write-Host "  " -NoNewline
-            Write-Color "+" "Green"
-            Write-Host " Merged hooks into existing ~\.claude\settings.json (your settings preserved)"
-        }
-        catch {
-            Write-Host "  " -NoNewline
-            Write-Color "!" "Yellow"
-            Write-Host " Could not merge hooks. Manually add hooks from:"
-            Write-Host "    $templateSettings"
-        }
-    }
-    else {
-        Copy-TemplateFile $templateSettings $globalSettings "~\.claude\settings.json (global hooks)"
-    }
-
-    Write-Host ""
-    Write-Color "============================================" "Green"
-    Write-Color "  Global Setup Complete!" "Green"
-    Write-Color "============================================" "Green"
-    Write-Host ""
-    Write-Color "What was created:" "Yellow"
-    Write-Host ""
-    Write-Host "  ~\.claude\CLAUDE.md         Instructions that tell Claude how to use its memory"
-    Write-Host "  ~\.claude\settings.json     Hooks that auto-save learnings before context loss"
-    Write-Host "  ~\.claude\hooks\            Scripts that provide context to memory hooks"
-    Write-Host "  ~\.claude\rules\            Personal rules that apply to all your projects"
-    Write-Host ""
-    Write-Color "What this means:" "Yellow"
-    Write-Host ""
-    Write-Host "  Claude will now:"
-    Write-Host "  - Save bug fixes, patterns, and preferences to persistent memory"
-    Write-Host "  - Automatically preserve learnings before context compression"
-    Write-Host "  - Load its memory at the start of every session"
-    Write-Host "  - Get smarter over time as it accumulates project knowledge"
-    Write-Host ""
-    Write-Color "Now set up your first project:" "Yellow"
-    Write-Host ""
-    Write-Host "  cd C:\your\project"
-    Write-Host "  & $ScriptDir\setup.ps1 -p `"Project Name`""
-    Write-Host ""
-    exit 0
-}
-
-# ============================================================================
-# PROJECT SETUP (default, no -Global flag)
+# PROJECT SETUP
 # ============================================================================
 
 # Validate -WithPlaywright flag
@@ -467,10 +351,16 @@ if (-not $isGitRepo) {
     git init
 }
 
-# Check if global setup has been done
-$globalClaude = Join-Path (Join-Path $HOME ".claude") "CLAUDE.md"
-if (-not (Test-Path $globalClaude)) {
-    Write-Color "Warning: Global memory not set up. Run: & $ScriptDir\setup.ps1 -Global" "Yellow"
+$setupRepoRootText = (& git rev-parse --show-toplevel 2>$null | Select-Object -First 1)
+if (-not $setupRepoRootText) {
+    [Console]::Error.WriteLine("BLOCKED: cannot resolve the Git repository root.")
+    exit 1
+}
+$setupRepoRoot = (Resolve-Path -LiteralPath $setupRepoRootText.Trim()).Path
+$setupWorkingRoot = (Resolve-Path -LiteralPath (Get-Location).Path).Path
+if ($setupWorkingRoot -ne $setupRepoRoot) {
+    [Console]::Error.WriteLine("BLOCKED: run setup from the Git repository root: $setupRepoRoot")
+    exit 1
 }
 
 # ---------------------------------------------------------------------------
@@ -711,35 +601,19 @@ Write-Color "Copying configuration files..." "Yellow"
 $hadClaude = Test-Path "CLAUDE.md"
 $hadContinuity = Test-Path "CONTINUITY.md"
 
-# Forge version pin: capture PRE-state for the advisory + lie-prevention (mirror of setup.sh).
-#  - $prevForgeVersion: the project's existing pin (for the drift warning).
-#  - $hadForgeMachinery: did Forge machinery already exist? (.claude/settings.json sentinel)
-#    so a plain non-force rerun that SKIPS existing files never fabricates a pin.
 $prevForgeVersion = ""
 try {
-    if (Test-Path ".claude/.forge-version") {
-        $prevForgeVersion = ((Get-Content ".claude/.forge-version" -Raw -ErrorAction SilentlyContinue)).Trim()
+    if (Test-Path ".forge/version") {
+        $prevForgeVersion = ((Get-Content ".forge/version" -Raw -ErrorAction SilentlyContinue)).Trim()
     }
 } catch {}
-$hadForgeMachinery = Test-Path ".claude/settings.json"
 
-# Setup-time advisory warning: -Upgrade rewrites machinery + advances the pin,
-# so warn if it differs. Numeric [version] compare (NOT string — 5.50 vs 5.9). Advisory.
-$forgeDriftWarn = ""
-if ($ForgeVersion -ne "unknown" -and ($prevForgeVersion -match '^\d+\.\d+$') -and $prevForgeVersion -ne $ForgeVersion -and ($Upgrade -or $Force)) {
-    $isDowngrade = $false
-    try { $isDowngrade = ([version]("$ForgeVersion.0") -lt [version]("$prevForgeVersion.0")) } catch {}
-    if ($isDowngrade) {
-        $forgeDriftWarn = "i This project's .claude/ was pinned to Forge $prevForgeVersion; you're running $ForgeVersion. This run will DOWNGRADE the project's .claude/ to $ForgeVersion. That's a shared change - other clones of this repo will pull it."
-    } else {
-        $forgeDriftWarn = "i This project's .claude/ was pinned to Forge $prevForgeVersion; you're running $ForgeVersion. This run will UPGRADE the project's .claude/ to $ForgeVersion. That's a shared change - other clones of this repo will pull it."
-    }
-    Write-Color $forgeDriftWarn "Yellow"
-}
-
-& (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows
+& (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows -ReleaseVersion $ForgeVersion
 Write-NativeGoalCollisions (Get-Location).Path
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($prevForgeVersion -and $prevForgeVersion -ne $ForgeVersion) {
+    Write-Host "FORGE_VERSION_CHANGE: $prevForgeVersion -> $ForgeVersion"
+}
 
 # Retain the v5 implementation text for Task 3 ownership recognition, but do
 # not execute it beside the v6 materialized layout.
@@ -1202,33 +1076,12 @@ else {
 # The v6 marker materializer owns only the bounded Forge block. Text outside
 # that block is user-owned bytes and is never subject to project-name rewriting.
 
-# Forge version pin (project) — WRITE LATE, after all .claude/ copies succeeded, and
-# only when machinery was actually (re)written this run (-Upgrade, or no
-# machinery existed before). Never advance the pin on a skipped non-force rerun.
-if ((Test-Path ".claude/settings.json") -and ($script:ForgeCopyErrors -eq 0) -and ($Force -or $Upgrade -or (-not $hadForgeMachinery))) {
-    # Machinery (re)written this run AND every copy succeeded ($script:ForgeCopyErrors
-    # -eq 0 — the PowerShell analog of setup.sh's `set -e` abort; the settings.json
-    # post-condition is a second belt) — so the pin reflects what's actually on disk.
-    if ($ForgeVersion -ne "unknown") {
-        try { [System.IO.File]::WriteAllText((Join-Path (Get-Location) ".claude/.forge-version"), "$ForgeVersion`n") } catch {}
-    } else {
-        # Version unparseable but machinery WAS rewritten → clear the stale pin so it
-        # can't lie (mirror of setup.sh; Codex code-review iter-2 P2).
-        Remove-Item (Join-Path (Get-Location) ".claude/.forge-version") -Force -ErrorAction SilentlyContinue
-    }
-}
-
 Write-Host ""
 if ($Upgrade) {
     Write-Color "============================================" "Green"
     Write-Color "  Upgrade Complete!" "Green"
     Write-Color "============================================" "Green"
     Write-Host ""
-    # Re-surface the version-drift advisory so it isn't lost in scrollback.
-    if ($forgeDriftWarn) {
-        Write-Color $forgeDriftWarn "Yellow"
-        Write-Host ""
-    }
     Write-Color "What was updated:" "Yellow"
     Write-Host ""
     Write-Host "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and state template"
@@ -1345,22 +1198,6 @@ if ($Upgrade) {
     Write-Host ""
     Write-Host "  - frontend-design          (optional Claude Code UI integration)"
     Write-Host ""
-    # Check if global setup needed
-    $globalClaude = Join-Path (Join-Path $HOME ".claude") "CLAUDE.md"
-    if (-not (Test-Path $globalClaude)) {
-        Write-Color "+--------------------------------------------------------------+" "Red"
-        Write-Color "|  WARNING: Global Forge policy is not set up yet!              |" "Red"
-        Write-Color "|                                                               |" "Red"
-        Write-Color "|  Without global setup:                                        |" "Red"
-        Write-Color "|  - Shared global grounding is not installed for either host   |" "Red"
-        Write-Color "|  - Trusted native-goal authorization helpers are unavailable  |" "Red"
-        Write-Color "|                                                               |" "Red"
-        Write-Host  "|  Run: " -NoNewline -ForegroundColor Red
-        Write-Host  "& $ScriptDir\setup.ps1 -Global" -NoNewline -ForegroundColor Green
-        Write-Color "                          |" "Red"
-        Write-Color "+--------------------------------------------------------------+" "Red"
-        Write-Host ""
-    }
     Write-Color "Next steps:" "Yellow"
     Write-Host ""
     Write-Host "1. " -NoNewline

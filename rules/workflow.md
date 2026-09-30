@@ -86,7 +86,12 @@ is existing isolation: never create another worktree for a same-directory handof
 isolated workflows, the ordinary `worktree-lifecycle` shell helper remains the portable creation
 path where the host permits it. Native creation or adoption is an option only when the actual host
 exposes that capability and the intended base and installed Forge harness are verified in the
-resulting worktree before activation. Never silently substitute a host's default base.
+resulting worktree before activation. Before activating in a fresh host-native worktree, run
+`worktree-lifecycle.sh adopt --kind <feat|fix> --name <slug> --base <ref-or-sha> --worktree <path>`
+(or the PowerShell twin). The helper requires an exact-base, clean, unpublished linked worktree,
+then seeds Forge state and replaces a host-generated branch name such as `claude/...` or `codex/...`
+with the required `feat/...` or `fix/...` name. It never renames a protected, dirty, shared, or
+published branch. Never silently substitute a host's default base.
 
 If worktree creation, adoption, seeding, or harness setup is denied, stop before task work and
 report the exact target, missing prerequisite, and next supported setup action. Do not fabricate activation.

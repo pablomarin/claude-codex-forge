@@ -1,7 +1,6 @@
 # Forge v6 managed layout. Tab-separated; blank lines and lines beginning with # are ignored.
 # kind	source	destination	platform	host	scope	ownership	canonical-path	canonical-revision
 canonical	FORGE.template.md	.forge/instructions.md	all	shared	project	forge-canonical	.forge/instructions.md	v6
-canonical	GLOBAL-FORGE.template.md	.forge/instructions.md	all	shared	global	forge-canonical	.forge/instructions.md	v6
 canonical	state.template.md	.forge/state.template.md	all	shared	project	forge-canonical	.forge/state.template.md	v6
 canonical	manifests/managed-v6.tsv	.forge/managed-files.tsv	all	shared	project	forge-canonical	.forge/managed-files.tsv	v6
 canonical	manifests/legacy-v5.tsv	.forge/migrations/legacy-v5.tsv	all	shared	project	forge-canonical	.forge/migrations/legacy-v5.tsv	v6
@@ -82,6 +81,8 @@ canonical	hooks/lib/review-breaker.ps1	.forge/hooks/lib/review-breaker.ps1	all	s
 canonical	hooks/lib/review-breaker.sh	.forge/hooks/lib/review-breaker.sh	all	shared	project	forge-canonical	.forge/hooks/lib/review-breaker.sh	v6
 canonical	hooks/lib/state-path.ps1	.forge/hooks/lib/state-path.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/state-path.ps1	v6
 canonical	hooks/lib/state-path.sh	.forge/hooks/lib/state-path.sh	all	shared	project	forge-canonical	.forge/hooks/lib/state-path.sh	v6
+canonical	hooks/lib/goal-ledger.ps1	.forge/hooks/lib/goal-ledger.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/goal-ledger.ps1	v6
+canonical	hooks/lib/goal-ledger.sh	.forge/hooks/lib/goal-ledger.sh	all	shared	project	forge-canonical	.forge/hooks/lib/goal-ledger.sh	v6
 canonical	hooks/lib/workflow-state.ps1	.forge/hooks/lib/workflow-state.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/workflow-state.ps1	v6
 canonical	hooks/lib/workflow-state.sh	.forge/hooks/lib/workflow-state.sh	all	shared	project	forge-canonical	.forge/hooks/lib/workflow-state.sh	v6
 canonical	hooks/lib/worktree-lifecycle.ps1	.forge/hooks/lib/worktree-lifecycle.ps1	all	shared	project	forge-canonical	.forge/hooks/lib/worktree-lifecycle.ps1	v6
@@ -119,12 +120,6 @@ canonical	scripts/qualify-goal-feasibility.sh	.forge/bin/qualify-goal-feasibilit
 canonical	scripts/qualify-goal-feasibility.ps1	.forge/bin/qualify-goal-feasibility.ps1	all	shared	project	forge-canonical	.forge/bin/qualify-goal-feasibility.ps1	v6
 canonical	scripts/qualify-skill-pressure.sh	.forge/bin/qualify-skill-pressure	all	shared	project	forge-canonical	.forge/bin/qualify-skill-pressure	v6
 canonical	scripts/qualify-skill-pressure.ps1	.forge/bin/qualify-skill-pressure.ps1	all	shared	project	forge-canonical	.forge/bin/qualify-skill-pressure.ps1	v6
-canonical	scripts/forge-goal-authorize.sh	.forge/bin/forge-goal-authorize	all	shared	global	forge-canonical	.forge/bin/forge-goal-authorize	v6
-canonical	scripts/forge-goal-authorize.ps1	.forge/bin/forge-goal-authorize.ps1	all	shared	global	forge-canonical	.forge/bin/forge-goal-authorize.ps1	v6
-canonical	scripts/forge-goal-capture.sh	.forge/bin/forge-goal-capture	all	shared	global	forge-canonical	.forge/bin/forge-goal-capture	v6
-canonical	scripts/forge-goal-capture.ps1	.forge/bin/forge-goal-capture.ps1	all	shared	global	forge-canonical	.forge/bin/forge-goal-capture.ps1	v6
-protected	-	.forge/bin/codex.identity	all	codex	global	operator-setup	-	dynamic
-protected	-	.forge/bin/codex.identity.sha256	all	codex	global	operator-seal	.forge/bin/codex.identity	dynamic
 adapter	templates/adapters/claude-command.template.md	.claude/commands/opinion.md	all	claude	project	forge-generated	.forge/workflows/opinion.md	v6
 adapter	templates/adapters/codex-skill.template.md	.agents/skills/opinion/SKILL.md	all	codex	project	forge-generated	.forge/workflows/opinion.md	v6
 adapter	templates/adapters/claude-command.template.md	.claude/commands/finish-branch.md	all	claude	project	forge-generated	.forge/workflows/finish-branch.md	v6
@@ -175,10 +170,6 @@ merge	settings/codex-hooks.template.json	.codex/hooks.json	all	codex	project	for
 merge	mcp.template.json	.mcp.json	all	shared	project	forge-managed-entries	-	v6
 marker	templates/adapters/CLAUDE.block.template.md	CLAUDE.md	all	claude	project	forge-marker	.forge/instructions.md	v6
 marker	templates/adapters/AGENTS.block.template.md	AGENTS.md	all	codex	project	forge-marker	.forge/instructions.md	v6
-marker	GLOBAL-CLAUDE.template.md	.claude/CLAUDE.md	all	claude	global	forge-marker	.forge/instructions.md	v6
-marker	GLOBAL-AGENTS.template.md	.codex/AGENTS.md	all	codex	global	forge-marker	.forge/instructions.md	v6
-merge	settings/global-settings.template.json	.claude/settings.json	all	claude	global	forge-managed-entries	-	v6
-merge	settings/codex-config.template.toml	.codex/config.toml	all	codex	global	forge-managed-entries	-	v6
 protected	-	.forge/local/state.md	all	shared	project	developer-local	-	v6
 protected	-	.forge/local/memory	all	shared	project	developer-local	-	v6
 protected	-	.forge/memory	all	shared	project	project-owned	-	v6

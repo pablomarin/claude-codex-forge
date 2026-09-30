@@ -173,34 +173,20 @@ assert_file_missing "$S1H/.forge/version" "blocked hook preview does not stamp v
 assert_equals "$(shasum -a 256 "$S1H/.git/hooks/post-checkout" | awk '{print $1}')" "$hook_before" \
     "full refresh never rewrites the user-owned Git hook"
 
-S1G=$(scratch_dir full-refresh-preview-global)
+S1G=$(scratch_dir full-refresh-retired-global)
 make_git_repo "$S1G"
 mkdir -p "$S1G/.fakehome/.claude"
-printf '5.61\n' > "$S1G/.fakehome/.claude/.forge-version"
-global_log="${S1G}.preview.log"
-before_global=$(snapshot_project "$S1G/.fakehome")
-run_refresh "$S1G" "$global_log" -g -F --dry-run
-assert_equals "$?" "0" "global exact v5 preview is ready"
-after_global=$(snapshot_project "$S1G/.fakehome")
-assert_equals "$after_global" "$before_global" "global preview leaves HOME byte-identical"
-assert_file_missing "$S1G/.fakehome/.forge/version" "global preview writes no v6 stamp"
-
-S1GA=$(scratch_dir full-refresh-preview-global-current-advisory)
-mkdir -p "$S1GA/home/.claude" "$S1GA/invoker"
-git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.template.md \
-    > "$S1GA/home/.claude/CLAUDE.md"
-printf '6.0\n' > "$S1GA/home/.claude/.forge-version"
-S1GA_HOME=$(cd "$S1GA/home" && pwd -P)
-before_advisory=$(snapshot_project "$S1GA/home")
-(cd "$S1GA/invoker" && HOME="$S1GA_HOME" "$REPO_ROOT/setup.sh" --global -f --dry-run) \
-    > "$S1GA/preview.log" 2>&1
-assert_equals "$?" "1" "retired v5 global references still block with a current advisory stamp"
-assert_contains "$S1GA/preview.log" "ROOT_POLICY_AMBIGUOUS" \
-    "actual modified global policy remains an ownership blocker"
-assert_not_contains "$S1GA/preview.log" "UNSUPPORTED_LEGACY_RELEASE" \
-    "current project advisory is not treated as global release authority"
-assert_equals "$(snapshot_project "$S1GA/home")" "$before_advisory" \
-    "blocked current-advisory preview leaves HOME byte-identical"
+printf 'HOME_SENTINEL\n' > "$S1G/.fakehome/.claude/personal.txt"
+global_log="${S1G}.retired-global.log"
+before_global=$(snapshot_project "$S1G")
+run_refresh "$S1G" "$global_log" --global -f --dry-run
+assert_equals "$?" "1" "global full refresh is retired"
+assert_equals "$(snapshot_project "$S1G")" "$before_global" \
+    "retired global full refresh leaves project and HOME byte-identical"
+assert_contains "$global_log" "global installation is retired" \
+    "retired global full refresh explains the project-only boundary"
+assert_contains "$global_log" "--retire-global" \
+    "retired global full refresh points to the explicit cleanup path"
 
 run_refresh "$S1P" "${S1P}.dry-run-only.log" --dry-run
 assert_equals "$?" "1" "dry-run without full refresh is rejected"
@@ -235,6 +221,32 @@ forge_state_path "$S2" read > "$S2/empty-version-out" 2> "$S2/empty-version-err"
 assert_equals "$?" "1" "empty Forge version never downgrades to legacy state"
 assert_contains "$S2/empty-version-err" "invalid Forge v6 state" \
     "empty Forge version is treated as an invalid migrated surface"
+
+EXPECTED_RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' \
+    "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
+start_test "exact project release is published last and legacy V6 is adopted"
+V=$(scratch_dir exact-project-version)
+git -C "$V" init -q
+mkdir -p "$V/.forge"
+printf '6\n' > "$V/.forge/version"
+(cd "$V" && HOME="$V/home" "$REPO_ROOT/setup.sh" -f) > "$V/apply.log" 2>&1
+assert_equals "$?" "0" "unversioned V6 refresh succeeds"
+assert_equals "$(tr -d '\r\n' < "$V/.forge/version")" "$EXPECTED_RELEASE" \
+    "unversioned V6 becomes the exact release"
+assert_contains "$V/apply.log" "FORGE_VERSION_CHANGE: 6 -> $EXPECTED_RELEASE" \
+    "refresh reports the exact version transition"
+
+start_test "unsupported Forge layout major is rejected without mutation"
+BAD=$(scratch_dir unsupported-forge-major)
+git -C "$BAD" init -q
+mkdir -p "$BAD/.forge"
+printf '7.0\n' > "$BAD/.forge/version"
+before=$(hash_file "$BAD/.forge/version")
+(cd "$BAD" && HOME="$BAD/home" "$REPO_ROOT/setup.sh" -f) > "$BAD/apply.log" 2>&1
+assert_equals "$?" "1" "unsupported major blocks"
+assert_hash_equals "$BAD/.forge/version" "$before" "unsupported version remains unchanged"
+assert_contains "$BAD/apply.log" "BLOCKED: unsupported Forge layout major 7" \
+    "unsupported major is diagnosed"
 
 S2L=$(scratch_dir state-path-symlink)
 mkdir -p "$S2L/outside/local"
@@ -283,10 +295,6 @@ git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:commands/new-f
 mkdir -p "$S4/docs/adr"
 git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/README.md \
     > "$S4/docs/adr/README.md"
-mkdir -p "$S4/.fakehome/.forge/bin"
-: > "$S4/.fakehome/.forge/bin/forge-goal-authorize"
-chmod +x "$S4/.fakehome/.forge/bin/forge-goal-authorize"
-printf '6\n' > "$S4/.fakehome/.forge/version"
 write_active_v5_state "$S4" "V5_CHECKPOINT_TOKEN"
 printf 'SEED_SNAPSHOT_BYTES\n' > "$S4/.claude/local/.state-seed-snapshot.md"
 printf 'CUSTOM_EXTENSION_BYTES\n' > "$S4/.claude/developer-extension.txt"
@@ -322,11 +330,9 @@ assert_contains "$S4/refresh.log" "RUNTIME_QUALIFICATION: final owner '$REPO_ROO
     "runtime qualification names the final owner and live project rather than transaction staging"
 assert_not_contains "$S4/refresh.log" "VERIFY_RUNTIME:" \
     "runtime qualification does not advertise the non-certifying verifier"
-assert_contains "$S4/refresh.log" "GLOBAL_HARNESS: MATERIALIZED" \
-    "transaction diagnostics inspect the operator home"
 assert_contains "$S4/refresh.log" "NORMAL_PROJECT_WORKFLOWS: READY" \
     "optional native goal qualification does not block ordinary workflows"
-assert_contains "$S4/refresh.log" "NATIVE_GOAL_RUNTIME: PENDING qualification via scripts/qualify-goal-feasibility.sh" \
+assert_contains "$S4/refresh.log" "NATIVE_GOAL_RUNTIME: PENDING reason=live-qualification-not-run" \
     "transaction diagnostics distinguish pending native goal qualification"
 assert_not_contains "$S4/refresh.log" "GOAL_OVERLAY: BLOCKED" \
     "transaction diagnostics do not report a blanket project block"
@@ -690,17 +696,6 @@ assert_equals "$?" "0" "second full refresh succeeds"
 assert_hash_equals "$S7/.forge/managed-files.tsv" "$first_manifest" "managed manifest is idempotent"
 assert_contains "$S7/.fakehome/.forge/sentinel" "HOME_SENTINEL" "project transaction does not mutate home harness"
 
-start_test "global refresh is explicit and confined to selected HOME"
-S8=$(scratch_dir full-refresh-global)
-mkdir -p "$S8/home" "$S8/invoker"
-S8_HOME=$(cd "$S8/home" && pwd -P)
-(cd "$S8/invoker" && HOME="$S8_HOME" "$REPO_ROOT/setup.sh" --global -f) >"$S8/global.log" 2>&1
-assert_equals "$?" "0" "explicit global full refresh succeeds"
-assert_file_exists "$S8/home/.forge/version" "global v6 stamp is under selected home"
-assert_file_exists "$S8/home/.claude/CLAUDE.md" "global Claude adapter installed"
-assert_file_exists "$S8/home/.codex/AGENTS.md" "global Codex adapter installed"
-assert_file_missing "$S8/invoker/.forge/version" "global transaction writes nothing to invoker"
-
 start_test "every supported v5 release selector proves an exact managed fingerprint"
 S9=$(scratch_dir full-refresh-release-matrix)
 while IFS=$'\t' read -r release commit _stamp_mode _fingerprint_set _region_set; do
@@ -857,7 +852,7 @@ make_git_repo "$S15"
 mkdir -p "$S15/no-python-bin"
 ln -s /usr/bin/dirname "$S15/no-python-bin/dirname"
 PATH="$S15/no-python-bin" /bin/bash "$REPO_ROOT/scripts/full-refresh.sh" \
-    --target "$S15" --scope project > "$S15/python.log" 2>&1
+    --target "$S15" --scope project --release-version "$EXPECTED_RELEASE" > "$S15/python.log" 2>&1
 assert_equals "$?" "1" "missing Python blocks authoritative migration"
 assert_contains "$S15/python.log" "Python 3 is required" "missing Python is explicit"
 assert_file_missing "$S15/.forge" "Python preflight mutates no Forge path"
@@ -907,21 +902,6 @@ run_refresh "$S17" "$S17/refresh.log" -F
 assert_equals "$?" "0" "exact managed regions with customized user bytes migrate"
 assert_contains "$S17/CLAUDE.md" 'CUSTOM_USER_REGION_!@#$%^&*()' \
     "project user-region bytes survive in the v6 root surface"
-
-S17G=$(scratch_dir full-refresh-global-regions)
-mkdir -p "$S17G/home/.claude" "$S17G/invoker"
-git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.template.md \
-    > "$S17G/home/.claude/CLAUDE.md"
-sed -i.bak 's/<!-- Add your personal preferences below\. Examples: -->/GLOBAL_CUSTOM_REGION_!@#$%^\&*()/' \
-    "$S17G/home/.claude/CLAUDE.md"
-sed -i.bak 's#~/.claude/rules/#~/.forge/rules/#g' "$S17G/home/.claude/CLAUDE.md"
-rm -f "$S17G/home/.claude/CLAUDE.md.bak"
-S17G_HOME=$(cd "$S17G/home" && pwd -P)
-(cd "$S17G/invoker" && HOME="$S17G_HOME" "$REPO_ROOT/setup.sh" --global -f) \
-    > "$S17G/refresh.log" 2>&1
-assert_equals "$?" "0" "exact global managed region with customized user bytes migrates"
-assert_contains "$S17G/home/.claude/CLAUDE.md" 'GLOBAL_CUSTOM_REGION_!@#$%^&*()' \
-    "global user-region bytes survive in the v6 root surface"
 
 start_test "retired continuity command is inert and unresolved legacy content blocks full refresh"
 S18R=$(scratch_dir full-refresh-continuity-retired)
@@ -1131,33 +1111,6 @@ assert_equals "$?" "1" "two valid project segmentations block rather than guessi
 assert_hash_equals "$S20A/CLAUDE.md" "$ambiguous_hash" \
     "ambiguous project root remains byte-identical"
 
-S20G=$(scratch_dir full-refresh-global-region-inline)
-mkdir -p "$S20G/home/.claude" "$S20G/invoker"
-git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.template.md \
-    > "$S20G/home/.claude/CLAUDE.md"
-python3 -c 'import sys
-p=sys.argv[1]; b=open(p,"rb").read(); b=b.replace(b"<!-- Add your personal preferences below. Examples: -->",b"Developer text mentions ## Cross-Project Conventions inline."); b=b.replace(b"~/.claude/rules/",b"~/.forge/rules/"); open(p,"wb").write(b)' "$S20G/home/.claude/CLAUDE.md"
-S20G_HOME=$(cd "$S20G/home" && pwd -P)
-(cd "$S20G/invoker" && HOME="$S20G_HOME" "$REPO_ROOT/setup.sh" --global -f) \
-    > "$S20G/refresh.log" 2>&1
-assert_equals "$?" "0" "inline boundary-looking global user text remains unambiguous"
-assert_contains "$S20G/home/.claude/CLAUDE.md" 'Developer text mentions ## Cross-Project Conventions inline.' \
-    "inline anchor-like global text is byte-preserved"
-
-S20GA=$(scratch_dir full-refresh-global-region-ambiguous)
-mkdir -p "$S20GA/home/.claude" "$S20GA/invoker"
-git -C "$REPO_ROOT" show d30dee8b045b202df39c5d3efabd3b49ea7b8950:GLOBAL-CLAUDE.template.md \
-    > "$S20GA/home/.claude/CLAUDE.md"
-python3 -c 'import sys
-p=sys.argv[1]; b=open(p,"rb").read(); marker=b"## Personal Preferences\n"; i=b.index(marker)+len(marker); b=b[:i]+b"\n## Cross-Project Conventions\n\nAMBIGUOUS_USER_BOUNDARY\n"+b[i:]; open(p,"wb").write(b)' "$S20GA/home/.claude/CLAUDE.md"
-global_ambiguous_hash=$(hash_file "$S20GA/home/.claude/CLAUDE.md")
-S20GA_HOME=$(cd "$S20GA/home" && pwd -P)
-(cd "$S20GA/invoker" && HOME="$S20GA_HOME" "$REPO_ROOT/setup.sh" --global -f) \
-    > "$S20GA/refresh.log" 2>&1
-assert_equals "$?" "1" "two valid global segmentations block rather than guessing"
-assert_hash_equals "$S20GA/home/.claude/CLAUDE.md" "$global_ambiguous_hash" \
-    "ambiguous global root remains byte-identical"
-
 start_test "rollback destination race retains every version until explicit verified recovery"
 S21=$(scratch_dir full-refresh-rollback-race)
 make_git_repo "$S21"
@@ -1186,31 +1139,6 @@ assert_hash_equals "$S21/CLAUDE.md" "$rollback_original_hash" \
     "verified recovery restores the exact original"
 assert_contains "$S21/rollback-race-preserved.txt" 'FORGE_ROLLBACK_DESTINATION_RACE' \
     "explicit recovery leaves the concurrent version preserved separately"
-
-start_test "global full refresh rejects root and noncanonical selected homes before Python"
-S22=$(scratch_dir full-refresh-global-home-validation)
-mkdir -p "$S22/fake-bin" "$S22/real-home"
-cat > "$S22/fake-bin/python3" <<'EOF'
-#!/bin/sh
-printf 'INVOKED\n' > "$FORGE_FAKE_PYTHON_MARKER"
-exit 0
-EOF
-chmod +x "$S22/fake-bin/python3"
-FORGE_FAKE_PYTHON_MARKER="$S22/root-python-invoked" \
-    PATH="$S22/fake-bin:/usr/bin:/bin" HOME=/ \
-    "$REPO_ROOT/setup.sh" --global -f > "$S22/root.log" 2>&1
-assert_equals "$?" "1" "filesystem root is rejected as a selected global home"
-assert_file_missing "$S22/root-python-invoked" "root rejection occurs before Python or transaction writes"
-FORGE_FAKE_PYTHON_MARKER="$S22/noncanonical-python-invoked" \
-    PATH="$S22/fake-bin:/usr/bin:/bin" \
-    /bin/bash "$REPO_ROOT/scripts/full-refresh.sh" \
-    --target "$S22/real-home/../real-home" --scope global > "$S22/noncanonical.log" 2>&1
-assert_equals "$?" "1" "noncanonical selected global home is rejected"
-assert_file_missing "$S22/noncanonical-python-invoked" \
-    "noncanonical-home rejection occurs before Python or transaction writes"
-/bin/bash "$REPO_ROOT/scripts/full-refresh.sh" \
-    --target "$S22/missing-home" --scope global > "$S22/missing.log" 2>&1
-assert_equals "$?" "1" "nonexistent selected global home is rejected"
 
 start_test "sanitized downstream profiles preview, reconcile, and converge on one active Forge"
 PROFILE_ROOT=$(scratch_dir full-refresh-downstream-profiles)

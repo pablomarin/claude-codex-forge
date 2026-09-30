@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
-    echo "Set up Claude Code configuration for a project or globally."
+    echo "Set up Forge configuration in the current project."
     echo ""
     echo "Options:"
     echo "  -h, --help          Show this help message"
@@ -29,7 +29,10 @@ usage() {
     echo "  -u, --upgrade       Update an existing v6 install; preserve project configuration"
     echo "  -f, --force         Authoritative transactional full installation/reconciliation"
     echo "      --dry-run       Preview --force without writing target files"
-    echo "  -g, --global        Set up global memory system (~/.claude/)"
+    echo "  -g, --global        Retired; prints the project-only migration path"
+    echo "      --retire-global Preview removal of a legacy global Forge harness"
+    echo "      --apply         Apply --retire-global after a matching preview"
+    echo "      --confirm SHA   Confirm the exact retirement preview digest"
     echo "  -w, --with-playwright  Install Playwright framework templates (requires -t fullstack or typescript)"
     echo "  --playwright-dir DIR   Scaffold Playwright into DIR instead of repo root (monorepo layouts)"
     echo "                         If omitted: auto-detect frontend/apps/web/web/client if exactly one matches"
@@ -41,8 +44,8 @@ usage() {
     echo "  $0 --upgrade                # Update an existing v6 install"
     echo "  $0 --force --dry-run        # Preview full reconciliation"
     echo "  $0 --force                  # Execute full reconciliation"
-    echo "  $0 --global                 # Set up global memory (run once per machine)"
-    echo "  $0 --global --upgrade       # Update an existing global v6 install"
+    echo "  $0 --retire-global          # Preview legacy machine-wide cleanup"
+    echo "  $0 --retire-global --apply --confirm SHA256"
     echo "  $0 -t fullstack --with-playwright  # Install Playwright framework templates"
 }
 
@@ -53,7 +56,9 @@ FORCE=false
 FULL_REFRESH=false
 DRY_RUN=false
 UPGRADE=false
-GLOBAL=false
+RETIRE_GLOBAL=false
+RETIRE_APPLY=false
+RETIRE_CONFIRM=""
 WITH_PLAYWRIGHT=false
 DEPRECATED_FULL_REFRESH=""
 
@@ -99,8 +104,20 @@ while [[ $# -gt 0 ]]; do
             exit 1
             ;;
         -g|--global)
-            GLOBAL=true
+            echo "ERROR: global installation is retired; Forge is installed per project. Use --retire-global to preview cleanup of a legacy machine-wide harness." >&2
+            exit 1
+            ;;
+        --retire-global)
+            RETIRE_GLOBAL=true
             shift
+            ;;
+        --apply)
+            RETIRE_APPLY=true
+            shift
+            ;;
+        --confirm)
+            RETIRE_CONFIRM="$2"
+            shift 2
             ;;
         -w|--with-playwright)
             WITH_PLAYWRIGHT=true
@@ -117,6 +134,35 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [ "$RETIRE_APPLY" = true ] && [ "$RETIRE_GLOBAL" != true ]; then
+    echo -e "${RED}ERROR: --apply is valid only with --retire-global.${NC}" >&2
+    exit 1
+fi
+if [ -n "$RETIRE_CONFIRM" ] && [ "$RETIRE_GLOBAL" != true ]; then
+    echo -e "${RED}ERROR: --confirm is valid only with --retire-global.${NC}" >&2
+    exit 1
+fi
+if [ "$RETIRE_GLOBAL" = true ]; then
+    if [ "$RETIRE_APPLY" = true ]; then
+        [[ "$RETIRE_CONFIRM" =~ ^[0-9a-f]{64}$ ]] || {
+            echo -e "${RED}ERROR: --retire-global --apply requires --confirm with the preview's lowercase SHA-256.${NC}" >&2
+            exit 1
+        }
+    elif [ -n "$RETIRE_CONFIRM" ]; then
+        echo -e "${RED}ERROR: --confirm requires --apply.${NC}" >&2
+        exit 1
+    fi
+    command -v python3 >/dev/null 2>&1 || {
+        echo "BLOCKED: Python 3 is required only for legacy global retirement" >&2
+        exit 2
+    }
+    retire_args=(--repo-root "$SCRIPT_DIR" --home "${HOME:?HOME is required}" --platform unix)
+    if [ "$RETIRE_APPLY" = true ]; then
+        retire_args+=(--apply --digest "$RETIRE_CONFIRM")
+    fi
+    exec python3 "$SCRIPT_DIR/scripts/retire-global.py" "${retire_args[@]}"
+fi
 
 if [ "$DRY_RUN" = true ] && [ "$FULL_REFRESH" != true ]; then
     echo -e "${RED}ERROR: --dry-run requires --force.${NC}" >&2
@@ -142,21 +188,31 @@ report_native_goal_collisions() {
     fi
 }
 
+# The first release heading is the single source of truth for the exact
+# repository-local Forge release. Every installation path receives this value
+# explicitly; no host-specific or machine-wide version stamp exists.
+forge_version() {
+    local top v
+    top=$(grep -m1 '^## ' "$SCRIPT_DIR/docs/CHANGELOG.md" 2>/dev/null)
+    v=$(printf '%s' "$top" | sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p')
+    if [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]]; then printf '%s' "$v"; else printf 'unknown'; fi
+}
+FORGE_VERSION="$(forge_version)"
+[[ "$FORGE_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || {
+    echo "BLOCKED: published Forge release is unavailable" >&2
+    exit 2
+}
+
 # Full refresh is a separate transaction. It exits before ordinary setup can
 # stamp, merge, or create any host surface.
 if [ "$FULL_REFRESH" = true ]; then
     refresh_helper="$SCRIPT_DIR/scripts/full-refresh.sh"
     [ -f "$refresh_helper" ] || { echo "BLOCKED: full-refresh helper not found: $refresh_helper" >&2; exit 1; }
-    if [ "$GLOBAL" = true ]; then
-        refresh_args=(--target "${HOME:?HOME is required for global full refresh}" --scope global)
-    else
-        refresh_args=(--target "$(pwd -P)" --scope project)
-    fi
+    refresh_args=(--target "$(pwd -P)" --scope project)
+    refresh_args+=(--release-version "$FORGE_VERSION")
     [ "$DRY_RUN" = true ] && refresh_args+=(--dry-run)
     bash "$refresh_helper" "${refresh_args[@]}"
-    if [ "$GLOBAL" != true ]; then
-        report_native_goal_collisions "$(pwd -P)"
-    fi
+    report_native_goal_collisions "$(pwd -P)"
     exit $?
 fi
 
@@ -164,13 +220,19 @@ fi
 # recognizable or ambiguous v5 harness. Task 3 replaces this interim block
 # with the transactional full-refresh implementation and executable command.
 v6_preflight_no_legacy() {
-    local root="$1" scope="$2" manifest="$SCRIPT_DIR/manifests/legacy-v5.tsv"
+    local root="$1" scope="$2" manifest="$SCRIPT_DIR/manifests/legacy-v5.tsv" installed_version installed_major
     local kind source destination row_scope platform host ownership selector proof extra family mixed_path
     if [ -f "$root/.forge/version" ]; then
-        [ "$(cat "$root/.forge/version" 2>/dev/null)" = "6" ] || {
-            echo "BLOCKED: unsupported Forge layout version at $root/.forge/version" >&2
+        installed_version=$(tr -d '\r\n' < "$root/.forge/version" 2>/dev/null)
+        case "$installed_version" in 6|6.*) installed_major=6 ;; [0-9]*.*) installed_major=${installed_version%%.*} ;; *) installed_major="$installed_version" ;; esac
+        [ "$installed_major" = 6 ] || {
+            echo "BLOCKED: unsupported Forge layout major ${installed_major:-unknown}" >&2
             return 1
         }
+        case "$installed_version" in 6|6.[0-9]*) ;; *)
+            echo "BLOCKED: malformed Forge release at $root/.forge/version" >&2
+            return 1
+        esac
         return 0
     fi
     if [ "$scope" = project ] && { [ -e "$root/CONTINUITY.md" ] || [ -L "$root/CONTINUITY.md" ]; }; then
@@ -191,27 +253,13 @@ v6_preflight_no_legacy() {
                 [ "$ownership" = mixed-regions ] || continue
                 mixed_path="$root/$destination"
                 [ -f "$mixed_path" ] || continue
-                if [ "$scope" = project ]; then
-                    grep -Eq '^# CLAUDE\.md - |^## Project Overview$|^### Research Enforcement$|^## Detailed Rules$|\.claude/(commands|rules|hooks|skills|agents)/' "$mixed_path" || continue
-                else
-                    grep -Eq '^# Global Claude Code Instructions$|^## Ground Your Claims$|^## Memory Management$' "$mixed_path" || continue
-                fi
+                grep -Eq '^# CLAUDE\.md - |^## Project Overview$|^### Research Enforcement$|^## Detailed Rules$|\.claude/(commands|rules|hooks|skills|agents)/' "$mixed_path" || continue
                 ;;
             .claude/*)
                 family=${destination#'.claude/'}
                 family=${family%%/*}
                 family=".claude/$family"
                 [ -e "$root/$family" ] || continue
-                # Project setup records an advisory machine-version stamp before
-                # global setup may have run. A lone regular stamp is not a v5
-                # global harness; allow the documented project-first recovery
-                # path to materialize the real global v6 surfaces.
-                if [ "$scope" = global ] && [ "$destination" = ".claude/.forge-version" ] \
-                    && [ -d "$root/.claude" ] && [ ! -L "$root/.claude" ] \
-                    && [ -f "$root/.claude/.forge-version" ] && [ ! -L "$root/.claude/.forge-version" ] \
-                    && [ "$(find "$root/.claude" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = "1" ]; then
-                    continue
-                fi
                 # A lone custom native goal is not a legacy Forge harness. Let
                 # setup preserve it and report the explicit goal collision.
                 if [ "$scope" = project ] && [ "$family" = ".claude/commands" ] \
@@ -223,60 +271,15 @@ v6_preflight_no_legacy() {
             *) continue ;;
         esac
         if [ "$UPGRADE" = true ]; then
-            if [ "$scope" = global ]; then
-                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: '$SCRIPT_DIR/setup.sh' --global -f --dry-run" >&2
-            else
-                echo "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: '$SCRIPT_DIR/setup.sh' -f --dry-run" >&2
-            fi
+            echo "BLOCKED: legacy Forge harness requires authoritative refresh. Preview first: '$SCRIPT_DIR/setup.sh' -f --dry-run" >&2
         else
-            if [ "$scope" = global ]; then
-                echo "BLOCKED: legacy Forge harness detected. Preview first: '$SCRIPT_DIR/setup.sh' --global -f --dry-run" >&2
-            else
-                echo "BLOCKED: legacy Forge harness detected. Preview first: '$SCRIPT_DIR/setup.sh' -f --dry-run" >&2
-            fi
+            echo "BLOCKED: legacy Forge harness detected. Preview first: '$SCRIPT_DIR/setup.sh' -f --dry-run" >&2
         fi
         return 1
     done < "$manifest"
 }
 
-if [ "$GLOBAL" = true ]; then
-    v6_preflight_no_legacy "${HOME:?HOME is required for global setup}" global || exit 1
-else
-    v6_preflight_no_legacy "$(pwd)" project || exit 1
-fi
-
-# --- Forge version stamp (advisory drift detection) ------------------------
-# Read the Forge's own version from the top "## X.YY" line of its CHANGELOG —
-# single source of truth, no separate VERSION constant. Validated: a non-match
-# (e.g. "## [Unreleased]") yields "unknown" rather than echoing the heading.
-forge_version() {
-    # Inspect ONLY the FIRST "## " heading (the current entry). If it isn't a bare
-    # X.Y version (e.g. a future "## [Unreleased]"), fail open to "unknown" rather
-    # than scanning past it to a stale older release (Codex code-review P2-1).
-    local top v
-    top=$(grep -m1 '^## ' "$SCRIPT_DIR/docs/CHANGELOG.md" 2>/dev/null)
-    v=$(printf '%s' "$top" | sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p')
-    if [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]]; then printf '%s' "$v"; else printf 'unknown'; fi
-}
-FORGE_VERSION="$(forge_version)"
-
-# Machine stamp: record THIS machine's Forge version (advisory only). Runs on every
-# ordinary install / --upgrade / --global invocation. The authoritative --force
-# path and retired --migrate command exit above without reaching this code.
-# Placed before the --global branch so both ordinary modes hit it.
-# Fail-open: the brace group silences a failed redirection too, and HOME is guarded,
-# so a stamp-write failure can never abort setup under `set -e`.
-if [[ -n "${HOME:-}" ]]; then
-    if [[ "$FORGE_VERSION" != "unknown" ]]; then
-        mkdir -p "$HOME/.claude" 2>/dev/null || true
-        { printf '%s\n' "$FORGE_VERSION" > "$HOME/.claude/.forge-version"; } 2>/dev/null || true
-    else
-        # Version unparseable → this machine's Forge version is genuinely unknown.
-        # Clear any stale machine stamp so session-start fails open instead of
-        # comparing project pins against a stale value (Codex code-review iter-3 P2).
-        { rm -f "$HOME/.claude/.forge-version"; } 2>/dev/null || true
-    fi
-fi
+v6_preflight_no_legacy "$(pwd)" project || exit 1
 
 # Copy function with force check
 copy_file() {
@@ -310,129 +313,7 @@ copy_file() {
 }
 
 # ============================================================================
-# GLOBAL SETUP (--global flag)
-# ============================================================================
-if [[ "$GLOBAL" == true ]]; then
-    bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
-        --repo-root "$SCRIPT_DIR" --target "$HOME" --scope global --platform unix
-    echo "INSTALLATION: MATERIALIZED"
-    echo "GLOBAL_HARNESS: MATERIALIZED"
-    echo "NORMAL_PROJECT_WORKFLOWS: READY"
-    echo "NATIVE_GOAL_RUNTIME: PENDING qualification via scripts/qualify-goal-feasibility.sh"
-    echo "Global Forge v6 materialized for Claude Code and Codex. No permanent main agent was selected."
-    exit 0
-
-    echo -e "${BLUE}============================================${NC}"
-    echo -e "${BLUE}  Claude Code Global Setup${NC}"
-    echo -e "${BLUE}============================================${NC}"
-    echo ""
-    echo -e "This sets up Claude Code's memory system for ${GREEN}ALL${NC} your projects."
-    echo "After this, Claude will remember learnings across sessions and projects."
-    echo ""
-
-    # Create global directories
-    echo -e "${YELLOW}Step 1: Creating global directories...${NC}"
-
-    global_dirs=(
-        "$HOME/.claude"
-        "$HOME/.claude/hooks"
-        "$HOME/.claude/rules"
-    )
-
-    for dir in "${global_dirs[@]}"; do
-        if [[ ! -d "$dir" ]]; then
-            mkdir -p "$dir"
-            echo -e "  ${GREEN}✓${NC} Created $dir"
-        else
-            echo -e "  ${BLUE}○${NC} $dir already exists"
-        fi
-    done
-    echo ""
-
-    # Copy global CLAUDE.md
-    echo -e "${YELLOW}Step 2: Installing global configuration...${NC}"
-    echo "  These files tell Claude how to manage its memory."
-    # CLAUDE.md is USER CONTENT — NEVER overwrite it, even under -f/--upgrade
-    # (both set FORCE=true). copy_file's skip-guard is FORCE-gated, so a plain
-    # copy_file here clobbers a customized ~/.claude/CLAUDE.md on upgrade — the
-    # data-loss bug this guard fixes. Mirrors the project-mode guard (never
-    # overwritten, even with -f). First-time install still creates it.
-    if [[ -f "$HOME/.claude/CLAUDE.md" ]]; then
-        echo -e "  ${BLUE}○${NC} ~/.claude/CLAUDE.md already exists (never overwritten — user content)"
-    else
-        copy_file "$SCRIPT_DIR/GLOBAL-CLAUDE.template.md" "$HOME/.claude/CLAUDE.md" "~/.claude/CLAUDE.md (global instructions)"
-    fi
-
-    # Copy global hooks
-    copy_file "$SCRIPT_DIR/hooks/pre-compact-memory.sh" "$HOME/.claude/hooks/pre-compact-memory.sh" "~/.claude/hooks/pre-compact-memory.sh"
-    chmod +x "$HOME/.claude/hooks/pre-compact-memory.sh" 2>/dev/null || true
-
-    # Merge global hooks into existing settings (preserves user's plugins, statusLine, etc.)
-    GLOBAL_SETTINGS="$HOME/.claude/settings.json"
-    TEMPLATE_SETTINGS="$SCRIPT_DIR/settings/global-settings.template.json"
-    if [[ -f "$GLOBAL_SETTINGS" ]]; then
-        MERGE_SUCCESS=false
-        if command -v jq &> /dev/null; then
-            # Use jq to merge just the hooks key, preserving everything else
-            MERGED=$(jq -s '.[0] * {hooks: .[1].hooks}' "$GLOBAL_SETTINGS" "$TEMPLATE_SETTINGS" 2>/dev/null)
-            if [[ $? -eq 0 ]] && [[ -n "$MERGED" ]]; then
-                echo "$MERGED" > "$GLOBAL_SETTINGS"
-                echo -e "  ${GREEN}✓${NC} Merged hooks into existing ~/.claude/settings.json (your settings preserved)"
-                MERGE_SUCCESS=true
-            fi
-        fi
-        if [[ "$MERGE_SUCCESS" != true ]] && command -v python3 &> /dev/null; then
-            # Fallback: use Python to merge JSON
-            python3 -c "
-import json, sys
-with open('$GLOBAL_SETTINGS') as f: existing = json.load(f)
-with open('$TEMPLATE_SETTINGS') as f: template = json.load(f)
-existing['hooks'] = template['hooks']
-with open('$GLOBAL_SETTINGS', 'w') as f: json.dump(existing, f, indent=2)
-" 2>/dev/null
-            if [[ $? -eq 0 ]]; then
-                echo -e "  ${GREEN}✓${NC} Merged hooks into existing ~/.claude/settings.json (your settings preserved)"
-                MERGE_SUCCESS=true
-            fi
-        fi
-        if [[ "$MERGE_SUCCESS" != true ]]; then
-            echo -e "  ${YELLOW}⚠${NC} Could not auto-merge hooks (install jq or python3). Manually add hooks from:"
-            echo -e "    ${BLUE}$TEMPLATE_SETTINGS${NC}"
-        fi
-    else
-        copy_file "$TEMPLATE_SETTINGS" "$GLOBAL_SETTINGS" "~/.claude/settings.json (global hooks)"
-    fi
-
-    echo ""
-    echo -e "${GREEN}============================================${NC}"
-    echo -e "${GREEN}  Global Setup Complete!${NC}"
-    echo -e "${GREEN}============================================${NC}"
-    echo ""
-    echo -e "${YELLOW}What was created:${NC}"
-    echo ""
-    echo "  ~/.claude/CLAUDE.md         Instructions that tell Claude how to use its memory"
-    echo "  ~/.claude/settings.json     Hooks that auto-save learnings before context loss"
-    echo "  ~/.claude/hooks/            Scripts that provide context to memory hooks"
-    echo "  ~/.claude/rules/            Personal rules that apply to all your projects"
-    echo ""
-    echo -e "${YELLOW}What this means:${NC}"
-    echo ""
-    echo "  Claude will now:"
-    echo "  - Save bug fixes, patterns, and preferences to persistent memory"
-    echo "  - Automatically preserve learnings before context compression"
-    echo "  - Load its memory at the start of every session"
-    echo "  - Get smarter over time as it accumulates project knowledge"
-    echo ""
-    echo -e "${YELLOW}Now set up your first project:${NC}"
-    echo ""
-    echo "  cd /your/project"
-    echo "  $SCRIPT_DIR/setup.sh -p \"Project Name\""
-    echo ""
-    exit 0
-fi
-
-# ============================================================================
-# PROJECT SETUP (default, no --global flag)
+# PROJECT SETUP
 # ============================================================================
 
 # Validate --with-playwright flag
@@ -468,14 +349,25 @@ if ! command -v git &> /dev/null; then
     exit 1
 fi
 
+if ! command -v python3 &> /dev/null; then
+    echo -e "${RED}BLOCKED: Python 3 is required before Forge setup can change project files.${NC}" >&2
+    exit 1
+fi
+
 if ! git rev-parse --is-inside-work-tree &> /dev/null 2>&1; then
     echo -e "${YELLOW}WARNING: Not in a git repository. Initializing...${NC}"
     git init
 fi
 
-# Check if global setup has been done
-if [[ ! -f "$HOME/.claude/CLAUDE.md" ]]; then
-    echo -e "${YELLOW}⚠ Global memory not set up. Run: $SCRIPT_DIR/setup.sh --global${NC}"
+SETUP_REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo -e "${RED}BLOCKED: cannot resolve the Git repository root.${NC}" >&2
+    exit 1
+}
+SETUP_REPO_ROOT=$(cd "$SETUP_REPO_ROOT" && pwd -P)
+SETUP_WORKING_ROOT=$(pwd -P)
+if [[ "$SETUP_WORKING_ROOT" != "$SETUP_REPO_ROOT" ]]; then
+    echo -e "${RED}BLOCKED: run setup from the Git repository root: $SETUP_REPO_ROOT${NC}" >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -693,42 +585,20 @@ echo -e "${YELLOW}Copying configuration files...${NC}"
 if [[ -f "CLAUDE.md" ]]; then had_claude_md=true; else had_claude_md=false; fi
 if [[ -f "CONTINUITY.md" ]]; then had_continuity_md=true; else had_continuity_md=false; fi
 
-# Forge version pin: capture PRE-state for the advisory + lie-prevention.
-#  - prev_forge_version: the project's existing pin (for the drift warning).
-#  - had_forge_machinery: did Forge machinery already exist? (.claude/settings.json is
-#    the always-written project-mode sentinel.) Used so a plain non-force rerun that
-#    SKIPS existing files never fabricates/advances a pin (the stamp must reflect what's
-#    actually on disk). The pin itself is written LATE (after copies succeed) below.
-prev_forge_version=$(cat .claude/.forge-version 2>/dev/null || echo "")
-if [[ -f .claude/settings.json ]]; then had_forge_machinery=true; else had_forge_machinery=false; fi
-
-# Setup-time advisory warning: an --upgrade run rewrites the machinery and will
-# advance the pin, so warn if it differs from the project's existing pin. Advisory
-# only — setup continues. Printed here (before the rewrite) AND echoed in the upgrade
-# summary below so it isn't lost in scrollback.
-forge_drift_warn=""
-if [[ "$FORGE_VERSION" != "unknown" ]] \
-   && [[ "$prev_forge_version" =~ ^[0-9]+\.[0-9]+$ ]] \
-   && [[ "$prev_forge_version" != "$FORGE_VERSION" ]] \
-   && { [[ "$UPGRADE" == true ]] || [[ "$FORCE" == true ]]; }; then
-    # Portable numeric major.minor compare — `sort -V` is GNU-only and absent on stock
-    # macOS/BSD sort (Codex code-review iter-3 P2). Both sides are validated X.Y; 10#
-    # forces base-10 so a leading zero can't be read as octal.
-    if [ "$((10#${FORGE_VERSION%%.*}))" -lt "$((10#${prev_forge_version%%.*}))" ] \
-       || { [ "$((10#${FORGE_VERSION%%.*}))" -eq "$((10#${prev_forge_version%%.*}))" ] \
-            && [ "$((10#${FORGE_VERSION#*.}))" -lt "$((10#${prev_forge_version#*.}))" ]; }; then
-        forge_drift_warn="ℹ This project's .claude/ was pinned to Forge $prev_forge_version; you're running $FORGE_VERSION. This run will DOWNGRADE the project's .claude/ to $FORGE_VERSION. That's a shared change — other clones of this repo will pull it."
-    else
-        forge_drift_warn="ℹ This project's .claude/ was pinned to Forge $prev_forge_version; you're running $FORGE_VERSION. This run will UPGRADE the project's .claude/ to $FORGE_VERSION. That's a shared change — other clones of this repo will pull it."
-    fi
-    echo -e "${YELLOW}${forge_drift_warn}${NC}"
+prev_forge_version=""
+if [[ -f ".forge/version" ]]; then
+    prev_forge_version=$(tr -d '\r\n' < .forge/version)
 fi
 
 if [[ "$had_claude_md" == true ]]; then
     echo -e "  ${BLUE}○${NC} CLAUDE.md user text will be preserved outside the Forge block"
 fi
 bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
-    --repo-root "$SCRIPT_DIR" --target "$(pwd)" --scope project --platform unix
+    --repo-root "$SCRIPT_DIR" --target "$(pwd)" --scope project --platform unix \
+    --release-version "$FORGE_VERSION"
+if [[ -n "$prev_forge_version" && "$prev_forge_version" != "$FORGE_VERSION" ]]; then
+    echo "FORGE_VERSION_CHANGE: $prev_forge_version -> $FORGE_VERSION"
+fi
 report_native_goal_collisions "$(pwd -P)"
 
 # ADRs belong to the downstream project. Retire only byte-exact copies of
@@ -1035,37 +905,12 @@ fi
 # The v6 marker materializer owns only the bounded Forge block. Text outside
 # that block is user-owned bytes and is never subject to project-name rewriting.
 
-# Forge version pin (project) — WRITE LATE, after all .claude/ copies have succeeded,
-# so a mid-copy abort under `set -e` never leaves the pin ahead of the actual files.
-# Only stamp when the machinery was actually (re)written this run: --upgrade
-# (rewritten), OR no machinery existed before (genuine fresh install). The --force
-# transaction owns its own late stamp. On a plain
-# non-force rerun that SKIPPED existing files, leave the pin untouched — never lie.
-if [[ -f .claude/settings.json ]] \
-   && { [[ "$FORCE" == true ]] || [[ "$UPGRADE" == true ]] || [[ "$had_forge_machinery" == false ]]; }; then
-    # Machinery was (re)written this run (the `.claude/settings.json` post-condition
-    # confirms it landed — never pin a project whose copy step left it incomplete).
-    if [[ "$FORGE_VERSION" != "unknown" ]]; then
-        { printf '%s\n' "$FORGE_VERSION" > .claude/.forge-version; } 2>/dev/null || true
-    else
-        # Version unparseable but machinery WAS rewritten → the old pin no longer
-        # reflects what's on disk. Clearing it (rather than leaving a stale pin) keeps
-        # the pin from lying; session-start then fails open (Codex code-review iter-2 P2).
-        { rm -f .claude/.forge-version; } 2>/dev/null || true
-    fi
-fi
-
 echo ""
 if [[ "$UPGRADE" == true ]]; then
     echo -e "${GREEN}============================================${NC}"
     echo -e "${GREEN}  Upgrade Complete!${NC}"
     echo -e "${GREEN}============================================${NC}"
     echo ""
-    # Re-surface the version-drift advisory here so it isn't lost in scrollback.
-    if [[ -n "$forge_drift_warn" ]]; then
-        echo -e "${YELLOW}${forge_drift_warn}${NC}"
-        echo ""
-    fi
     echo -e "${YELLOW}What was updated:${NC}"
     echo ""
     echo "  .forge/                  Canonical workflows, rules, hooks, agents, skills, and state template"
@@ -1177,18 +1022,6 @@ else
     echo ""
     echo "  - frontend-design          (optional Claude Code UI integration)"
     echo ""
-    if [[ ! -f "$HOME/.claude/CLAUDE.md" ]]; then
-        echo -e "${RED}┌──────────────────────────────────────────────────────────────┐${NC}"
-        echo -e "${RED}│  ⚠ IMPORTANT: Global Forge policy is not set up yet!        │${NC}"
-        echo -e "${RED}│                                                              │${NC}"
-        echo -e "${RED}│  Without global setup:                                       │${NC}"
-        echo -e "${RED}│  • Shared global grounding is not installed for either host  │${NC}"
-        echo -e "${RED}│  • Trusted native-goal authorization helpers are unavailable │${NC}"
-        echo -e "${RED}│                                                              │${NC}"
-        echo -e "${RED}│  Run: ${GREEN}$SCRIPT_DIR/setup.sh --global${RED}           │${NC}"
-        echo -e "${RED}└──────────────────────────────────────────────────────────────┘${NC}"
-        echo ""
-    fi
     echo -e "${YELLOW}Next steps:${NC}"
     echo ""
     echo -e "1. ${BLUE}Verify both installed host surfaces${NC}:"

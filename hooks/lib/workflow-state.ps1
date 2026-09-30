@@ -128,7 +128,7 @@ function Get-OptionalFirstCertifiedIteration {
 function Write-WorkflowStateLines {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string[]]$Lines
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$Lines
     )
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     [IO.File]::WriteAllText($Path, ([string]::Join("`n", $Lines) + "`n"), $utf8)
@@ -180,7 +180,7 @@ function Publish-ForgeWorkflowState {
     if ((Get-WorkflowStateHash -Path $State) -ne $ExpectedHash) {
         Throw-WorkflowStateBlocked "workflow state changed concurrently; retry from show"
     }
-    [IO.File]::Replace($Next, $State, $null)
+    [IO.File]::Replace($Next, $State, [System.Management.Automation.Language.NullString]::Value)
 }
 
 function Set-WorkflowStateActivationFile {
@@ -373,16 +373,42 @@ function Invoke-WorkflowStateActivate {
     $root = Get-WorkflowStateRoot
     $common = Get-WorkflowStateCommonDirectory -Root $root
     $state = Get-CanonicalWorkflowState -Root $root
-    $baseSha = & git -C $root rev-parse --verify "$baseRef`^{commit}" 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $baseSha) { Throw-WorkflowStateBlocked "base ref does not resolve to a commit: $baseRef" }
-    $baseSha = $baseSha.Trim()
     $stateHash = Get-WorkflowStateHash -Path $state
     $command = "/$workflow $task"
     $currentCommand = Get-WorkflowStateValue -Path $state -Section Workflow -Key Command
     $currentPhase = Get-WorkflowStateValue -Path $state -Section Workflow -Key Phase
     $currentNext = Get-WorkflowStateValue -Path $state -Section Workflow -Key "Next step"
+    $currentRoot = Get-WorkflowStateValue -Path $state -Section Identity -Key "Worktree root"
+    $currentCommon = Get-WorkflowStateValue -Path $state -Section Identity -Key "Git common directory"
+    $currentBaseRef = Get-WorkflowStateValue -Path $state -Section Identity -Key "Workflow base ref"
+    $currentBaseSha = Get-WorkflowStateValue -Path $state -Section Identity -Key "Workflow base SHA"
+    $activeWorkflow = $currentCommand -and $currentCommand -notin @("none", "-", "—") -and -not ($currentPhase -eq "complete" -and $currentNext -eq "none")
+    $inactiveWorkflow = -not $currentCommand -or $currentCommand -in @("none", "-", "—")
+    $boundMode = if ($currentBaseSha -match '^[0-9a-f]{40}([0-9a-f]{24})?$' -and $activeWorkflow) { "active" } elseif ($currentBaseSha -match '^[0-9a-f]{40}([0-9a-f]{24})?$' -and $inactiveWorkflow) { "prebound" } else { "none" }
+    if ($boundMode -ne "none") {
+        if ($currentRoot -ne $root -or $currentCommon -ne $common -or $currentBaseRef -ne $baseRef) {
+            Throw-WorkflowStateBlocked "bound worktree identity differs from requested activation"
+        }
+        $null = & git -C $root cat-file -e "$currentBaseSha`^{commit}" 2>$null
+        if ($LASTEXITCODE -ne 0) { Throw-WorkflowStateBlocked "bound worktree identity differs from requested activation" }
+        $currentHead = (& git -C $root rev-parse --verify HEAD 2>$null | Select-Object -First 1)
+        if (-not $currentHead) { Throw-WorkflowStateBlocked "cannot resolve bound worktree HEAD" }
+        $currentHead = $currentHead.Trim()
+        if ($boundMode -eq "prebound" -and $currentHead -ne $currentBaseSha) {
+            Throw-WorkflowStateBlocked "prebound worktree HEAD differs from its adopted base"
+        }
+        if ($boundMode -eq "active") {
+            $null = & git -C $root merge-base --is-ancestor $currentBaseSha $currentHead 2>$null
+            if ($LASTEXITCODE -ne 0) { Throw-WorkflowStateBlocked "active workflow base is not an ancestor of HEAD" }
+        }
+        $baseSha = $currentBaseSha
+    } else {
+        $baseSha = & git -C $root rev-parse --verify "$baseRef`^{commit}" 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $baseSha) { Throw-WorkflowStateBlocked "base ref does not resolve to a commit: $baseRef" }
+        $baseSha = $baseSha.Trim()
+    }
     $mode = "new"
-    if ($currentCommand -and $currentCommand -notin @("none", "-", "—") -and -not ($currentPhase -eq "complete" -and $currentNext -eq "none")) {
+    if ($activeWorkflow) {
         $expected = @{
             "Worktree root" = $root
             "Git common directory" = $common

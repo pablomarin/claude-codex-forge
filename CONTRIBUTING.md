@@ -10,9 +10,11 @@ are materialized into downstream projects.
 - `FORGE.template.md` is the canonical policy installed into downstream projects as
   `.forge/instructions.md`.
 - `manifests/managed-v6.tsv` defines which source owns each installed destination.
-- `templates/adapters/CLAUDE.block.template.md` and
-  `templates/adapters/AGENTS.block.template.md` are thin native discovery adapters. They point both
-  hosts to the same installed policy; they are not independent copies of that policy.
+- `templates/adapters/AGENTS.block.template.md` supplies the canonical installed project adapter:
+  `AGENTS.md` is the canonical installed project adapter and discovers the shared policy plus
+  optional project-owned context.
+- `templates/adapters/CLAUDE.block.template.md` supplies the compatibility bridge:
+  `CLAUDE.md` is only the compatibility bridge and imports `AGENTS.md` without restating policy.
 - Root `CLAUDE.md` and `AGENTS.md` are equally thin adapters for contributors working in this source
   repository.
 

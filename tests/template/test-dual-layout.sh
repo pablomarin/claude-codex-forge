@@ -305,8 +305,8 @@ for relative in \
     templates/adapters/CLAUDE.block.template.md \
     templates/adapters/AGENTS.block.template.md \
     FORGE.template.md \
-    GLOBAL-FORGE.template.md \
-    GLOBAL-AGENTS.template.md; do
+    manifests/legacy-v6-global.tsv \
+    manifests/legacy-v6-global-settings.json; do
     assert_file_exists "$REPO_ROOT/$relative" "staged v6 artifact exists: $relative"
 done
 
@@ -378,10 +378,10 @@ assert_manifest_valid "$MANIFEST" "managed-v6 records satisfy the nine-field sch
 
 if [ -f "$MANIFEST" ]; then
     if awk -F '\t' '!/^#/ && NF {print $6 "\t" $3}' "$MANIFEST" | sort -u | grep -q $'project\t.forge/instructions.md' \
-        && awk -F '\t' '!/^#/ && NF {print $6 "\t" $3}' "$MANIFEST" | sort -u | grep -q $'global\t.forge/instructions.md'; then
-        pass "project and global scopes may own the same relative destination"
+        && ! awk -F '\t' '!/^#/ && $6 == "global" {bad=1} END {exit bad ? 0 : 1}' "$MANIFEST"; then
+        pass "active ownership is project-only"
     else
-        fail "scope-aware destination ownership lacks project/global canonical roots"
+        fail "active ownership is not project-only"
     fi
 
     EXPECTED=$(scratch_dir dual-layout-inventory)/expected
@@ -424,10 +424,10 @@ if [ -f "$MANIFEST" ]; then
     [ "$MISSING_TARGETS" -eq 0 ] && pass "every adapter points to a declared canonical destination"
 fi
 
-start_test "global ownership and platform-specific settings sources are explicit"
+start_test "cleanup-only global inventory and project settings sources are explicit"
 if [ -f "$MANIFEST" ]; then
-    assert_contains "$MANIFEST" $'canonical\tGLOBAL-FORGE.template.md\t.forge/instructions.md\tall\tshared\tglobal\tforge-canonical\t.forge/instructions.md\tv6' "global canonical instructions are Forge-owned"
-    assert_contains "$MANIFEST" $'marker\tGLOBAL-AGENTS.template.md\t.codex/AGENTS.md\tall\tcodex\tglobal\tforge-marker\t.forge/instructions.md\tv6' "global Codex marker targets global canonical instructions"
+    assert_not_contains "$MANIFEST" $'\tglobal\t' "active manifest contains no global scope"
+    assert_contains "$REPO_ROOT/manifests/legacy-v6-global.tsv" $'marker\t.codex/AGENTS.md\tall\tforge-marker-v6' "cleanup inventory owns the retired global Codex marker"
     assert_contains "$MANIFEST" $'merge\tsettings/settings.template.json\t.claude/settings.json\tunix\tclaude\tproject\tforge-managed-entries\t-\tv6' "Unix Claude settings use the Unix template"
     assert_contains "$MANIFEST" $'merge\tsettings/settings-windows.template.json\t.claude/settings.json\twindows\tclaude\tproject\tforge-managed-entries\t-\tv6' "Windows Claude settings use the Windows template"
     assert_contains "$MANIFEST" $'canonical\tmanifests/legacy-v5-releases.tsv\t.forge/migrations/legacy-v5-releases.tsv\tall\tshared\tproject' "supported legacy release map is installed canonically"
@@ -450,7 +450,6 @@ if [ -f "$MANIFEST" ]; then
     SENTINEL="$MUTATION_DIR/sentinel.tsv"
     DUPLICATE="$MUTATION_DIR/duplicate.tsv"
     PROJECT_ROOT="$MUTATION_DIR/project-root"
-    GLOBAL_ROOT="$MUTATION_DIR/global-root"
     awk -F '\t' 'BEGIN{OFS="\t"} $1 == "adapter" && !done {$9="v5"; done=1} {print}' "$MANIFEST" > "$STALE"
     awk -F '\t' 'BEGIN{OFS="\t"} $1 == "canonical" && !done {$3="../escape"; done=1} {print}' "$MANIFEST" > "$TRAVERSAL"
     awk -F '\t' 'BEGIN{OFS="\t"} $1 == "canonical" && !done {$3="C:/escape"; done=1} {print}' "$MANIFEST" > "$DRIVE_DEST"
@@ -458,8 +457,7 @@ if [ -f "$MANIFEST" ]; then
     awk -F '\t' 'BEGIN{OFS="\t"} $1 == "adapter" && !done {$8="C:/escape"; done=1} {print}' "$MANIFEST" > "$ADAPTER_DRIVE"
     awk -F '\t' 'BEGIN{OFS="\t"} {print} END {print "canonical", "skills/CLAUDE.md", ".forge/skills/CLAUDE.md", "all", "shared", "project", "forge-canonical", ".forge/skills/CLAUDE.md", "v6"}' "$MANIFEST" > "$SENTINEL"
     awk '1; !/^#/ && !done {print; done=1}' "$MANIFEST" > "$DUPLICATE"
-    mkdir -p "$PROJECT_ROOT" "$GLOBAL_ROOT"
-    ln -s "$MUTATION_DIR" "$GLOBAL_ROOT/.forge"
+    mkdir -p "$PROJECT_ROOT"
     if ! manifest_is_valid "$STALE"; then pass "stale adapter revision is rejected"; else fail "stale adapter revision was accepted"; fi
     if ! manifest_is_valid "$TRAVERSAL"; then pass "parent-traversal destination is rejected"; else fail "parent-traversal destination was accepted"; fi
     if ! manifest_is_valid "$DRIVE_DEST"; then pass "Windows drive-qualified destination is rejected"; else fail "Windows drive-qualified destination was accepted"; fi
@@ -467,7 +465,6 @@ if [ -f "$MANIFEST" ]; then
     if ! manifest_is_valid "$ADAPTER_DRIVE"; then pass "adapter Windows drive-qualified canonical path is rejected"; else fail "adapter Windows drive-qualified canonical path was accepted"; fi
     if ! manifest_is_valid "$SENTINEL"; then pass "canonical host-memory sentinel skill is rejected"; else fail "canonical host-memory sentinel skill was accepted"; fi
     if ! manifest_is_valid "$DUPLICATE"; then pass "overlapping destination ownership in one scope is rejected"; else fail "overlapping destination ownership in one scope was accepted"; fi
-    if ! manifest_is_valid "$MANIFEST" "$PROJECT_ROOT" "$GLOBAL_ROOT"; then pass "symlinked global installed ancestor is rejected"; else fail "symlinked global installed ancestor was accepted"; fi
 else
     fail "mutation checks require managed-v6.tsv"
 fi
@@ -486,7 +483,7 @@ for relative in \
     assert_contains "$file" "forge-generated" "$relative declares forge-generated"
     assert_contains "$file" "canonical-path" "$relative declares canonical-path"
     assert_contains "$file" "canonical-revision" "$relative declares canonical-revision"
-    assert_matches "$file" '[Rr]ead.*canonical.*completely|@\.forge/instructions\.md' "$relative requires complete canonical loading"
+    assert_matches "$file" '[Rr]ead.*(canonical|\.forge/instructions).*completely|@\.forge/instructions\.md|@AGENTS\.md' "$relative requires complete canonical loading"
     lines=$(wc -l < "$file" | tr -d ' ')
     if [ "$lines" -le 36 ]; then pass "$relative stays thin ($lines lines)"; else fail "$relative embeds too much policy ($lines lines)"; fi
 done
@@ -585,8 +582,6 @@ for relative in \
     scripts/render-codex-config.py scripts/verify-runtime.sh scripts/verify-runtime.ps1 \
     scripts/qualify-dispatch-isolation.sh scripts/qualify-dispatch-isolation.ps1 \
     scripts/qualify-goal-feasibility.sh scripts/qualify-goal-feasibility.ps1 \
-    scripts/forge-goal-authorize.sh scripts/forge-goal-authorize.ps1 \
-    scripts/forge-goal-capture.sh scripts/forge-goal-capture.ps1 \
     hooks/lib/codex-worktree-dispatch.sh hooks/lib/codex-worktree-dispatch.ps1 \
     settings/codex-config.template.toml settings/codex-hooks.template.json \
     tests/template/test-runtime-identity.sh tests/template/test-runtime-identity.ps1 \
@@ -594,23 +589,25 @@ for relative in \
     tests/template/run-all.ps1 .github/workflows/windows-parity.yml; do
     assert_file_exists "$REPO_ROOT/$relative" "Task 2 artifact exists: $relative"
 done
+for retired in scripts/forge-goal-authorize.sh scripts/forge-goal-authorize.ps1 \
+  scripts/forge-goal-capture.sh scripts/forge-goal-capture.ps1; do
+    assert_file_missing "$REPO_ROOT/$retired" "retired active helper is absent: $retired"
+done
 
 if [ -f "$MANIFEST" ]; then
     for row in \
         $'canonical\thooks/lib/codex-worktree-dispatch.sh\t.forge/hooks/lib/codex-worktree-dispatch.sh' \
         $'canonical\thooks/lib/codex-worktree-dispatch.ps1\t.forge/hooks/lib/codex-worktree-dispatch.ps1' \
         $'canonical\tscripts/verify-runtime.sh\t.forge/bin/verify-runtime' \
-        $'canonical\tscripts/verify-runtime.ps1\t.forge/bin/verify-runtime.ps1' \
-        $'canonical\tscripts/forge-goal-authorize.sh\t.forge/bin/forge-goal-authorize' \
-        $'canonical\tscripts/forge-goal-authorize.ps1\t.forge/bin/forge-goal-authorize.ps1' \
-        $'canonical\tscripts/forge-goal-capture.sh\t.forge/bin/forge-goal-capture' \
-        $'canonical\tscripts/forge-goal-capture.ps1\t.forge/bin/forge-goal-capture.ps1'; do
+        $'canonical\tscripts/verify-runtime.ps1\t.forge/bin/verify-runtime.ps1'; do
         assert_contains "$MANIFEST" "$row" "managed-v6 owns shipped helper: ${row#*$'\t'}"
     done
     assert_contains "$MANIFEST" $'merge\tsettings/codex-config.template.toml\t.codex/config.toml' "Codex config template is singular and manifest-owned"
     assert_contains "$MANIFEST" $'merge\tsettings/codex-hooks.template.json\t.codex/hooks.json' "Codex hook registry template is singular and manifest-owned"
-    assert_contains "$MANIFEST" $'protected\t-\t.forge/bin/codex.identity\tall\tcodex\tglobal\toperator-setup' "managed-v6 declares the independently recorded Codex identity"
-    assert_contains "$MANIFEST" $'protected\t-\t.forge/bin/codex.identity.sha256\tall\tcodex\tglobal\toperator-seal' "managed-v6 declares the Codex identity seal"
+    assert_contains "$REPO_ROOT/manifests/legacy-v6-global.tsv" $'canonical\t.forge/bin/forge-goal-authorize\tall\tinstalled-hash' "cleanup inventory owns the retired Unix goal helper"
+    assert_contains "$REPO_ROOT/manifests/legacy-v6-global.tsv" $'canonical\t.forge/bin/forge-goal-authorize.ps1\tall\tinstalled-hash' "cleanup inventory owns the retired PowerShell goal helper"
+    assert_contains "$REPO_ROOT/manifests/legacy-v6-global.tsv" $'generated\t.forge/bin/codex.identity\tall\trecognized-schema' "cleanup inventory recognizes the retired Codex identity"
+    assert_contains "$REPO_ROOT/manifests/legacy-v6-global.tsv" $'generated\t.forge/bin/codex.identity.sha256\tall\trecognized-seal' "cleanup inventory recognizes the retired Codex identity seal"
 fi
 
 start_test "live qualification scripts are separate from deterministic suite discovery"
@@ -623,14 +620,14 @@ start_test "PowerShell 5.1 materializer and owning runner mirror the Unix contra
 for function_name in Read-ManagedManifest Install-CanonicalFile Render-Adapter Set-ForgeMarkerBlock Get-EngineAvailability Write-InstallManifest; do
     assert_contains "$REPO_ROOT/scripts/materialize-adapters.ps1" "function $function_name" "PowerShell materializer defines $function_name"
 done
-assert_contains "$REPO_ROOT/setup.ps1" '-Scope global -Platform windows' "PowerShell global setup delegates with explicit scope/platform"
+assert_not_contains "$REPO_ROOT/setup.ps1" '-Scope global -Platform windows' "PowerShell has no active global materialization"
 assert_contains "$REPO_ROOT/setup.ps1" '-Scope project -Platform windows' "PowerShell project setup delegates with explicit scope/platform"
 assert_contains "$REPO_ROOT/tests/template/run-all.ps1" 'Get-ChildItem -Path $PSScriptRoot -Filter "test-*.ps1"' "PowerShell runner discovers every owning suite"
 assert_not_contains "$REPO_ROOT/tests/template/run-all.ps1" 'ignore' "PowerShell runner has no silent ignore list"
 assert_contains "$REPO_ROOT/.github/workflows/windows-parity.yml" 'shell: powershell' "Windows workflow uses Windows PowerShell"
 
 start_test "live root templates are thin v6 marker surfaces"
-for template in CLAUDE.template.md GLOBAL-CLAUDE.template.md; do
+for template in CLAUDE.template.md; do
     lines=$(wc -l < "$REPO_ROOT/$template" | tr -d ' ')
     [ "$lines" -le 20 ] && pass "$template stays thin ($lines lines)" || fail "$template still embeds a second policy body ($lines lines)"
     assert_contains "$REPO_ROOT/$template" '<!-- forge:begin v6 -->' "$template opens bounded v6 block"

@@ -414,7 +414,7 @@ public static class ForgeFakeEngine {
     Remove-Item Env:FAKE_REAL_ROOT, Env:FORGE_FULL_AGENT_PROBE -ErrorAction SilentlyContinue
 
     Write-Host 'PowerShell qualified independent reproduction boundary'
-    $repo = New-Repository 'reproduction boundary'; $auth = Join-Path $repo 'protected-auth.json'; [IO.File]::WriteAllText($auth, "protected-auth`n"); $outside = Join-Path $temporary 'reproduction-external'
+    $repo = New-Repository 'reproduction boundary'; $auth = Join-Path $temporary 'protected-auth.json'; [IO.File]::WriteAllText($auth, "protected-auth`n"); $outside = Join-Path $temporary 'reproduction-external'
     $state = Join-Path $repo '.forge/local/state.md'; $stateHash = Get-ShaFileForTest $state; $authHash = Get-ShaFileForTest $auth
     $stateLiteral = $state.Replace('\','\\').Replace('"','\"'); $authLiteral = $auth.Replace('\','\\').Replace('"','\"'); $outsideLiteral = $outside.Replace('\','\\').Replace('"','\"')
     $reproSource = "using System; using System.IO; public static class ForgeBoundaryProgram { public static int Main(string[] args) { if(Environment.GetEnvironmentVariable(`"HTTPS_PROXY`")!=null) return 62; if(Environment.GetEnvironmentVariable(`"FORGE_REPRO_NO_NETWORK`")!=`"1`") { File.AppendAllText(`"$stateLiteral`",`"escaped\n`"); File.AppendAllText(`"$authLiteral`",`"escaped\n`"); File.WriteAllText(`"$outsideLiteral`",`"escaped\n`"); } Console.WriteLine(args[0]==`"primary`"?`"MATCH`":`"CONTROL`"); return 0; } }"
@@ -486,7 +486,8 @@ public static class ForgeFakeEngine {
 
     Write-Host 'PowerShell materialized Codex host-context invocation'
     $installed = Join-Path $temporary 'materialized adapters'; New-Item -ItemType Directory -Path $installed | Out-Null
-    Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $root 'scripts/materialize-adapters.ps1'),'-RepoRoot',$root,'-Target',$installed,'-Scope','project','-Platform','windows')) 0 'PowerShell adapters materialize'
+    $release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
+    Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $root 'scripts/materialize-adapters.ps1'),'-RepoRoot',$root,'-Target',$installed,'-Scope','project','-Platform','windows','-ReleaseVersion',$release)) 0 'PowerShell adapters materialize'
     $hooks = Get-Content -LiteralPath (Join-Path $installed '.codex/hooks.json') -Raw | ConvertFrom-Json
     $sessionHandlers = @($hooks.hooks.SessionStart | ForEach-Object { @($_.hooks) })
     $hostEntry = @($sessionHandlers | Where-Object { [string]$_.command -like '*/host-context.sh*' })[0]

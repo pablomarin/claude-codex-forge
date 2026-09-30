@@ -215,13 +215,13 @@ else
     fail "permissions check failed: $(cat "$S5/.assert")"
 fi
 
-start_test "merge: only a recognized Forge template retires exact host-context permissions"
+start_test "merge: only a recognized Forge template retires exact obsolete Forge permissions"
 
 S5R=$(scratch_dir merge-retired-forge-permissions)
 cat > "$S5R/template.json" <<'EOF'
 {
   "permissions": {"deny": ["Bash(current-forge:*)"]},
-  "sandbox": {"filesystem": {"denyWrite": ["~/.forge/bin"]}},
+  "sandbox": {"filesystem": {"denyRead": [], "denyWrite": []}},
   "hooks": {
     "SessionStart": [
       {"matcher": "startup|resume|clear|compact", "hooks": [
@@ -237,9 +237,15 @@ cat > "$S5R/user.json" <<'EOF'
     "Read(~/.forge/host-contexts/**)",
     "Edit(~/.forge/host-contexts/**)",
     "Bash(*.forge/host-contexts*:*)",
+    "Read(~/.forge/goal-captures/**)",
+    "Edit(~/.forge/goal-authorizations/**)",
+    "Bash(*forge-goal-authorize*:*)",
     "Bash(project-custom:*)"
   ]},
-  "sandbox": {"filesystem": {"denyWrite": ["~/.forge/host-contexts", "~/custom-protected"]}}
+  "sandbox": {"filesystem": {
+    "denyRead": ["~/.forge/goal-captures", "~/custom-readable"],
+    "denyWrite": ["~/.forge/host-contexts", "~/.forge/bin", "~/.forge/goal-authorizations", "~/custom-protected"]
+  }}
 }
 EOF
 python3 "$MERGE" "$S5R/template.json" "$S5R/user.json" > "$S5R/merge.out" 2>&1
@@ -250,11 +256,18 @@ retired = {
     "Read(~/.forge/host-contexts/**)",
     "Edit(~/.forge/host-contexts/**)",
     "Bash(*.forge/host-contexts*:*)",
+    "Read(~/.forge/goal-captures/**)",
+    "Edit(~/.forge/goal-authorizations/**)",
+    "Bash(*forge-goal-authorize*:*)",
 }
 assert retired.isdisjoint(set(settings["permissions"]["deny"]))
 assert "~/.forge/host-contexts" not in settings["sandbox"]["filesystem"]["denyWrite"]
+assert "~/.forge/bin" not in settings["sandbox"]["filesystem"]["denyWrite"]
+assert "~/.forge/goal-authorizations" not in settings["sandbox"]["filesystem"]["denyWrite"]
+assert "~/.forge/goal-captures" not in settings["sandbox"]["filesystem"]["denyRead"]
 assert "Bash(project-custom:*)" in settings["permissions"]["deny"]
 assert "~/custom-protected" in settings["sandbox"]["filesystem"]["denyWrite"]
+assert "~/custom-readable" in settings["sandbox"]["filesystem"]["denyRead"]
 print("ok")
 PY
 if [[ "$(cat "$S5R/.assert")" == "ok" ]]; then

@@ -416,7 +416,7 @@ workflow_state_activate() {
     workflow_state_validate_cell "phase" "$phase" || return $?
     workflow_state_validate_cell "next step" "$next_step" || return $?
 
-    local root common state base_sha state_hash current_command current_phase current_next
+    local root common state base_sha state_hash current_command current_phase current_next current_head bound_mode
     local current_root current_common current_base_ref current_base_sha current_iteration command mode
     local current_candidate current_spec current_quality current_app current_e2e current_promotion
     local expected_candidate expected_spec expected_quality expected_app expected_e2e expected_promotion
@@ -424,10 +424,6 @@ workflow_state_activate() {
     root=$(workflow_state_root) || { workflow_state_die "not inside a Git worktree"; return $?; }
     common=$(workflow_state_common_dir "$root") || { workflow_state_die "cannot resolve Git common directory"; return $?; }
     state=$(workflow_state_canonical "$root") || return 2
-    base_sha=$(git -C "$root" rev-parse --verify "${base_ref}^{commit}" 2>/dev/null) || {
-        workflow_state_die "base ref does not resolve to a commit: $base_ref"
-        return $?
-    }
     state_hash=$(workflow_state_hash "$state") || return 2
     current_command=$(workflow_state_value "$state" Workflow Command) || return 2
     current_phase=$(workflow_state_value "$state" Workflow Phase) || return 2
@@ -443,6 +439,47 @@ workflow_state_activate() {
     current_app=$(workflow_state_value "$state" Receipts 'Verify app receipt') || return 2
     current_e2e=$(workflow_state_value "$state" Receipts 'E2E receipt') || return 2
     current_promotion=$(workflow_state_value "$state" Receipts 'Promotion receipt') || return 2
+    bound_mode=none
+    if printf '%s\n' "$current_base_sha" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$'; then
+        if [ -n "$current_command" ] && [ "$current_command" != none ] \
+            && [ "$current_command" != - ] && [ "$current_command" != '—' ] \
+            && ! { [ "$current_phase" = complete ] && [ "$current_next" = none ]; }; then
+            bound_mode=active
+        elif [ -z "$current_command" ] || [ "$current_command" = none ] \
+            || [ "$current_command" = - ] || [ "$current_command" = '—' ]; then
+            bound_mode=prebound
+        fi
+    fi
+    if [ "$bound_mode" != none ]; then
+        [ "$current_root" = "$root" ] \
+            && [ "$current_common" = "$common" ] \
+            && [ "$current_base_ref" = "$base_ref" ] \
+            && git -C "$root" cat-file -e "${current_base_sha}^{commit}" 2>/dev/null || {
+                workflow_state_die "bound worktree identity differs from requested activation"
+                return $?
+            }
+        current_head=$(git -C "$root" rev-parse --verify HEAD 2>/dev/null) || {
+            workflow_state_die "cannot resolve bound worktree HEAD"
+            return $?
+        }
+        if [ "$bound_mode" = prebound ]; then
+            [ "$current_head" = "$current_base_sha" ] || {
+                workflow_state_die "prebound worktree HEAD differs from its adopted base"
+                return $?
+            }
+        else
+            git -C "$root" merge-base --is-ancestor "$current_base_sha" "$current_head" 2>/dev/null || {
+                workflow_state_die "active workflow base is not an ancestor of HEAD"
+                return $?
+            }
+        fi
+        base_sha=$current_base_sha
+    else
+        base_sha=$(git -C "$root" rev-parse --verify "${base_ref}^{commit}" 2>/dev/null) || {
+            workflow_state_die "base ref does not resolve to a commit: $base_ref"
+            return $?
+        }
+    fi
     command="/$workflow $task"
     expected_candidate=".forge/local/evidence/$task/candidate.receipt"
     expected_spec=".forge/local/reviews/$task/spec.receipt"

@@ -8,8 +8,8 @@ param(
     [string]$Output,
     [Alias('Input')][string]$ReceiptInput,
     [string]$EngineDir,
-    [string]$ClaudeGoalAuthorization,
-    [string]$CodexGoalCapture,
+    [string]$ClaudeGoalEvidence,
+    [string]$CodexGoalEvidence,
     [string]$WindowsAttestation,
     [ValidateRange(1,86400)][int]$QualificationTimeoutSeconds = 1200
 )
@@ -52,6 +52,7 @@ function ConvertTo-QualificationArgument([string]$Value) {
     return '"'+(($Value -replace '(\\*)"','$1$1\"') -replace '(\\+)$','$1$1')+'"'
 }
 function Write-BlockedChild([string]$Path,[string]$Schema,[string]$Reason) {
+    $parent=Split-Path -Parent $Path;if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
     $body=@{schema=$Schema;status='BLOCKED';reason=$Reason;evidence_mode='authenticated';source_class='forge-runtime-qualifier'}|ConvertTo-Json -Compress
     [IO.File]::WriteAllText($Path,$body+"`n",$Utf8NoBom)
 }
@@ -97,7 +98,8 @@ function Test-Final([string]$Path){
         $binary=$f["${engine}_binary_path"];$binaryHash=$f["${engine}_binary_sha256"]
         if($binary -eq 'none'){if($binaryHash -ne 'none'){return (Reject-Final "$engine binary fields disagree")}}elseif(-not (Test-Regular $binary) -or (Get-Hash $binary) -cne $binaryHash){return (Reject-Final "$engine binary binding is invalid")}
         if(-not (Test-Child $f["${engine}_dispatch_path"] $f["${engine}_dispatch_sha256"] 'forge.dispatch-isolation.v1')){return (Reject-Final "$engine dispatch receipt is invalid")}
-        if(-not (Test-Child $f["${engine}_goal_path"] $f["${engine}_goal_sha256"] 'forge.goal-feasibility.v1')){return (Reject-Final "$engine goal receipt is invalid")}
+        if(-not (Test-Child $f["${engine}_goal_path"] $f["${engine}_goal_sha256"] 'forge.goal-feasibility.v2')){return (Reject-Final "$engine goal receipt is invalid")}
+        if($f["${engine}_native_goal_runtime"] -notin @('READY','BLOCKED','NOT_TESTED')){return (Reject-Final "$engine native Goal status is invalid")}
     }
     if($f.windows_status -notin @('PASS','PENDING')){return (Reject-Final 'Windows status is invalid')}
     if($f.windows_status -eq 'PASS'){
@@ -106,12 +108,12 @@ function Test-Final([string]$Path){
     }
     if($f.overall_status -eq 'PASS'){
         if($f.evidence_mode -ne 'authenticated' -or $f.windows_status -ne 'PASS'){return (Reject-Final 'PASS lacks authenticated Windows evidence')}
-        $expected=@{
-          'claude_dispatch'='authenticated isolated review, exact-id resume, and full-agent worktree investigation passed';'codex_dispatch'='authenticated isolated review, exact-id resume, and full-agent worktree investigation passed';
-          'claude_goal'='authenticated Claude native /goal activation, exact resume, budget pause, and stuck oracle passed';'codex_goal'='validated sealed physical operator Codex TUI capture'
+        foreach($engine in @('claude','codex')){
+            if($f["${engine}_native_goal_runtime"] -ne 'READY'){return (Reject-Final "$engine native Goal is not ready")}
+            $dispatchChild=Get-Content -LiteralPath $f["${engine}_dispatch_path"] -Raw|ConvertFrom-Json
+            $goalChild=Get-Content -LiteralPath $f["${engine}_goal_path"] -Raw|ConvertFrom-Json
+            if($dispatchChild.status -ne 'PASS' -or $goalChild.status -ne 'PASS' -or $goalChild.live_host -ne $engine -or $goalChild.live_status -ne 'READY'){return (Reject-Final "$engine authenticated runtime semantics are invalid")}
         }
-        foreach($name in $expected.Keys){$child=Get-Content -LiteralPath $f["${name}_path"] -Raw|ConvertFrom-Json;if($child.status -ne 'PASS' -or $child.reason -cne $expected[$name]){return (Reject-Final "$name PASS semantics are invalid")}}
-        if(-not (Test-Regular $f.codex_goal_capture_path) -or (Get-Hash $f.codex_goal_capture_path) -cne $f.codex_goal_capture_sha256){return (Reject-Final 'Codex goal capture binding is invalid')}
     }
     return $true
 }
@@ -125,38 +127,35 @@ if($Validate){if(Test-Final $ReceiptInput){exit 0}else{Write-Output "BLOCKED: in
 $selected=0;foreach($flag in @($FixtureMode,$Inventory,$Live)){if($flag){$selected++}};if($selected -ne 1 -or -not $ProjectRoot -or -not $Output){throw 'select exactly one of FixtureMode, Inventory, or Live and provide ProjectRoot/Output'}
 $mode=$(if($FixtureMode){'fixture'}elseif($Inventory){'inventory'}else{'authenticated'});$ProjectRoot=(Resolve-Path $ProjectRoot).Path
 $parent=Split-Path -Parent $Output;if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null};$Output=[IO.Path]::GetFullPath($Output);$bundle="$Output.d";if(Test-Path $bundle){throw 'output bundle already exists'};New-Item -ItemType Directory -Path $bundle|Out-Null
-$candidate=Get-CandidateHash $ProjectRoot;$gitHead=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$treeSha=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1);$children=@{};$binaries=@{}
+$candidate=Get-CandidateHash $ProjectRoot;$gitHead=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$treeSha=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1);$children=@{};$binaries=@{};$goalRuntime=@{}
+if($Live){$env:FORGE_LIVE_QUALIFICATION='1'}
 foreach($engine in @('claude','codex')){
     $binary='';if($EngineDir){$binary=Join-Path $EngineDir "$engine.exe"}else{$command=Get-Command $engine -ErrorAction SilentlyContinue;if($command){$binary=$command.Source}};$binaries[$engine]=$binary
-    $dispatchOut=Join-Path $bundle "$engine-dispatch.json";$goalOut=Join-Path $bundle "$engine-goal.json";$children["${engine}_dispatch"]=$dispatchOut;$children["${engine}_goal"]=$goalOut
+    $dispatchOut=Join-Path $bundle "$engine-dispatch.json";$goalDir=Join-Path $bundle "$engine-goal-evidence";$goalOut=Join-Path $goalDir 'goal-qualification.json';New-Item -ItemType Directory -Path $goalDir -Force|Out-Null;$children["${engine}_dispatch"]=$dispatchOut;$children["${engine}_goal"]=$goalOut
     if($FixtureMode){
         $dispatchArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatch,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$dispatchOut,'-FixtureMode','-EnginePath',$binary)
-        $goalArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$goal,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$goalOut,'-FixtureMode','-EnginePath',$binary)
+        $goalArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$goal,'-Project',$ProjectRoot,'-EvidenceDir',$goalDir,'-Live','none')
         $null=Invoke-QualificationChild -Arguments $dispatchArguments -Receipt $dispatchOut -Schema 'forge.dispatch-isolation.v1' -TimeoutSeconds $QualificationTimeoutSeconds
-        $null=Invoke-QualificationChild -Arguments $goalArguments -Receipt $goalOut -Schema 'forge.goal-feasibility.v1' -TimeoutSeconds $QualificationTimeoutSeconds
+        if($engine -eq 'claude'){$null=Invoke-QualificationChild -Arguments $goalArguments -Receipt $goalOut -Schema 'forge.goal-feasibility.v2' -TimeoutSeconds $QualificationTimeoutSeconds}
+        else{Copy-Item -LiteralPath $children['claude_goal'] -Destination $goalOut}
     }else{
-        $previous=$env:FORGE_LIVE_QUALIFICATION;if($Live){$env:FORGE_LIVE_QUALIFICATION='1'}else{Remove-Item Env:FORGE_LIVE_QUALIFICATION -ErrorAction SilentlyContinue}
-        try{
-            $extra=@();if($engine -eq 'claude' -and $ClaudeGoalAuthorization){$extra=@('-Authorization',$ClaudeGoalAuthorization)}elseif($engine -eq 'codex' -and $CodexGoalCapture){$extra=@('-TrustedCapture',$CodexGoalCapture)}
-            if($Live){
-                $dispatchArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatch,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$dispatchOut)
-                $goalArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$goal,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$goalOut)+$extra
-                $null=Invoke-QualificationChild -Arguments $dispatchArguments -Receipt $dispatchOut -Schema 'forge.dispatch-isolation.v1' -TimeoutSeconds $QualificationTimeoutSeconds
-                $null=Invoke-QualificationChild -Arguments $goalArguments -Receipt $goalOut -Schema 'forge.goal-feasibility.v1' -TimeoutSeconds $QualificationTimeoutSeconds
-            }else{
-                $dispatchArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatch,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$dispatchOut)
-                $goalArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$goal,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$goalOut)+$extra
-                $null=Invoke-QualificationChild -Arguments $dispatchArguments -Receipt $dispatchOut -Schema 'forge.dispatch-isolation.v1' -TimeoutSeconds $QualificationTimeoutSeconds
-                $null=Invoke-QualificationChild -Arguments $goalArguments -Receipt $goalOut -Schema 'forge.goal-feasibility.v1' -TimeoutSeconds $QualificationTimeoutSeconds
-            }
-        }finally{if($null -eq $previous){Remove-Item Env:FORGE_LIVE_QUALIFICATION -ErrorAction SilentlyContinue}else{$env:FORGE_LIVE_QUALIFICATION=$previous}}
+        $dispatchArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatch,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$dispatchOut)
+        $goalArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$goal,'-Project',$ProjectRoot,'-EvidenceDir',$goalDir,'-Live',$(if($Live){$engine}else{'none'}))
+        $goalEvidence = if($engine -eq 'claude'){$ClaudeGoalEvidence}else{$CodexGoalEvidence}
+        if($Live -and $goalEvidence){$goalArguments += @('-LiveEvidence',$goalEvidence)}
+        $dispatchCode=Invoke-QualificationChild -Arguments $dispatchArguments -Receipt $dispatchOut -Schema 'forge.dispatch-isolation.v1' -TimeoutSeconds $QualificationTimeoutSeconds
+        if($Live -and $dispatchCode -ne 0){Write-BlockedChild $goalOut 'forge.goal-feasibility.v2' 'dispatch-qualification-blocked'}
+        elseif(-not $Live -and $engine -eq 'codex'){Copy-Item -LiteralPath $children['claude_goal'] -Destination $goalOut}
+        else{$null=Invoke-QualificationChild -Arguments $goalArguments -Receipt $goalOut -Schema 'forge.goal-feasibility.v2' -TimeoutSeconds $QualificationTimeoutSeconds}
     }
+    try{$goalReceipt=Get-Content -LiteralPath $goalOut -Raw|ConvertFrom-Json;$goalRuntime[$engine]=$(if(-not $Live){'NOT_TESTED'}elseif($goalReceipt.status -eq 'PASS' -and $goalReceipt.live_status -eq 'READY'){'READY'}else{'BLOCKED'})}catch{$goalRuntime[$engine]=$(if($Live){'BLOCKED'}else{'NOT_TESTED'})}
 }
 $windowsStatus='PENDING';$windowsPath='none';$windowsHash='none'
 if($WindowsAttestation -and (Test-Regular $WindowsAttestation)){$wf=Get-Fields $WindowsAttestation;$head=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$tree=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1);if($wf.format -eq 'forge-windows-deterministic-v1' -and $wf.status -eq 'PASS' -and $wf.powershell_major -eq '5' -and $wf.powershell_minor -eq '1' -and $wf.candidate_clean -eq 'true' -and $wf.git_head -eq $head -and $wf.tree_sha -eq $tree -and (Test-CandidateClean $ProjectRoot)){$windowsStatus='PASS';$windowsPath=(Resolve-Path $WindowsAttestation).Path;$windowsHash=Get-Hash $windowsPath}}
 $overall='BLOCKED';if($mode -eq 'authenticated' -and $windowsStatus -eq 'PASS'){$allPass=$true;foreach($child in $children.Values){try{if((Get-Content -Raw $child|ConvertFrom-Json).status -ne 'PASS'){$allPass=$false}}catch{$allPass=$false}};if($allPass){$overall='PASS'}}
 $lines=New-Object Collections.Generic.List[string];foreach($line in @('format=forge-runtime-final-v1','source_class=forge-runtime-qualifier',"evidence_mode=$mode","project_root=$ProjectRoot","candidate_sha256=$candidate","git_head=$gitHead","tree_sha=$treeSha")){$lines.Add($line)}
-foreach($engine in @('claude','codex')){$binary=$binaries[$engine];if($binary -and (Test-Regular $binary)){$binary=(Resolve-Path $binary).Path;$binaryHash=Get-Hash $binary}else{$binary='none';$binaryHash='none'};$lines.Add("${engine}_binary_path=$binary");$lines.Add("${engine}_binary_sha256=$binaryHash");foreach($kind in @('dispatch','goal')){$child=$children["${engine}_${kind}"];$lines.Add("${engine}_${kind}_path=$child");$lines.Add("${engine}_${kind}_sha256=$(Get-Hash $child)")}}
-if($CodexGoalCapture -and (Test-Regular $CodexGoalCapture)){$capture=(Resolve-Path $CodexGoalCapture).Path;$lines.Add("codex_goal_capture_path=$capture");$lines.Add("codex_goal_capture_sha256=$(Get-Hash $capture)")}else{$lines.Add('codex_goal_capture_path=none');$lines.Add('codex_goal_capture_sha256=none')}
+foreach($engine in @('claude','codex')){$binary=$binaries[$engine];if($binary -and (Test-Regular $binary)){$binary=(Resolve-Path $binary).Path;$binaryHash=Get-Hash $binary}else{$binary='none';$binaryHash='none'};$lines.Add("${engine}_binary_path=$binary");$lines.Add("${engine}_binary_sha256=$binaryHash");foreach($kind in @('dispatch','goal')){$child=$children["${engine}_${kind}"];$lines.Add("${engine}_${kind}_path=$child");$lines.Add("${engine}_${kind}_sha256=$(Get-Hash $child)")};$lines.Add("${engine}_native_goal_runtime=$($goalRuntime[$engine])")}
 $lines.Add("windows_status=$windowsStatus");$lines.Add("windows_attestation_path=$windowsPath");$lines.Add("windows_attestation_sha256=$windowsHash");$lines.Add("overall_status=$overall");[IO.File]::WriteAllLines($Output,$lines,$Utf8NoBom)
-if(-not (Test-Final $Output)){throw 'generated final attestation failed schema validation'};Get-Content $Output;if($overall -eq 'PASS'){exit 0}else{exit 1}
+if(-not (Test-Final $Output)){throw 'generated final attestation failed schema validation'};Get-Content $Output
+if($Live){foreach($engine in @('claude','codex')){$receipt=Get-Content -LiteralPath $children["${engine}_goal"] -Raw|ConvertFrom-Json;if($goalRuntime[$engine] -eq 'READY'){Write-Host "NATIVE_GOAL_RUNTIME: READY host=$engine evidence=$($children["${engine}_goal"])"}else{Write-Host "NATIVE_GOAL_RUNTIME: BLOCKED host=$engine reason=$($receipt.reason)"}}}
+if($overall -eq 'PASS'){exit 0}else{exit 1}

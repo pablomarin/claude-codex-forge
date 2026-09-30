@@ -8,7 +8,7 @@ DISPATCH="$ROOT/scripts/qualify-dispatch-isolation.sh"
 GOAL="$ROOT/scripts/qualify-goal-feasibility.sh"
 
 usage() {
-    echo "Usage: qualify-runtime-final.sh (--fixture-mode|--inventory|--live) --project-root DIR --output FILE [--engine-dir DIR] [--claude-goal-authorization FILE] [--codex-goal-capture FILE] [--windows-attestation FILE] [--qualification-timeout-seconds N]" >&2
+    echo "Usage: qualify-runtime-final.sh (--fixture-mode|--inventory|--live) --project-root DIR --output FILE [--engine-dir DIR] [--claude-goal-evidence FILE] [--codex-goal-evidence FILE] [--windows-attestation FILE] [--qualification-timeout-seconds N]" >&2
     echo "       qualify-runtime-final.sh --validate --input FILE" >&2
     exit 2
 }
@@ -49,6 +49,7 @@ candidate_hash() {
 binary_path() { local path; if [ -n "$2" ]; then path="$(cd "$2" && pwd -P)/$1"; else path=$(command -v "$1" 2>/dev/null || true); fi; [ -z "$path" ] || resolve_file "$path"; }
 candidate_clean() { [ -z "$(git -C "$1" status --porcelain --untracked-files=all)" ]; }
 write_blocked_child() {
+    mkdir -p "$(dirname "$1")"
     printf '{"schema":"%s","status":"BLOCKED","reason":"%s","evidence_mode":"authenticated","source_class":"forge-runtime-qualifier"}\n' "$2" "$3" > "$1"
 }
 signal_qualification_tree() {
@@ -82,7 +83,7 @@ validate_child() {
 }
 
 validate_receipt() {
-    local input="$1" project candidate mode overall engine kind path sha bin bin_sha status reason head tree
+    local input="$1" project candidate mode overall engine kind path sha bin bin_sha status head tree runtime
     [ -f "$input" ] && [ ! -L "$input" ] || return 1
     [ "$(field "$input" format)" = forge-runtime-final-v1 ] || return 1
     [ "$(field "$input" source_class)" = forge-runtime-qualifier ] || return 1
@@ -101,9 +102,11 @@ validate_receipt() {
             path=$(field "$input" "${engine}_${kind}_path")
             sha=$(field "$input" "${engine}_${kind}_sha256")
             if [ "$kind" = dispatch ]; then validate_child "$path" forge.dispatch-isolation.v1 "$sha" || return 1
-            else validate_child "$path" forge.goal-feasibility.v1 "$sha" || return 1
+            else validate_child "$path" forge.goal-feasibility.v2 "$sha" || return 1
             fi
         done
+        runtime=$(field "$input" "${engine}_native_goal_runtime")
+        case "$runtime" in READY|BLOCKED|NOT_TESTED) ;; *) return 1 ;; esac
     done
     status=$(field "$input" windows_status); case "$status" in PASS|PENDING) ;; *) return 1 ;; esac
     if [ "$status" = PASS ]; then
@@ -121,26 +124,20 @@ validate_receipt() {
     if [ "$overall" = PASS ]; then
         [ "$mode" = authenticated ] && [ "$status" = PASS ] || return 1
         for engine in claude codex; do
-            for kind in dispatch goal; do
-                path=$(field "$input" "${engine}_${kind}_path")
-                [ "$(json_field "$path" status)" = PASS ] || return 1
-                reason=$(json_field "$path" reason)
-                case "$engine:$kind:$reason" in
-                    'claude:dispatch:authenticated isolated review, exact-id resume, and full-agent worktree investigation passed'|\
-                    'codex:dispatch:authenticated isolated review, exact-id resume, and full-agent worktree investigation passed'|\
-                    'claude:goal:authenticated Claude native /goal activation, exact resume, budget pause, and stuck oracle passed'|\
-                    'codex:goal:validated sealed physical operator Codex TUI capture') ;;
-                    *) return 1 ;;
-                esac
-            done
+            [ "$(field "$input" "${engine}_native_goal_runtime")" = READY ] || return 1
+            path=$(field "$input" "${engine}_dispatch_path")
+            [ "$(json_field "$path" status)" = PASS ] || return 1
+            path=$(field "$input" "${engine}_goal_path")
+            [ "$(json_field "$path" status)" = PASS ] \
+              && [ "$(json_field "$path" live_host)" = "$engine" ] \
+              && [ "$(json_field "$path" live_status)" = READY ] || return 1
         done
-        path=$(field "$input" codex_goal_capture_path); sha=$(field "$input" codex_goal_capture_sha256)
-        [ -f "$path" ] && [ ! -L "$path" ] && [ "$(hash_file "$path")" = "$sha" ] || return 1
     fi
     return 0
 }
 
-mode=""; project=""; output=""; input=""; engine_dir=""; claude_auth=""; codex_capture=""; windows=""; qualification_timeout=1200
+mode=""; project=""; output=""; input=""; engine_dir=""; windows=""; qualification_timeout=1200
+claude_goal_evidence=""; codex_goal_evidence=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --fixture-mode) [ -z "$mode" ] || usage; mode=fixture; shift ;;
@@ -149,8 +146,8 @@ while [ "$#" -gt 0 ]; do
         --validate) [ -z "$mode" ] || usage; mode=validate; shift ;;
         --project-root) project="$2"; shift 2 ;; --output) output="$2"; shift 2 ;;
         --input) input="$2"; shift 2 ;; --engine-dir) engine_dir="$2"; shift 2 ;;
-        --claude-goal-authorization) claude_auth="$2"; shift 2 ;;
-        --codex-goal-capture) codex_capture="$2"; shift 2 ;;
+        --claude-goal-evidence) claude_goal_evidence="$2"; shift 2 ;;
+        --codex-goal-evidence) codex_goal_evidence="$2"; shift 2 ;;
         --windows-attestation) windows="$2"; shift 2 ;;
         --qualification-timeout-seconds) qualification_timeout="$2"; shift 2 ;;
         *) usage ;;
@@ -166,37 +163,57 @@ bundle="$output.d"; [ ! -e "$bundle" ] || { echo "BLOCKED: output bundle already
 
 candidate=$(candidate_hash "$project")
 git_head=$(git -C "$project" rev-parse HEAD); tree_sha=$(git -C "$project" rev-parse 'HEAD^{tree}')
+[ "$mode" != authenticated ] || export FORGE_LIVE_QUALIFICATION=1
 for engine in claude codex; do
     bin=$(binary_path "$engine" "$engine_dir")
-    dispatch_out="$bundle/$engine-dispatch.json"; goal_out="$bundle/$engine-goal.json"
+    dispatch_out="$bundle/$engine-dispatch.json"
+    goal_dir="$bundle/$engine-goal-evidence"
+    goal_out="$goal_dir/goal-qualification.json"
+    mkdir -p "$goal_dir"
     if [ "$mode" = fixture ]; then
         [ -x "$bin" ] || { echo "BLOCKED: fixture engine missing: $engine" >&2; exit 3; }
         FORGE_FAKE_ENGINE_NAME="$engine" "$DISPATCH" --engine "$engine" --project-root "$project" --output "$dispatch_out" --fixture-mode --engine-path "$bin" >/dev/null 2>&1 || true
-        FORGE_FAKE_ENGINE_NAME="$engine" "$GOAL" --engine "$engine" --project-root "$project" --output "$goal_out" --fixture-mode --engine-path "$bin" >/dev/null 2>&1 || true
+        if [ "$engine" = claude ]; then
+            "$GOAL" --project "$project" --evidence-dir "$goal_dir" --live none >/dev/null 2>&1 || true
+        else
+            cp "$claude_goal" "$goal_out"
+        fi
     else
         if [ "$mode" = authenticated ]; then
-            export FORGE_LIVE_QUALIFICATION=1
+            dispatch_rc=0
             run_qualification_child "$qualification_timeout" "$dispatch_out" forge.dispatch-isolation.v1 \
-                "$DISPATCH" --engine "$engine" --project-root "$project" --output "$dispatch_out" || true
-            if [ "$engine" = claude ] && [ -n "$claude_auth" ]; then
-                run_qualification_child "$qualification_timeout" "$goal_out" forge.goal-feasibility.v1 \
-                    "$GOAL" --engine claude --project-root "$project" --output "$goal_out" --authorization "$claude_auth" || true
-            elif [ "$engine" = codex ] && [ -n "$codex_capture" ]; then
-                run_qualification_child "$qualification_timeout" "$goal_out" forge.goal-feasibility.v1 \
-                    "$GOAL" --engine codex --project-root "$project" --output "$goal_out" --trusted-capture "$codex_capture" || true
+                "$DISPATCH" --engine "$engine" --project-root "$project" --output "$dispatch_out" || dispatch_rc=$?
+            if [ "$dispatch_rc" -eq 0 ]; then
+                case "$engine" in
+                    claude) goal_evidence=$claude_goal_evidence ;;
+                    codex) goal_evidence=$codex_goal_evidence ;;
+                esac
+                goal_args=(--project "$project" --evidence-dir "$goal_dir" --live "$engine")
+                [ -z "$goal_evidence" ] || goal_args+=(--live-evidence "$goal_evidence")
+                run_qualification_child "$qualification_timeout" "$goal_out" forge.goal-feasibility.v2 \
+                    "$GOAL" "${goal_args[@]}" || true
             else
-                run_qualification_child "$qualification_timeout" "$goal_out" forge.goal-feasibility.v1 \
-                    "$GOAL" --engine "$engine" --project-root "$project" --output "$goal_out" || true
+                write_blocked_child "$goal_out" forge.goal-feasibility.v2 'dispatch-qualification-blocked'
             fi
         else
-            unset FORGE_LIVE_QUALIFICATION 2>/dev/null || true
             "$DISPATCH" --engine "$engine" --project-root "$project" --output "$dispatch_out" >/dev/null 2>&1 || true
-            "$GOAL" --engine "$engine" --project-root "$project" --output "$goal_out" >/dev/null 2>&1 || true
+            if [ "$engine" = claude ]; then
+                "$GOAL" --project "$project" --evidence-dir "$goal_dir" --live none >/dev/null 2>&1 || true
+            else
+                cp "$claude_goal" "$goal_out"
+            fi
         fi
     fi
     eval "${engine}_bin=\$bin"
     eval "${engine}_dispatch=\$dispatch_out"
     eval "${engine}_goal=\$goal_out"
+    goal_status=$(json_field "$goal_out" status 2>/dev/null || true)
+    goal_live_status=$(json_field "$goal_out" live_status 2>/dev/null || true)
+    if [ "$mode" != authenticated ]; then runtime=NOT_TESTED
+    elif [ "$goal_status" = PASS ] && [ "$goal_live_status" = READY ]; then runtime=READY
+    else runtime=BLOCKED
+    fi
+    eval "${engine}_native_goal_runtime=\$runtime"
 done
 
 windows_status=PENDING; windows_path=none; windows_sha=none
@@ -229,10 +246,20 @@ fi
         printf '%s_binary_path=%s\n%s_binary_sha256=%s\n' "$engine" "$bin" "$engine" "$bin_sha"
         printf '%s_dispatch_path=%s\n%s_dispatch_sha256=%s\n' "$engine" "$dispatch_out" "$engine" "$(hash_file "$dispatch_out")"
         printf '%s_goal_path=%s\n%s_goal_sha256=%s\n' "$engine" "$goal_out" "$engine" "$(hash_file "$goal_out")"
+        eval "runtime=\$${engine}_native_goal_runtime"
+        printf '%s_native_goal_runtime=%s\n' "$engine" "$runtime"
     done
-    if [ -n "$codex_capture" ] && [ -f "$codex_capture" ]; then printf 'codex_goal_capture_path=%s\ncodex_goal_capture_sha256=%s\n' "$(physical_file "$codex_capture")" "$(hash_file "$codex_capture")"; else printf 'codex_goal_capture_path=none\ncodex_goal_capture_sha256=none\n'; fi
     printf 'windows_status=%s\nwindows_attestation_path=%s\nwindows_attestation_sha256=%s\noverall_status=%s\n' "$windows_status" "$windows_path" "$windows_sha" "$overall"
 } > "$output"
 validate_receipt "$output" || { echo "BLOCKED: generated final attestation failed schema validation" >&2; exit 4; }
 cat "$output"
+for engine in claude codex; do
+    eval "runtime=\$${engine}_native_goal_runtime"
+    eval "goal_out=\$${engine}_goal"
+    if [ "$runtime" = READY ]; then
+        echo "NATIVE_GOAL_RUNTIME: READY host=$engine evidence=$goal_out"
+    elif [ "$mode" = authenticated ]; then
+        echo "NATIVE_GOAL_RUNTIME: BLOCKED host=$engine reason=$(json_field "$goal_out" reason 2>/dev/null || printf unavailable)"
+    fi
+done
 [ "$overall" = PASS ]

@@ -44,6 +44,7 @@ assert_not_contains /tmp/forge-runtime-host.$$ "binary unavailable" \
 start_test "root and nested discovery enumerate each canonical rule once"
 S=$(scratch_dir runtime-discovery)
 mkdir -p "$S/project/nested/deeper" "$S/project/.forge/rules"
+printf '6.3\n' > "$S/project/.forge/version"
 printf 'one\n' > "$S/project/.forge/rules/one.md"
 printf 'two\n' > "$S/project/.forge/rules/two.md"
 printf '<!-- forge:begin v6 -->\nRead .forge/instructions.md completely.\n<!-- forge:end v6 -->\n' > "$S/project/CLAUDE.md"

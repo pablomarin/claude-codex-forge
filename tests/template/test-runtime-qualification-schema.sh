@@ -13,6 +13,18 @@ start_test "runtime qualification wrappers exist but deterministic runners never
 assert_file_exists "$RUNNER" "Bash final qualifier exists"
 assert_file_exists "$RUNNER_PS" "PowerShell final qualifier exists"
 assert_not_contains "$REPO_ROOT/tests/template/run-all.sh" 'qualify-runtime-final' "run-all never launches final live qualification"
+for runner in "$RUNNER" "$RUNNER_PS"; do
+    assert_not_contains "$runner" 'ClaudeGoalAuthorization' \
+        "$(basename "$runner") has no PowerShell global Goal authorization input"
+    assert_not_contains "$runner" 'claude-goal-authorization' \
+        "$(basename "$runner") has no Unix global Goal authorization input"
+    assert_not_contains "$runner" 'CodexGoalCapture' \
+        "$(basename "$runner") has no PowerShell global Goal capture input"
+    assert_not_contains "$runner" 'codex-goal-capture' \
+        "$(basename "$runner") has no Unix global Goal capture input"
+    assert_contains "$runner" 'native_goal_runtime' \
+        "$(basename "$runner") classifies each host native Goal runtime"
+done
 
 if [[ ! -f "$RUNNER" ]]; then
     report "test-runtime-qualification-schema.sh"
@@ -58,6 +70,8 @@ set -e
 [[ "$rc" -ne 0 ]] && pass "fixture qualification stays non-certifying" || fail "fixture qualification falsely returned release-ready"
 assert_contains "$OUT" 'evidence_mode=fixture' "attestation labels fake evidence"
 assert_contains "$OUT" 'overall_status=BLOCKED' "fake evidence cannot become PASS"
+assert_contains "$OUT" 'claude_native_goal_runtime=NOT_TESTED' "fixture does not claim Claude live readiness"
+assert_contains "$OUT" 'codex_native_goal_runtime=NOT_TESTED' "fixture does not claim Codex live readiness"
 if bash "$RUNNER" --validate --input "$OUT" >/dev/null 2>&1; then
     pass "fixture receipt validates structurally"
 else

@@ -29,13 +29,17 @@ Set-Location C:\path\to\project
 
 The command must run at the canonical repository root. Unix full refresh requires Python 3. The
 preview uses the same planner and staging validation as execution but creates no guard, backup,
-report, stamp, or project/global file. Execution repeats discovery under the transaction guard, so
+report, stamp, or project file. Execution repeats discovery under the transaction guard, so
 a stale preview never authorizes changed bytes.
 
 `--upgrade` / `-Upgrade` updates an existing v6 installation while preserving project-owned
 configuration. `-f` / `--force` / `-Force` previews or executes the transactional full
 installation and reconciliation path from any state. The former `-F` / `--full-refresh` and
 `-FullRefresh` / `-R` spellings remain deprecated compatibility aliases and are no longer needed.
+
+After a routine update, read `cat .forge/version` on macOS/Linux or
+`Get-Content .forge\version` in PowerShell. That exact release is committed with the repository;
+other repositories remain untouched and may intentionally run another Forge version.
 
 If you do not know which harness or version is present, run the preview. It is the safe inventory
 command and writes no project files.
@@ -56,29 +60,22 @@ authorization evidence is invalidated because it cannot certify the new contract
 
 ```text
 .forge/                     Forge-owned engineering policy
-docs/agent-context.md       Team-owned shared project knowledge
-CLAUDE.md                   Thin Claude discovery adapter + shared-context pointer
-AGENTS.md                   Thin Codex discovery adapter + shared-context pointer
+docs/agent-context.md       Optional team-owned shared project knowledge
+AGENTS.md                   Canonical project discovery adapter
+CLAUDE.md                   Compatibility bridge containing only @AGENTS.md
 ```
 
-Do not manually synchronize `CLAUDE.md` and `AGENTS.md`. Shared project instructions belong in the
-neutral context file instead. Project-owned text stays outside their bounded Forge blocks, and both
-blocks load the same `.forge/instructions.md` policy. Forge cannot infer repository architecture,
-domain facts, or local commands; create `docs/agent-context.md` when the project needs shared
-context and put this same pointer outside the managed block in both roots:
-
-```markdown
-Read `docs/agent-context.md` completely before acting.
-```
-
-Then maintain shared knowledge only in the neutral document. Keep only genuinely host-specific
-instructions in the corresponding root file.
+Do not manually synchronize `CLAUDE.md` and `AGENTS.md`. The canonical `AGENTS.md` loads
+`.forge/instructions.md` and the optional neutral context file. `CLAUDE.md` imports `AGENTS.md`.
+Forge cannot infer repository architecture, domain facts, or local commands; create
+`docs/agent-context.md` when the project needs shared context, then maintain that knowledge only in
+the neutral document.
 
 ## Protected Content
 
 Full refresh preserves:
 
-- user text outside Forge marker blocks in root/global instruction files;
+- user text outside Forge marker blocks in legacy root instruction files;
 - `.forge/local/state.md`, local memory, and project-owned `.forge/memory/`;
 - unknown/custom settings and MCP entries unless they collide with required Forge behavior;
 - custom native goal content, reported as a host readiness collision rather than overwritten;
@@ -154,23 +151,43 @@ Codex-only review command, or old `.claude/rules/` imports. Preserve useful proj
 shared material to `docs/agent-context.md`; do not replace the whole root file or copy shared Forge
 policy into both native files.
 
-## Project and Global Scopes
+## One-time Legacy Global Retirement
 
-A project refresh never changes home-directory configuration. Refresh the global harness
-separately when setup reports it stale, previewing first:
+Forge 6.3 is complete per repository and never requires machine-wide Forge policy, memory, or Goal
+helpers. If an older release installed those files, first preview the retirement:
 
 ```bash
-~/claude-codex-forge/setup.sh --global -f --dry-run
-~/claude-codex-forge/setup.sh --global -f
+~/claude-codex-forge/setup.sh --retire-global
 ```
 
 ```powershell
-& $HOME\claude-codex-forge\setup.ps1 -Global -Force -DryRun
-& $HOME\claude-codex-forge\setup.ps1 -Global -Force
+& $HOME\claude-codex-forge\setup.ps1 -RetireGlobal
 ```
 
-Do not combine full reconciliation with the routine update, retired continuity migration, or
-Playwright scaffolding flags.
+The preview prints one classification per discovered path and ends with
+`RETIRE_GLOBAL_DIGEST=<sha256>`:
+
+- `REMOVE` means released bytes or an exact Forge-owned block can be removed safely.
+- `PRESERVE` means personal or unknown bytes remain untouched.
+- `BLOCKED` means ownership or structure is unsafe to infer; resolve it manually and preview again.
+- `ABSENT` means that legacy path is not present.
+
+When there are no blockers, copy the exact lowercase digest and apply that same inventory:
+
+```bash
+~/claude-codex-forge/setup.sh --retire-global --apply --confirm <digest-from-preview>
+```
+
+```powershell
+& $HOME\claude-codex-forge\setup.ps1 -RetireGlobal -Apply -Confirm <digest-from-preview>
+```
+
+Any intervening change produces a different digest and the apply fails closed. Retirement is
+optional cleanup for old machines, never a fresh-install or normal-upgrade prerequisite. It does
+not modify a project repository.
+
+Do not combine full project reconciliation with routine update, legacy retirement, retired
+continuity migration, or Playwright scaffolding flags.
 
 Full refresh changes only the current worktree. It does not edit sibling worktrees or guess which
 sibling branch should receive the migration. Commit the successful harness migration, merge or

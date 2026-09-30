@@ -22,6 +22,12 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
    exists, create one with the portable helper where allowed:
    `.forge/hooks/lib/worktree-lifecycle.sh create --kind feat --name <slug> --base <ref-or-sha>`
    (PowerShell: `worktree-lifecycle.ps1 -Action Create -Kind feat -Name <slug> -Base <ref-or-sha>`).
+   In a fresh host-native worktree, normalize and seed it before activation with
+   `.forge/hooks/lib/worktree-lifecycle.sh adopt --kind feat --name <slug> --base <ref-or-sha>
+   --worktree "$PWD"` (PowerShell: `worktree-lifecycle.ps1 -Action Adopt -Kind feat -Name <slug>
+   -Base <ref-or-sha> -Worktree $PWD.Path`). This safely replaces a clean, unpublished
+   host-generated branch name with `feat/<slug>`; it never renames protected, dirty, shared, or
+   published work.
    Only in the Forge source checkout, when the installed path is absent, use the tracked
    `hooks/lib/worktree-lifecycle.sh` or `.ps1`. Native creation or adoption is optional only under
    the shared startup boundary; never create a second worktree for the same-directory handoff.
@@ -33,9 +39,9 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
 5. The helper seeds only `## State` (with `### Now` cleared), `## Open Questions`, and `## Blockers`
    from the primary checkout and writes the exact baseline to
    `.forge/local/.state-seed-snapshot.md`. It never seeds workflow, goal, authorization, receipts,
-   evidence, or local memory. For an adopted inactive worktree that lacks seeded state, run the
-   helper's `seed` action once; if state or a snapshot already exists, reconcile it explicitly
-   rather than guessing or overwriting an active workflow.
+   evidence, or local memory. The `create` and `adopt` actions both seed state. If an inactive
+   native worktree already has both state and its snapshot, `adopt` preserves them; if only one
+   exists or a workflow is active, stop rather than guessing or overwriting it.
 6. In the target worktree, run `workflow-state.sh show` and resolve the intended base ref. If state
    is inactive, invoke `.forge/hooks/lib/workflow-state.sh activate --host <claude|codex> --workflow
    new-feature --task <slug> --base-ref <ref-or-sha> --phase requirements --next-step 'complete
@@ -75,9 +81,13 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
 Run `/prd:discuss <feature>` and `/prd:create <feature>`. Do not design implementation details in
 the PRD. Continue only after explicit PRD approval and record the approved PRD path/version.
 
-If autonomous execution would help, offer the active host's native `/goal`. Forge state remains the
-authority for objective, nonce, persistent turn ceiling/count, checklist, evidence, authorization,
-and terminal status. Native counters may reset; the Forge record never does.
+If autonomous execution would help, offer the active host's native `/goal`. Populate `## /goal
+session` only after the developer invokes `/goal` or explicitly requests native Goal autonomy, then
+publish the activation with `.forge/hooks/lib/goal-ledger.sh activate` (or the PowerShell twin).
+That human action is activation authority; Forge state and the Git-common ledger provide persistent
+objective, nonce, activation/count/ceiling, checklist, evidence, and terminal status. Native counters
+may reset; the repository ledger never does. External mutations retain their separate authorization
+boundaries.
 
 ## 2. Research
 
