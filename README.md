@@ -168,6 +168,12 @@ The main workflows are:
 | Engineering Council | `/council <question>` | `$council <question>` |
 | Autonomous execution | Native `/goal` | Native `/goal` |
 
+In Claude Desktop, start a new-feature or bug-fix session from the project and turn on **worktree** before sending the first prompt. Claude then creates the isolated checkout outside its
+protected agent sandbox; Forge verifies the requested base, seeds local state, and normalizes the
+host-generated branch to `feat/<slug>` or `fix/<slug>` before activation. Quick fixes do not need
+this option. Other supported hosts may use their native isolated-worktree mode or Forge's portable
+worktree helper.
+
 Forge never shadows either host’s native `/goal`. It supplies the shared composition contract in
 `.forge/workflows/goal.md`; native session history stays host-specific while the Forge objective,
 nonce, persistent turn count, evidence, and next step survive a host switch.

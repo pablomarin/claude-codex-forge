@@ -34,10 +34,30 @@ assert_contains "$REPO_ROOT/commands/forge-goal.md" 'activation_count' \
     "goal workflow records monotonic activations"
 assert_contains "$REPO_ROOT/commands/forge-goal.md" '20 * activation_count' \
     "goal workflow derives a fixed 20-turn tranche per activation"
+assert_contains "$REPO_ROOT/commands/forge-goal.md" "sync the state's \`turn_count\`" \
+    "goal continuation synchronizes state from the authoritative ledger before work"
+assert_contains "$REPO_ROOT/commands/forge-goal.md" "state may lag the ledger by exactly one" \
+    "goal contract documents the Stop-to-next-turn accounting boundary"
 assert_contains "$MANAGED" $'canonical\thooks/lib/goal-ledger.sh\t.forge/hooks/lib/goal-ledger.sh' \
     "Bash repository ledger helper is installed"
 assert_contains "$MANAGED" $'canonical\thooks/lib/goal-ledger.ps1\t.forge/hooks/lib/goal-ledger.ps1' \
     "PowerShell repository ledger helper is installed"
+assert_contains "$REPO_ROOT/scripts/qualify-goal-feasibility.sh" 'interactive-native-goal-evidence-required' \
+    "Bash qualifier does not treat a zero-exit host process as native Goal proof"
+assert_contains "$REPO_ROOT/scripts/qualify-goal-feasibility.ps1" 'interactive-native-goal-evidence-required' \
+    "PowerShell qualifier does not treat a zero-exit host process as native Goal proof"
+assert_contains "$REPO_ROOT/scripts/qualify-goal-feasibility.sh" 'forge.native-goal-operator-evidence.v1' \
+    "Bash qualifier accepts candidate-bound observed native Goal evidence"
+assert_contains "$REPO_ROOT/scripts/qualify-goal-feasibility.ps1" 'forge.native-goal-operator-evidence.v1' \
+    "PowerShell qualifier accepts candidate-bound observed native Goal evidence"
+assert_contains "$REPO_ROOT/scripts/qualify-runtime-final.sh" '--claude-goal-evidence' \
+    "Bash final qualifier routes Claude operator evidence explicitly"
+assert_contains "$REPO_ROOT/scripts/qualify-runtime-final.sh" '--codex-goal-evidence' \
+    "Bash final qualifier routes Codex operator evidence explicitly"
+assert_contains "$REPO_ROOT/scripts/qualify-runtime-final.ps1" 'ClaudeGoalEvidence' \
+    "PowerShell final qualifier routes Claude operator evidence explicitly"
+assert_contains "$REPO_ROOT/scripts/qualify-runtime-final.ps1" 'CodexGoalEvidence' \
+    "PowerShell final qualifier routes Codex operator evidence explicitly"
 
 start_test "bounded stage rejects unresolved external runtime dependencies"
 scan_files="commands/opinion.md commands/prd/discuss.md commands/prd/create.md agents/research-first.md agents/verify-app.md agents/verify-e2e.md rules/workflow.md rules/critical-rules.md"
@@ -129,6 +149,16 @@ assert_contains "$REPO_ROOT/rules/workflow.md" 'Do not fabricate activation' \
     "a denied setup cannot be reported as an active workflow"
 assert_contains "$REPO_ROOT/rules/workflow.md" 'prepared native worktree' \
     "startup supports native isolation without duplicating worktrees"
+assert_contains "$REPO_ROOT/rules/workflow.md" 'worktree-lifecycle.sh adopt' \
+    "startup canonicalizes a clean host-native worktree before activation"
+for workflow in new-feature fix-bug; do
+    assert_contains "$REPO_ROOT/commands/$workflow.md" 'worktree-lifecycle.sh adopt' \
+        "$workflow adopts native isolation onto the Forge branch convention"
+done
+assert_contains "$REPO_ROOT/docs/guides/parallel-sessions.md" 'worktree-lifecycle.sh adopt' \
+    "parallel-session guide documents native worktree adoption"
+assert_contains "$REPO_ROOT/README.md" 'turn on **worktree** before sending the first prompt' \
+    "README exposes the Claude Desktop isolation prerequisite at the workflow entrypoint"
 assert_contains "$REPO_ROOT/rules/workflow.md" 'Quick-fix never creates a worktree' \
     "shared startup preserves the quick-fix no-worktree contract"
 assert_contains "$REPO_ROOT/rules/workflow.md" 'Only `/new-feature` and `/fix-bug`' \

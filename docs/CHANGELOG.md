@@ -22,6 +22,23 @@ preview exact `REMOVE`, `PRESERVE`, `BLOCKED`, and `ABSENT` classifications, bin
 SHA-256 digest, and apply only when the confirmed inventory is unchanged. Personal, modified,
 unknown, linked, or structurally unsafe content is preserved or blocks instead of being guessed.
 
+**Host-native worktrees retain Forge branch names without weakening the sandbox.** Current Claude
+Desktop protects tracked `.claude/**` files from an agent-created checkout, while its native
+worktree option materializes them before the agent starts. The lifecycle helper now adopts that
+clean exact-base checkout, moves only Git refs without writing shared `.git/config`, seeds local
+state, and activates on `feat/<slug>` or `fix/<slug>`. Dirty, protected, shared, published,
+wrong-base, or already-active worktrees stop safely. Bash and PowerShell contracts cover creation,
+adoption, branch normalization, config immutability, seeding, and rejection of dirty work; a fresh
+Claude Desktop natural-language run proved one-pass adoption and activation before application code.
+
+**Closeout checks fail closed on real repository boundaries.** Activation preserves the immutable
+base bound during native-worktree adoption even if the named base ref moves before the workflow
+starts. Setup refuses nested repository directories, an existing JSON/TOML configuration cannot be
+partially installed without Python, and automated native Goal qualification no longer treats a
+zero-exit host process as proof of interactive Goal behavior. Exact candidate-bound operator
+evidence is required to mark an observed native Goal `READY`. Goal continuation also states the
+single authoritative ledger-to-state synchronization point explicitly.
+
 - Codex workflow skills now use short names such as `$fix-bug` and `$new-feature`,
   matching Claude's command vocabulary. All seven formerly prefixed entry points,
   current guides, setup messages, and capability metadata are updated; shared

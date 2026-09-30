@@ -351,6 +351,18 @@ if (-not $isGitRepo) {
     git init
 }
 
+$setupRepoRootText = (& git rev-parse --show-toplevel 2>$null | Select-Object -First 1)
+if (-not $setupRepoRootText) {
+    [Console]::Error.WriteLine("BLOCKED: cannot resolve the Git repository root.")
+    exit 1
+}
+$setupRepoRoot = (Resolve-Path -LiteralPath $setupRepoRootText.Trim()).Path
+$setupWorkingRoot = (Resolve-Path -LiteralPath (Get-Location).Path).Path
+if ($setupWorkingRoot -ne $setupRepoRoot) {
+    [Console]::Error.WriteLine("BLOCKED: run setup from the Git repository root: $setupRepoRoot")
+    exit 1
+}
+
 # ---------------------------------------------------------------------------
 # Runtime version preflight (warn-only, never blocks).
 # Mirrors the POSIX logic in setup.sh. See docs/guides/multi-project-isolation.md

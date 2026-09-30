@@ -243,6 +243,32 @@ forge_lifecycle_bind_identity() {
     return "$rc"
 }
 
+forge_lifecycle_attach_branch() {
+    local target="$1" primary="$2" branch="$3" current="$4" resolved="$5"
+    git -C "$primary" update-ref "refs/heads/$branch" "$resolved" "" || return 1
+    if ! git -C "$target" symbolic-ref HEAD "refs/heads/$branch"; then
+        git -C "$primary" update-ref -d "refs/heads/$branch" "$resolved" >/dev/null 2>&1 || true
+        return 1
+    fi
+    if [ -n "$current" ] \
+        && ! git -C "$primary" update-ref -d "refs/heads/$current" "$resolved"; then
+        git -C "$target" symbolic-ref HEAD "refs/heads/$current" >/dev/null 2>&1 || true
+        git -C "$primary" update-ref -d "refs/heads/$branch" "$resolved" >/dev/null 2>&1 || true
+        return 1
+    fi
+}
+
+forge_lifecycle_restore_branch() {
+    local target="$1" primary="$2" branch="$3" current="$4" resolved="$5"
+    if [ -n "$current" ]; then
+        git -C "$primary" update-ref "refs/heads/$current" "$resolved" "" >/dev/null 2>&1 || return 1
+        git -C "$target" symbolic-ref HEAD "refs/heads/$current" >/dev/null 2>&1 || return 1
+    else
+        git -C "$target" update-ref --no-deref HEAD "$resolved" >/dev/null 2>&1 || return 1
+    fi
+    git -C "$primary" update-ref -d "refs/heads/$branch" "$resolved" >/dev/null 2>&1
+}
+
 forge_lifecycle_create() {
     local kind="" name="" base="" root target branch resolved
     while [ "$#" -gt 0 ]; do
@@ -281,8 +307,91 @@ forge_lifecycle_create() {
     printf 'CREATE_OK: branch=%s worktree=%s base=%s\n' "$branch" "$target" "$resolved"
 }
 
+forge_lifecycle_adopt() {
+    local kind="" name="" base="" requested="" pair target primary resolved head branch current \
+        state snapshot seeded=0 renamed=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --kind) kind="${2:-}"; shift 2 ;;
+            --name) name="${2:-}"; shift 2 ;;
+            --base) base="${2:-}"; shift 2 ;;
+            --worktree) requested="${2:-}"; shift 2 ;;
+            *) forge_lifecycle_fail "ADOPT_BLOCKED: unknown option: $1"; return 1 ;;
+        esac
+    done
+    case "$kind" in feat|fix) ;; *) forge_lifecycle_fail "ADOPT_BLOCKED: --kind must be feat or fix"; return 1 ;; esac
+    case "$name" in ''|*[!a-z0-9._-]*|[.-]*|*..) forge_lifecycle_fail "ADOPT_BLOCKED: invalid lowercase worktree name"; return 1 ;; esac
+    [ -n "$base" ] || { forge_lifecycle_fail "ADOPT_BLOCKED: --base is required"; return 1; }
+    [ -n "$requested" ] || { forge_lifecycle_fail "ADOPT_BLOCKED: --worktree is required"; return 1; }
+
+    pair=$(forge_lifecycle_validate_worktree "$requested") || return 1
+    target=${pair%%$'\t'*}; primary=${pair#*$'\t'}
+    [ "$target" != "$primary" ] \
+        || { forge_lifecycle_fail "ADOPT_BLOCKED: target must be a linked worktree"; return 1; }
+    resolved=$(git -C "$primary" rev-parse --verify "$base^{commit}" 2>/dev/null) \
+        || { forge_lifecycle_fail "ADOPT_BLOCKED: base does not resolve to a commit: $base"; return 1; }
+    head=$(git -C "$target" rev-parse --verify HEAD 2>/dev/null) \
+        || { forge_lifecycle_fail "ADOPT_BLOCKED: native worktree has no HEAD"; return 1; }
+    [ "$head" = "$resolved" ] \
+        || { forge_lifecycle_fail "ADOPT_BLOCKED: native worktree HEAD does not match base $base"; return 1; }
+    [ -z "$(git -C "$target" status --porcelain --untracked-files=all 2>/dev/null)" ] \
+        || { forge_lifecycle_fail "ADOPT_BLOCKED: native worktree must be clean before branch normalization"; return 1; }
+
+    branch="$kind/$name"
+    current=$(git -C "$target" branch --show-current 2>/dev/null || true)
+    case "$current" in main|master|develop|development|production|release) \
+        forge_lifecycle_fail "ADOPT_BLOCKED: protected branch cannot be renamed: $current"; return 1 ;; esac
+    if [ -n "$current" ] && [ "$current" != "$branch" ]; then
+        if git -C "$target" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1 \
+            || [ -n "$(git -C "$target" branch -r --list "*/$current" 2>/dev/null)" ]; then
+            forge_lifecycle_fail "ADOPT_BLOCKED: shared or published branch cannot be renamed automatically: $current"
+            return 1
+        fi
+    fi
+    if [ "$current" != "$branch" ] && git -C "$primary" show-ref --verify --quiet "refs/heads/$branch"; then
+        forge_lifecycle_fail "ADOPT_BLOCKED: branch already exists: $branch"
+        return 1
+    fi
+
+    state="$target/.forge/local/state.md"
+    snapshot="$target/.forge/local/.state-seed-snapshot.md"
+    if [ -e "$state" ] || [ -L "$state" ] || [ -e "$snapshot" ] || [ -L "$snapshot" ]; then
+        [ -f "$state" ] && [ ! -L "$state" ] && [ -f "$snapshot" ] && [ ! -L "$snapshot" ] \
+            || { forge_lifecycle_fail "ADOPT_BLOCKED: state and seed snapshot must both be present or absent"; return 1; }
+        grep -Eq '^\|[[:space:]]*Command[[:space:]]*\|[[:space:]]*none[[:space:]]*\|[[:space:]]*$' "$state" \
+            || { forge_lifecycle_fail "ADOPT_BLOCKED: worktree workflow is already active"; return 1; }
+    fi
+
+    if [ "$current" != "$branch" ]; then
+        forge_lifecycle_attach_branch "$target" "$primary" "$branch" "$current" "$resolved" \
+            || { forge_lifecycle_fail "ADOPT_BLOCKED: cannot attach canonical branch $branch"; return 1; }
+        renamed=1
+    fi
+
+    if [ ! -e "$state" ] && [ ! -L "$state" ] && [ ! -e "$snapshot" ] && [ ! -L "$snapshot" ]; then
+        if forge_lifecycle_seed "$target"; then
+            seeded=1
+        else
+            if [ "$renamed" -eq 1 ]; then
+                forge_lifecycle_restore_branch "$target" "$primary" "$branch" "$current" "$resolved" || true
+            fi
+            return 1
+        fi
+    fi
+    if ! forge_lifecycle_bind_identity "$target" "$base" "$resolved"; then
+        if [ "$seeded" -eq 1 ]; then rm -f "$state" "$snapshot"; fi
+        if [ "$renamed" -eq 1 ]; then
+            forge_lifecycle_restore_branch "$target" "$primary" "$branch" "$current" "$resolved" || true
+        fi
+        forge_lifecycle_fail "ADOPT_BLOCKED: cannot bind native worktree identity"
+        return 1
+    fi
+    printf 'ADOPT_OK: branch=%s worktree=%s base=%s\n' "$branch" "$target" "$resolved"
+}
+
 forge_lifecycle_usage() {
     printf 'usage: worktree-lifecycle.sh create --kind feat|fix --name <slug> --base <ref-or-sha>\n' >&2
+    printf '       worktree-lifecycle.sh adopt --kind feat|fix --name <slug> --base <ref-or-sha> --worktree <path>\n' >&2
     printf '       worktree-lifecycle.sh seed --worktree <path>\n' >&2
     printf '       worktree-lifecycle.sh fold --worktree <path>\n' >&2
 }
@@ -290,6 +399,7 @@ forge_lifecycle_usage() {
 action="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$action" in
     create) forge_lifecycle_create "$@" ;;
+    adopt) forge_lifecycle_adopt "$@" ;;
     seed|fold)
         [ "${1:-}" = --worktree ] && [ -n "${2:-}" ] && [ "$#" -eq 2 ] \
             || { forge_lifecycle_usage; exit 2; }

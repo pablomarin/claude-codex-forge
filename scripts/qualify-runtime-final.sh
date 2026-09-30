@@ -8,7 +8,7 @@ DISPATCH="$ROOT/scripts/qualify-dispatch-isolation.sh"
 GOAL="$ROOT/scripts/qualify-goal-feasibility.sh"
 
 usage() {
-    echo "Usage: qualify-runtime-final.sh (--fixture-mode|--inventory|--live) --project-root DIR --output FILE [--engine-dir DIR] [--windows-attestation FILE] [--qualification-timeout-seconds N]" >&2
+    echo "Usage: qualify-runtime-final.sh (--fixture-mode|--inventory|--live) --project-root DIR --output FILE [--engine-dir DIR] [--claude-goal-evidence FILE] [--codex-goal-evidence FILE] [--windows-attestation FILE] [--qualification-timeout-seconds N]" >&2
     echo "       qualify-runtime-final.sh --validate --input FILE" >&2
     exit 2
 }
@@ -137,6 +137,7 @@ validate_receipt() {
 }
 
 mode=""; project=""; output=""; input=""; engine_dir=""; windows=""; qualification_timeout=1200
+claude_goal_evidence=""; codex_goal_evidence=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --fixture-mode) [ -z "$mode" ] || usage; mode=fixture; shift ;;
@@ -145,6 +146,8 @@ while [ "$#" -gt 0 ]; do
         --validate) [ -z "$mode" ] || usage; mode=validate; shift ;;
         --project-root) project="$2"; shift 2 ;; --output) output="$2"; shift 2 ;;
         --input) input="$2"; shift 2 ;; --engine-dir) engine_dir="$2"; shift 2 ;;
+        --claude-goal-evidence) claude_goal_evidence="$2"; shift 2 ;;
+        --codex-goal-evidence) codex_goal_evidence="$2"; shift 2 ;;
         --windows-attestation) windows="$2"; shift 2 ;;
         --qualification-timeout-seconds) qualification_timeout="$2"; shift 2 ;;
         *) usage ;;
@@ -181,8 +184,14 @@ for engine in claude codex; do
             run_qualification_child "$qualification_timeout" "$dispatch_out" forge.dispatch-isolation.v1 \
                 "$DISPATCH" --engine "$engine" --project-root "$project" --output "$dispatch_out" || dispatch_rc=$?
             if [ "$dispatch_rc" -eq 0 ]; then
+                case "$engine" in
+                    claude) goal_evidence=$claude_goal_evidence ;;
+                    codex) goal_evidence=$codex_goal_evidence ;;
+                esac
+                goal_args=(--project "$project" --evidence-dir "$goal_dir" --live "$engine")
+                [ -z "$goal_evidence" ] || goal_args+=(--live-evidence "$goal_evidence")
                 run_qualification_child "$qualification_timeout" "$goal_out" forge.goal-feasibility.v2 \
-                    "$GOAL" --project "$project" --evidence-dir "$goal_dir" --live "$engine" || true
+                    "$GOAL" "${goal_args[@]}" || true
             else
                 write_blocked_child "$goal_out" forge.goal-feasibility.v2 'dispatch-qualification-blocked'
             fi

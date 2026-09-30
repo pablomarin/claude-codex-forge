@@ -99,10 +99,14 @@ and materialization tests cannot prove a live Auto-mode classifier decision.
 `scripts/qualify-runtime-final.sh` and `.ps1` are thin release wrappers over
 `qualify-dispatch-isolation.*` and `qualify-goal-feasibility.*`. Goal qualification always proves
 the repository-local ledger first and records its receipt under the supplied project evidence
-directory. `--live` is the only mode that may invoke authenticated hosts. Each host is classified
-separately as `NATIVE_GOAL_RUNTIME: READY` or `BLOCKED`; unavailable or expired credentials produce
-a concrete blocker rather than fake evidence. Aggregate `PASS` additionally requires both supported
-hosts and the matching Windows PowerShell 5.1 attestation. Validation rejects fixture-as-PASS,
+directory. `--live` records the selected host binary and version, but a process exit code cannot
+prove an interactive native Goal. Without evidence it remains `BLOCKED` with
+`interactive-native-goal-evidence-required`; it never converts an ordinary zero-exit prompt into
+`READY`. After running the documented native UI/CLI scenario, pass its exact candidate-bound
+`forge.native-goal-operator-evidence.v1` record through `--claude-goal-evidence` or
+`--codex-goal-evidence`. The record binds the host, physical project root, Git HEAD/tree, and
+observed activation, progress, and stop behavior.
+Aggregate `PASS` additionally requires both supported hosts and the matching Windows PowerShell 5.1 attestation. Validation rejects fixture-as-PASS,
 malformed child status/schema, changed child or engine hashes, and a stale candidate.
 
 Example after the remaining operator evidence exists:
@@ -110,6 +114,8 @@ Example after the remaining operator evidence exists:
 ```bash
 scripts/qualify-runtime-final.sh --live --project-root /path/to/project \
   --output /operator/path/runtime-final.receipt \
+  --claude-goal-evidence /operator/path/claude-native-goal.evidence \
+  --codex-goal-evidence /operator/path/codex-native-goal.evidence \
   --windows-attestation /operator/path/windows-powershell-51.receipt
 ```
 

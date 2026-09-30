@@ -216,6 +216,7 @@ merge_json_config() {
         python3 "$MATERIALIZE_REPO/scripts/merge-settings.py" "$template" "$destination"
     else
         echo "CONFIG_READINESS: BLOCKED: python3 unavailable to merge existing JSON: $destination"
+        return 1
     fi
 }
 
@@ -303,8 +304,10 @@ materialize_project_config() {
     elif [ ! -f "$MATERIALIZE_TARGET/.codex/config.toml" ]; then
         cp "$MATERIALIZE_REPO/settings/codex-config.template.toml" "$MATERIALIZE_TARGET/.codex/config.toml"
         echo "CODEX_CONFIG_READINESS: BLOCKED: python3 unavailable for staged validation/translation"
+        return 1
     else
         echo "CODEX_CONFIG_READINESS: BLOCKED: python3 unavailable to preserve and merge existing TOML"
+        return 1
     fi
 }
 
@@ -382,6 +385,17 @@ done
     echo "BLOCKED: invalid release version" >&2
     exit 2
 }
+case "$MATERIALIZE_PLATFORM" in
+    unix|windows) ;;
+    *)
+        echo "BLOCKED: invalid materializer platform '$MATERIALIZE_PLATFORM' (expected unix or windows)" >&2
+        exit 2
+        ;;
+esac
+if [ "$MATERIALIZE_PLATFORM" = unix ] && ! command -v python3 >/dev/null 2>&1; then
+    echo "CONFIG_READINESS: BLOCKED: python3 is required before Forge materialization" >&2
+    exit 1
+fi
 mkdir -p "$MATERIALIZE_TARGET"
 MATERIALIZE_REPO=$(cd "$MATERIALIZE_REPO" && pwd -P)
 MATERIALIZE_TARGET=$(cd "$MATERIALIZE_TARGET" && pwd -P)

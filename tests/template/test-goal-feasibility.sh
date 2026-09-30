@@ -57,4 +57,44 @@ set -e
 assert_contains "$S/live-blocked.log" 'GOAL_LIVE: BLOCKED host=codex reason=' \
     "unavailable host reports a concrete live blocker"
 
+start_test "a zero-exit Claude prompt cannot certify native Goal behavior"
+FAKE_BIN="$S/fake-bin"
+mkdir -p "$FAKE_BIN"
+printf '%s\n' '#!/bin/sh' 'case "$1" in --version) echo "Claude Code fake" ;; *) exit 0 ;; esac' \
+    > "$FAKE_BIN/claude"
+chmod +x "$FAKE_BIN/claude"
+set +e
+PATH="$FAKE_BIN:$PATH" HOME="$S/home" bash "$REPO_ROOT/scripts/qualify-goal-feasibility.sh" \
+    --project "$P" --evidence-dir "$P/.forge/local/evidence/zero-exit-claude" \
+    --live claude > "$S/zero-exit-claude.log" 2>&1
+zero_exit_rc=$?
+set -e
+[ "$zero_exit_rc" -ne 0 ] && pass "zero-exit Claude qualification remains non-certifying" || fail "zero-exit Claude prompt falsely certified native Goal"
+assert_contains "$S/zero-exit-claude.log" \
+    'GOAL_LIVE: BLOCKED host=claude reason=interactive-native-goal-evidence-required' \
+    "Claude qualification requires observable native Goal evidence"
+
+start_test "candidate-bound operator evidence can certify an observed native Goal"
+OPERATOR_EVIDENCE="$S/claude-native-goal.evidence"
+OPERATOR_PROJECT=$(cd "$P" && pwd -P)
+{
+    printf 'schema=forge.native-goal-operator-evidence.v1\n'
+    printf 'evidence_mode=operator-observed\n'
+    printf 'result=PASS\n'
+    printf 'host=claude\n'
+    printf 'project_root=%s\n' "$OPERATOR_PROJECT"
+    printf 'git_head=%s\n' "$(git -C "$P" rev-parse HEAD)"
+    printf 'tree_sha=%s\n' "$(git -C "$P" rev-parse 'HEAD^{tree}')"
+    printf 'activation_observed=true\n'
+    printf 'progress_observed=true\n'
+    printf 'stop_observed=true\n'
+} > "$OPERATOR_EVIDENCE"
+PATH="$FAKE_BIN:$PATH" HOME="$S/home" bash "$REPO_ROOT/scripts/qualify-goal-feasibility.sh" \
+    --project "$P" --evidence-dir "$P/.forge/local/evidence/operator-observed-claude" \
+    --live claude --live-evidence "$OPERATOR_EVIDENCE" > "$S/operator-observed-claude.log" 2>&1
+assert_equals "$?" "0" "candidate-bound operator evidence certifies the observed host"
+assert_contains "$S/operator-observed-claude.log" \
+    'GOAL_LIVE: READY host=claude' \
+    "native Goal readiness requires explicit observed evidence"
+
 report "test-goal-feasibility.sh"

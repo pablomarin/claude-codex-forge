@@ -15,6 +15,22 @@ primary checkout. The helper never copies local memory, receipts, goal authoriza
 Each worktree therefore has its own candidate, `.forge/local/state.md`, and local evidence even when
 the harness is intentionally uncommitted.
 
+When the host offers native isolation, select its worktree option before starting the session.
+The host creates the checkout outside the agent sandbox. Forge then adopts that fresh checkout
+before workflow activation. Anthropic documents Desktop's per-session Git worktrees and the CLI
+`--worktree` equivalent in its [Claude Code Desktop guide](https://code.claude.com/docs/en/desktop).
+
+```bash
+.forge/hooks/lib/worktree-lifecycle.sh adopt \
+  --kind feat --name auth --base main --worktree "$PWD"
+```
+
+Adoption verifies that the linked worktree is clean, unpublished, and still at the exact requested
+base. It seeds local Forge state and changes a host-generated branch such as `claude/auth-123` or
+`codex/auth-123` to `feat/auth` (use `--kind fix` for `fix/auth`). It refuses to rename protected,
+dirty, shared, or published work. This is the current safe equivalent of Forge V5 creating the
+worktree itself.
+
 ```bash
 # Terminal 1
 cd /project && claude
@@ -65,7 +81,9 @@ missing/stale registration or wrong-common-directory event keeps Codex `RUNTIME_
 
 ## Practical Rules
 
-- Start a new feature from the primary checkout; the workflow moves into its worktree.
+- In Claude Desktop, turn on **worktree** before the first new-feature or bug-fix prompt. In other
+  supported hosts, start from the primary checkout and use native isolation or let the portable
+  helper create the worktree.
 - A current or later Codex or Claude Code session may continue it by setting tool cwd to that
   worktree; no task-root reopen, copied identity, or per-worktree trust step is needed.
 - Do not create nested worktrees.

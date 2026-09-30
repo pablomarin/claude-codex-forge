@@ -194,7 +194,7 @@ scratch_dir() {
 cleanup_scratch_dirs() {
     # Called from EXIT trap. Preserves dirs if the script is exiting with
     # non-zero AND KEEP_TMP_ON_FAIL=1 is set. Also preserves if KEEP_TMP=1.
-    local rc=$?
+    local rc="${1:-$?}"
     # Guard against empty-array expansion under `set -u` on older bash.
     local count=${#_SCRATCH_DIRS[@]}
     [[ $count -eq 0 ]] && return
@@ -210,7 +210,14 @@ cleanup_scratch_dirs() {
     done
 }
 
-trap cleanup_scratch_dirs EXIT
+cleanup_scratch_dirs_on_exit() {
+    local rc=$?
+    trap - EXIT
+    cleanup_scratch_dirs "$rc"
+    exit "$rc"
+}
+
+trap cleanup_scratch_dirs_on_exit EXIT
 
 # ---------------------------------------------------------------------------
 # setup.sh invocation wrapper

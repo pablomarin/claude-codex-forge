@@ -267,6 +267,21 @@ if [ -z "${TEST_FIXTURES_SKIP_EXIT_PROBE:-}" ]; then
         bash "$REPO_ROOT/tests/template/test-fixtures.sh" \
         > "$EXIT_PROBE_DIR/good.out" 2>&1
     assert_equals "$?" "0" "canonical good fixtures return zero"
+
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'source "'"$REPO_ROOT"'/tests/template/lib.sh"' \
+        'init_counters' \
+        'scratch_dir exit-trap-probe >/dev/null' \
+        'fail "deliberate failure"' \
+        'report "exit-trap-probe"' \
+        > "$EXIT_PROBE_DIR/exit-trap-probe.sh"
+    bash "$EXIT_PROBE_DIR/exit-trap-probe.sh" > "$EXIT_PROBE_DIR/trap.out" 2>&1
+    if [ "$?" -ne 0 ]; then
+        pass "scratch cleanup preserves a failing suite exit status"
+    else
+        fail "scratch cleanup swallowed a failing suite exit status"
+    fi
 fi
 
 # Keep report as the final executable statement so its status reaches callers.

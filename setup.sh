@@ -349,9 +349,25 @@ if ! command -v git &> /dev/null; then
     exit 1
 fi
 
+if ! command -v python3 &> /dev/null; then
+    echo -e "${RED}BLOCKED: Python 3 is required before Forge setup can change project files.${NC}" >&2
+    exit 1
+fi
+
 if ! git rev-parse --is-inside-work-tree &> /dev/null 2>&1; then
     echo -e "${YELLOW}WARNING: Not in a git repository. Initializing...${NC}"
     git init
+fi
+
+SETUP_REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo -e "${RED}BLOCKED: cannot resolve the Git repository root.${NC}" >&2
+    exit 1
+}
+SETUP_REPO_ROOT=$(cd "$SETUP_REPO_ROOT" && pwd -P)
+SETUP_WORKING_ROOT=$(pwd -P)
+if [[ "$SETUP_WORKING_ROOT" != "$SETUP_REPO_ROOT" ]]; then
+    echo -e "${RED}BLOCKED: run setup from the Git repository root: $SETUP_REPO_ROOT${NC}" >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,10 @@ This canonical workflow is installed only as `.forge/workflows/goal.md`. Forge m
 On every turn:
 
 1. Validate the repository binding, activation sequence, objective nonce, durable count/ceiling,
-   state, and evidence.
+   state, and evidence. At the start of every continued turn, first sync the state's `turn_count`
+   to the ledger's already-published count. The Stop hook appends the current turn afterward, so
+   state may lag the ledger by exactly one only between Stop and the next turn; any greater lag or
+   count reduction fails closed.
 2. Resume the exact next unchecked durable step. A same-host resume may restore native context; a
    cross-host resume starts a fresh native session and never claims session transfer.
 3. Increment the persistent Forge count through hook-owned records. Native session, token, or turn

@@ -134,6 +134,66 @@ assert_contains "$TARGET/.forge/local/state.md" "| Worktree root | $TARGET_PHYSI
 assert_contains "$TARGET/.forge/local/state.md" "| Workflow base SHA | $BASE_SHA |" \
     "create freezes the resolved base SHA in state"
 
+start_test "v6 helper adopts a clean host-native worktree onto the exact feature branch"
+NATIVE_BASE=$(scratch_dir lifecycle-native)
+NATIVE_PRIMARY="$NATIVE_BASE/project"
+NATIVE_TARGET="$NATIVE_PRIMARY/.claude/worktrees/native-feature"
+mkdir -p "$NATIVE_PRIMARY"
+(
+    cd "$NATIVE_PRIMARY" || exit 1
+    git init -q --initial-branch=main
+    git config user.email t@t
+    git config user.name t
+    printf 'tracked\n' > app.txt
+    git add app.txt
+    git commit -q -m base
+)
+NATIVE_BASE_SHA=$(git -C "$NATIVE_PRIMARY" rev-parse HEAD)
+mkdir -p "$NATIVE_PRIMARY/.forge/local"
+cp "$REPO_ROOT/state.template.md" "$NATIVE_PRIMARY/.forge/state.template.md"
+printf '6.3\n' > "$NATIVE_PRIMARY/.forge/version"
+printf 'private policy\n' > "$NATIVE_PRIMARY/.forge/instructions.md"
+printf '.forge/state.template.md\tfixture\tv6\n.forge/instructions.md\tfixture\tv6\n' \
+    > "$NATIVE_PRIMARY/.forge/installed-files.tsv"
+write_state "$NATIVE_PRIMARY/.forge/local/state.md" "none" "native-done" "native-now" "native-next"
+printf '%s\n' '.forge/' '.claude/' >> "$NATIVE_PRIMARY/.git/info/exclude"
+git -C "$NATIVE_PRIMARY" worktree add -q -b claude/native-feature "$NATIVE_TARGET" "$NATIVE_BASE_SHA"
+git -C "$NATIVE_PRIMARY" config branch.claude/native-feature.description 'host-native metadata'
+NATIVE_CONFIG_HASH=$(shasum -a 256 "$NATIVE_PRIMARY/.git/config" | awk '{print $1}')
+if "$HELPER" adopt --kind feat --name native-feature --base main --worktree "$NATIVE_TARGET" \
+    > "$NATIVE_BASE/adopt.out" 2> "$NATIVE_BASE/adopt.err"; then
+    NATIVE_ADOPT_RC=0
+else
+    NATIVE_ADOPT_RC=$?
+fi
+assert_equals "$NATIVE_ADOPT_RC" "0" "clean native worktree adoption succeeds"
+assert_equals "$(git -C "$NATIVE_TARGET" branch --show-current 2>/dev/null || true)" "feat/native-feature" \
+    "native host prefix is normalized to feat/<slug>"
+assert_file_exists "$NATIVE_TARGET/.forge/local/.state-seed-snapshot.md" \
+    "native adoption seeds the fold baseline"
+assert_contains "$NATIVE_TARGET/.forge/local/state.md" "| Workflow base SHA | $NATIVE_BASE_SHA |" \
+    "native adoption freezes the verified base SHA"
+assert_contains "$NATIVE_BASE/adopt.out" "ADOPT_OK: branch=feat/native-feature" \
+    "native adoption reports the canonical branch"
+assert_equals "$(shasum -a 256 "$NATIVE_PRIMARY/.git/config" | awk '{print $1}')" "$NATIVE_CONFIG_HASH" \
+    "native adoption never writes shared Git config"
+
+start_test "native adoption rejects dirty work without renaming its branch"
+DIRTY_TARGET="$NATIVE_PRIMARY/.claude/worktrees/dirty-feature"
+git -C "$NATIVE_PRIMARY" worktree add -q -b claude/dirty-feature "$DIRTY_TARGET" "$NATIVE_BASE_SHA"
+printf 'dirty\n' >> "$DIRTY_TARGET/app.txt"
+if "$HELPER" adopt --kind feat --name dirty-feature --base main --worktree "$DIRTY_TARGET" \
+    > "$NATIVE_BASE/dirty.out" 2> "$NATIVE_BASE/dirty.err"; then
+    DIRTY_ADOPT_RC=0
+else
+    DIRTY_ADOPT_RC=$?
+fi
+if [ "$DIRTY_ADOPT_RC" -ne 0 ]; then pass "dirty native adoption exits nonzero"; else fail "dirty native adoption must exit nonzero"; fi
+assert_contains "$NATIVE_BASE/dirty.err" "ADOPT_BLOCKED: native worktree must be clean" \
+    "dirty native adoption explains the safe stop"
+assert_equals "$(git -C "$DIRTY_TARGET" branch --show-current 2>/dev/null || true)" "claude/dirty-feature" \
+    "dirty native branch is not renamed"
+
 start_test "Forge source checkout seeds from the tracked root state template"
 SOURCE_BASE=$(scratch_dir lifecycle-source)
 SOURCE_PRIMARY="$SOURCE_BASE/project"

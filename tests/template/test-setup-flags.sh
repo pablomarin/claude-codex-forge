@@ -88,6 +88,30 @@ assert_contains "$A/setup.log" \
   'NATIVE_GOAL_RUNTIME: PENDING reason=live-qualification-not-run' \
   "project setup reports deterministic install without overstating live qualification"
 
+start_test "project setup refuses a repository subdirectory target"
+SUBDIR=$(scratch_dir setup-subdirectory)
+git -C "$SUBDIR" init -q
+mkdir -p "$SUBDIR/nested"
+(cd "$SUBDIR/nested" && HOME="$SUBDIR/home" "$REPO_ROOT/setup.sh") > "$SUBDIR/subdir.log" 2>&1
+assert_equals "$?" "1" "subdirectory setup exits nonzero"
+assert_contains "$SUBDIR/subdir.log" 'run setup from the Git repository root' \
+    "subdirectory setup names the supported recovery"
+assert_file_missing "$SUBDIR/nested/.forge/version" \
+    "subdirectory setup cannot create a nested Forge installation"
+assert_file_missing "$SUBDIR/.forge/version" \
+    "subdirectory setup does not mutate the repository root"
+if command -v pwsh >/dev/null 2>&1; then
+    (cd "$SUBDIR/nested" && HOME="$SUBDIR/home" pwsh -NoLogo -NoProfile -File "$REPO_ROOT/setup.ps1") \
+        > "$SUBDIR/subdir-powershell.log" 2>&1
+    assert_equals "$?" "1" "PowerShell subdirectory setup exits nonzero"
+    assert_contains "$SUBDIR/subdir-powershell.log" 'run setup from the Git repository root' \
+        "PowerShell subdirectory setup names the supported recovery"
+    assert_file_missing "$SUBDIR/nested/.forge/version" \
+        "PowerShell subdirectory setup cannot create a nested Forge installation"
+else
+    skip_test "pwsh unavailable; PowerShell root-only setup is covered by Windows CI"
+fi
+
 start_test "active ownership and materialization are project-only"
 if awk -F '\t' '$1 !~ /^#/ && $6 == "global" { found=1 } END { exit found ? 0 : 1 }' \
     "$REPO_ROOT/manifests/managed-v6.tsv"; then
@@ -104,6 +128,66 @@ bash "$REPO_ROOT/scripts/materialize-adapters.sh" \
 assert_equals "$?" "1" "active materializer rejects global scope"
 assert_file_missing "$MATERIALIZE_GLOBAL/target/.forge/version" \
     "rejected global scope writes no version"
+
+start_test "materializer rejects an unknown platform before changing the project"
+INVALID_PLATFORM=$(scratch_dir materialize-invalid-platform)
+INVALID_PLATFORM_TARGET="$INVALID_PLATFORM/target"
+mkdir -p "$INVALID_PLATFORM_TARGET"
+printf '%s\n' 'PROJECT_SENTINEL' > "$INVALID_PLATFORM_TARGET/project.txt"
+invalid_platform_before=$(snapshot_project "$INVALID_PLATFORM_TARGET")
+bash "$REPO_ROOT/scripts/materialize-adapters.sh" \
+    --repo-root "$REPO_ROOT" --target "$INVALID_PLATFORM_TARGET" \
+    --scope project --platform typo --release-version 6.3 \
+    > "$INVALID_PLATFORM/output.log" 2>&1
+assert_equals "$?" "2" "unknown platform exits with a usage error"
+assert_contains "$INVALID_PLATFORM/output.log" 'invalid materializer platform' \
+    "unknown platform explains the accepted values"
+assert_equals "$(snapshot_project "$INVALID_PLATFORM_TARGET")" "$invalid_platform_before" \
+    "unknown platform leaves the target byte-identical"
+assert_file_missing "$INVALID_PLATFORM_TARGET/.forge/version" \
+    "unknown platform cannot publish the Forge version"
+
+start_test "missing Python cannot stamp an incompletely merged installation"
+NO_PYTHON=$(scratch_dir materialize-without-python)
+NO_PYTHON_BIN="$NO_PYTHON/bin"
+NO_PYTHON_TARGET="$NO_PYTHON/target"
+mkdir -p "$NO_PYTHON_BIN" "$NO_PYTHON_TARGET"
+for command_name in awk basename cat chmod cmp cp cut date dirname find git grep head ln mkdir mktemp mv pwd readlink rm sed shasum sort stat tail tr wc; do
+    command_path=$(command -v "$command_name" 2>/dev/null || true)
+    [ -n "$command_path" ] && ln -s "$command_path" "$NO_PYTHON_BIN/$command_name"
+done
+printf '%s\n' '{"mcpServers":{"project-custom":{"command":"custom"}}}' > "$NO_PYTHON_TARGET/.mcp.json"
+no_python_before=$(snapshot_project "$NO_PYTHON_TARGET")
+PATH="$NO_PYTHON_BIN" /bin/bash "$REPO_ROOT/scripts/materialize-adapters.sh" \
+    --repo-root "$REPO_ROOT" --target "$NO_PYTHON_TARGET" \
+    --scope project --platform unix --release-version 6.3 \
+    > "$NO_PYTHON/output.log" 2>&1
+assert_equals "$?" "1" "missing Python blocks an existing-config merge"
+assert_contains "$NO_PYTHON/output.log" 'python3 is required before Forge materialization' \
+    "missing Python is rejected before materialization"
+assert_equals "$(snapshot_project "$NO_PYTHON_TARGET")" "$no_python_before" \
+    "missing-Python preflight leaves the target byte-identical"
+assert_file_missing "$NO_PYTHON_TARGET/.forge/version" \
+    "blocked configuration merge cannot publish the Forge version"
+
+start_test "Bash setup rejects missing Python before changing the project"
+NO_PYTHON_SETUP=$(scratch_dir setup-without-python)
+NO_PYTHON_SETUP_BIN="$NO_PYTHON_SETUP/bin"
+NO_PYTHON_SETUP_TARGET="$NO_PYTHON_SETUP/target"
+mkdir -p "$NO_PYTHON_SETUP_BIN" "$NO_PYTHON_SETUP_TARGET"
+for command_name in basename dirname git grep sed; do
+    command_path=$(command -v "$command_name" 2>/dev/null || true)
+    [ -n "$command_path" ] && ln -s "$command_path" "$NO_PYTHON_SETUP_BIN/$command_name"
+done
+printf '%s\n' 'PROJECT_SENTINEL' > "$NO_PYTHON_SETUP_TARGET/project.txt"
+no_python_setup_before=$(snapshot_project "$NO_PYTHON_SETUP_TARGET")
+(cd "$NO_PYTHON_SETUP_TARGET" && PATH="$NO_PYTHON_SETUP_BIN" /bin/bash "$REPO_ROOT/setup.sh") \
+    > "$NO_PYTHON_SETUP/output.log" 2>&1
+assert_equals "$?" "1" "missing Python blocks Bash setup"
+assert_contains "$NO_PYTHON_SETUP/output.log" 'Python 3 is required before Forge setup can change project files' \
+    "Bash setup explains the pre-mutation prerequisite"
+assert_equals "$(snapshot_project "$NO_PYTHON_SETUP_TARGET")" "$no_python_setup_before" \
+    "missing-Python setup leaves the project byte-identical"
 
 start_test "force dry-run previews the authoritative transaction without writes"
 S2=$(scratch_dir setup-flags-preview)

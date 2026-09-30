@@ -8,6 +8,8 @@ param(
     [string]$Output,
     [Alias('Input')][string]$ReceiptInput,
     [string]$EngineDir,
+    [string]$ClaudeGoalEvidence,
+    [string]$CodexGoalEvidence,
     [string]$WindowsAttestation,
     [ValidateRange(1,86400)][int]$QualificationTimeoutSeconds = 1200
 )
@@ -139,6 +141,8 @@ foreach($engine in @('claude','codex')){
     }else{
         $dispatchArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatch,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$dispatchOut)
         $goalArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$goal,'-Project',$ProjectRoot,'-EvidenceDir',$goalDir,'-Live',$(if($Live){$engine}else{'none'}))
+        $goalEvidence = if($engine -eq 'claude'){$ClaudeGoalEvidence}else{$CodexGoalEvidence}
+        if($Live -and $goalEvidence){$goalArguments += @('-LiveEvidence',$goalEvidence)}
         $dispatchCode=Invoke-QualificationChild -Arguments $dispatchArguments -Receipt $dispatchOut -Schema 'forge.dispatch-isolation.v1' -TimeoutSeconds $QualificationTimeoutSeconds
         if($Live -and $dispatchCode -ne 0){Write-BlockedChild $goalOut 'forge.goal-feasibility.v2' 'dispatch-qualification-blocked'}
         elseif(-not $Live -and $engine -eq 'codex'){Copy-Item -LiteralPath $children['claude_goal'] -Destination $goalOut}

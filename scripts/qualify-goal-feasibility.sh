@@ -5,7 +5,7 @@
 set -eu
 
 usage() {
-    echo "Usage: qualify-goal-feasibility.sh --project DIR --evidence-dir DIR --live none|claude|codex" >&2
+    echo "Usage: qualify-goal-feasibility.sh --project DIR --evidence-dir DIR --live none|claude|codex [--live-evidence FILE]" >&2
     exit 2
 }
 
@@ -26,19 +26,28 @@ json_escape() {
 }
 
 physical_dir() { (cd "$1" && pwd -P); }
+evidence_field() {
+    local file="$1" key="$2" count
+    count=$(awk -F= -v k="$key" '$1==k{n++} END{print n+0}' "$file")
+    [ "$count" -eq 1 ] || return 1
+    awk -F= -v k="$key" '$1==k{sub(/^[^=]*=/,""); print; exit}' "$file"
+}
 
 project=""
 evidence_dir=""
 live=""
+live_evidence=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --project) [ "$#" -ge 2 ] || usage; project="$2"; shift 2 ;;
         --evidence-dir) [ "$#" -ge 2 ] || usage; evidence_dir="$2"; shift 2 ;;
         --live) [ "$#" -ge 2 ] || usage; live="$2"; shift 2 ;;
+        --live-evidence) [ "$#" -ge 2 ] || usage; live_evidence="$2"; shift 2 ;;
         *) usage ;;
     esac
 done
 case "$live" in none|claude|codex) ;; *) usage ;; esac
+[ "$live" != none ] || [ -z "$live_evidence" ] || usage
 [ -n "$project" ] && [ -d "$project/.forge" ] && [ ! -L "$project" ] || {
     echo "GOAL_DETERMINISTIC: BLOCKED reason=materialized-project-required" >&2
     exit 3
@@ -182,6 +191,7 @@ reason=deterministic-project-ledger-pass
 engine_path=""
 engine_version=""
 live_output_sha=""
+operator_evidence_path=""
 
 if [ "$live" != none ]; then
     engine_path=$(command -v "$live" 2>/dev/null || true)
@@ -189,36 +199,44 @@ if [ "$live" != none ]; then
         status=BLOCKED
         live_status=BLOCKED
         reason=binary-unavailable
-    elif [ "$live" = codex ]; then
-        engine_version=$($engine_path --version 2>/dev/null | head -1 || true)
-        status=BLOCKED
-        live_status=BLOCKED
-        reason=interactive-native-goal-required
     else
         engine_version=$($engine_path --version 2>/dev/null | head -1 || true)
-        live_log="$run_dir/claude-live.log"
-        set +e
-        (cd "$project" && "$engine_path" -p "/goal Qualify the installed Forge native Goal surface. Report the activation and stop without editing files.") > "$live_log" 2>&1
-        live_rc=$?
-        set -e
-        live_output_sha=$(hash_file "$live_log")
-        if [ "$live_rc" -eq 0 ]; then
-            live_status=READY
-            reason=authenticated-native-goal-invocation-passed
-        elif grep -Eqi '401|oauth|token.*expired|authentication|not logged in|login required' "$live_log"; then
+        if [ -z "$live_evidence" ]; then
             status=BLOCKED
             live_status=BLOCKED
-            reason=authentication-required
+            reason=interactive-native-goal-evidence-required
+        elif [ ! -f "$live_evidence" ] || [ -L "$live_evidence" ]; then
+            status=BLOCKED
+            live_status=BLOCKED
+            reason=operator-evidence-invalid
         else
-            status=BLOCKED
-            live_status=BLOCKED
-            reason=native-goal-command-failed
+            operator_evidence_path=$(cd "$(dirname "$live_evidence")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$live_evidence")")
+            evidence_head=$(git -C "$project" rev-parse HEAD)
+            evidence_tree=$(git -C "$project" rev-parse 'HEAD^{tree}')
+            if [ "$(evidence_field "$operator_evidence_path" schema 2>/dev/null || true)" = forge.native-goal-operator-evidence.v1 ] \
+                && [ "$(evidence_field "$operator_evidence_path" evidence_mode 2>/dev/null || true)" = operator-observed ] \
+                && [ "$(evidence_field "$operator_evidence_path" result 2>/dev/null || true)" = PASS ] \
+                && [ "$(evidence_field "$operator_evidence_path" host 2>/dev/null || true)" = "$live" ] \
+                && [ "$(evidence_field "$operator_evidence_path" project_root 2>/dev/null || true)" = "$project" ] \
+                && [ "$(evidence_field "$operator_evidence_path" git_head 2>/dev/null || true)" = "$evidence_head" ] \
+                && [ "$(evidence_field "$operator_evidence_path" tree_sha 2>/dev/null || true)" = "$evidence_tree" ] \
+                && [ "$(evidence_field "$operator_evidence_path" activation_observed 2>/dev/null || true)" = true ] \
+                && [ "$(evidence_field "$operator_evidence_path" progress_observed 2>/dev/null || true)" = true ] \
+                && [ "$(evidence_field "$operator_evidence_path" stop_observed 2>/dev/null || true)" = true ]; then
+                live_status=READY
+                reason=operator-observed-native-goal-pass
+                live_output_sha=$(hash_file "$operator_evidence_path")
+            else
+                status=BLOCKED
+                live_status=BLOCKED
+                reason=operator-evidence-invalid
+            fi
         fi
     fi
 fi
 
 cat > "$receipt" <<EOF
-{"schema":"forge.goal-feasibility.v2","status":"$status","project":"$(json_escape "$project")","objective_hash":"$objective","deterministic":"PASS","global_harness":"NOT_REQUIRED","live_host":"$live","live_status":"$live_status","reason":"$reason","engine_path":"$(json_escape "$engine_path")","engine_version":"$(json_escape "$engine_version")","ledger_binding_sha256":"$binding_sha","checkpoint_sha256":"$checkpoint_sha","live_output_sha256":"$live_output_sha"}
+{"schema":"forge.goal-feasibility.v2","status":"$status","project":"$(json_escape "$project")","objective_hash":"$objective","deterministic":"PASS","global_harness":"NOT_REQUIRED","live_host":"$live","live_status":"$live_status","reason":"$reason","engine_path":"$(json_escape "$engine_path")","engine_version":"$(json_escape "$engine_version")","operator_evidence_path":"$(json_escape "$operator_evidence_path")","ledger_binding_sha256":"$binding_sha","checkpoint_sha256":"$checkpoint_sha","live_output_sha256":"$live_output_sha"}
 EOF
 
 echo "GOAL_DETERMINISTIC: PASS evidence=$receipt"

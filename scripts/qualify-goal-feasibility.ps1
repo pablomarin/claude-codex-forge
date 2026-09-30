@@ -5,7 +5,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Project,
     [Parameter(Mandatory = $true)][string]$EvidenceDir,
-    [Parameter(Mandatory = $true)][ValidateSet('none', 'claude', 'codex')][string]$Live
+    [Parameter(Mandatory = $true)][ValidateSet('none', 'claude', 'codex')][string]$Live,
+    [string]$LiveEvidence = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,6 +23,18 @@ function Get-TextHash([string]$Text) {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($sha.ComputeHash($Utf8.GetBytes($Text)))).Replace('-', '').ToLowerInvariant() }
     finally { $sha.Dispose() }
+}
+
+function Get-EvidenceFields([string]$Path) {
+    $result = @{}
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        $index = $line.IndexOf('=')
+        if ($index -le 0) { continue }
+        $key = $line.Substring(0, $index)
+        if ($result.ContainsKey($key)) { throw "duplicate operator evidence field: $key" }
+        $result[$key] = $line.Substring($index + 1)
+    }
+    return $result
 }
 
 function Write-State([string]$Root, [int]$TurnCount, [string]$Nonce, [string]$Activation, [string]$Objective) {
@@ -59,6 +72,7 @@ function Write-State([string]$Root, [int]$TurnCount, [string]$Nonce, [string]$Ac
 }
 
 $Project = (Resolve-Path -LiteralPath $Project).Path
+if ($Live -eq 'none' -and $LiveEvidence) { throw 'LiveEvidence requires a live host' }
 if (-not (Test-Path -LiteralPath (Join-Path $Project '.forge') -PathType Container)) {
     [Console]::Error.WriteLine('GOAL_DETERMINISTIC: BLOCKED reason=materialized-project-required')
     exit 3
@@ -137,31 +151,38 @@ $reason = 'deterministic-project-ledger-pass'
 $enginePath = ''
 $engineVersion = ''
 $liveOutputHash = ''
+$operatorEvidencePath = ''
 if ($Live -ne 'none') {
     $command = Get-Command $Live -ErrorAction SilentlyContinue
     if (-not $command) {
         $status = 'BLOCKED'; $liveStatus = 'BLOCKED'; $reason = 'binary-unavailable'
-    } elseif ($Live -eq 'codex') {
-        $enginePath = $command.Source
-        $engineVersion = ((& $enginePath --version 2>$null) | Select-Object -First 1)
-        $status = 'BLOCKED'; $liveStatus = 'BLOCKED'; $reason = 'interactive-native-goal-required'
     } else {
         $enginePath = $command.Source
         $engineVersion = ((& $enginePath --version 2>$null) | Select-Object -First 1)
-        $liveLog = Join-Path $runDir 'claude-live.log'
-        Push-Location $Project
-        try {
-            $output = (& $enginePath -p '/goal Qualify the installed Forge native Goal surface. Report the activation and stop without editing files.' 2>&1 | Out-String)
-            $liveCode = $LASTEXITCODE
-        } finally { Pop-Location }
-        [IO.File]::WriteAllText($liveLog, $output, $Utf8)
-        $liveOutputHash = Get-Hash $liveLog
-        if ($liveCode -eq 0) {
-            $liveStatus = 'READY'; $reason = 'authenticated-native-goal-invocation-passed'
-        } elseif ($output -match '(?i)401|oauth|token.*expired|authentication|not logged in|login required') {
-            $status = 'BLOCKED'; $liveStatus = 'BLOCKED'; $reason = 'authentication-required'
+        if (-not $LiveEvidence) {
+            $status = 'BLOCKED'; $liveStatus = 'BLOCKED'; $reason = 'interactive-native-goal-evidence-required'
+        } elseif (-not (Test-Path -LiteralPath $LiveEvidence -PathType Leaf) -or
+            ((Get-Item -LiteralPath $LiveEvidence -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $status = 'BLOCKED'; $liveStatus = 'BLOCKED'; $reason = 'operator-evidence-invalid'
         } else {
-            $status = 'BLOCKED'; $liveStatus = 'BLOCKED'; $reason = 'native-goal-command-failed'
+            $operatorEvidencePath = (Resolve-Path -LiteralPath $LiveEvidence).Path
+            try {
+                $fields = Get-EvidenceFields $operatorEvidencePath
+                $head = ((& git -C $Project rev-parse HEAD) | Select-Object -First 1)
+                $tree = ((& git -C $Project rev-parse 'HEAD^{tree}') | Select-Object -First 1)
+                $valid = $fields.schema -ceq 'forge.native-goal-operator-evidence.v1' -and
+                    $fields.evidence_mode -ceq 'operator-observed' -and $fields.result -ceq 'PASS' -and
+                    $fields.host -ceq $Live -and $fields.project_root -ceq $Project -and
+                    $fields.git_head -ceq $head -and $fields.tree_sha -ceq $tree -and
+                    $fields.activation_observed -ceq 'true' -and $fields.progress_observed -ceq 'true' -and
+                    $fields.stop_observed -ceq 'true'
+            } catch { $valid = $false }
+            if ($valid) {
+                $liveStatus = 'READY'; $reason = 'operator-observed-native-goal-pass'
+                $liveOutputHash = Get-Hash $operatorEvidencePath
+            } else {
+                $status = 'BLOCKED'; $liveStatus = 'BLOCKED'; $reason = 'operator-evidence-invalid'
+            }
         }
     }
 }
@@ -172,6 +193,7 @@ $receipt = [ordered]@{
     objective_hash = $objective; deterministic = 'PASS'; global_harness = 'NOT_REQUIRED'
     live_host = $Live; live_status = $liveStatus; reason = $reason
     engine_path = $enginePath; engine_version = $engineVersion
+    operator_evidence_path = $operatorEvidencePath
     ledger_binding_sha256 = Get-Hash (Join-Path $goalRoot 'binding')
     checkpoint_sha256 = Get-Hash (Join-Path $goalRoot 'checkpoint')
     live_output_sha256 = $liveOutputHash
