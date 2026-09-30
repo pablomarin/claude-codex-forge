@@ -128,6 +128,33 @@ case "$*" in
     printf 'worktree=%s\nartifact_written=true\n' "$(pwd -P)"
     exit 0 ;;
 esac
+if [ "${FORGE_FAKE_ENGINE_NAME:-}" = codex ]; then
+  schema=""; previous=""
+  for argument in "$@"; do
+    if [ "$previous" = --output-schema ]; then schema="$argument"; break; fi
+    previous="$argument"
+  done
+  [ -n "$schema" ] || exit 72
+  case " $* " in *' --ephemeral '*) shape=ephemeral ;; *) shape=council ;; esac
+  python3 - "$schema" "$shape" <<'PY' || exit 73
+import json
+import sys
+
+path, shape = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    schema = json.load(handle)
+expected = {
+    "ephemeral": {"sentinel": "string", "canary_observed": "boolean"},
+    "council": {"seat_hash": "string", "config_hash": "string", "canary_observed": "boolean"},
+}[shape]
+assert schema.get("type") == "object"
+assert schema.get("additionalProperties") is False
+assert set(schema.get("properties", {})) == set(expected)
+assert set(schema.get("required", [])) == set(expected)
+for name, kind in expected.items():
+    assert schema["properties"][name] == {"type": kind}
+PY
+fi
 case "${FORGE_FAKE_ENGINE_NAME:-}" in
   claude)
     case "$*" in
@@ -140,11 +167,11 @@ case "${FORGE_FAKE_ENGINE_NAME:-}" in
     esac ;;
   codex)
     case "$*" in
-      *--ephemeral*) printf '{"type":"item.completed","sentinel":"%s","canary_observed":%s}\n' "$FORGE_DISPATCH_SENTINEL" "${FORGE_FAKE_CANARY_RESULT:-false}" ;;
+      *--ephemeral*) printf '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{\\"sentinel\\":\\"%s\\",\\"canary_observed\\":%s}"}}\n' "$FORGE_DISPATCH_SENTINEL" "${FORGE_FAKE_CANARY_RESULT:-false}" ;;
       *'exec resume '*)
         seat="$FORGE_DISPATCH_SEAT_HASH"; [ "${FORGE_FAKE_DISPATCH_FAILURE:-}" = cross-seat ] && seat=wrong-seat
-        printf '{"type":"turn.completed","thread_id":"%s","seat_hash":"%s","config_hash":"%s","canary_observed":false}\n' "$FORGE_DISPATCH_SESSION_ID" "$seat" "$FORGE_DISPATCH_CONFIG_HASH" ;;
-      *FORGE_COUNCIL_START*) printf '{"type":"thread.started","thread_id":"%s"}\n{"type":"turn.completed","thread_id":"%s","seat_hash":"%s","config_hash":"%s","canary_observed":false}\n' "$FORGE_DISPATCH_SESSION_ID" "$FORGE_DISPATCH_SESSION_ID" "$FORGE_DISPATCH_SEAT_HASH" "$FORGE_DISPATCH_CONFIG_HASH" ;;
+        printf '{"type":"thread.started","thread_id":"%s"}\n{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{\\"seat_hash\\":\\"%s\\",\\"config_hash\\":\\"%s\\",\\"canary_observed\\":false}"}}\n' "$FORGE_DISPATCH_SESSION_ID" "$seat" "$FORGE_DISPATCH_CONFIG_HASH" ;;
+      *FORGE_COUNCIL_START*) printf '{"type":"thread.started","thread_id":"%s"}\n{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{\\"seat_hash\\":\\"%s\\",\\"config_hash\\":\\"%s\\",\\"canary_observed\\":false}"}}\n' "$FORGE_DISPATCH_SESSION_ID" "$FORGE_DISPATCH_SEAT_HASH" "$FORGE_DISPATCH_CONFIG_HASH" ;;
       *) exit 71 ;;
     esac ;;
 esac
@@ -185,6 +212,24 @@ for engine in claude codex; do
         assert_contains "$LIVE/$engine.argv" '--ignore-user-config --ignore-rules' "Codex repeats discovery isolation"
     fi
 done
+
+powershell_runtime=""
+for candidate in pwsh powershell powershell.exe; do
+    if command -v "$candidate" >/dev/null 2>&1; then powershell_runtime="$candidate"; break; fi
+done
+if [ -n "$powershell_runtime" ]; then
+    : > "$LIVE/codex-powershell.argv"
+    powershell_project=$(cd "$Q/project" && pwd -P)
+    FORGE_FAKE_ENGINE_NAME=codex FORGE_FAKE_ARGV_LOG="$LIVE/codex-powershell.argv" \
+      "$powershell_runtime" -NoProfile -File "$REPO_ROOT/scripts/qualify-dispatch-isolation.ps1" \
+      -Engine codex -ProjectRoot "$powershell_project" -Output "$LIVE/codex-powershell.json" \
+      -TestLiveDriver -EnginePath "$LIVE/bin/codex" > "$LIVE/codex-powershell.log" 2>&1
+    assert_equals "$?" "0" "PowerShell Codex guarded live driver accepts strict phase schemas"
+    assert_contains "$LIVE/codex-powershell.json" '"status":"PASS"' \
+        "PowerShell Codex guarded live driver can reach PASS"
+else
+    skip_test "no PowerShell runtime on PATH; strict-schema twin execution remains externally required"
+fi
 
 for failure in cross-seat canary; do
     : > "$LIVE/fail-$failure.argv"

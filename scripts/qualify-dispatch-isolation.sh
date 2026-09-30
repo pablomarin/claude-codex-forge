@@ -74,7 +74,7 @@ validate_bound_response() {
     grep -qF "$session" "$file" \
         && grep -qF "$seat" "$file" \
         && grep -qF "$config" "$file" \
-        && grep -Eq 'canary_observed["= :]+false' "$file" \
+        && grep -Eq 'canary_observed(\\)?["= :]+false' "$file" \
         && ! grep -qF FORGE_CANARY_ "$file"
 }
 
@@ -106,7 +106,7 @@ run_fixture_dispatch() {
 }
 
 run_guarded_dispatch() {
-    local scratch primary candidate investigation empty_mcp schema sentinel before config seat session start_session artifact
+    local scratch primary candidate investigation empty_mcp ephemeral_schema council_schema sentinel before config seat session start_session artifact
     local ephemeral_out start_out resume_out investigation_out
     qualification_scratch=$(mktemp -d "${TMPDIR:-/tmp}/forge-dispatch-live.XXXXXX")
     scratch="$qualification_scratch"; primary="$scratch/primary"; candidate="$scratch/candidate"; investigation="$project_root"
@@ -115,7 +115,10 @@ run_guarded_dispatch() {
     printf 'FORGE_CANARY_USER_INSTRUCTION\n' > "$primary/CLAUDE.md"
     printf 'FORGE_CANARY_USER_INSTRUCTION\n' > "$scratch/codex-home/AGENTS.md"
     empty_mcp="$scratch/empty-mcp.json"; printf '{"mcpServers":{}}\n' > "$empty_mcp"
-    schema="$scratch/schema.json"; printf '%s\n' '{"type":"object","additionalProperties":true}' > "$schema"
+    ephemeral_schema="$scratch/ephemeral-schema.json"
+    printf '%s\n' '{"type":"object","properties":{"sentinel":{"type":"string"},"canary_observed":{"type":"boolean"}},"required":["sentinel","canary_observed"],"additionalProperties":false}' > "$ephemeral_schema"
+    council_schema="$scratch/council-schema.json"
+    printf '%s\n' '{"type":"object","properties":{"seat_hash":{"type":"string"},"config_hash":{"type":"string"},"canary_observed":{"type":"boolean"}},"required":["seat_hash","config_hash","canary_observed"],"additionalProperties":false}' > "$council_schema"
     if [ "$engine" = codex ] && [ "$test_live_driver" = false ]; then cp "$FORGE_CODEX_AUTH_FILE" "$scratch/codex-home/auth.json"; chmod 600 "$scratch/codex-home/auth.json"; fi
     before=$(candidate_identity_qualification "$candidate")
     sentinel="FORGE_ISOLATION_OK_${engine}_$$"; config=$(hash_qualification_text "$engine\nqualified-v1\n$before\n"); seat=$(hash_qualification_text "$engine\n$config\n$sentinel\n")
@@ -124,9 +127,9 @@ run_guarded_dispatch() {
     if [ "$engine" = claude ]; then
         (cd "$primary" && FORGE_DISPATCH_SENTINEL="$sentinel" "$binary" -p --safe-mode --no-session-persistence --strict-mcp-config --mcp-config "$empty_mcp" --setting-sources '' --tools '' --permission-mode dontAsk --output-format json --system-prompt "Return sentinel=$sentinel and canary_observed=false." "$sentinel") > "$ephemeral_out" 2> "$scratch/ephemeral.err" || { reason="Claude ephemeral isolation invocation failed"; return 1; }
     else
-        CODEX_HOME="$scratch/codex-home" FORGE_DISPATCH_SENTINEL="$sentinel" "$binary" -a never exec --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use -C "$primary" --add-dir "$candidate" --ignore-user-config --ignore-rules --ephemeral --sandbox read-only --json --output-schema "$schema" "Return sentinel=$sentinel and canary_observed=false." > "$ephemeral_out" 2> "$scratch/ephemeral.err" || { reason="Codex ephemeral isolation invocation failed"; return 1; }
+        CODEX_HOME="$scratch/codex-home" FORGE_DISPATCH_SENTINEL="$sentinel" "$binary" -a never exec --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use -C "$primary" --add-dir "$candidate" --ignore-user-config --ignore-rules --ephemeral --sandbox read-only --json --output-schema "$ephemeral_schema" "Return sentinel=$sentinel and canary_observed=false." > "$ephemeral_out" 2> "$scratch/ephemeral.err" || { reason="Codex ephemeral isolation invocation failed"; return 1; }
     fi
-    grep -qF "$sentinel" "$ephemeral_out" && grep -Eq 'canary_observed["= :]+false' "$ephemeral_out" && ! grep -qF FORGE_CANARY_ "$ephemeral_out" || { reason="ephemeral response leaked a canary or missed the sentinel"; return 1; }
+    grep -qF "$sentinel" "$ephemeral_out" && grep -Eq 'canary_observed(\\)?["= :]+false' "$ephemeral_out" && ! grep -qF FORGE_CANARY_ "$ephemeral_out" || { reason="ephemeral response leaked a canary or missed the sentinel"; return 1; }
     ephemeral=PASS
 
     if [ "$engine" = claude ]; then
@@ -134,12 +137,12 @@ run_guarded_dispatch() {
         validate_bound_response "$start_out" "$session" "$seat" "$config" || { reason="Claude council first turn identity mismatch"; return 1; }
         (cd "$primary" && FORGE_DISPATCH_SESSION_ID="$session" FORGE_DISPATCH_SEAT_HASH="$seat" FORGE_DISPATCH_CONFIG_HASH="$config" "$binary" -p --safe-mode --strict-mcp-config --mcp-config "$empty_mcp" --setting-sources '' --tools '' --permission-mode dontAsk --output-format json --resume "$session" --system-prompt "Return exactly these four key=value lines and nothing else: session_id=$session, seat_hash=$seat, config_hash=$config, canary_observed=false." "FORGE_COUNCIL_RESUME") > "$resume_out" 2> "$scratch/resume.err" || { reason="Claude exact-id resume failed"; return 1; }
     else
-        CODEX_HOME="$scratch/codex-home" FORGE_DISPATCH_SESSION_ID="$session" FORGE_DISPATCH_SEAT_HASH="$seat" FORGE_DISPATCH_CONFIG_HASH="$config" "$binary" -a never exec --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use -C "$primary" --add-dir "$candidate" --ignore-user-config --ignore-rules --sandbox read-only --json --output-schema "$schema" "FORGE_COUNCIL_START seat_hash=$seat config_hash=$config canary_observed=false" > "$start_out" 2> "$scratch/start.err" || { reason="Codex council first turn failed"; return 1; }
+        CODEX_HOME="$scratch/codex-home" FORGE_DISPATCH_SESSION_ID="$session" FORGE_DISPATCH_SEAT_HASH="$seat" FORGE_DISPATCH_CONFIG_HASH="$config" "$binary" -a never exec --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use -C "$primary" --add-dir "$candidate" --ignore-user-config --ignore-rules --sandbox read-only --json --output-schema "$council_schema" "FORGE_COUNCIL_START seat_hash=$seat config_hash=$config canary_observed=false" > "$start_out" 2> "$scratch/start.err" || { reason="Codex council first turn failed"; return 1; }
         start_session=$(sed -n 's/.*"type":"thread.started".*"thread_id":"\([^"]*\)".*/\1/p' "$start_out" | head -1)
         [ -n "$start_session" ] || { reason="Codex council first turn emitted no thread.started id"; return 1; }
         if [ "$test_live_driver" = true ]; then [ "$start_session" = "$session" ] || { reason="Codex fake driver returned unexpected thread id"; return 1; }; else session="$start_session"; fi
         validate_bound_response "$start_out" "$session" "$seat" "$config" || { reason="Codex council first turn identity mismatch"; return 1; }
-        CODEX_HOME="$scratch/codex-home" FORGE_DISPATCH_SESSION_ID="$session" FORGE_DISPATCH_SEAT_HASH="$seat" FORGE_DISPATCH_CONFIG_HASH="$config" "$binary" -a never --sandbox read-only exec resume --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use --ignore-user-config --ignore-rules --json --output-schema "$schema" "$session" "FORGE_COUNCIL_RESUME exact session_id=$session seat_hash=$seat config_hash=$config canary_observed=false" > "$resume_out" 2> "$scratch/resume.err" || { reason="Codex exact-id resume failed"; return 1; }
+        CODEX_HOME="$scratch/codex-home" FORGE_DISPATCH_SESSION_ID="$session" FORGE_DISPATCH_SEAT_HASH="$seat" FORGE_DISPATCH_CONFIG_HASH="$config" "$binary" -a never --sandbox read-only exec resume --disable hooks --disable plugins --disable plugin_sharing --disable apps --disable remote_plugin --disable in_app_browser --disable browser_use --disable computer_use --ignore-user-config --ignore-rules --json --output-schema "$council_schema" "$session" "FORGE_COUNCIL_RESUME exact session_id=$session seat_hash=$seat config_hash=$config canary_observed=false" > "$resume_out" 2> "$scratch/resume.err" || { reason="Codex exact-id resume failed"; return 1; }
     fi
     validate_bound_response "$resume_out" "$session" "$seat" "$config" || { reason="council resume rejected cross-seat, stale config, or canary evidence"; return 1; }
     council_resume=PASS

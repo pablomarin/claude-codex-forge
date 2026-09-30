@@ -133,7 +133,7 @@ function New-ForgeLiveCandidate([string]$Root) {
 }
 
 function Test-ForgeBoundResponse([string]$Text, [string]$Session, [string]$Seat, [string]$Config) {
-    return ($Text -match [regex]::Escape($Session) -and $Text -match [regex]::Escape($Seat) -and $Text -match [regex]::Escape($Config) -and $Text -match 'canary_observed["= :]+false' -and $Text -notmatch 'FORGE_CANARY_')
+    return ($Text -match [regex]::Escape($Session) -and $Text -match [regex]::Escape($Seat) -and $Text -match [regex]::Escape($Config) -and $Text -match 'canary_observed(?:\\)?["= :]+false' -and $Text -notmatch 'FORGE_CANARY_')
 }
 
 function Invoke-ForgeGuardedDispatch([string]$Binary) {
@@ -145,7 +145,10 @@ function Invoke-ForgeGuardedDispatch([string]$Binary) {
         [IO.File]::WriteAllText((Join-Path $primary "CLAUDE.md"), "FORGE_CANARY_USER_INSTRUCTION`n", $Utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $scratch "codex-home\AGENTS.md"), "FORGE_CANARY_USER_INSTRUCTION`n", $Utf8NoBom)
         $emptyMcp = Join-Path $scratch "empty-mcp.json"; [IO.File]::WriteAllText($emptyMcp, '{"mcpServers":{}}', $Utf8NoBom)
-        $schema = Join-Path $scratch "schema.json"; [IO.File]::WriteAllText($schema, '{"type":"object","additionalProperties":true}', $Utf8NoBom)
+        $ephemeralSchema = Join-Path $scratch "ephemeral-schema.json"
+        [IO.File]::WriteAllText($ephemeralSchema, '{"type":"object","properties":{"sentinel":{"type":"string"},"canary_observed":{"type":"boolean"}},"required":["sentinel","canary_observed"],"additionalProperties":false}', $Utf8NoBom)
+        $councilSchema = Join-Path $scratch "council-schema.json"
+        [IO.File]::WriteAllText($councilSchema, '{"type":"object","properties":{"seat_hash":{"type":"string"},"config_hash":{"type":"string"},"canary_observed":{"type":"boolean"}},"required":["seat_hash","config_hash","canary_observed"],"additionalProperties":false}', $Utf8NoBom)
         if ($Engine -eq "codex" -and -not $TestLiveDriver) { Copy-Item $env:FORGE_CODEX_AUTH_FILE (Join-Path $scratch "codex-home\auth.json") }
         $before = Get-ForgeCandidateIdentity $candidate; $sentinel = "FORGE_ISOLATION_OK_$Engine`_$PID"
         $config = Get-ForgeSha256Bytes ($Utf8NoBom.GetBytes("$Engine`nqualified-v1`n$before`n")); $seat = Get-ForgeSha256Bytes ($Utf8NoBom.GetBytes("$Engine`n$config`n$sentinel`n")); $session = "11111111-1111-4111-8111-{0:d12}" -f $PID
@@ -157,10 +160,10 @@ function Invoke-ForgeGuardedDispatch([string]$Binary) {
         if ($Engine -eq "claude") {
             $args = @("-p","--safe-mode","--no-session-persistence","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","json","--system-prompt","Return sentinel=$sentinel and canary_observed=false.",$sentinel)
         } else {
-            $args = @("-a","never","exec","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","-C",$primary,"--add-dir",$candidate,"--ignore-user-config","--ignore-rules","--ephemeral","--sandbox","read-only","--json","--output-schema",$schema,"Return sentinel=$sentinel and canary_observed=false.")
+            $args = @("-a","never","exec","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","-C",$primary,"--add-dir",$candidate,"--ignore-user-config","--ignore-rules","--ephemeral","--sandbox","read-only","--json","--output-schema",$ephemeralSchema,"Return sentinel=$sentinel and canary_observed=false.")
         }
         $run = Invoke-ForgeLiveEngine $Binary $args $vars $primary
-        if ($run.Code -ne 0 -or $run.Text -notmatch [regex]::Escape($sentinel) -or $run.Text -notmatch 'canary_observed["= :]+false' -or $run.Text -match 'FORGE_CANARY_') { throw "ephemeral response leaked a canary or missed the sentinel" }
+        if ($run.Code -ne 0 -or $run.Text -notmatch [regex]::Escape($sentinel) -or $run.Text -notmatch 'canary_observed(?:\\)?["= :]+false' -or $run.Text -match 'FORGE_CANARY_') { throw "ephemeral response leaked a canary or missed the sentinel" }
         $script:ephemeral = "PASS"
         if ($Engine -eq "claude") {
             $startArgs = @("-p","--safe-mode","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","json","--session-id",$session,"--system-prompt","Return exactly these four key=value lines and nothing else: session_id=$session, seat_hash=$seat, config_hash=$config, canary_observed=false.","FORGE_COUNCIL_START")
@@ -168,14 +171,14 @@ function Invoke-ForgeGuardedDispatch([string]$Binary) {
             if ($run.Code -ne 0 -or -not (Test-ForgeBoundResponse $run.Text $session $seat $config)) { throw "Claude council first turn identity mismatch" }
             $resumeArgs = @("-p","--safe-mode","--strict-mcp-config","--mcp-config",$emptyMcp,"--setting-sources","","--tools","","--permission-mode","dontAsk","--output-format","json","--resume",$session,"--system-prompt","Return exactly these four key=value lines and nothing else: session_id=$session, seat_hash=$seat, config_hash=$config, canary_observed=false.","FORGE_COUNCIL_RESUME")
         } else {
-            $startArgs = @("-a","never","exec","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","-C",$primary,"--add-dir",$candidate,"--ignore-user-config","--ignore-rules","--sandbox","read-only","--json","--output-schema",$schema,"FORGE_COUNCIL_START seat_hash=$seat config_hash=$config canary_observed=false")
+            $startArgs = @("-a","never","exec","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","-C",$primary,"--add-dir",$candidate,"--ignore-user-config","--ignore-rules","--sandbox","read-only","--json","--output-schema",$councilSchema,"FORGE_COUNCIL_START seat_hash=$seat config_hash=$config canary_observed=false")
             $run = Invoke-ForgeLiveEngine $Binary $startArgs $vars $primary
             $thread = ""
             foreach ($line in ($run.Text -split "`n")) { try { $event = $line | ConvertFrom-Json; if ($event.type -eq "thread.started") { $thread = $event.thread_id; break } } catch {} }
             if (-not $thread -or ($TestLiveDriver -and $thread -cne $session)) { throw "Codex council first turn emitted no exact thread.started id" }
             if (-not $TestLiveDriver) { $session = $thread; $vars["FORGE_DISPATCH_SESSION_ID"] = $session }
             if ($run.Code -ne 0 -or -not (Test-ForgeBoundResponse $run.Text $session $seat $config)) { throw "Codex council first turn identity mismatch" }
-            $resumeArgs = @("-a","never","--sandbox","read-only","exec","resume","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","--ignore-user-config","--ignore-rules","--json","--output-schema",$schema,$session,"FORGE_COUNCIL_RESUME session_id=$session seat_hash=$seat config_hash=$config canary_observed=false")
+            $resumeArgs = @("-a","never","--sandbox","read-only","exec","resume","--disable","hooks","--disable","plugins","--disable","plugin_sharing","--disable","apps","--disable","remote_plugin","--ignore-user-config","--ignore-rules","--json","--output-schema",$councilSchema,$session,"FORGE_COUNCIL_RESUME session_id=$session seat_hash=$seat config_hash=$config canary_observed=false")
         }
         $run = Invoke-ForgeLiveEngine $Binary $resumeArgs $vars $primary
         if ($run.Code -ne 0 -or -not (Test-ForgeBoundResponse $run.Text $session $seat $config)) { throw "council resume rejected cross-seat, stale config, or canary evidence" }
