@@ -2977,6 +2977,30 @@ for safety_rule in 'Run the read-only full-refresh preview first' \
         "copy-paste prompt requires: $safety_rule"
 done
 assert_contains "$AGENT_SETUP" \
+    '`chore/forge-install` for a fresh' \
+    "copy-paste prompt selects the neutral fresh/reconciliation branch"
+assert_contains "$AGENT_SETUP" \
+    '`chore/forge-upgrade` for an existing Forge v6 update.' \
+    "copy-paste prompt selects the neutral v6-upgrade branch"
+assert_contains "$AGENT_SETUP" \
+    'Never use an engine or host name such as `codex/`, `claude/`, or `agent/` as the branch prefix.' \
+    "copy-paste prompt forbids engine-prefixed setup branches"
+assert_contains "$AGENT_SETUP" \
+    'Keep shared project knowledge in docs/agent-context.md.' \
+    "copy-paste prompt keeps one project-owned shared context"
+assert_contains "$AGENT_SETUP" \
+    'Move still-valid custom root policy into docs/agent-context.md before replacing root instructions.' \
+    "copy-paste prompt migrates valid custom root policy"
+assert_contains "$AGENT_SETUP" \
+    'Validate every repository path referenced by the existing root instructions; each must exist.' \
+    "copy-paste prompt validates migrated project-policy references"
+assert_contains "$AGENT_SETUP" \
+    'Remove circular or stale references between the root adapters and docs/agent-context.md.' \
+    "copy-paste prompt rejects circular and stale project policy"
+assert_contains "$AGENT_SETUP" \
+    'If missing policy has no clear authoritative source, stop and ask the user instead of inventing it.' \
+    "copy-paste prompt escalates unclear missing policy"
+assert_contains "$AGENT_SETUP" \
     'Run the read-only full-refresh preview first for Forge v5, Claude-only, Codex-only, mixed, custom, or unknown harnesses.' \
     "copy-paste prompt sends non-v6 existing harnesses through full refresh"
 assert_not_contains "$AGENT_SETUP" 'for every existing' \
