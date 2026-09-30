@@ -1208,6 +1208,60 @@ for combo in both claude-only codex-only neither; do
     fi
 done
 
+start_test "v6 exact Claude bridge is adopted without duplication"
+BRIDGE_CASE="$V6_BASE/exact-claude-bridge/project"
+BRIDGE_FAKE="$V6_BASE/exact-claude-bridge/bin"
+mkdir -p "$BRIDGE_CASE" "$BRIDGE_CASE/.fakehome"
+(cd "$BRIDGE_CASE" && git init -q)
+make_fake_engine_path "$BRIDGE_FAKE" present present
+printf '@AGENTS.md\n' > "$BRIDGE_CASE/CLAUDE.md"
+(cd "$BRIDGE_CASE" && PATH="$BRIDGE_FAKE:/usr/bin:/bin" HOME="$BRIDGE_CASE/.fakehome" \
+    "$REPO_ROOT/setup.sh" -p "Exact Claude bridge" -t fullstack >"$BRIDGE_CASE/setup.log" 2>&1)
+assert_equals "$?" "0" "exact Claude bridge setup exits zero"
+BRIDGE_IMPORT_COUNT=$(grep -c '^@AGENTS\.md$' "$BRIDGE_CASE/CLAUDE.md" || true)
+assert_equals "$BRIDGE_IMPORT_COUNT" "1" \
+    "exact pre-existing Claude bridge becomes one managed import"
+assert_contains "$BRIDGE_CASE/CLAUDE.md" '<!-- forge:begin v6 -->' \
+    "exact pre-existing Claude bridge is adopted into the managed block"
+assert_contains "$BRIDGE_CASE/CLAUDE.md" 'canonical-revision:' \
+    "adopted Claude bridge records its canonical revision"
+BRIDGE_HASH=$(hash_file "$BRIDGE_CASE/CLAUDE.md")
+(cd "$BRIDGE_CASE" && PATH="$BRIDGE_FAKE:/usr/bin:/bin" HOME="$BRIDGE_CASE/.fakehome" \
+    "$REPO_ROOT/setup.sh" -p "Exact Claude bridge" -t fullstack >"$BRIDGE_CASE/setup-2.log" 2>&1)
+assert_equals "$?" "0" "second exact Claude bridge setup exits zero"
+assert_hash_equals "$BRIDGE_CASE/CLAUDE.md" "$BRIDGE_HASH" \
+    "exact Claude bridge is byte-idempotent after adoption"
+if command -v pwsh >/dev/null 2>&1; then
+    BRIDGE_PS_CASE="$V6_BASE/exact-claude-bridge-powershell/project"
+    BRIDGE_PS_HOME="$V6_BASE/exact-claude-bridge-powershell/home"
+    BRIDGE_PS_FAKE="$V6_BASE/exact-claude-bridge-powershell/bin"
+    PWSH_BIN=$(command -v pwsh)
+    mkdir -p "$BRIDGE_PS_CASE" "$BRIDGE_PS_HOME"
+    (cd "$BRIDGE_PS_CASE" && git init -q)
+    make_fake_engine_path "$BRIDGE_PS_FAKE" present present
+    printf '@AGENTS.md\n' > "$BRIDGE_PS_CASE/CLAUDE.md"
+    (cd "$BRIDGE_PS_CASE" && PATH="$BRIDGE_PS_FAKE:/usr/bin:/bin" HOME="$BRIDGE_PS_HOME" \
+        "$PWSH_BIN" -NoLogo -NoProfile -File "$REPO_ROOT/setup.ps1" \
+        -Project "Exact Claude bridge" -Tech fullstack >"$BRIDGE_PS_CASE/setup.log" 2>&1)
+    assert_equals "$?" "0" "PowerShell exact Claude bridge setup exits zero"
+    BRIDGE_PS_IMPORT_COUNT=$(grep -c '^@AGENTS\.md$' "$BRIDGE_PS_CASE/CLAUDE.md" || true)
+    assert_equals "$BRIDGE_PS_IMPORT_COUNT" "1" \
+        "PowerShell exact pre-existing Claude bridge becomes one managed import"
+    assert_contains "$BRIDGE_PS_CASE/CLAUDE.md" '<!-- forge:begin v6 -->' \
+        "PowerShell exact Claude bridge is adopted into the managed block"
+    assert_contains "$BRIDGE_PS_CASE/CLAUDE.md" 'canonical-revision:' \
+        "PowerShell adopted Claude bridge records its canonical revision"
+    BRIDGE_PS_HASH=$(hash_file "$BRIDGE_PS_CASE/CLAUDE.md")
+    (cd "$BRIDGE_PS_CASE" && PATH="$BRIDGE_PS_FAKE:/usr/bin:/bin" HOME="$BRIDGE_PS_HOME" \
+        "$PWSH_BIN" -NoLogo -NoProfile -File "$REPO_ROOT/setup.ps1" \
+        -Project "Exact Claude bridge" -Tech fullstack >"$BRIDGE_PS_CASE/setup-2.log" 2>&1)
+    assert_equals "$?" "0" "second PowerShell exact Claude bridge setup exits zero"
+    assert_hash_equals "$BRIDGE_PS_CASE/CLAUDE.md" "$BRIDGE_PS_HASH" \
+        "PowerShell exact Claude bridge is byte-idempotent after adoption"
+else
+    skip_test "pwsh unavailable; exact Claude bridge adoption is covered by Windows CI"
+fi
+
 start_test "v6 root adapters preserve project text and expose canonical rules once"
 ROOT_CASE="$V6_BASE/both/project with spaces"
 assert_contains "$ROOT_CASE/CLAUDE.md" '<!-- forge:begin v6 -->' "Claude root has bounded Forge block"

@@ -117,6 +117,19 @@ replace_marker_block() {
     case "$begin_count:$end_count" in
         0:0)
             tmp=$(mktemp "$destination.forge-tmp.XXXXXX")
+            if [ "$(basename "$destination")" = CLAUDE.md ] && awk '
+                {
+                    sub(/\r$/, "")
+                    if ($0 ~ /^[[:space:]]*$/) next
+                    meaningful++
+                    if ($0 != "@AGENTS.md") invalid=1
+                }
+                END { exit (meaningful == 1 && !invalid) ? 0 : 1 }
+            ' "$destination"; then
+                cp "$template" "$tmp"
+                if cmp -s "$destination" "$tmp"; then rm -f "$tmp"; else mv "$tmp" "$destination"; fi
+                return 0
+            fi
             cat "$destination" > "$tmp"
             destination_size=$(wc -c < "$destination" | tr -d ' ')
             if [ "$destination_size" -gt 0 ]; then
