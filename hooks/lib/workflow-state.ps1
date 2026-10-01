@@ -445,7 +445,7 @@ function Invoke-WorkflowStateRebind {
     if ($currentBaseSha -ne $expectedBaseSha) {
         Throw-WorkflowStateBlocked 'inactive workflow base changed; rerun show before rebind'
     }
-    if (($currentCommand -and $currentCommand -notin @('none', '-', '—')) -or $currentPhase -or $currentNext) {
+    if (($currentCommand -and $currentCommand -notin @('none', '-', ([string][char]0x2014))) -or $currentPhase -or $currentNext) {
         Throw-WorkflowStateBlocked 'rebind requires an inactive workflow with no phase or next step'
     }
     $placeholders = @{
@@ -468,7 +468,7 @@ function Invoke-WorkflowStateRebind {
         Throw-WorkflowStateBlocked 'rebind refuses an active or malformed Goal session'
     }
     foreach ($line in [IO.File]::ReadAllLines($state)) {
-        if ($line -match '^- \[x\] PR creation authorized — `[0-9]{4}-[0-9]{2}-[0-9]{2}T') {
+        if ($line -match '^- \[x\] PR creation authorized \u2014 `[0-9]{4}-[0-9]{2}-[0-9]{2}T') {
             Throw-WorkflowStateBlocked 'rebind refuses existing PR authorization'
         }
     }
@@ -525,8 +525,8 @@ function Invoke-WorkflowStateActivate {
     $currentCommon = Get-WorkflowStateValue -Path $state -Section Identity -Key "Git common directory"
     $currentBaseRef = Get-WorkflowStateValue -Path $state -Section Identity -Key "Workflow base ref"
     $currentBaseSha = Get-WorkflowStateValue -Path $state -Section Identity -Key "Workflow base SHA"
-    $activeWorkflow = $currentCommand -and $currentCommand -notin @("none", "-", "—") -and -not ($currentPhase -eq "complete" -and $currentNext -eq "none")
-    $inactiveWorkflow = -not $currentCommand -or $currentCommand -in @("none", "-", "—")
+    $activeWorkflow = $currentCommand -and $currentCommand -notin @("none", "-", ([string][char]0x2014)) -and -not ($currentPhase -eq "complete" -and $currentNext -eq "none")
+    $inactiveWorkflow = -not $currentCommand -or $currentCommand -in @("none", "-", ([string][char]0x2014))
     $boundMode = if ($currentBaseSha -match '^[0-9a-f]{40}([0-9a-f]{24})?$' -and $activeWorkflow) { "active" } elseif ($currentBaseSha -match '^[0-9a-f]{40}([0-9a-f]{24})?$' -and $inactiveWorkflow) { "prebound" } else { "none" }
     if ($boundMode -ne "none") {
         if ($currentRoot -ne $root -or $currentCommon -ne $common -or $currentBaseRef -ne $baseRef) {

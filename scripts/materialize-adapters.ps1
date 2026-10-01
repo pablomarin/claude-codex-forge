@@ -95,7 +95,7 @@ function Write-NormalProjectWorkflowStatus {
         Write-Host "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=canonical-state-unreadable action=workflow-state-show"
         return
     }
-    if ($command -and $command -notin @("none", "-", "—")) {
+    if ($command -and $command -notin @("none", "-", ([string][char]0x2014))) {
         Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
         return
     }
