@@ -85,6 +85,8 @@ start_test "bash: canonical Forge state read guardrail is host neutral"
 assert_block_sh 'cat .forge/local/state.md' "canonical state read via Bash is blocked"
 assert_block_sh 'sed -n "1,80p" .forge/local/state.md' "canonical state sed read is blocked"
 assert_allow_sh '.forge/hooks/lib/workflow-state.sh show' "bounded canonical state reader is allowed"
+assert_allow_sh '.forge/hooks/lib/workflow-state.sh rebind --base-ref main --expected-base-sha 0000000000000000000000000000000000000000' \
+    "bounded inactive rebind command is allowed"
 assert_allow_sh ".forge/hooks/lib/workflow-state.sh activate --host claude --workflow quick-fix --task safe-task --base-ref main --phase diagnosis --next-step 'write RED test'" \
     "bounded activation command is allowed"
 assert_allow_sh ".forge/hooks/lib/workflow-state.sh checkpoint --host codex --phase review --next-step 'dispatch reviewers' --begin-review" \
@@ -102,6 +104,8 @@ WRITE_REMEDIATION="$FAKE_HOME/write-remediation.err"
 run_sh_capture 'printf x > .forge/local/state.md' "$WRITE_REMEDIATION"
 assert_contains "$WRITE_REMEDIATION" 'workflow-state.sh activate' \
     "direct canonical state write denial names bounded activation"
+assert_contains "$WRITE_REMEDIATION" 'workflow-state.sh rebind' \
+    "direct canonical state write denial names bounded inactive rebind"
 assert_contains "$WRITE_REMEDIATION" 'workflow-state.sh checkpoint' \
     "direct canonical state write denial names bounded checkpoint"
 

@@ -113,6 +113,7 @@ fi
 start_test "canonical policy routes workflow control rows through the bounded helper"
 for surface in "$REPO_ROOT/rules/workflow.md" "$REPO_ROOT/FORGE.template.md"; do
     assert_contains "$surface" 'workflow-state.sh show' "$(basename "$surface") names bounded show"
+    assert_contains "$surface" 'workflow-state.sh rebind' "$(basename "$surface") names bounded inactive rebind"
     assert_contains "$surface" 'workflow-state.sh activate' "$(basename "$surface") names bounded activation"
     assert_contains "$surface" 'workflow-state.sh checkpoint' "$(basename "$surface") names bounded checkpoint"
     assert_not_contains "$surface" 'Read `.forge/local/state.md`' \

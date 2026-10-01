@@ -203,6 +203,25 @@ forge_workflow_state_publish() {
     }
 }
 
+workflow_state_transform_rebind() {
+    local state="$1" next="$2" base_sha="$3"
+    FORGE_WS_BASE_SHA="$base_sha" awk -F '|' '
+        BEGIN { base_sha=ENVIRON["FORGE_WS_BASE_SHA"] }
+        { sub(/\r$/, "") }
+        function trim(value) {
+            sub(/^[ \t]+/, "", value)
+            sub(/[ \t]+$/, "", value)
+            return value
+        }
+        /^## / { section=$0; sub(/^## /, "", section) }
+        section == "Identity" && /^\|/ && trim($2) == "Workflow base SHA" {
+            print "| Workflow base SHA    | " base_sha " |"
+            next
+        }
+        { print }
+    ' "$state" > "$next"
+}
+
 workflow_state_transform_activate() {
     local state="$1" next="$2" mode="$3" root="$4" common="$5" host="$6"
     local base_ref="$7" base_sha="$8" command="$9"
@@ -372,6 +391,134 @@ workflow_state_show() {
     cat "$state"
 }
 
+workflow_state_rebind() {
+    local base_ref="" expected_base_sha="" seen_base=false seen_expected=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --base-ref)
+                [ "$seen_base" = false ] || { workflow_state_die "duplicate rebind option: --base-ref"; return $?; }
+                [ $# -ge 2 ] || { workflow_state_die "option requires a value: --base-ref"; return $?; }
+                base_ref="$2"; seen_base=true; shift 2 ;;
+            --expected-base-sha)
+                [ "$seen_expected" = false ] || { workflow_state_die "duplicate rebind option: --expected-base-sha"; return $?; }
+                [ $# -ge 2 ] || { workflow_state_die "option requires a value: --expected-base-sha"; return $?; }
+                expected_base_sha="$2"; seen_expected=true; shift 2 ;;
+            *) workflow_state_die "unsupported rebind option: $1"; return $? ;;
+        esac
+    done
+    [ "$seen_base" = true ] && [ "$seen_expected" = true ] || {
+        workflow_state_die "rebind requires base-ref and expected-base-sha"
+        return $?
+    }
+    workflow_state_validate_ref "$base_ref" || return $?
+    printf '%s\n' "$expected_base_sha" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' || {
+        workflow_state_die "expected base SHA must be a full lowercase Git object id"
+        return $?
+    }
+
+    local root common state state_hash current_root current_common current_base_ref current_base_sha
+    local current_command current_phase current_next current_iteration current_candidate current_spec
+    local current_quality current_app current_e2e current_promotion current_council first_certified goal_nonce
+    local current_head resolved_base tmp
+    root=$(workflow_state_root) || { workflow_state_die "not inside a Git worktree"; return $?; }
+    common=$(workflow_state_common_dir "$root") || { workflow_state_die "cannot resolve Git common directory"; return $?; }
+    state=$(workflow_state_canonical "$root") || return 2
+    state_hash=$(workflow_state_hash "$state") || return 2
+    current_root=$(workflow_state_value "$state" Identity 'Worktree root') || return 2
+    current_common=$(workflow_state_value "$state" Identity 'Git common directory') || return 2
+    current_base_ref=$(workflow_state_value "$state" Identity 'Workflow base ref') || return 2
+    current_base_sha=$(workflow_state_value "$state" Identity 'Workflow base SHA') || return 2
+    current_command=$(workflow_state_value "$state" Workflow Command) || return 2
+    current_phase=$(workflow_state_value "$state" Workflow Phase) || return 2
+    current_next=$(workflow_state_value "$state" Workflow 'Next step') || return 2
+    current_iteration=$(workflow_state_value "$state" Receipts 'Review iteration') || return 2
+    current_candidate=$(workflow_state_value "$state" Receipts 'Candidate receipt') || return 2
+    current_spec=$(workflow_state_value "$state" Receipts 'Spec review receipt') || return 2
+    current_quality=$(workflow_state_value "$state" Receipts 'Quality review receipt') || return 2
+    current_app=$(workflow_state_value "$state" Receipts 'Verify app receipt') || return 2
+    current_e2e=$(workflow_state_value "$state" Receipts 'E2E receipt') || return 2
+    current_promotion=$(workflow_state_value "$state" Receipts 'Promotion receipt') || return 2
+    current_council=$(workflow_state_value "$state" Receipts 'Council receipt') || return 2
+    first_certified=$(workflow_state_optional_first_certified "$state") || return 2
+    goal_nonce=$(workflow_state_value "$state" '/goal session' nonce 2>/dev/null || true)
+
+    [ "$current_root" = "$root" ] && [ "$current_common" = "$common" ] \
+        && [ "$current_base_ref" = "$base_ref" ] || {
+        workflow_state_die "rebind identity differs from the inactive worktree binding"
+        return $?
+    }
+    [ "$current_base_sha" = "$expected_base_sha" ] || {
+        workflow_state_die "inactive workflow base changed; rerun show before rebind"
+        return $?
+    }
+    { [ -z "$current_command" ] || [ "$current_command" = none ] \
+        || [ "$current_command" = - ] || [ "$current_command" = '—' ]; } \
+        && [ -z "$current_phase" ] && [ -z "$current_next" ] || {
+        workflow_state_die "rebind requires an inactive workflow with no phase or next step"
+        return $?
+    }
+    { [ "$current_iteration" = 0 ] || [ "$current_iteration" = '<integer>' ]; } \
+        && [ "$current_candidate" = '.forge/local/evidence/<task-id>/candidate.receipt' ] \
+        && [ "$current_spec" = '.forge/local/reviews/<task-id>/spec.receipt' ] \
+        && [ "$current_quality" = '.forge/local/reviews/<task-id>/quality.receipt' ] \
+        && [ "$current_app" = '.forge/local/evidence/<task-id>/verify-app.receipt' ] \
+        && [ "$current_e2e" = '.forge/local/evidence/<task-id>/e2e.receipt' ] \
+        && [ "$current_promotion" = '.forge/local/evidence/<task-id>/promotion.receipt' ] \
+        && [ "$current_council" = '.forge/local/council/<council-id>/receipt.json' ] \
+        && [ "$first_certified" = none ] || {
+        workflow_state_die "rebind refuses workflow or review evidence"
+        return $?
+    }
+    case "$goal_nonce" in ''|'<uuid-v4-lowercase>') ;; *)
+        workflow_state_die "rebind refuses an active or malformed Goal session"
+        return $? ;;
+    esac
+    if grep -qE '^- \[x\] PR creation authorized — `[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$state"; then
+        workflow_state_die "rebind refuses existing PR authorization"
+        return $?
+    fi
+    git -C "$root" cat-file -e "${current_base_sha}^{commit}" 2>/dev/null || {
+        workflow_state_die "inactive workflow base does not resolve to a commit"
+        return $?
+    }
+    resolved_base=$(git -C "$root" rev-parse --verify "${base_ref}^{commit}" 2>/dev/null) || {
+        workflow_state_die "base ref does not resolve to a commit: $base_ref"
+        return $?
+    }
+    current_head=$(git -C "$root" rev-parse --verify HEAD 2>/dev/null) || {
+        workflow_state_die "cannot resolve worktree HEAD"
+        return $?
+    }
+    [ "$resolved_base" = "$current_head" ] || {
+        workflow_state_die "rebind target must resolve to current worktree HEAD"
+        return $?
+    }
+    [ "$current_base_sha" != "$current_head" ] || {
+        workflow_state_die "inactive workflow base already matches current HEAD"
+        return $?
+    }
+    git -C "$root" merge-base --is-ancestor "$current_base_sha" "$current_head" 2>/dev/null || {
+        workflow_state_die "rebind refuses a non-descendant worktree HEAD"
+        return $?
+    }
+
+    tmp=$(mktemp "$state.tmp.XXXXXX") || return 2
+    workflow_state_transform_rebind "$state" "$tmp" "$current_head" || {
+        rm -f "$tmp"
+        return 2
+    }
+    workflow_state_validate_shape "$tmp" || {
+        rm -f "$tmp"
+        workflow_state_die "rebind produced invalid state"
+        return $?
+    }
+    forge_workflow_state_publish "$state" "$tmp" "$state_hash" || {
+        rm -f "$tmp"
+        return 2
+    }
+    printf 'REBOUND: base_ref=%s old=%s new=%s\n' "$base_ref" "$current_base_sha" "$current_head"
+}
+
 workflow_state_activate() {
     local host="" workflow="" task="" base_ref="" phase="" next_step=""
     local seen_host=false seen_workflow=false seen_task=false seen_base=false seen_phase=false seen_next=false
@@ -464,7 +611,7 @@ workflow_state_activate() {
         }
         if [ "$bound_mode" = prebound ]; then
             [ "$current_head" = "$current_base_sha" ] || {
-                workflow_state_die "prebound worktree HEAD differs from its adopted base"
+                workflow_state_die "prebound worktree HEAD differs from its adopted base; inspect with show, then use workflow-state rebind only for the approved descendant base"
                 return $?
             }
         else
@@ -646,9 +793,10 @@ workflow_state_main() {
             [ $# -eq 0 ] || { workflow_state_die "show accepts no arguments"; return $?; }
             workflow_state_show
             ;;
+        rebind) workflow_state_rebind "$@" ;;
         activate) workflow_state_activate "$@" ;;
         checkpoint) workflow_state_checkpoint "$@" ;;
-        *) workflow_state_die "usage: workflow-state show|activate|checkpoint" ;;
+        *) workflow_state_die "usage: workflow-state show|rebind|activate|checkpoint" ;;
     esac
 }
 

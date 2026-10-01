@@ -33,6 +33,11 @@ For Forge source development, the local gate is `tests/template/run-fast.sh`, no
 - Run `.forge/hooks/lib/workflow-state.sh show` before resuming work (PowerShell:
   `.forge/hooks/lib/workflow-state.ps1 show`) and keep evidence bound to the exact candidate
   revision. Do not infer a successful gate from execution alone.
+- If an inactive pre-bound worktree was fast-forwarded to the exact intended base, use
+  `.forge/hooks/lib/workflow-state.sh rebind --base-ref <ref> --expected-base-sha <recorded-sha>`
+  before activation (or the `.ps1` twin on Windows). Rebind is explicit, atomic, descendant-only,
+  requires the ref to resolve exactly to current `HEAD`, and refuses active workflow, Goal, review,
+  or PR-authorization evidence. Never repair workflow control rows manually.
 - Use `.forge/hooks/lib/workflow-state.sh activate` to start canonical workflow control state and
   `.forge/hooks/lib/workflow-state.sh checkpoint` for host, phase, next-step, and monotonic review
   transitions. Use the `.ps1` twin on Windows. Native file tools may update checklist and narrative

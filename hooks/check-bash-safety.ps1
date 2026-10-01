@@ -122,13 +122,13 @@ elseif ($Command -match '(?m)(^|[ \t])(/[^ \t]*/)?(cat|sed|grep|egrep|fgrep|rg|a
 #    bracket space-class — invalid .NET). Redirect target scoped to its single
 #    token so `> /tmp/log .claude/local/x` (real target /tmp) does not false-match.
 elseif ($Command -match '(?m)(^|[ \t])(mkdir|touch|cp|mv|tee|rm)[ \t][^\r\n|&;]*\.forge[/\\]local[/\\]') {
-    $Reason = "Writing under .forge/local/ via Bash — for workflow state use .forge/hooks/lib/workflow-state.ps1 activate or .forge/hooks/lib/workflow-state.ps1 checkpoint; for other local artifacts use the host Write/Edit tool"
+    $Reason = "Writing under .forge/local/ via Bash — for workflow state use .forge/hooks/lib/workflow-state.ps1 rebind, .forge/hooks/lib/workflow-state.ps1 activate, or .forge/hooks/lib/workflow-state.ps1 checkpoint; for other local artifacts use the host Write/Edit tool"
 }
 elseif ($Command -match '(?m)(^|[ \t])(mkdir|touch|cp|mv|tee|rm)[ \t][^\r\n|&;]*\.claude[/\\]local[/\\]') {
     $Reason = "Writing under .claude/local/ via Bash — use the Write/Edit tool instead (Bash writes under .claude/ are never auto-approved and stall autonomous /goal runs on a permission prompt; the Write tool auto-creates parent dirs — see ADR 0006)"
 }
 elseif ($Command -match '(?m)(^|[ \t])[12]?>>?[ \t]*[^\r\n \t|&;]*\.forge[/\\]local[/\\]') {
-    $Reason = "Writing under .forge/local/ via Bash (redirect) — for workflow state use .forge/hooks/lib/workflow-state.ps1 activate or .forge/hooks/lib/workflow-state.ps1 checkpoint; for other local artifacts use the host Write/Edit tool"
+    $Reason = "Writing under .forge/local/ via Bash (redirect) — for workflow state use .forge/hooks/lib/workflow-state.ps1 rebind, .forge/hooks/lib/workflow-state.ps1 activate, or .forge/hooks/lib/workflow-state.ps1 checkpoint; for other local artifacts use the host Write/Edit tool"
 }
 elseif ($Command -match '(?m)(^|[ \t])[12]?>>?[ \t]*[^\r\n \t|&;]*\.claude[/\\]local[/\\]') {
     $Reason = "Writing under .claude/local/ via Bash (redirect) — use the Write/Edit tool instead (Bash writes under .claude/ stall autonomous /goal runs on a permission prompt; see ADR 0006)"

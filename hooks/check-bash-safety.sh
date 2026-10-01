@@ -124,11 +124,11 @@ elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(/[^[:space:]]*/)?(cat|sed|grep|
 #    .claude/local path as a plain string ARGUMENT (no shell op) is not matched.
 #    Gates the AGENT's Bash tool only — a human's terminal is unaffected.
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(mkdir|touch|cp|mv|tee|rm)[[:space:]][^|&;]*\.forge/local/' 2>/dev/null; then
-    REASON="Writing under .forge/local/ via Bash — for workflow state use .forge/hooks/lib/workflow-state.sh activate or .forge/hooks/lib/workflow-state.sh checkpoint; for other local artifacts use the host Write/Edit tool"
+    REASON="Writing under .forge/local/ via Bash — for workflow state use .forge/hooks/lib/workflow-state.sh rebind, .forge/hooks/lib/workflow-state.sh activate, or .forge/hooks/lib/workflow-state.sh checkpoint; for other local artifacts use the host Write/Edit tool"
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])(mkdir|touch|cp|mv|tee|rm)[[:space:]][^|&;]*\.claude/local/' 2>/dev/null; then
     REASON="Writing under .claude/local/ via Bash — use the Write/Edit tool instead (Bash writes under .claude/ are never auto-approved and stall autonomous /goal runs on a permission prompt; the Write tool auto-creates parent dirs — see ADR 0006)"
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])[12]?>>?[[:space:]]*[^[:space:]|&;]*\.forge/local/' 2>/dev/null; then
-    REASON="Writing under .forge/local/ via Bash (redirect) — for workflow state use .forge/hooks/lib/workflow-state.sh activate or .forge/hooks/lib/workflow-state.sh checkpoint; for other local artifacts use the host Write/Edit tool"
+    REASON="Writing under .forge/local/ via Bash (redirect) — for workflow state use .forge/hooks/lib/workflow-state.sh rebind, .forge/hooks/lib/workflow-state.sh activate, or .forge/hooks/lib/workflow-state.sh checkpoint; for other local artifacts use the host Write/Edit tool"
 elif echo "$COMMAND" | grep -qE '(^|[[:space:]])[12]?>>?[[:space:]]*[^[:space:]|&;]*\.claude/local/' 2>/dev/null; then
     REASON="Writing under .claude/local/ via Bash (redirect) — use the Write/Edit tool instead (Bash writes under .claude/ stall autonomous /goal runs on a permission prompt; see ADR 0006)"
 fi

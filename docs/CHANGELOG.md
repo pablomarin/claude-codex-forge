@@ -4,6 +4,16 @@ All notable changes to claude-codex-forge.
 
 ## 6.3 — 2026-09-28
 
+### Unreleased inactive-worktree recovery — 2026-10-01
+
+**Inactive fast-forwarded worktrees have a bounded recovery path.** `workflow-state rebind` can
+atomically advance only the recorded base SHA when the workflow is inactive, the recorded base is
+the caller-supplied expected SHA and an ancestor of current `HEAD`, and the requested base ref
+resolves exactly to that `HEAD`. It refuses active workflow, Goal, review, council, or PR-authority
+evidence and preserves application changes. Bash and PowerShell implementations remain paired.
+Setup diagnostics now report this mismatch as `NORMAL_PROJECT_WORKFLOWS: BLOCKED` with the rebind
+action instead of incorrectly claiming readiness; activation failures provide the same remediation.
+
 ### Unreleased council improvement — 2026-09-30
 
 **Council dispatch runs in three waves.** The five initial advice turns now run concurrently, then

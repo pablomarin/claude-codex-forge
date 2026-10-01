@@ -160,7 +160,12 @@ runtime result rather than permission to claim the workflow is prompt-free.
 
 Run `.forge/hooks/lib/workflow-state.sh show` before every workflow action (PowerShell:
 `.forge/hooks/lib/workflow-state.ps1 show`). The bounded helper is the only canonical interface for
-workflow control rows: use `workflow-state.sh activate` once in a new task worktree and
+workflow control rows. If an inactive pre-bound worktree was fast-forwarded to the exact intended
+base, run `workflow-state.sh rebind --base-ref <ref> --expected-base-sha <recorded-sha>` before
+activation (use the `.ps1` twin on Windows). Rebind is atomic and fail-closed: the recorded base
+must be an ancestor, the requested ref must equal current `HEAD`, and no active workflow, Goal,
+review, or PR-authorization evidence may exist. Never edit workflow control rows manually. Use
+`workflow-state.sh activate` once in a new task worktree and
 `workflow-state.sh checkpoint` for later host, phase, next-step, and review-iteration transitions.
 The helper alone derives the first receipt-certified iteration and preserves it for convergence
 accounting; neither host may set or advance that anchor directly.
@@ -180,28 +185,31 @@ file capabilities for local evidence. Never infer a clean gate from a successful
 Every development workflow follows this state machine; receipt population records progress and
 never activates a mode:
 
-1. **Activate:** resolve and persist the immutable workflow base ref/SHA, create one task-local
+1. **Recover inactive binding when required:** if `show` reports that an inactive pre-bound
+   worktree no longer matches `HEAD`, use the bounded `workflow-state.sh rebind` transition above.
+   This is a one-time recovery before activation, not an active-workflow base mutation.
+2. **Activate:** resolve and persist the immutable workflow base ref/SHA, create one task-local
    `.forge/local/` evidence directory, populate every receipt path, and set `Review iteration` to
    `0`. Invoke `.forge/hooks/lib/workflow-state.sh activate --host <claude|codex> --workflow
    <new-feature|fix-bug|quick-fix> --task <slug> --base-ref <ref-or-sha> --phase <phase>
    --next-step '<exact next step>'` before any discretionary investigation or tracked mutation.
    The active V6 schema selects structured evidence immediately. An identical in-flight V6.1
    placeholder bundle is adopted by this activation; partial or conflicting bundles fail closed.
-2. **Plan before code:** for planned feature and bug work, obtain clean candidate-bound plan evidence
+3. **Plan before code:** for planned feature and bug work, obtain clean candidate-bound plan evidence
    before production implementation. Quick fixes must record their acceptance check before editing.
-3. **Exercise early:** run preliminary E2E while mutation is still allowed, or record why no
+4. **Exercise early:** run preliminary E2E while mutation is still allowed, or record why no
    supported user journey exists; this is not final certification.
-4. **Freeze:** finish TDD, documentation, and simplification; stage the intended tree and freeze one
+5. **Freeze:** finish TDD, documentation, and simplification; stage the intended tree and freeze one
    staged-clean candidate.
-5. **Review:** invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host <claude|codex> --phase
+6. **Review:** invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host <claude|codex> --phase
    review --next-step '<exact next step>' --begin-review` before dispatch, then run distinct fresh
    `code-spec` and `code-quality` lenses against the same candidate and iteration.
-6. **Verify:** run `verify-app` and E2E against that same candidate and write their structured
+7. **Verify:** run `verify-app` and E2E against that same candidate and write their structured
    receipts. E2E N/A requires its candidate-bound report and reason.
-7. **Invalidate on change:** Any candidate mutation invalidates the final review and verifier
+8. **Invalidate on change:** Any candidate mutation invalidates the final review and verifier
    receipts. Restage, freeze a new candidate, increment the iteration before review, and rerun the
    affected final gates.
-8. **Promote:** revalidate the complete receipt set and promote only the exact certified tree.
+9. **Promote:** revalidate the complete receipt set and promote only the exact certified tree.
 
 At every other durable boundary, invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host
 <claude|codex> --phase <phase> --next-step '<exact next step>'`. End a completed workflow with the

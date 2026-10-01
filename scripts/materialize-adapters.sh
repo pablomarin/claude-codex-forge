@@ -19,6 +19,94 @@ safe_relative_materializer_path() {
     return 0
 }
 
+materializer_state_value() {
+    local state="$1" wanted_section="$2" wanted_key="$3"
+    awk -F '|' -v wanted_section="$wanted_section" -v wanted_key="$wanted_key" '
+        function trim(value) {
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            return value
+        }
+        /^## / {
+            section = $0
+            sub(/^## /, "", section)
+            next
+        }
+        /^\|/ {
+            key = trim($2)
+            if (section == wanted_section && key == wanted_key) {
+                count++
+                value = trim($3)
+            }
+        }
+        END {
+            if (count != 1) exit 2
+            print value
+        }
+    ' "$state"
+}
+
+report_normal_project_workflows() {
+    local target="$1" state="$1/.forge/local/state.md"
+    local command phase next_step state_root state_common base_ref base_sha
+    local git_common current_head resolved_ref action
+
+    if [ ! -e "$state" ]; then
+        echo "NORMAL_PROJECT_WORKFLOWS: READY"
+        return 0
+    fi
+    if [ -L "$state" ] || [ ! -f "$state" ]; then
+        echo "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=canonical-state-not-regular action=workflow-state-show"
+        return 0
+    fi
+    if ! command=$(materializer_state_value "$state" Workflow Command) \
+        || ! phase=$(materializer_state_value "$state" Workflow Phase) \
+        || ! next_step=$(materializer_state_value "$state" Workflow 'Next step') \
+        || ! state_root=$(materializer_state_value "$state" Identity 'Worktree root') \
+        || ! state_common=$(materializer_state_value "$state" Identity 'Git common directory') \
+        || ! base_ref=$(materializer_state_value "$state" Identity 'Workflow base ref') \
+        || ! base_sha=$(materializer_state_value "$state" Identity 'Workflow base SHA'); then
+        echo "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=canonical-state-unreadable action=workflow-state-show"
+        return 0
+    fi
+    case "$command" in none|''|-|'—') ;; *) echo "NORMAL_PROJECT_WORKFLOWS: READY"; return 0 ;; esac
+    printf '%s\n' "$base_sha" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' || {
+        echo "NORMAL_PROJECT_WORKFLOWS: READY"
+        return 0
+    }
+    if [ -n "$phase" ] || [ -n "$next_step" ]; then
+        echo "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-state-invalid action=workflow-state-show"
+        return 0
+    fi
+    git_common=$(git -C "$target" rev-parse --git-common-dir 2>/dev/null) || {
+        echo "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-git-unavailable action=workflow-state-show"
+        return 0
+    }
+    case "$git_common" in
+        /*) git_common=$(cd "$git_common" 2>/dev/null && pwd -P) || git_common='' ;;
+        *) git_common=$(cd "$target/$git_common" 2>/dev/null && pwd -P) || git_common='' ;;
+    esac
+    if [ "$state_root" != "$target" ] || [ -z "$git_common" ] || [ "$state_common" != "$git_common" ]; then
+        echo "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-identity-mismatch action=workflow-state-show"
+        return 0
+    fi
+    current_head=$(git -C "$target" rev-parse --verify HEAD 2>/dev/null) || {
+        echo "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-head-unavailable action=workflow-state-show"
+        return 0
+    }
+    if [ "$current_head" = "$base_sha" ]; then
+        echo "NORMAL_PROJECT_WORKFLOWS: READY"
+        return 0
+    fi
+    action=workflow-state-show
+    resolved_ref=$(git -C "$target" rev-parse --verify "${base_ref}^{commit}" 2>/dev/null || true)
+    if [ "$resolved_ref" = "$current_head" ] \
+        && git -C "$target" merge-base --is-ancestor "$base_sha" "$current_head" 2>/dev/null; then
+        action=workflow-state-rebind
+    fi
+    echo "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-head-mismatch action=$action base_ref=$base_ref base_sha=$base_sha head=$current_head"
+}
+
 load_managed_manifest() {
     local manifest="$1" line=0 kind source destination platform host scope ownership canonical revision extra
     [ -f "$manifest" ] || { echo "BLOCKED: managed manifest not found: $manifest" >&2; return 1; }
@@ -443,6 +531,6 @@ if [ -n "$primary" ] && [ "$(cd "$primary" 2>/dev/null && pwd -P)" != "$current"
 else
     echo "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
 fi
-echo "NORMAL_PROJECT_WORKFLOWS: READY"
+report_normal_project_workflows "$MATERIALIZE_DIAGNOSTIC_TARGET"
 echo "NATIVE_GOAL_RUNTIME: PENDING reason=live-qualification-not-run"
 echo "RUNTIME_QUALIFICATION: final owner '$MATERIALIZE_REPO/scripts/qualify-runtime-final.sh'; live project '$MATERIALIZE_DIAGNOSTIC_TARGET'; command and required operator evidence: '$MATERIALIZE_REPO/docs/qualification/agent-mode-selection.md'"
