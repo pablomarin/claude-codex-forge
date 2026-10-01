@@ -133,8 +133,8 @@ try {
   & git -C $capture.Repo config user.email test@example.invalid
   & git -C $capture.Repo add -- artifact.txt question.txt
   & git -C $capture.Repo commit -qm base
-  $repoRoot=(& git -C $capture.Repo rev-parse --show-toplevel);$base=(& git -C $capture.Repo rev-parse HEAD)
-  $store=Join-Path $repoRoot '.forge/local/reviews/session-stores/owned'
+  $repoRoot=(Resolve-Path (& git -C $capture.Repo rev-parse --show-toplevel)).Path;$base=(& git -C $capture.Repo rev-parse HEAD)
+  $store=[IO.Path]::GetFullPath((Join-Path $repoRoot '.forge/local/reviews/session-stores/owned'))
   New-Item -ItemType Directory -Path $store -Force|Out-Null
   $state="<!-- forge:state-schema v6 -->`n## Identity`n| Field | Value |`n| Worktree root | $repoRoot |`n| Git common directory | $(Join-Path $repoRoot '.git') |`n| Workflow base ref | $base |`n| Workflow base SHA | $base |`n"
   [IO.File]::WriteAllText((Join-Path $repoRoot '.forge/local/state.md'),$state)
