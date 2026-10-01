@@ -69,7 +69,10 @@ The dispatcher uses three main-engine advisors, two other-engine advisors, and a
 chairman when healthy. It creates five fresh advisor sessions, resumes each for
 one anonymous peer-review turn, and creates a fresh chairman session.
 The executable topology is always the full eleven-turn council: five advisor starts, five
-peer-review resumes, and one chairman. There is no quick or three-seat mode.
+peer-review resumes, and one chairman. It launches the five advice turns concurrently, waits for
+all five, then launches the five exact-session peer turns concurrently. The chairman starts only
+after all peers succeed. Anonymous bundles retain fixed A–E ordering regardless of completion
+order. There is no quick or three-seat mode.
 
 Every Task 5 dispatch must use `--fallback-policy none`, a distinct `--seat-id`,
 the stable question hash, and `--conversation new|resume` exact-id transport.

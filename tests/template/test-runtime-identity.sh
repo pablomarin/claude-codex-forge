@@ -9,7 +9,7 @@ FIXTURES="$REPO_ROOT/tests/template/fixtures/host-events"
 
 start_test "Claude captured identity exposes provider/model but not actual effort"
 bash "$VERIFY" identity --host claude --fixture "$FIXTURES/claude-2.1.237.json" \
-    --invocation-hash fixture-claude > /tmp/forge-runtime-claude.$$ 2>&1
+    --requested-model claude-opus-5-5 --invocation-hash fixture-claude > /tmp/forge-runtime-claude.$$ 2>&1
 assert_equals "$?" "0" "Claude identity fixture parses"
 assert_contains /tmp/forge-runtime-claude.$$ '"actual_provider":"anthropic"' "Claude provider is observable"
 assert_contains /tmp/forge-runtime-claude.$$ '"actual_model":"claude-opus-4-1"' "Claude canonical model is observable"
@@ -17,7 +17,7 @@ assert_not_contains /tmp/forge-runtime-claude.$$ '"actual_effort"' "Claude effor
 
 start_test "Codex captured identity invents no actual provider/model/effort"
 bash "$VERIFY" identity --host codex --fixture "$FIXTURES/codex-0.144.1.jsonl" \
-    --invocation-hash fixture-codex > /tmp/forge-runtime-codex.$$ 2>&1
+    --requested-model gpt-6-astra --invocation-hash fixture-codex > /tmp/forge-runtime-codex.$$ 2>&1
 assert_equals "$?" "0" "Codex identity fixture parses"
 assert_contains /tmp/forge-runtime-codex.$$ '"invocation_hash":"fixture-codex"' "Codex receipt binds requested invocation"
 assert_not_contains /tmp/forge-runtime-codex.$$ '"actual_provider"' "Codex provider is not invented"

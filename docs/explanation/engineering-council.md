@@ -49,6 +49,17 @@ After the five advisors return and anonymously peer-review one another, a fresh 
 the result. The other engine chairs a healthy mixed council; a fresh main-engine session chairs the
 all-main fallback.
 
+The council runs in three waves: five initial advisor calls in parallel, five peer-review calls in
+parallel after all initial answers succeed, then the chairman. Each peer resumes its original
+session and sees the other four anonymized initial answers. Bundle order stays fixed regardless
+of which member finishes first. Normal model-call latency is therefore approximately the slowest
+advice call plus the slowest peer call plus the chairman call, rather than the sum of eleven calls.
+The number of model turns and token cost are unchanged by parallel scheduling.
+
+If a wave fails, the dispatcher waits for every worker to exit before discarding the mixed attempt
+and starting an all-main rerun. A main-engine failure blocks the verdict even when an other-engine
+seat also fails in that wave.
+
 ### Two output vocabularies — don't conflate them
 
 **Advisors** each return a single-token verdict in their structured response:

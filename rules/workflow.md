@@ -121,8 +121,14 @@ imaginable rare case. Rare but catastrophic security or data loss triggers remai
 discipline never excuses reachable security failure, data loss, incorrect supported behavior, or an
 explicit acceptance criterion.
 
-During repair, run focused owning checks. Run one complete aggregate after the final bytes freeze;
-do not mechanically restart unrelated verification. A mutation invalidates only evidence whose
+During repair, run focused owning checks. After the final bytes freeze, use the project's fast local gate
+and applicable focused acceptance checks, not an exhaustive aggregate of unrelated suites.
+Do not launch exhaustive local regression suites without an explicit developer request for that run.
+For Forge source development, use `tests/template/run-fast.sh`; `run-all.sh` and `run-all.ps1` are
+CI/release coverage, not automatic local gates. A workflow invocation, candidate freeze, version bump,
+release, or integration boundary is not permission to launch them locally. Report unexecuted coverage
+honestly; required feature-specific acceptance and user-journey checks remain applicable.
+Do not mechanically restart unrelated verification. A mutation invalidates only evidence whose
 boundary it can affect, while exact-candidate receipts still require the same final fingerprint.
 Environment-only Windows, authenticated, and manual gates remain honest final gates; they do not
 trigger implementation loops or authorize fake evidence.

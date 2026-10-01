@@ -4,7 +4,7 @@ log="${FAKE_CLAUDE_LOG:-}"
 [ -z "$log" ] || printf 'cwd=%s home=%s user=%s logname=%s argv=%s\n' \
   "$(pwd -P)" "${HOME:-}" "${USER:-}" "${LOGNAME:-}" "$*" >> "$log"
 clean_json() {
-  printf '{"result":"schema_version=1\\nverdict=CLEAN\\nmax_severity=NONE\\nblocked_class=none\\nforge_canary_hash=%s\\nforge_config_hash=%s\\nforge_qualification_revision=%s","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"firstParty"}}}\n' \
+  printf '{"result":"schema_version=1\\nverdict=CLEAN\\nmax_severity=NONE\\nblocked_class=none\\nforge_canary_hash=%s\\nforge_config_hash=%s\\nforge_qualification_revision=%s","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5-5":{"canonicalModel":"claude-opus-5-5","provider":"firstParty"}}}\n' \
     "${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}"
 }
 fast_mode_enabled() {
@@ -21,7 +21,7 @@ fast_mode_enabled() {
 }
 qualified_json() {
   body=$(printf '%s\n' "$@" "forge_canary_hash=${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "forge_config_hash=${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "forge_qualification_revision=${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}" | awk '{gsub(/\\/,"\\\\"); gsub(/\"/,"\\\""); printf "%s%s", separator, $0; separator="\\n"}')
-  printf '{"result":"%s","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"firstParty"}}}\n' "$body"
+  printf '{"result":"%s","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5-5":{"canonicalModel":"claude-opus-5-5","provider":"firstParty"}}}\n' "$body"
 }
 case "${FAKE_CLAUDE_BEHAVIOR:-clean}" in
   clean) clean_json ;;
@@ -48,9 +48,9 @@ case "${FAKE_CLAUDE_BEHAVIOR:-clean}" in
   blocked-engine) qualified_json 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=engine' ;;
   contradictory) qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|contradiction' ;;
   malformed) printf '%s\n' 'This is prose, not an envelope.' ;;
-  identity-mismatch) printf '%s\n' '{"result":"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none","modelUsage":{"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"unexpectedProvider"}}}' ;;
+  identity-mismatch) printf '%s\n' '{"result":"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none","modelUsage":{"claude-opus-5-5":{"canonicalModel":"claude-opus-5-5","provider":"unexpectedProvider"}}}' ;;
   identity-missing) printf '%s\n' '{"result":"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none"}' ;;
-  canary-missing) printf '%s\n' '{"result":"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5":{"canonicalModel":"claude-opus-5","provider":"firstParty"}}}' ;;
+  canary-missing) printf '%s\n' '{"result":"schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none","modelUsage":{"claude-haiku-4-5":{"canonicalModel":"claude-haiku-4-5","provider":"firstParty"},"claude-opus-5-5":{"canonicalModel":"claude-opus-5-5","provider":"firstParty"}}}' ;;
   duplicate-canary) qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' "forge_canary_hash=${FORGE_DISPATCH_CANARY_HASH:-MISSING}" "forge_config_hash=${FORGE_DISPATCH_CONFIG_HASH:-MISSING}" "forge_qualification_revision=${FORGE_DISPATCH_QUALIFICATION_REVISION:-MISSING}" ;;
   conflicting-canary) qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=NONE' 'blocked_class=none' 'forge_canary_hash=WRONG' ;;
   empty) : ;;

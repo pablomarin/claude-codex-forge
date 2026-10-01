@@ -42,7 +42,7 @@ start_test "severity and mutation rules stop noise without hiding material failu
 POLICY="$REPO_ROOT/rules/workflow.md"
 for contract in "P3" "cosmetic" "purely theoretical" "unchanged candidate" \
     "P2" "material" "rare" "data loss" "focused owning checks" \
-    "complete aggregate" "final bytes" "Environment-only"; do
+    "fast local gate" "final bytes" "Environment-only"; do
     assert_contains "$POLICY" "$contract" "workflow policy covers $contract"
 done
 assert_contains "$REPO_ROOT/rules/critical-rules.md" "RESOURCE DISCIPLINE" \
@@ -81,20 +81,20 @@ assert_contains "$REPO_ROOT/FORGE.template.md" "solely because the candidate is 
     "canonical policy prevents duplicate prompts for complete private candidate transport"
 assert_contains "$REPO_ROOT/FORGE.template.md" "not an external mutation" \
     "canonical policy distinguishes reviewer transport from external mutation"
-assert_contains "$REPO_ROOT/FORGE.template.md" "Agent-selected or inferred workflow use is not user authorization" \
-    "canonical policy does not manufacture consent from agent workflow selection"
-assert_contains "$REPO_ROOT/FORGE.template.md" "ask once before the first review dispatch" \
-    "canonical policy obtains one user-originated authorization before review transport"
-assert_contains "$REPO_ROOT/FORGE.template.md" "Do not ask again during that workflow segment" \
-    "canonical policy reuses explicit consent for later bounded reviews"
-assert_contains "$REPO_ROOT/FORGE.template.md" "May I send this Forge workflow's bounded immutable candidate snapshot, prompt, and evidence" \
-    "canonical policy supplies an exact informed-consent question"
+assert_contains "$REPO_ROOT/FORGE.template.md" "All ordinary Forge reviews are human-approved in advance" \
+    "canonical policy records standing human approval for ordinary reviews"
+assert_contains "$REPO_ROOT/FORGE.template.md" "Do not ask for separate review-transport permission" \
+    "canonical policy removes the extra Forge consent question"
+assert_contains "$REPO_ROOT/FORGE.template.md" "This approval covers initial reviews, fallback reviewers, follow-up reviews, and resumed sessions" \
+    "canonical policy carries human approval across the ordinary review lifecycle"
+assert_contains "$REPO_ROOT/FORGE.template.md" "This approves running reviews, not accepting their findings" \
+    "canonical policy does not preapprove findings or shipping"
 assert_contains "$REPO_ROOT/FORGE.template.md" "beyond that supplied review input" \
     "canonical disclosure excludes only state outside the supplied review input"
 assert_contains "$REPO_ROOT/commands/opinion.md" "FORGE_REVIEW_TRANSPORT_AUTHORIZED" \
     "opinion workflow distinguishes reviewer transport from agent network capability"
-assert_contains "$REPO_ROOT/commands/opinion.md" "current user message" \
-    "opinion workflow binds review transport to user-originated authorization"
+assert_contains "$REPO_ROOT/commands/opinion.md" "standing human approval" \
+    "opinion workflow uses bounded standing human approval without another question"
 assert_contains "$REPO_ROOT/commands/opinion.md" 'does not authorize `investigate`' \
     "ordinary reviewer consent cannot authorize a full-agent investigation"
 assert_contains "$REPO_ROOT/commands/opinion.md" "May I launch a fresh full-capability" \
@@ -140,14 +140,14 @@ assert_contains "$INSTALL/.forge/instructions.md" "solely because the candidate 
     "installed canonical policy prevents duplicate private-candidate prompts"
 assert_contains "$INSTALL/.forge/instructions.md" "not an external mutation" \
     "installed canonical policy distinguishes reviewer transport from external mutation"
-assert_contains "$INSTALL/.forge/instructions.md" "Agent-selected or inferred workflow use is not user authorization" \
-    "installed policy does not manufacture consent from agent workflow selection"
-assert_contains "$INSTALL/.forge/instructions.md" "ask once before the first review dispatch" \
-    "installed policy obtains one user-originated authorization before review transport"
-assert_contains "$INSTALL/.forge/instructions.md" "Do not ask again during that workflow segment" \
-    "installed policy reuses explicit consent for later bounded reviews"
-assert_contains "$INSTALL/.forge/instructions.md" "May I send this Forge workflow's bounded immutable candidate snapshot, prompt, and evidence" \
-    "installed policy supplies an exact informed-consent question"
+assert_contains "$INSTALL/.forge/instructions.md" "All ordinary Forge reviews are human-approved in advance" \
+    "installed policy records standing human approval for ordinary reviews"
+assert_contains "$INSTALL/.forge/instructions.md" "Do not ask for separate review-transport permission" \
+    "installed policy removes the extra Forge consent question"
+assert_contains "$INSTALL/.forge/instructions.md" "This approval covers initial reviews, fallback reviewers, follow-up reviews, and resumed sessions" \
+    "installed policy carries human approval across the ordinary review lifecycle"
+assert_contains "$INSTALL/.forge/instructions.md" "This approves running reviews, not accepting their findings" \
+    "installed policy does not preapprove findings or shipping"
 assert_contains "$INSTALL/.forge/instructions.md" "beyond that supplied review input" \
     "installed disclosure excludes only state outside the supplied review input"
 assert_contains "$INSTALL/.forge/agents/independent-reviewer.md" "FORGE_REVIEW_TRANSPORT_AUTHORIZED" \

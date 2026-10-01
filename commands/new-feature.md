@@ -190,8 +190,9 @@ Closure checks only named findings and direct regressions; do not start a second
 One still-open reachable P0/P1 may receive one surgical repair plus surgical verification, then
 surface the blocker to the developer. P3, cosmetic, speculative, purely theoretical, and
 unchanged-candidate concerns do not keep the loop open; a concrete material P2 still prevents
-certification. Run focused owning checks during repair and one complete aggregate after final bytes
-freeze.
+certification. Run focused owning checks during repair and the project's fast local gate after final
+bytes freeze. Follow the shared [local verification scope](../rules/workflow.md#resource-discipline):
+exhaustive local regression suites require an explicit developer request for that run.
 A code-review finding is not a council trigger; keep findings in this bounded repair and closure
 loop, then surface a remaining blocker to the developer.
 

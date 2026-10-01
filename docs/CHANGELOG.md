@@ -4,6 +4,54 @@ All notable changes to claude-codex-forge.
 
 ## 6.3 — 2026-09-28
 
+### Unreleased council improvement — 2026-09-30
+
+**Council dispatch runs in three waves.** The five initial advice turns now run concurrently, then
+the five exact-session anonymous peer reviews run concurrently, followed by the chairman. Bash
+and PowerShell retain fixed A–E bundle order and collect all workers before whole-topology
+fallback; simultaneous main and other-engine failures block rather than hiding a main failure.
+Shared session directories are established before dispatch, and each seat captures its own
+dispatcher log. PowerShell uses native named parameters for the advisor and chairman dispatcher.
+Bundle boundaries remain distinct even when an engine response has no final newline, preserving
+peer self-exclusion and the chairman's complete ordered inputs.
+The council still uses six sessions and eleven turns; parallelism reduces wall time, not token cost.
+Failed attempts now close their own advisor sessions and delete their private stores only after
+all workers drain, including failed new turns that never publish a session id. Exact ownership
+bindings protect unrelated sessions; abandoned metadata and failed dispatch diagnostics remain
+available without being treated as a successful council receipt.
+Advisor repository snapshots are created inside their owned session store, so successful peer
+completion and failed-attempt cleanup reclaim the complete private candidate as well as session data.
+
+### Unreleased verification policy — 2026-09-30
+
+**Exhaustive local regression is opt-in.** Local development uses focused owning checks and the
+project's fast gate. The full regression runners remain available for CI/release coverage, but
+agents may launch them locally only when the developer explicitly requests that run. Workflow
+activation, candidate freeze, version bumps, and integration boundaries do not supply that consent.
+Feature-specific acceptance checks remain required; unexecuted coverage must be reported honestly.
+
+### Unreleased review authorization — 2026-09-30
+
+**Ordinary reviews are human-preapproved.** Standing developer approval covers bounded read-only
+reviews through the project's configured Claude Code/Codex services, including fallback,
+follow-ups, resumed sessions, and configured-host switches. Forge no longer adds a separate review
+consent question. Approval permits running reviews, not accepting findings or shipping; unrelated
+data, investigation, external mutations, and host security controls retain their existing boundaries.
+Live Desktop approval behavior remains separately unqualified.
+
+### Unreleased reviewer model pins — 2026-09-30
+
+**Reviews and council use explicit current model pins.** Claude Code requests
+`claude-opus-5-5`; Codex requests `gpt-6-astra`. The certifying, council-advisor,
+and council-chair profiles retain their existing effort and fast-service settings.
+Claude's model profiles declare the documented Claude Code 2.1.280 minimum for
+Opus 5.5. Codex model profiles declare Forge's 0.156.1 supported baseline, rather than
+claiming an undocumented vendor minimum. The README lists both CLI baselines and
+version-check/update commands. Captured historical identities remain historical; deterministic model
+fixtures do not establish authenticated access to either new model.
+
+### Released 6.3 changes
+
 **Forge is complete per repository.** Fresh installation and routine upgrade no longer require or
 create a machine-wide harness. Every installed project receives the complete shared policy,
 workflows, rules, agents, hooks, memory, and native Goal composition contract. `AGENTS.md` is the

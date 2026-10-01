@@ -161,6 +161,13 @@ for tuple in 'claude codex codex false' 'codex claude claude false' 'claude clau
     if run_dispatch "$S" "$host" sid "$requested" >/dev/null 2>&1; then pass "$host main can select $requested reviewer"; else fail "$host main failed $requested reviewer"; fi
     assert_receipt_value "$S" actual_engine "$actual"
     assert_receipt_value "$S" fallback "$fallback"
+    if [ "$actual" = claude ]; then
+      assert_receipt_value "$S" requested_model claude-opus-5-5
+      assert_receipt_value "$S" actual_model claude-opus-5-5
+    else
+      assert_receipt_value "$S" requested_model gpt-6-astra
+      assert_receipt_value "$S" actual_model UNOBSERVABLE
+    fi
 done
 for tuple in 'claude codex' 'codex claude'; do
     set -- $tuple; host="$1" actual="$2"

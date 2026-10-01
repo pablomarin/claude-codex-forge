@@ -93,7 +93,7 @@ public static class ForgeFakeEngine {
   static void Emit(string path, string text) { if (String.IsNullOrEmpty(path)) Console.Write(text); else File.WriteAllText(path, text); }
   static string Qualified(string engine,string body) {
     body += "forge_canary_hash="+E("FORGE_DISPATCH_CANARY_HASH","MISSING")+"\nforge_config_hash="+E("FORGE_DISPATCH_CONFIG_HASH","MISSING")+"\nforge_qualification_revision="+E("FORGE_DISPATCH_QUALIFICATION_REVISION","MISSING")+"\n";
-    if(engine=="claude") return "{\"result\":\""+body.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r","").Replace("\n","\\n")+"\",\"modelUsage\":{\"claude-haiku-4-5\":{\"canonicalModel\":\"claude-haiku-4-5\",\"provider\":\"firstParty\"},\"claude-opus-5\":{\"canonicalModel\":\"claude-opus-5\",\"provider\":\"firstParty\"}}}\n";
+    if(engine=="claude") return "{\"result\":\""+body.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r","").Replace("\n","\\n")+"\",\"modelUsage\":{\"claude-haiku-4-5\":{\"canonicalModel\":\"claude-haiku-4-5\",\"provider\":\"firstParty\"},\"claude-opus-5-5\":{\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\"}}}\n";
     return body;
   }
   static int RunReproduction() {

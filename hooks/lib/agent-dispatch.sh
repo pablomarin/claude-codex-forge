@@ -76,6 +76,11 @@ prepare_session_dispatch() {
         ensure_reserved_review_dir_dispatch "session-stores/$invocation_id/home" true >/dev/null || die_dispatch invariant 'cannot create private council session home'
         ensure_reserved_review_dir_dispatch "session-stores/$invocation_id/codex-home" true >/dev/null || die_dispatch invariant 'cannot create private Codex session home'
         chmod 700 "$SESSION_STORE" 2>/dev/null || true
+        # Bind cleanup before the engine runs, including unsuccessful new turns.
+        printf '%s\n' "$session_id_output.store-id" > "$SESSION_STORE/session-owner"
+        printf '%s\n' "$invocation_id" > "$SESSION_STORE/store-id"
+        validate_owned_review_path_dispatch "$session_id_output.store-id" 'session store ownership'
+        publish_owned_review_file_dispatch "$SESSION_STORE/store-id" "$VALID_REVIEW_PATH" 'session store ownership'
         return 0
     fi
     safe_session_id_dispatch "$session_id" || die_dispatch invariant 'unsafe exact session id'
@@ -113,6 +118,7 @@ write_session_metadata_dispatch() {
         "$SESSION_FINAL_ID" "$actual" "$role" "$seat_id" "$question_hash" "$active_host" "$artifact_hash" "$worktree_identity" "$prompt_hash" "$ATTEMPT_CONFIG_HASH" "$ATTEMPT_CANARY_HASH" "$ATTEMPT_SEAT_HASH" "$qualification_revision" "$invocation_id" "$ATTEMPT_SNAPSHOT" "$snapshot_hash"
     } > "$tmp" || return 2
     chmod 600 "$tmp" 2>/dev/null || true; mv "$tmp" "$SESSION_META" || return 2
+    printf '%s\n' "$SESSION_FINAL_ID" > "$SESSION_STORE/session-id" || return 2
     output_tmp="$meta_dir/$SESSION_FINAL_ID.session-id.$$"; printf '%s\n' "$SESSION_FINAL_ID" > "$output_tmp" || return 2; chmod 600 "$output_tmp" 2>/dev/null || true
     publish_owned_review_file_dispatch "$output_tmp" "$session_id_output" 'session id output'; rm -f "$output_tmp"
 }
@@ -445,7 +451,8 @@ EOF
       [ "$(hash_file_dispatch "$snapshot_check")" = "$SESSION_SNAPSHOT_HASH" ] || { ATTEMPT_CLASS=artifact; ATTEMPT_REASON=resume-snapshot-mismatch; return 2; }
     else
       attempt_fingerprint="$reviews_dir/$invocation_id.attempt-$attempt_number.candidate"
-      if ! bash "$FINGERPRINT" capture --artifact "$artifact" --workflow-base-sha "$workflow_base_sha" --workflow-base-ref "$workflow_base_ref" --output "$attempt_fingerprint" >/dev/null 2>&1; then ATTEMPT_CLASS=artifact; ATTEMPT_REASON=candidate-capture-failed; return 2; fi
+      local capture_args=(); [ "$conversation" != new ] || capture_args=(--snapshot-parent "$SESSION_STORE")
+      if ! bash "$FINGERPRINT" capture --artifact "$artifact" --workflow-base-sha "$workflow_base_sha" --workflow-base-ref "$workflow_base_ref" --output "$attempt_fingerprint" ${capture_args[@]+"${capture_args[@]}"} >/dev/null 2>&1; then ATTEMPT_CLASS=artifact; ATTEMPT_REASON=candidate-capture-failed; return 2; fi
       [ "$(kv_dispatch "$attempt_fingerprint" artifact_hash)" = "$artifact_hash" ] && [ "$(kv_dispatch "$attempt_fingerprint" worktree_identity)" = "$worktree_identity" ] || { ATTEMPT_CLASS=artifact; ATTEMPT_REASON=candidate-binding-mismatch; return 2; }
       snapshot=$(kv_dispatch "$attempt_fingerprint" snapshot_path); [ -d "$snapshot" ] && [ ! -L "$snapshot" ] || { ATTEMPT_CLASS=artifact; ATTEMPT_REASON=candidate-snapshot-unavailable; return 2; }
     fi

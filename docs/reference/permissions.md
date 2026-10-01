@@ -10,7 +10,7 @@ sandbox prompts can differ between Claude Code and Codex; Forge's human-authorit
 | Read any file                              | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Edit/Write files                           | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Run an ordinary shell command              | Host-dependent | Claude Code recognizes some read-only commands directly. In Auto mode it drops blanket Bash allow rules and evaluates other actions; commands it cannot parse completely can still prompt. Forge therefore requires small, literal, single-purpose calls but does not promise that every shell command is prompt-free                                                                         |
-| Forge reviewer dispatch                    | No after informed entry | Explicitly invoking a disclosed native Forge entry point authorizes its bounded reviewer transport. If Forge inferred the workflow from ordinary prose, it asks once before the first review; private or unchanged tracked content needs no per-review approval after consent                                                                                                               |
+| Forge reviewer dispatch                    | No extra Forge question | Ordinary bounded read-only reviews through configured Claude Code/Codex services are human-preapproved, including fallback and resumed sessions. Approval permits running reviews, not accepting findings or shipping; host security controls still apply |
 | Skill invocation                           | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Web search and fetch                       | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Context7 MCP tools                         | No      | Auto-approved for docs lookup                                                                                                                                                                                                                                                                                                                                                                |
@@ -56,18 +56,18 @@ See Anthropic's current [permission rules](https://code.claude.com/docs/en/permi
 | Protected DB/cloud/API mutation | Current explicit human authority is required |
 | Windows: `Remove-Item -Recurse` | Destructive deletion (Windows template only) |
 
-Reviewer transport is narrowly scoped. It is expected review input transfer, not an external
-mutation or a grant of arbitrary network access. The complete candidate can include private or
-sensitive tracked and in-scope non-ignored content; remove or gitignore anything that must not leave
-the developer environment before authorizing the workflow. An explicit invocation of a native entry
-point carries the disclosure in its displayed description. Agent-inferred workflow selection does
-not manufacture user consent; it requires one affirmative answer in the current conversation, and a
-new session requires a new user-originated signal. Authorization does not extend to sourcing
-additional secrets, credentials, or gitignored developer state from outside the candidate;
-outside-worktree paths; other projects; arbitrary destinations; deploys; publication; destructive
-work; or any other external mutation. Ordinary review remains hermetic; only explicit investigation
-receives the selected host's normal full-agent capabilities, and the existing human mutation
-boundaries still apply.
+Ordinary reviews have standing human approval under the canonical Human-Approved Reviews policy.
+Forge does not add a consent question for the first review, a follow-up, fallback, or a resumed
+session. This approves executing reviews, not their findings or shipping. Reviewer transport
+remains narrowly scoped: the complete bounded candidate, prompt, and evidence go only to the
+configured Claude Code/Codex services. The candidate can include private or sensitive tracked and
+in-scope non-ignored content; remove or gitignore anything that must not leave before review.
+This transfer is not an external mutation and does not grant arbitrary network access, additional
+secrets, credentials, or gitignored state beyond the candidate; outside-worktree paths; other
+projects; arbitrary destinations; full-agent investigation; deployment; publication; or destructive
+work. Host security controls still apply, and an agent must never invent human approval. Ordinary
+review remains hermetic; explicit investigation retains its separate capability authorization and
+the existing human mutation boundaries.
 
 The installed contract and materialization tests do not prove Codex Desktop Auto-review behavior.
 That host boundary remains `PENDING` until the physical-operator journeys in

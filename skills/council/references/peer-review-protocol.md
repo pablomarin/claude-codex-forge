@@ -34,21 +34,32 @@ per-seat fallback.
 
 ### Parallelism (CRITICAL)
 
-All advisors dispatch IN PARALLEL. The only serial dependency is the chairman, which runs after all advisors complete.
+The dispatcher runs three dependency waves. All five initial advice turns run in parallel.
+After every advice turn succeeds, it builds the anonymous bundle in fixed A–E order and resumes
+all five exact advisor sessions for peer review in parallel. Each peer sees the other four initial
+answers, excluding its own answer. After every peer turn succeeds, a fresh chairman synthesizes
+both complete bundles. Completion order never changes bundle order.
 
 ```
-Step 1: All advisors fire simultaneously
-  ├── Claude subagents via Agent tool (multiple tool calls in one message)
-  ├── Codex advisors via codex exec (run_in_background: true)
-  │
-  ▼ Wait for all to complete
-  │
-Step 2: Chairman (Codex exec) — SEQUENTIAL
-  │   Receives all raw outputs
-  │
-  ▼
-Step 3: Present to user
+Wave 1: Advice A | B | C | D | E (parallel)
+        Wait for all five; build anonymous advice bundle
+Wave 2: Peer   A | B | C | D | E (parallel, exact-session resumes)
+        Wait for all five; build anonymous peer-review bundle
+Wave 3: Chairman (receives both complete bundles)
+        Present the verdict
 ```
+
+Each wave collects every worker's exit status before fallback or removal of attempt artifacts.
+A main-engine failure blocks even if an other-engine seat also failed in that wave. Workers use
+their existing bounded transport timeouts; the orchestrator drains the failed wave before
+starting the all-main rerun. Per-seat dispatcher diagnostics are captured as
+`<seat>-<advice|peer>.dispatch.log` in the attempt directory, with failure diagnostics surfaced
+before a failed mixed attempt is discarded.
+
+### Historical manual dispatch (DO NOT EXECUTE)
+
+The following commands document the older transport. Use the canonical dispatcher above for
+the complete three-wave council; do not launch these commands alongside it.
 
 ### Claude Advisor Dispatch
 

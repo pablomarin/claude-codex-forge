@@ -159,11 +159,12 @@ promote_fp() {
 
 mode="${1:-}"; [ "$#" -gt 0 ] && shift
 if [ "$mode" = promote ]; then promote_fp "$@"; fi
-artifact=""; base=""; base_ref=""; output=""
+artifact=""; base=""; base_ref=""; output=""; snapshot_parent=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --artifact) artifact="${2:-}"; shift 2 ;; --workflow-base-sha) base="${2:-}"; shift 2 ;;
         --workflow-base-ref) base_ref="${2:-}"; shift 2 ;; --output) output="${2:-}"; shift 2 ;;
+        --snapshot-parent) snapshot_parent="${2:-}"; shift 2 ;;
         *) die_fp "unknown argument $1" ;;
     esac
 done
@@ -272,7 +273,20 @@ if [ "$mode" = freeze ]; then
     [ -n "$output" ] || die_fp 'freeze output is required'
 elif [ "$mode" = capture ]; then
     [ -n "$output" ] || die_fp 'capture output is required'
-    snapshot=$(mktemp -d "${TMPDIR:-/tmp}/forge-candidate.XXXXXX") || die_fp 'cannot create sibling candidate'
+    if [ -n "$snapshot_parent" ]; then
+        # Council candidates share the already-bound session store lifecycle.
+        scalar_fp snapshot-parent "$snapshot_parent"
+        [ "$(dirname "$snapshot_parent")" = "$root/.forge/local/reviews/session-stores" ] || die_fp 'snapshot parent must be an owned session store'
+        cursor="$root"
+        for part in .forge local reviews session-stores "$(basename "$snapshot_parent")"; do
+            case "$part" in ''|.|..|*[!A-Za-z0-9._-]*) die_fp 'unsafe snapshot parent component' ;; esac
+            cursor="$cursor/$part"; [ -d "$cursor" ] && [ ! -L "$cursor" ] || die_fp 'snapshot parent must be a no-follow directory'
+        done
+        [ "$(cd "$snapshot_parent" && pwd -P)" = "$snapshot_parent" ] || die_fp 'snapshot parent is linked'
+        snapshot=$(mktemp -d "$snapshot_parent/candidate.XXXXXX") || die_fp 'cannot create owned session candidate'
+    else
+        snapshot=$(mktemp -d "${TMPDIR:-/tmp}/forge-candidate.XXXXXX") || die_fp 'cannot create sibling candidate'
+    fi
     if [ "$artifact_kind" = file ]; then mkdir -p "$snapshot/data"; cp -p "$file" "$snapshot/data/$(basename "$file")" || die_fp 'file snapshot failed'
     else
         git clone -q --no-hardlinks --no-checkout "$root" "$snapshot/repository" 2>/dev/null || die_fp 'candidate clone failed'

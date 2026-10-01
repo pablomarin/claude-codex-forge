@@ -348,7 +348,9 @@ function Invoke-Engine([string]$Selected) {
     if ($Conversation -eq 'resume') { $snapshot = $SessionSnapshot }
     else {
         $attemptFingerprint = Join-Path $reviews "$invocationId.attempt-$Selected-$([Guid]::NewGuid().ToString('N')).candidate"
-        & $Fingerprint -Mode capture -Artifact $Artifact -WorkflowBaseSha $WorkflowBaseSha -WorkflowBaseRef $WorkflowBaseRef -Output $attemptFingerprint
+        $captureParameters = @{ Mode='capture'; Artifact=$Artifact; WorkflowBaseSha=$WorkflowBaseSha; WorkflowBaseRef=$WorkflowBaseRef; Output=$attemptFingerprint }
+        if ($Conversation -eq 'new') { $captureParameters.SnapshotParent = $SessionStore }
+        & $Fingerprint @captureParameters
         if ($LASTEXITCODE -ne 0 -or (Get-Value $attemptFingerprint 'artifact_hash') -cne $ArtifactHash -or (Get-Value $attemptFingerprint 'worktree_identity') -cne $worktreeIdentity) { return @{ Rc = 2; Class = 'artifact'; Reason = 'candidate-capture-failed'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
         $snapshot = Get-Value $attemptFingerprint 'snapshot_path'
     }
@@ -627,6 +629,12 @@ try {
         $SessionStore = Ensure-ReservedReviewDirectory $reviews "session-stores/$invocationId" $true
         $null = Ensure-ReservedReviewDirectory $reviews "session-stores/$invocationId/home" $true
         $null = Ensure-ReservedReviewDirectory $reviews "session-stores/$invocationId/codex-home" $true
+        # Publish attempt ownership before a new turn can fail without a session id.
+        $ownerPath = Reserve-OwnedReviewPath ($SessionIdOutput + '.store-id') 'session store ownership' $root $reviews
+        [IO.File]::WriteAllText((Join-Path $SessionStore 'session-owner'), "$ownerPath`n", $Utf8)
+        $storeIdSource = Join-Path $SessionStore 'store-id'
+        [IO.File]::WriteAllText($storeIdSource, "$invocationId`n", $Utf8)
+        Publish-OwnedReviewFile $storeIdSource $ownerPath 'session store ownership' $reviews
     }
     elseif ($Conversation -eq 'resume') {
         $null = Ensure-ReservedReviewDirectory $reviews 'sessions' $false
@@ -686,6 +694,7 @@ try {
         if (Test-Path -LiteralPath $SessionMeta) { throw 'BLOCKED[invariant]: session metadata already exists' }
         $meta = "schema_version=1`ncompleted=false`nsession_id=$($result.Session)`nengine=$($result.Engine)`nrole=$Role`nseat_id=$SeatId`nquestion_hash=$QuestionHash`nactive_host=$activeHost`nartifact_hash=$ArtifactHash`nworktree_identity=$worktreeIdentity`nturn_prompt_hash=$PromptHash`nconfig_hash=$($result.ConfigHash)`ncanary_hash=$($result.CanaryHash)`nseat_hash=$($result.SeatHash)`nqualification_revision=$QualificationRevision`nstore_id=$invocationId`nsnapshot_path=$($result.Snapshot)`nsnapshot_manifest_hash=$(Get-SnapshotStateHash $result.SnapshotBefore)`n"
         [IO.File]::WriteAllText($SessionMeta, $meta, $Utf8)
+        [IO.File]::WriteAllText((Join-Path $SessionStore 'session-id'), "$($result.Session)`n", $Utf8)
         $sessionSource = Join-Path $sessionDirectory "$($result.Session).session-id.$PID"
         [IO.File]::WriteAllText($sessionSource, "$($result.Session)`n", $Utf8)
         Publish-OwnedReviewFile $sessionSource $SessionIdOutput 'session id output' $reviews

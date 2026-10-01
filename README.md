@@ -188,6 +188,33 @@ Prerequisites: Git 2.23+ and at least one authenticated supported host. On macOS
 Python 3 (`python3` on PATH) before first setup or any upgrade. Windows requires PowerShell 5.1+,
 plus Python 3 for full reconciliation. Both adapters are installed even if only one CLI is available.
 
+### Minimum CLI versions
+
+The current independent-review and council profiles require these supported CLI baselines:
+
+| CLI | Minimum supported version | Pinned reviewer / council model |
+| --- | --- | --- |
+| Claude Code | **2.1.280+** | `claude-opus-5-5` (Opus 5.5) |
+| Codex CLI | **0.156.1+** | `gpt-6-astra` (GPT-6 Astra) |
+
+Claude's minimum is the [documented requirement for Opus 5.5](https://code.claude.com/docs/en/model-config).
+Codex's minimum is Forge's supported baseline for this model profile, not a claim about OpenAI's
+earliest Astra-compatible release. These baselines are recorded in
+[`manifests/host-capabilities.tsv`](manifests/host-capabilities.tsv).
+Keep both CLIs current; meeting a version floor does not prove account/model access or runtime readiness.
+
+Check your installed versions:
+
+```bash
+claude --version
+codex --version
+```
+
+Update Claude Code with `claude update`. Update Codex using the package manager that installed it:
+`brew upgrade --cask codex` for a Homebrew cask installation, or
+`npm install -g @openai/codex@latest` for an npm installation. Do not install a second copy just to
+update the first. See the [official Codex changelog](https://learn.chatgpt.com/docs/changelog) for releases.
+
 **Two different folders:** the **Forge clone** holds the installer; your **project repository**
 receives Forge. Run project setup from your project's Git root, calling the installer by its full
 path. Do not run project installation inside the Forge clone itself.
