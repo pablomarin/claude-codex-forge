@@ -18,7 +18,7 @@ identity_mode() {
     [ -f "$fixture" ] && [ -n "$invocation_hash" ] || return 2
     case "$host" in
         claude)
-            case "$requested_model" in ""|opus|claude-opus-4-1) ;; *) echo "BLOCKED: unsupported Claude model profile" >&2; return 3 ;; esac
+            case "$requested_model" in ""|opus|claude-opus-4-1|claude-opus-5-5) ;; *) echo "BLOCKED: unsupported Claude model profile" >&2; return 3 ;; esac
             model=$(sed -nE '/"modelUsage"/{n; s/^[[:space:]]*"([^"]+)".*/\1/p;}' "$fixture" | head -1)
             provider=$(sed -nE 's/^[[:space:]]*"provider":[[:space:]]*"([^"]+)".*/\1/p' "$fixture" | head -1)
             [ -n "$model" ] && [ -n "$provider" ] || { echo "BLOCKED: Claude fixture lacks observable modelUsage identity" >&2; return 4; }
@@ -26,7 +26,7 @@ identity_mode() {
                 "$(json_escape_runtime "$provider")" "$(json_escape_runtime "$model")" "$(json_escape_runtime "$invocation_hash")"
             ;;
         codex)
-            case "$requested_model" in ""|gpt-5.6-sol) ;; *) echo "BLOCKED: unsupported Codex model profile" >&2; return 3 ;; esac
+            case "$requested_model" in ""|gpt-5.6-sol|gpt-6-astra) ;; *) echo "BLOCKED: unsupported Codex model profile" >&2; return 3 ;; esac
             grep -q '"type":"thread.started"' "$fixture" || { echo "BLOCKED: Codex fixture lacks thread.started" >&2; return 4; }
             # Current structured output exposes no provider/model/effort. Bind
             # only the explicit invocation hash; never synthesize actual_*.

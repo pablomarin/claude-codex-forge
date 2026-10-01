@@ -4,6 +4,7 @@ param(
     [string]$WorkflowBaseSha,
     [string]$WorkflowBaseRef,
     [string]$Output,
+    [string]$SnapshotParent,
     [string]$Candidate,
     [string]$State,
     [string]$MessageFile,
@@ -437,7 +438,20 @@ try {
         if (-not $Output) { throw 'BLOCKED[artifact]: freeze output is required' }
     }
     elseif ($Mode -eq 'capture') {
-        $parent = Join-Path ([IO.Path]::GetTempPath()) ('forge-candidate-' + [Guid]::NewGuid().ToString('N'))
+        $candidateParent = [IO.Path]::GetTempPath()
+        if ($SnapshotParent) {
+            $owned = [IO.Path]::GetFullPath($SnapshotParent)
+            if ((Split-Path -Parent $owned) -cne [IO.Path]::GetFullPath((Join-Path $root '.forge/local/reviews/session-stores'))) { throw 'BLOCKED[artifact]: snapshot parent must be an owned session store' }
+            $cursor = $root
+            foreach ($part in @('.forge','local','reviews','session-stores',(Split-Path -Leaf $owned))) {
+                if ($part -notmatch '^[A-Za-z0-9._-]+$' -or $part -in @('.','..')) { throw 'BLOCKED[artifact]: unsafe snapshot parent component' }
+                $cursor = Join-Path $cursor $part
+                $item = Get-Item -LiteralPath $cursor -Force
+                if (-not $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'BLOCKED[artifact]: snapshot parent must be a no-follow directory' }
+            }
+            $candidateParent = $owned
+        }
+        $parent = Join-Path $candidateParent ('forge-candidate-' + [Guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $parent | Out-Null
         if ($kind -eq 'file') {
             $snapshot = Join-Path $parent 'data'

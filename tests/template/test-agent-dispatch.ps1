@@ -3,7 +3,8 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $dispatcher = Join-Path $root 'hooks/lib/agent-dispatch.ps1'
 $hostContext = Join-Path $root 'hooks/lib/host-context.ps1'
 $fingerprint = Join-Path $root 'hooks/lib/candidate-fingerprint.ps1'
-$temporary = Join-Path ([IO.Path]::GetTempPath()) ('Forge Dispatch PS ' + [Guid]::NewGuid().ToString('N'))
+# Retain spaces without exhausting Windows 5.1 MAX_PATH after owned snapshots nest here.
+$temporary = Join-Path ([IO.Path]::GetTempPath()) ('F PS ' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 $bin = Join-Path $temporary 'fake engines'
 $contextLauncher = Join-Path $temporary 'launch-host-context.ps1'
 $script:Passed = 0; $script:Failed = 0
@@ -27,7 +28,7 @@ function Invoke-SilentPowerShell([object[]]$Arguments) {
     }
     finally { Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue }
 }
-function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; if ($null -eq $line) { return '' }; return $line.Substring($Key.Length + 1) }
+function Get-ReceiptValue([string]$Repository, [string]$Key) { $receipt = Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1; if ($null -eq $receipt) { throw "Dispatcher wrote no receipt: $script:LastChildStderr" }; $line = Get-Content -LiteralPath $receipt.FullName | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1; if ($null -eq $line) { return '' }; return $line.Substring($Key.Length + 1) }
 function Get-LatestReceipt([string]$Repository) { return (Get-ChildItem -LiteralPath (Join-Path $Repository '.forge/local/reviews') -Filter '*.receipt' | Sort-Object LastWriteTimeUtc, Name | Select-Object -Last 1).FullName }
 function New-Repository([string]$Name) {
     $path = Join-Path $temporary $Name
@@ -93,7 +94,7 @@ public static class ForgeFakeEngine {
   static void Emit(string path, string text) { if (String.IsNullOrEmpty(path)) Console.Write(text); else File.WriteAllText(path, text); }
   static string Qualified(string engine,string body) {
     body += "forge_canary_hash="+E("FORGE_DISPATCH_CANARY_HASH","MISSING")+"\nforge_config_hash="+E("FORGE_DISPATCH_CONFIG_HASH","MISSING")+"\nforge_qualification_revision="+E("FORGE_DISPATCH_QUALIFICATION_REVISION","MISSING")+"\n";
-    if(engine=="claude") return "{\"result\":\""+body.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r","").Replace("\n","\\n")+"\",\"modelUsage\":{\"claude-haiku-4-5\":{\"canonicalModel\":\"claude-haiku-4-5\",\"provider\":\"firstParty\"},\"claude-opus-5\":{\"canonicalModel\":\"claude-opus-5\",\"provider\":\"firstParty\"}}}\n";
+    if(engine=="claude") return "{\"result\":\""+body.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r","").Replace("\n","\\n")+"\",\"modelUsage\":{\"claude-haiku-4-5\":{\"canonicalModel\":\"claude-haiku-4-5\",\"provider\":\"firstParty\"},\"claude-opus-5-5\":{\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\"}}}\n";
     return body;
   }
   static int RunReproduction() {
@@ -213,7 +214,7 @@ public static class ForgeFakeEngine {
     Assert-Equal (Get-ReceiptValue $repo 'review_iteration') '1' 'retry keeps review iteration'
     Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatcher,'-Mode','verify-pair','-CodeSpecReceipt',$spec,'-CodeQualityReceipt',$quality)) 0 'retry pair certifies unchanged candidate'
     foreach ($case in @(@('council-advisor','new'), @('council-chair','ephemeral'))) {
-        $repo = New-Repository ('auth-scope-' + $case[0]); $env:FAKE_CLAUDE_BEHAVIOR = 'auth-expired'
+        $repo = New-Repository ('auth-' + $case[0].Replace('council-','')); $env:FAKE_CLAUDE_BEHAVIOR = 'auth-expired'
         $sessionOutput = Join-Path $repo '.forge/local/reviews/session.id'
         Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' $case[0] 'none' $case[1] '' $sessionOutput) 2 'council auth failure stays topology-owned'
         Assert-Equal ($script:LastChildStdout -match 'AUTH_REQUIRED') $false 'council does not emit ordinary recovery handoff'

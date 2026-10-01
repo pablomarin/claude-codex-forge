@@ -83,7 +83,7 @@ suites.
 3. Add or update the smallest test that proves the contract being changed.
 4. Run that test and confirm the expected failure.
 5. Implement the change in every owned platform twin.
-6. Rerun focused tests, then use the aggregate suite only at a meaningful integration boundary.
+6. Rerun focused tests, then use `run-fast.sh` for the ordinary local gate.
 7. Review the final diff for accidental user-content, history, or ownership changes.
 
 Common verification commands:
@@ -93,13 +93,15 @@ bash tests/template/run-fast.sh
 bash tests/template/test-contracts.sh
 bash tests/template/test-platform-parity.sh
 bash tests/template/test-setup.sh
-bash tests/template/run-all.sh
 git diff --check
 ```
 
 Use the narrowest relevant command while editing, then `run-fast.sh` for the ordinary local gate.
-`run-all.sh` retains the broad engine, evidence, installer, migration, hook, state, and end-to-end
-matrices; run it once at a meaningful release or integration boundary, not as a loop body.
+Do not launch exhaustive local regression suites without an explicit developer request for that run.
+`run-all.sh` and `run-all.ps1` retain broad regression coverage for CI/release pipelines; they are
+not automatic local finalization gates. A workflow invocation, candidate freeze, version bump,
+release, or integration boundary does not authorize a local exhaustive run. Keep focused checks for
+changed installer, migration, or hook behavior; report coverage that was not run honestly.
 
 ## Installer ownership
 

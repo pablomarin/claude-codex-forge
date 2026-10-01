@@ -29,7 +29,7 @@ report after the bytes freeze; this tracked document does not self-certify a lat
 | Codex CLI identity | `PASS` | `codex-cli 0.144.1`; physical binary SHA-256 `29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a` |
 | Codex authentication | `PASS` | `codex login status` returned `Logged in using ChatGPT` |
 | Codex guarded dispatch | `PASS` | Authenticated opinion, full-agent investigation, exact-id resume, and both mixed-council topologies passed in a disposable project |
-| Codex Desktop Auto-review transport | `PENDING` | Deterministic tests prove installed disclosure and user-provenance policy, not whether the Desktop approval reviewer recognizes or reuses that consent |
+| Codex Desktop Auto-review transport | `PENDING` | Deterministic tests prove the installed standing-human-approval policy, not whether the Desktop approval reviewer recognizes that actual human instruction |
 | Codex native `/goal` | `BLOCKED` | Requires an authenticated native interactive Goal run; `codex exec` and agent-authored substitutes do not certify it |
 | Claude Code identity | `PASS` | `2.1.237 (Claude Code)`; physical binary SHA-256 `338901351d4ff17495738c67fc3e12a32c1b506738ac5e012eb782d3d8b5be43` |
 | Claude authentication | `PASS` | Physical operator login completed; `claude auth status` returned `loggedIn: true`, `authMethod: claude.ai` |
@@ -61,13 +61,15 @@ certifying a reproduction.
 This boundary remains `PENDING` until a physical operator records all three journeys against the
 same release candidate and Codex Desktop version:
 
-1. Explicitly invoke a disclosed review-capable Forge entry point. Confirm the first and second
-   ordinary review launch without an additional disclosure prompt.
-2. Start the same workflow from ordinary prose. Confirm Forge asks the canonical disclosure once,
-   then—after an affirmative user reply—the first and second ordinary review launch without another
-   disclosure prompt.
-3. Start a fresh Desktop task without an explicit disclosed entry invocation. Confirm prior task
-   consent is not reused and Forge asks the canonical disclosure again before review.
+1. Explicitly invoke a review-capable Forge entry point in a project with the developer's standing
+   human approval. Confirm Forge adds no consent question to the first or second ordinary review.
+2. Start the same workflow from ordinary prose under that standing approval. Confirm Forge adds
+   no consent question to either ordinary review; record any independent host security gate
+   separately rather than treating this policy as permission to bypass it.
+3. Resume the authorized project workflow in a fresh Desktop task or switch configured hosts.
+   Confirm Forge does not re-ask for ordinary bounded review transport. Confirm that new
+   destinations, expanded access, investigation, and external mutations are not authorized by
+   ordinary review approval.
 
 Record the Desktop version, exact candidate SHA, task identifiers, and pass/fail outcome outside the
 repository. Do not store candidate content, credentials, or private transcript text in the receipt.

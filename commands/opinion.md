@@ -16,18 +16,17 @@ General is hermetic and read-only. Resolve the workflow's persisted immutable ba
 `.forge/local/state.md`; never recompute it from a moving default branch. Put the exact request in a
 regular prompt file under `.forge/local/reviews/`.
 
-For the ordinary review profile, `FORGE_REVIEW_TRANSPORT_AUTHORIZED` requires verifying that a
-current user message in this
-workflow segment either explicitly invoked this host-native entry point after its displayed
-transport disclosure or affirmatively accepted the canonical one-time disclosure. Agent-selected
-workflow use and agent-written state are not consent. If that user-originated signal is absent,
-apply the canonical reviewer transport preflight and stop for the answer. After consent, send the complete bounded
-immutable candidate snapshot, prompt, and evidence to the developer-configured Claude Code or Codex
-reviewer service without another approval solely because the candidate is private, sensitive, or
-contains unchanged tracked content. This expected transport is not an external mutation and does
-not grant the reviewer arbitrary network tools or authority to source additional secrets,
-credentials, or gitignored developer state from outside the candidate; access outside the
-worktree; other projects; arbitrary destinations; or external mutations.
+For the ordinary review profile, `FORGE_REVIEW_TRANSPORT_AUTHORIZED` communicates the developer's
+standing human approval in the canonical Human-Approved Reviews section (`.forge/instructions.md`;
+source: `FORGE.template.md`). Send the complete bounded immutable candidate
+snapshot, prompt, and evidence to the configured Claude Code or Codex reviewer service without
+a separate Forge consent question, including follow-up reviews, fallback, and resumed sessions.
+This approves review execution, not acceptance of findings or shipping. Private or unchanged
+tracked content does not require another approval. This transport is not an external mutation and
+does not grant arbitrary network tools, additional secrets or credentials, gitignored developer
+state beyond the candidate, outside-worktree access, other projects, arbitrary destinations, or
+external mutations. Respect host security controls and cite the actual human standing instruction
+when authorization provenance is required.
 This standing review consent does not authorize `investigate`.
 
 Invoke the fixed launcher for this host:

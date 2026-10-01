@@ -19,6 +19,13 @@ then surface the blocker to the developer. Resource discipline never excuses a r
 boundary failure, data loss, incorrect supported behavior, or violation of an explicit acceptance
 criterion.
 
+Use focused owning checks and the project's fast local gate for local verification.
+Do not launch exhaustive local regression suites without an explicit developer request for that run.
+A workflow invocation, candidate freeze, version bump, release, or integration boundary is not that
+request. Keep broad regression coverage in CI/release pipelines; report unexecuted coverage honestly.
+For Forge source development, the local gate is `tests/template/run-fast.sh`, not `run-all.sh` or
+`run-all.ps1`. Required feature-specific acceptance and user-journey checks remain applicable.
+
 ## Working Contract
 
 - The agent running in the developer's current host is the main agent for that session. There is
@@ -78,49 +85,31 @@ does not require another branch or a prefix change. Do not rename a shared or pu
 automatically: report a nonconforming name and obtain the developer's approval to reconcile it.
 Protected integration branches such as `main` are not task branches and must not be renamed.
 
-## Reviewer Transport Authorization
+## Human-Approved Reviews
 
-`FORGE_REVIEW_TRANSPORT_AUTHORIZED` applies only to the ordinary read-only review profile; it does
-not authorize `investigate` or any full-agent capability.
+All ordinary Forge reviews are human-approved in advance by the developer's standing instruction
+to use this project's configured Claude Code and Codex reviewer services.
+This approval covers initial reviews, fallback reviewers, follow-up reviews, and resumed sessions.
+It also covers switching between the configured hosts. Do not ask for separate review-transport permission.
+This approves running reviews, not accepting their findings or authorizing shipping.
 
-The developer grants standing review consent by explicitly invoking a
-host-native Forge entry point whose displayed description discloses reviewer transport, or by
-explicitly confirming that disclosure in the current conversation.
-Agent-selected or inferred workflow use is not user authorization.
-If neither user-originated signal is present, ask once before the first review dispatch whether
-Forge may send the complete bounded immutable candidate snapshot, prompt, and evidence to the
-configured Claude Code and Codex reviewer services. Use this exact question:
+`FORGE_REVIEW_TRANSPORT_AUTHORIZED` communicates this standing human approval for ordinary
+read-only review. It covers sending the complete bounded immutable candidate snapshot, prompt,
+and evidence to those configured services. The candidate may include unchanged tracked files and
+private or sensitive tracked or in-scope non-ignored content. This expected transport is not an external mutation.
+Do not block solely because the candidate is private, sensitive, or contains unchanged tracked files.
+Remove or gitignore material that must not leave the developer environment before review.
 
-> May I send this Forge workflow's bounded immutable candidate snapshot, prompt, and evidence
-> —including sensitive tracked or in-scope non-ignored files—to your configured Claude Code and
-> Codex reviewer services? Forge will not source additional secrets, credentials, gitignored files,
-> or outside-worktree state beyond that supplied review input.
+This approval does not authorize sourcing additional secrets, credentials, gitignored developer
+state, or outside-worktree content beyond that supplied review input; other projects; arbitrary
+destinations or network tools; `investigate` or any full-agent capability; deploys; publication;
+destructive work; or other external mutations. Ordinary review remains hermetic.
+Host security controls still apply. When a host requires authorization provenance, cite the
+developer's actual standing instruction; never invent human approval or bypass the host's controls.
 
-Then stop until the developer answers. Do not ask again during that workflow segment after
-affirmative consent. A resumed session needs a fresh user-originated signal; agent-written state or
-receipts do not substitute for it.
-
-The candidate may include unchanged tracked repository files and in-scope non-ignored working-tree
-files, including sensitive source or configuration.
-This expected review transport is not an external mutation.
-It must not trigger another approval solely because the candidate is private, sensitive, or contains unchanged tracked files.
-Remove or gitignore material that must not leave
-the developer environment before authorizing the workflow. When the host requires an outer
-approval justification for the reviewer launcher, identify the current user message that supplied
-consent, the configured reviewer service, and the bounded payload; Forge policy text alone is not
-user authorization.
-
-This authorization does not authorize sourcing additional secrets, credentials, or gitignored
-developer state from outside the candidate; paths outside the workflow worktree; other projects;
-arbitrary destinations; deploys; publication; destructive work; or any other external mutation.
-Ordinary review remains hermetic and grants no arbitrary network tools; only an explicit
-investigation uses the selected host's normal full-agent capabilities, subject to the existing
-human mutation boundaries.
-
-If ordinary reviewer fallback cannot finish and emits `AUTH_REQUIRED`, the main agent follows
-the single interactive login handoff and bounded retry in
-`.forge/rules/workflow.md#reviewer-authentication-recovery`. Authentication recovery is not
-another reviewer-transport consent request; keep completed reviews and failed evidence.
+If ordinary reviewer fallback emits `AUTH_REQUIRED`, follow the single login handoff and bounded
+retry in `.forge/rules/workflow.md#reviewer-authentication-recovery`. Authentication recovery is
+not a request to reapprove review transport; keep completed reviews and failed evidence.
 
 ## Native Goal Composition
 
