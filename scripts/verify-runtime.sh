@@ -47,7 +47,7 @@ discovery_mode() {
         return 6
     }
     version=$(tr -d '\r\n' < "$root/.forge/version")
-    [[ "$version" =~ ^[0-9]+\.[0-9]+$ ]] || {
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
         echo "FORGE_VERSION: BLOCKED malformed project release" >&2
         return 6
     }

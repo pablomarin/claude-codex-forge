@@ -44,7 +44,7 @@ assert_not_contains /tmp/forge-runtime-host.$$ "binary unavailable" \
 start_test "root and nested discovery enumerate each canonical rule once"
 S=$(scratch_dir runtime-discovery)
 mkdir -p "$S/project/nested/deeper" "$S/project/.forge/rules"
-printf '6.3\n' > "$S/project/.forge/version"
+printf '6.4.0\n' > "$S/project/.forge/version"
 printf 'one\n' > "$S/project/.forge/rules/one.md"
 printf 'two\n' > "$S/project/.forge/rules/two.md"
 printf '<!-- forge:begin v6 -->\nRead .forge/instructions.md completely.\n<!-- forge:end v6 -->\n' > "$S/project/CLAUDE.md"
@@ -55,6 +55,28 @@ for cwd in "$S/project" "$S/project/nested/deeper"; do
     assert_contains "$S/discovery.$(basename "$cwd")" 'canonical_rule_count=2' "$(basename "$cwd") sees both canonical rules"
     assert_contains "$S/discovery.$(basename "$cwd")" 'duplicate_rule_count=0' "$(basename "$cwd") sees no duplicate rule policy"
 done
+
+start_test "runtime discovery rejects incomplete source release stamps"
+cp -R "$S/project" "$S/malformed-project"
+printf '6.4\n' > "$S/malformed-project/.forge/version"
+bash "$VERIFY" discovery --project-root "$S/malformed-project" > "$S/malformed.out" 2>&1
+assert_equals "$?" "6" "two-component runtime stamp exits nonzero"
+assert_contains "$S/malformed.out" 'FORGE_VERSION: BLOCKED malformed project release' \
+    "two-component runtime stamp is diagnosed"
+
+if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoLogo -NoProfile -File "$REPO_ROOT/scripts/verify-runtime.ps1" discovery \
+        -ProjectRoot "$S/project" > "$S/discovery.ps1.out" 2>&1
+    assert_equals "$?" "0" "PowerShell discovery accepts exact SemVer"
+    pwsh -NoLogo -NoProfile -File "$REPO_ROOT/scripts/verify-runtime.ps1" discovery \
+        -ProjectRoot "$S/malformed-project" > "$S/malformed.ps1.out" 2>&1
+    [ "$?" -ne 0 ] && pass "PowerShell discovery rejects two-component stamp" \
+        || fail "PowerShell discovery accepted two-component stamp"
+    assert_contains "$S/malformed.ps1.out" 'FORGE_VERSION: BLOCKED malformed project release' \
+        "PowerShell malformed runtime stamp is diagnosed"
+else
+    skip_test "pwsh unavailable; PowerShell runtime SemVer coverage runs in Windows CI"
+fi
 
 start_test "deterministic dispatch qualification proves isolated review, exact resume, and full-agent investigation"
 Q="$S/qualification"

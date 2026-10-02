@@ -19,6 +19,11 @@ then surface the blocker to the developer. Resource discipline never excuses a r
 boundary failure, data loss, incorrect supported behavior, or violation of an explicit acceptance
 criterion.
 
+Stop a review cycle when further iterations have diminishing returns or remaining suggestions would
+violate KISS or YAGNI. Preserve and surface those advisory findings instead of starting another broad
+scan. Do not apply this stop rule to a reachable P0/P1, concrete material P2, or explicit acceptance
+criterion.
+
 Use focused owning checks and the project's fast local gate for local verification.
 Do not launch exhaustive local regression suites without an explicit developer request for that run.
 A workflow invocation, candidate freeze, version bump, release, or integration boundary is not that
@@ -148,12 +153,13 @@ evidence is missing, report the result as unverified or blocked rather than succ
 ## Ground Your Claims
 
 State what you verified, not what you assume. Read files before making claims about them, run the
-owning check before claiming behavior works, and distinguish fact from inference. Bind review and
-verification receipts to the final candidate fingerprint; mutation invalidates earlier evidence.
-Every active canonical V6 shipping action requires the current structured receipt set. Missing,
-placeholder, stale, mixed-candidate, or non-clean receipts block shipping; legacy prose cannot certify
-an active V6 workflow. A direct documentation-only commit retains its narrow carve-out, but push and
-PR creation always enforce the receipt boundary.
+owning check before claiming behavior works, and distinguish fact from inference. For `/fix-bug` and
+`/new-feature`, bind review and verification receipts to the final candidate fingerprint; mutation
+invalidates earlier evidence, and missing, placeholder, stale, mixed-candidate, or non-clean receipts
+block shipping. Exact bounded `/quick-fix` work instead requires one direct focused check and the
+hook-validated base/scope contract; it never dispatches reviewer or verifier agents. Legacy prose
+cannot certify a migrated gate. A direct documentation-only full-workflow commit retains its narrow
+carve-out, but push and PR creation still enforce the applicable workflow boundary.
 
 ## Protected Content
 

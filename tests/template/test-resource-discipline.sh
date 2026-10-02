@@ -47,8 +47,8 @@ for contract in "P3" "cosmetic" "purely theoretical" "unchanged candidate" \
 done
 assert_contains "$REPO_ROOT/rules/critical-rules.md" "RESOURCE DISCIPLINE" \
     "critical rules load resource discipline"
-assert_contains "$REPO_ROOT/commands/quick-fix.md" "closure review" \
-    "quick-fix inherits the closure stop rule"
+assert_contains "$REPO_ROOT/commands/quick-fix.md" "Run the focused check directly in the main session" \
+    "quick-fix replaces review loops with one bounded direct check"
 assert_contains "$REPO_ROOT/commands/review-pr-comments.md" "closure review" \
     "review-pr-comments inherits the closure stop rule"
 

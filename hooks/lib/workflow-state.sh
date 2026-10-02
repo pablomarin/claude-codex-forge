@@ -671,6 +671,46 @@ workflow_state_activate() {
         fi
     fi
 
+    if [ "$workflow" = quick-fix ] && [ "$mode" = new ]; then
+        current_head=$(git -C "$root" rev-parse --verify HEAD 2>/dev/null) || {
+            workflow_state_die "cannot resolve quick-fix worktree HEAD"
+            return $?
+        }
+        current_branch=$(git -C "$root" symbolic-ref -q --short HEAD 2>/dev/null) || {
+            workflow_state_die "new quick-fix activation requires a checked-out quick-fix/<slug> branch"
+            return $?
+        }
+        [ "$current_branch" = "quick-fix/$task" ] || {
+            workflow_state_die "new quick-fix activation requires branch quick-fix/$task"
+            return $?
+        }
+        base_full_ref=$(git -C "$root" rev-parse --symbolic-full-name "$base_ref" 2>/dev/null) || {
+            workflow_state_die "new quick-fix activation requires a named base branch"
+            return $?
+        }
+        case "$base_full_ref" in refs/heads/*|refs/remotes/*) ;; *)
+            workflow_state_die "new quick-fix activation requires a named base branch"
+            return $?
+        esac
+        current_full_ref="refs/heads/$current_branch"
+        [ "$base_full_ref" != "$current_full_ref" ] || {
+            workflow_state_die "new quick-fix activation base must differ from the quick-fix branch"
+            return $?
+        }
+        [ "$current_head" = "$base_sha" ] || {
+            workflow_state_die "new quick-fix activation requires HEAD to equal the resolved base"
+            return $?
+        }
+        quick_fix_status=$(git -C "$root" status --porcelain --untracked-files=all 2>/dev/null) || {
+            workflow_state_die "cannot inspect quick-fix worktree status"
+            return $?
+        }
+        [ -z "$quick_fix_status" ] || {
+            workflow_state_die "new quick-fix activation requires a clean worktree"
+            return $?
+        }
+    fi
+
     evidence_dir="$root/.forge/local/evidence/$task"
     review_dir="$root/.forge/local/reviews/$task"
     for candidate in "$root/.forge/local/evidence" "$evidence_dir" "$root/.forge/local/reviews" "$review_dir"; do

@@ -19,7 +19,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$TARGET" ] || TARGET=$(pwd -P)
 case "$SCOPE" in project) ;; *) echo "BLOCKED: active full refresh is project-only" >&2; exit 1 ;; esac
-[[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "BLOCKED: invalid release version" >&2; exit 2; }
+[[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "BLOCKED: invalid release version" >&2; exit 2; }
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "BLOCKED: Python 3 is required for authoritative JSON/state migration; no files were changed." >&2

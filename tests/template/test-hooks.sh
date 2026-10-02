@@ -2919,6 +2919,141 @@ assert_equals "$CODEX_HOST_CONTEXT_RESULT" "ok" \
 assert_contains "$REPO_ROOT/settings/codex-hooks.template.json" 'check-external-mutation-auth.sh' \
     "Codex registers external mutation defense through the native hook schema"
 
+start_test "exact quick-fix ships by direct base/scope checks without final receipts"
+QF=$(scratch_dir quick-fix-direct)
+git -C "$QF" init -q --initial-branch=main
+git -C "$QF" config user.email forge-test@example.com
+git -C "$QF" config user.name 'Forge Test'
+bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" --target "$QF" \
+    --scope project --platform unix --release-version 6.4.0 > "$QF/materialize.log" 2>&1
+assert_equals "$?" "0" "quick-fix fixture materializes"
+printf '.forge/local/\n*.out\n' > "$QF/.gitignore"
+printf 'base\n' > "$QF/app.txt"
+git -C "$QF" add -A
+git -C "$QF" -c core.hooksPath=/dev/null commit -qm base
+git -C "$QF" switch -q -c quick-fix/direct-check
+(cd "$QF" && bash .forge/hooks/lib/workflow-state.sh activate --host codex \
+    --workflow quick-fix --task direct-check --base-ref main --phase implementation \
+    --next-step 'run focused check') > /tmp/forge-quick-fix-activate.$$ 2>&1
+assert_equals "$?" "0" "clean exact-base quick-fix activates"
+printf 'changed\n' > "$QF/app.txt"
+QF_INPUT=$(printf '{"cwd":"%s","tool_input":{"command":"git commit -m quick-fix"}}' "$QF")
+printf '%s' "$QF_INPUT" | bash "$QF/.forge/hooks/check-workflow-gates.sh" > "$QF/gate.out" 2>&1
+assert_equals "$?" "0" "exact quick-fix bypasses final receipt roles"
+printf '{"cwd":"%s"}' "$QF" | bash "$QF/.forge/hooks/build-evidence.sh" > "$QF/evidence.out" 2>&1
+assert_contains "$QF/evidence.out" '"quick_fix_direct":true' \
+    "quick-fix evidence reports the validated direct path"
+
+cp "$QF/.forge/local/state.md" "$QF/.forge/local/state.no-goal"
+awk '1; /^## \/goal session$/ { print ""; print "| nonce | 123e4567-e89b-42d3-a456-426614174000 |" }' \
+    "$QF/.forge/local/state.no-goal" > "$QF/.forge/local/state.md"
+QF_PR_INPUT=$(printf '{"cwd":"%s","tool_input":{"command":"gh pr create"}}' "$QF")
+printf '%s' "$QF_PR_INPUT" | bash "$QF/.forge/hooks/check-workflow-gates.sh" > "$QF/pr-auth.out" 2>&1
+assert_equals "$?" "2" "direct quick-fix cannot bypass active Goal PR authorization"
+assert_contains "$QF/pr-auth.out" 'PR authorization' \
+    "quick-fix PR block names the required human authorization"
+mv "$QF/.forge/local/state.no-goal" "$QF/.forge/local/state.md"
+
+if command -v pwsh >/dev/null 2>&1; then
+    QF_PS=$(scratch_dir quick-fix-direct-ps)
+    git -C "$QF_PS" init -q --initial-branch=main
+    git -C "$QF_PS" config user.email forge-test@example.com
+    git -C "$QF_PS" config user.name 'Forge Test'
+    pwsh -NoLogo -NoProfile -File "$REPO_ROOT/scripts/materialize-adapters.ps1" \
+        -RepoRoot "$REPO_ROOT" -Target "$QF_PS" -Scope project -Platform windows \
+        -ReleaseVersion 6.4.0 > "$QF_PS/materialize.ps.log" 2>&1
+    assert_equals "$?" "0" "PowerShell quick-fix fixture materializes"
+    printf '.forge/local/\n*.out\n' > "$QF_PS/.gitignore"
+    printf 'base\n' > "$QF_PS/app.txt"
+    git -C "$QF_PS" add -A
+    git -C "$QF_PS" -c core.hooksPath=/dev/null commit -qm base
+    git -C "$QF_PS" switch -q -c quick-fix/direct-check
+    (cd "$QF_PS" && pwsh -NoLogo -NoProfile -File .forge/hooks/lib/workflow-state.ps1 \
+        activate --host codex --workflow quick-fix --task direct-check --base-ref main \
+        --phase implementation --next-step check) > /tmp/forge-quick-fix-activate-ps.$$ 2>&1
+    assert_equals "$?" "0" "PowerShell clean exact-base quick-fix activates"
+    printf 'changed\n' > "$QF_PS/app.txt"
+    QF_PS_INPUT=$(printf '{"cwd":"%s","tool_input":{"command":"git commit -m quick-fix"}}' "$QF_PS")
+    printf '%s' "$QF_PS_INPUT" | pwsh -NoLogo -NoProfile \
+        -File "$QF_PS/.forge/hooks/check-workflow-gates.ps1" > "$QF_PS/gate.ps.out" 2>&1
+    assert_equals "$?" "0" "PowerShell exact quick-fix bypasses final receipt roles"
+
+    cp "$QF_PS/.forge/local/state.md" "$QF_PS/.forge/local/state.no-goal"
+    awk '1; /^## \/goal session$/ { print ""; print "| nonce | 123e4567-e89b-42d3-a456-426614174000 |" }' \
+        "$QF_PS/.forge/local/state.no-goal" > "$QF_PS/.forge/local/state.md"
+    QF_PS_PR_INPUT=$(printf '{"cwd":"%s","tool_input":{"command":"gh pr create"}}' "$QF_PS")
+    printf '%s' "$QF_PS_PR_INPUT" | pwsh -NoLogo -NoProfile \
+        -File "$QF_PS/.forge/hooks/check-workflow-gates.ps1" > "$QF_PS/pr-auth.ps.out" 2>&1
+    assert_equals "$?" "2" "PowerShell direct quick-fix cannot bypass active Goal PR authorization"
+    mv "$QF_PS/.forge/local/state.no-goal" "$QF_PS/.forge/local/state.md"
+
+    for extra in two three; do printf '%s\n' "$extra" > "$QF_PS/$extra.txt"; done
+    mkdir -p "$QF_PS/docs"
+    printf 'release\n' > "$QF_PS/docs/CHANGELOG.md"
+    printf 'readme\n' > "$QF_PS/README.md"
+    git -C "$QF_PS" add app.txt two.txt three.txt README.md docs/CHANGELOG.md
+    printf '%s' "$QF_PS_INPUT" | pwsh -NoLogo -NoProfile \
+        -File "$QF_PS/.forge/hooks/check-workflow-gates.ps1" > "$QF_PS/three-path.ps.out" 2>&1
+    assert_equals "$?" "0" "PowerShell allows three implementation paths plus exact release metadata"
+    git -C "$QF_PS" mv -f app.txt App.txt
+    printf '%s' "$QF_PS_INPUT" | pwsh -NoLogo -NoProfile \
+        -File "$QF_PS/.forge/hooks/check-workflow-gates.ps1" > "$QF_PS/case-rename.ps.out" 2>&1
+    assert_equals "$?" "2" "PowerShell counts both endpoints of a case-only rename"
+    printf '{"cwd":"%s"}' "$QF_PS" | pwsh -NoLogo -NoProfile \
+        -File "$QF_PS/.forge/hooks/build-evidence.ps1" > "$QF_PS/case-rename-evidence.ps.out" 2>&1
+    assert_contains "$QF_PS/case-rename-evidence.ps.out" '"quick_fix_direct":false' \
+        "PowerShell evidence rejects a case-only rename overflow"
+    git -C "$QF_PS" mv -f App.txt app.txt
+    printf 'four\n' > "$QF_PS/four.txt"
+    git -C "$QF_PS" add four.txt
+    printf '%s' "$QF_PS_INPUT" | pwsh -NoLogo -NoProfile \
+        -File "$QF_PS/.forge/hooks/check-workflow-gates.ps1" > "$QF_PS/four-path.ps.out" 2>&1
+    assert_equals "$?" "2" "PowerShell scope overflow falls through to receipt enforcement"
+    git -C "$QF_PS" reset -q -- four.txt
+    rm -f "$QF_PS/four.txt"
+    cp "$QF_PS/.forge/local/state.md" "$QF_PS/.forge/local/state.valid"
+    sed 's#/quick-fix direct-check#/quick-fix Bad#' "$QF_PS/.forge/local/state.valid" \
+        > "$QF_PS/.forge/local/state.md"
+    printf '%s' "$QF_PS_INPUT" | pwsh -NoLogo -NoProfile \
+        -File "$QF_PS/.forge/hooks/check-workflow-gates.ps1" > "$QF_PS/malformed.ps.out" 2>&1
+    assert_equals "$?" "2" "PowerShell malformed quick-fix command cannot use the exemption"
+else
+    skip_test "pwsh unavailable; PowerShell direct quick-fix gate runs in Windows CI"
+fi
+
+for extra in two three; do printf '%s\n' "$extra" > "$QF/$extra.txt"; done
+mkdir -p "$QF/docs"
+printf 'release\n' > "$QF/docs/CHANGELOG.md"
+printf 'readme\n' > "$QF/README.md"
+git -C "$QF" add app.txt two.txt three.txt README.md docs/CHANGELOG.md
+printf '%s' "$QF_INPUT" | bash "$QF/.forge/hooks/check-workflow-gates.sh" > "$QF/three-path.out" 2>&1
+assert_equals "$?" "0" "three implementation paths plus exact release metadata are allowed"
+
+QF_BASE=$(git -C "$QF" rev-parse main)
+git -C "$QF" -c core.hooksPath=/dev/null commit -qm 'three path quick fix'
+git -C "$QF" restore --source="$QF_BASE" -- app.txt
+
+printf 'four\n' > "$QF/four.txt"
+git -C "$QF" add four.txt
+printf '%s' "$QF_INPUT" | bash "$QF/.forge/hooks/check-workflow-gates.sh" > "$QF/four-path.out" 2>&1
+assert_equals "$?" "2" "four implementation paths fall through to full receipt enforcement"
+assert_contains "$QF/four-path.out" 'final receipt set is missing' \
+    "scope overflow cannot use the quick-fix exemption"
+printf '{"cwd":"%s"}' "$QF" | bash "$QF/.forge/hooks/build-evidence.sh" > "$QF/four-path-evidence.out" 2>&1
+assert_contains "$QF/four-path-evidence.out" '"quick_fix_direct":false' \
+    "scope overflow cannot claim direct quick-fix readiness"
+
+git -C "$QF" restore --source=HEAD -- app.txt
+git -C "$QF" reset -q -- four.txt
+rm -f "$QF/four.txt"
+
+cp "$QF/.forge/local/state.md" "$QF/.forge/local/state.valid"
+sed 's#/quick-fix direct-check#/quick-fix Bad#' "$QF/.forge/local/state.valid" \
+    > "$QF/.forge/local/state.md"
+printf '%s' "$QF_INPUT" | bash "$QF/.forge/hooks/check-workflow-gates.sh" > "$QF/malformed.out" 2>&1
+assert_equals "$?" "2" "malformed quick-fix command cannot use the exemption"
+mv "$QF/.forge/local/state.valid" "$QF/.forge/local/state.md"
+
 start_test "Task 8 receipt-v2 helpers and final evidence boundaries are shipped symmetrically"
 for helper in verification-receipt.sh verification-receipt.ps1; do
     assert_contains "$REPO_ROOT/manifests/managed-v6.tsv" ".forge/hooks/lib/$helper" \

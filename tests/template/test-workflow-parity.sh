@@ -78,8 +78,8 @@ for relative in $scan_files; do
 done
 
 if [[ "$stage" == development || "$stage" == complete ]]; then
-    start_test "development workflows preserve portable continuity and candidate gates"
-    for workflow in new-feature fix-bug quick-fix; do
+    start_test "full development workflows preserve portable continuity and candidate gates"
+    for workflow in new-feature fix-bug; do
         file="$REPO_ROOT/commands/$workflow.md"
         for contract in "Last active host" "simultaneous editing" "base ref" "base SHA" "git add -A" "candidate" "authorization"; do
             assert_contains "$file" "$contract" "$workflow preserves $contract"
@@ -105,9 +105,15 @@ if [[ "$stage" == development || "$stage" == complete ]]; then
     done
     assert_contains "$REPO_ROOT/commands/new-feature.md" "same-engine reviewer" "new-feature has automatic reviewer fallback"
     assert_contains "$REPO_ROOT/commands/fix-bug.md" "same-engine fallback" "fix-bug has automatic reviewer fallback"
-    assert_contains "$REPO_ROOT/commands/quick-fix.md" "falls back automatically" "quick-fix has automatic reviewer fallback"
-    assert_contains "$REPO_ROOT/commands/quick-fix.md" "code-spec" "quick-fix requires the spec review lens"
-    assert_contains "$REPO_ROOT/commands/quick-fix.md" "code-quality" "quick-fix requires the quality review lens"
+
+    quick_fix="$REPO_ROOT/commands/quick-fix.md"
+    for contract in "workflow-state.sh show" "workflow-state.sh activate" "workflow-state.sh checkpoint" 'worktree whose `HEAD`' "focused check directly" "at most three implementation paths" 'use `/fix-bug`' "required human authorization"; do
+        assert_contains "$quick_fix" "$contract" "quick-fix preserves the direct-check contract: $contract"
+    done
+    assert_contains "$quick_fix" 'dispatches no `code-spec`' "quick-fix explicitly removes the spec reviewer"
+    assert_contains "$quick_fix" '`code-quality`, `verify-app`, or `verify-e2e`' "quick-fix explicitly removes quality and verifier agents"
+    assert_contains "$quick_fix" "no candidate-bound final receipt set" "quick-fix does not create final certification receipts"
+    assert_not_contains "$quick_fix" "--begin-review" "quick-fix has no review-iteration transition"
 fi
 
 start_test "canonical policy routes workflow control rows through the bounded helper"
@@ -252,13 +258,11 @@ for adapter in \
     .claude/commands/opinion.md \
     .claude/commands/new-feature.md \
     .claude/commands/fix-bug.md \
-    .claude/commands/quick-fix.md \
     .claude/commands/review-pr-comments.md \
     .claude/skills/council/SKILL.md \
     .agents/skills/opinion/SKILL.md \
     .agents/skills/new-feature/SKILL.md \
     .agents/skills/fix-bug/SKILL.md \
-    .agents/skills/quick-fix/SKILL.md \
     .agents/skills/review-pr-comments/SKILL.md \
     .agents/skills/council/SKILL.md; do
     assert_contains "$INSTALL/$adapter" "$review_transport_disclosure" \
@@ -270,7 +274,6 @@ for canonical_path in \
     .forge/workflows/opinion.md \
     .forge/workflows/new-feature.md \
     .forge/workflows/fix-bug.md \
-    .forge/workflows/quick-fix.md \
     .forge/workflows/review-pr-comments.md \
     .forge/skills/council/SKILL.template.md; do
     assert_contains "$REPO_ROOT/scripts/materialize-adapters.sh" "$canonical_path" \
@@ -281,8 +284,10 @@ done
 for adapter in \
     .claude/commands/prd/discuss.md \
     .claude/commands/finish-branch.md \
+    .claude/commands/quick-fix.md \
     .agents/skills/prd-discuss/SKILL.md \
-    .agents/skills/finish-branch/SKILL.md; do
+    .agents/skills/finish-branch/SKILL.md \
+    .agents/skills/quick-fix/SKILL.md; do
     assert_not_contains "$INSTALL/$adapter" "$review_transport_disclosure" \
         "$adapter does not claim ordinary-review transport consent"
 done

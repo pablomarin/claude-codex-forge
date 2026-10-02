@@ -177,6 +177,11 @@ from that checkpoint.
 | `/fix-bug` (simple)  | None          | Simple fixes skip Phase 3 and have no plan file to drive from   |
 | `/quick-fix`         | None          | Trivial changes are not eligible for autonomous loop            |
 
+Quick-fix also omits the full final-review lane: the main agent runs one obvious focused check
+directly, while ship hooks revalidate the clean recorded base and three-implementation-path limit.
+It dispatches no code-review or Verify agents. Any uncertainty, user-facing effect, higher risk, or
+scope growth moves the work to `/fix-bug` or `/new-feature`.
+
 ### What the loop does
 
 - Reads `.forge/local/state.md` each turn (the workflow checklist + objective nonce)

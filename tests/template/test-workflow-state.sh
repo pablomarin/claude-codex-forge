@@ -30,8 +30,9 @@ make_repo() {
     git -C "$root" config user.email "forge-test@example.com"
     git -C "$root" config user.name "Forge Test"
     printf '6\n' > "$root/.forge/version"
+    printf '.forge/local/\nhelper.*\n' > "$root/.gitignore"
     printf 'fixture\n' > "$root/README.md"
-    git -C "$root" add .forge/version README.md
+    git -C "$root" add .gitignore .forge/version README.md
     git -C "$root" commit -q -m init
     cp "$REPO_ROOT/state.template.md" "$root/.forge/local/state.md"
     printf '%s\n' "$root"
@@ -55,6 +56,11 @@ assert_rejected_unchanged() {
 
 activate_fixture() {
     local root="$1"
+    if [ "$(git -C "$root" symbolic-ref -q --short HEAD 2>/dev/null)" != quick-fix/handoff-smoke ]; then
+        git -C "$root" show-ref --verify --quiet refs/heads/quick-fix/handoff-smoke \
+            || git -C "$root" branch quick-fix/handoff-smoke main
+        git -C "$root" switch -q quick-fix/handoff-smoke
+    fi
     run_sh "$root" activate --host claude --workflow quick-fix --task handoff-smoke \
         --base-ref main --phase diagnosis --next-step 'write RED test'
 }
@@ -139,6 +145,60 @@ assert_dir_exists "$ACT_REPO/.forge/local/reviews/handoff-smoke" \
 assert_file_missing "$ACT_REPO/.forge/local/council" \
     "activate does not allocate a Council directory"
 
+start_test "new quick-fix activation requires a clean exact-base worktree"
+DIRTY_REPO=$(make_repo)
+git -C "$DIRTY_REPO" switch -q -c quick-fix/dirty-case
+printf 'dirty\n' >> "$DIRTY_REPO/README.md"
+assert_rejected_unchanged "$DIRTY_REPO" "dirty quick-fix activation" activate \
+    --host codex --workflow quick-fix --task dirty-case --base-ref main \
+    --phase diagnosis --next-step check
+
+AHEAD_REPO=$(make_repo)
+git -C "$AHEAD_REPO" switch -q -c quick-fix/ahead-case
+printf 'ahead\n' >> "$AHEAD_REPO/README.md"
+git -C "$AHEAD_REPO" add README.md
+git -C "$AHEAD_REPO" commit -qm ahead
+assert_rejected_unchanged "$AHEAD_REPO" "ahead-of-base quick-fix activation" activate \
+    --host codex --workflow quick-fix --task ahead-case --base-ref main \
+    --phase diagnosis --next-step check
+
+RECLASS_REPO=$(make_repo)
+git -C "$RECLASS_REPO" switch -q -c quick-fix/reclass-case
+printf 'prior\n' > "$RECLASS_REPO/prior.txt"
+git -C "$RECLASS_REPO" add prior.txt
+git -C "$RECLASS_REPO" commit -qm prior
+assert_rejected_unchanged "$RECLASS_REPO" "current-HEAD quick-fix reclassification" activate \
+    --host codex --workflow quick-fix --task reclass-case --base-ref HEAD \
+    --phase diagnosis --next-step check
+assert_contains "$RECLASS_REPO/helper.err" 'base must differ from the quick-fix branch' \
+    "current-HEAD reclassification names the distinct-base requirement"
+if command -v pwsh >/dev/null 2>&1; then
+    (cd "$RECLASS_REPO" && pwsh -NoLogo -NoProfile -File "$HELPER_PS1" activate \
+        --host codex --workflow quick-fix --task reclass-case --base-ref HEAD \
+        --phase diagnosis --next-step check) > "$RECLASS_REPO/helper.ps.out" 2> "$RECLASS_REPO/helper.ps.err"
+    [ "$?" -ne 0 ] && pass "PowerShell rejects current-HEAD quick-fix reclassification" \
+        || fail "PowerShell accepted current-HEAD quick-fix reclassification"
+    assert_contains "$RECLASS_REPO/helper.ps.err" 'distinct named base branch' \
+        "PowerShell current-HEAD rejection names the distinct-base requirement"
+else
+    skip_test "pwsh unavailable; PowerShell current-HEAD reclassification runs in Windows CI"
+fi
+
+if command -v pwsh >/dev/null 2>&1; then
+    UPPER_REPO=$(make_repo)
+    git -C "$UPPER_REPO" switch -q -c quick-fix/Bad-Slug
+    UPPER_BEFORE=$(hash_file "$UPPER_REPO/.forge/local/state.md")
+    (cd "$UPPER_REPO" && pwsh -NoLogo -NoProfile -File "$HELPER_PS1" activate \
+        --host codex --workflow quick-fix --task Bad-Slug --base-ref main \
+        --phase diagnosis --next-step check) > "$UPPER_REPO/helper.ps.out" 2> "$UPPER_REPO/helper.ps.err"
+    [ "$?" -ne 0 ] && pass "PowerShell rejects uppercase quick-fix task slug" \
+        || fail "PowerShell accepted uppercase quick-fix task slug"
+    assert_hash_equals "$UPPER_REPO/.forge/local/state.md" "$UPPER_BEFORE" \
+        "uppercase PowerShell task rejection leaves state unchanged"
+else
+    skip_test "pwsh unavailable; uppercase task rejection runs in Windows CI"
+fi
+
 start_test "activate preserves a prebound native-worktree base instead of re-resolving it"
 PREBOUND_PRIMARY=$(make_repo)
 PREBOUND_BASE=$(git -C "$PREBOUND_PRIMARY" rev-parse main)
@@ -194,7 +254,7 @@ if [ "$?" -ne 0 ]; then pass "mismatched inactive activation is rejected"; else 
 assert_contains "$REBIND_WORKTREE/helper.err" 'workflow-state rebind' \
     "mismatched inactive activation names the bounded recovery action"
 bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" \
-    --target "$REBIND_WORKTREE" --scope project --platform unix --release-version 6.3 \
+    --target "$REBIND_WORKTREE" --scope project --platform unix --release-version 6.4.0 \
     > "$REBIND_WORKTREE/materializer.out" 2> "$REBIND_WORKTREE/materializer.err"
 assert_equals "$?" "0" "materializer diagnoses the recoverable mismatch without failing installation"
 assert_contains "$REBIND_WORKTREE/materializer.out" \
@@ -248,7 +308,7 @@ fi
 assert_contains "$REBIND_WORKTREE/dirty.txt" 'preserve dirty work' \
     "rebind preserves dirty application work"
 bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" \
-    --target "$REBIND_WORKTREE" --scope project --platform unix --release-version 6.3 \
+    --target "$REBIND_WORKTREE" --scope project --platform unix --release-version 6.4.0 \
     > "$REBIND_WORKTREE/materializer.out" 2> "$REBIND_WORKTREE/materializer.err"
 assert_equals "$?" "0" "materializer rechecks the repaired binding"
 assert_contains "$REBIND_WORKTREE/materializer.out" 'NORMAL_PROJECT_WORKFLOWS: READY' \
@@ -261,7 +321,7 @@ else
     cp "$REBIND_WORKTREE/state.before-rebind" "$REBIND_WORKTREE/.forge/local/state.md"
     (cd "$REBIND_WORKTREE" && "$REBIND_PWSH" -NoProfile -File \
         "$REPO_ROOT/scripts/materialize-adapters.ps1" -RepoRoot "$REPO_ROOT" \
-        -Target "$REBIND_WORKTREE" -Scope project -Platform windows -ReleaseVersion 6.3) \
+        -Target "$REBIND_WORKTREE" -Scope project -Platform windows -ReleaseVersion 6.4.0) \
         > "$REBIND_WORKTREE/materializer-ps.out" 2> "$REBIND_WORKTREE/materializer-ps.err"
     assert_equals "$?" "0" "PowerShell materializer diagnoses the recoverable mismatch"
     assert_contains "$REBIND_WORKTREE/materializer-ps.out" \
@@ -371,6 +431,7 @@ if [ -z "$PWSH" ]; then
     skip_test "no pwsh/powershell on PATH; runtime parity remains externally required"
 else
     PS_REPO=$(make_repo)
+    git -C "$PS_REPO" switch -q -c quick-fix/handoff-smoke
     (cd "$PS_REPO" && "$PWSH" -NoProfile -File "$HELPER_PS1" show) \
         > "$PS_REPO/helper.out" 2> "$PS_REPO/helper.err"
     assert_equals "$?" "0" "PowerShell show exits zero"
@@ -543,10 +604,7 @@ if [ "$GROUP" = "all" ]; then
     run_sh "$CHECK_REPO" checkpoint --host codex --phase complete --next-step none
     assert_equals "$?" "0" "terminal checkpoint exits zero"
     activate_fixture "$CHECK_REPO"
-    assert_equals "$?" "0" "same workflow and task can reactivate after terminal checkpoint"
-    assert_contains "$CHECK_REPO/.forge/local/state.md" '| Review iteration       | 0 |' \
-        "same-task reactivation resets review iteration"
-    run_sh "$CHECK_REPO" checkpoint --host claude --phase complete --next-step none
+    assert_equals "$?" "2" "completed quick-fix cannot reclassify an already changed worktree"
     run_sh "$CHECK_REPO" activate --host codex --workflow fix-bug --task replacement-task \
         --base-ref main --phase diagnosis --next-step 'write failing test'
     assert_equals "$?" "0" "different task can activate after terminal checkpoint"

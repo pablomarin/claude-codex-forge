@@ -4,7 +4,7 @@ $setup = Join-Path $root "setup.ps1"
 $refresh = Join-Path $root "scripts\full-refresh.ps1"
 $recover = Join-Path $root "scripts\recover-full-refresh.ps1"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-$expectedRelease = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
+$expectedRelease = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+\.\d+)')).Groups[1].Value
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("forge-full-refresh-ps51-" + [Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($scratch) | Out-Null
 $passes = 0
@@ -218,6 +218,35 @@ try {
     Assert-True ($exactResult.Output.Contains("FORGE_VERSION_CHANGE: 6 -> $expectedRelease")) `
         "PowerShell refresh reports the exact version transition"
 
+    foreach ($installedVersion in @("6.3", "6.4.0")) {
+        $compatProject = New-Project ("compat-project-version-" + $installedVersion.Replace('.', '-'))
+        Write-Text (Join-Path $compatProject ".forge\version") "$installedVersion`n"
+        $compatResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Force") -WorkingDirectory $compatProject `
+            -Environment @{ HOME = (Join-Path $scratch "compat-home"); USERPROFILE = (Join-Path $scratch "compat-home") }
+        Assert-True ($compatResult.Code -eq 0) "PowerShell installed $installedVersion refresh succeeds"
+        Assert-True ([IO.File]::ReadAllText((Join-Path $compatProject ".forge\version")).Trim() -eq $expectedRelease) `
+            "PowerShell installed $installedVersion publishes exact SemVer"
+    }
+
+    foreach ($malformedVersion in @("6.4.0.1", "6.4.x")) {
+        $malformedProject = New-Project ("malformed-project-version-" + $malformedVersion.Replace('.', '-'))
+        $malformedPath = Join-Path $malformedProject ".forge\version"
+        Write-Text $malformedPath "$malformedVersion`n"
+        $malformedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $malformedPath).Hash
+        $malformedResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Force") -WorkingDirectory $malformedProject `
+            -Environment @{ HOME = (Join-Path $scratch "malformed-home"); USERPROFILE = (Join-Path $scratch "malformed-home") }
+        Assert-True ($malformedResult.Code -ne 0 -and $malformedResult.Output.Contains("malformed Forge release")) `
+            "PowerShell malformed installed $malformedVersion blocks"
+        Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $malformedPath).Hash -eq $malformedHash) `
+            "PowerShell malformed installed $malformedVersion remains unchanged"
+    }
+
+    $invalidMaterializer = New-Project "invalid-materializer-version"
+    $invalidMaterializerResult = Invoke-IsolatedPowerShell -Script (Join-Path $root "scripts\materialize-adapters.ps1") `
+        -Arguments @("-RepoRoot", $root, "-Target", $invalidMaterializer, "-Scope", "project", "-Platform", "windows", "-ReleaseVersion", "6.4")
+    Assert-True ($invalidMaterializerResult.Code -ne 0 -and $invalidMaterializerResult.Output.Contains("ReleaseVersion")) `
+        "PowerShell materializer rejects a two-component source release"
+
     $unsupportedProject = New-Project "unsupported-project-version"
     Write-Text (Join-Path $unsupportedProject ".forge\version") "7.0`n"
     $unsupportedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $unsupportedProject ".forge\version")).Hash
@@ -352,7 +381,7 @@ try {
 
     $managedCompat = New-Project "managed-cross-host-compat"
     $materializer = Join-Path $root "scripts\materialize-adapters.ps1"
-    $release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
+    $release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+\.\d+)')).Groups[1].Value
     $managedFirst = Invoke-IsolatedPowerShell -Script $materializer -Arguments @(
         "-RepoRoot", $root, "-Target", $managedCompat, "-Scope", "project", "-Platform", "windows", "-ReleaseVersion", $release
     ) -WorkingDirectory $managedCompat
@@ -573,7 +602,7 @@ try {
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
         -Environment @{ HOME = $projectOperatorHome; USERPROFILE = $projectOperatorHome }
     Assert-True ($first.Code -eq 0) "setup.ps1 -R translates a project under Windows PowerShell 5.1: $($first.Output.Trim())"
-    $projectPhysical = (Resolve-Path -LiteralPath $project).Path
+    $projectPhysical = (Resolve-Path -LiteralPath ([string](& git -C $project rev-parse --show-toplevel)).Trim()).Path
     Assert-True ($first.Output.Contains("CODEX_HOOKS: MATERIALIZED primary worktree registration") -and
         -not $first.Output.Contains("CODEX_HOOKS: BLOCKED linked worktree") -and
         $first.Output.Contains("RUNTIME_QUALIFICATION: final owner '$(Join-Path $root 'scripts\qualify-runtime-final.ps1')'; live project '$projectPhysical'") -and
@@ -746,12 +775,16 @@ try {
     $rollback = New-Project "rollback"
     $rollbackRoot = Join-Path $rollback "CLAUDE.md"
     Write-Text $rollbackRoot "WINDOWS_ROLLBACK_ORIGINAL`n"
+    $rollbackVersion = Join-Path $rollback ".forge\version"
+    Write-Text $rollbackVersion "6.3`n"
     $rollbackHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $rollbackRoot).Hash
+    $rollbackVersionHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $rollbackVersion).Hash
     $rollbackResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $rollback `
         -Environment @{ FORGE_FULL_REFRESH_FAIL_AFTER = "@penultimate" }
     Assert-True ($rollbackResult.Code -ne 0) "injected Windows commit failure returns nonzero"
     Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $rollbackRoot).Hash -eq $rollbackHash) "verified Windows rollback restores original bytes"
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $rollback ".forge\version"))) "failed Windows transaction never stamps readiness"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $rollbackVersion).Hash -eq $rollbackVersionHash) `
+        "failed Windows transaction preserves the legacy two-component stamp"
 
     $race = New-Project "rollback-race"
     $raceRoot = Join-Path $race "CLAUDE.md"

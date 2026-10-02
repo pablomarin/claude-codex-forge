@@ -144,7 +144,7 @@ _TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null || true)
 HOOK_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)
 CONFIG_CHECK="$HOOK_DIR/check-config-change.sh"
 FORGE_VERSION=$(head -1 .forge/version 2>/dev/null | tr -d '[:space:]')
-if printf '%s\n' "$FORGE_VERSION" | grep -Eq '^6(\.[0-9]+)?$' && [ -f "$CONFIG_CHECK" ]; then
+if printf '%s\n' "$FORGE_VERSION" | grep -Eq '^6(\.[0-9]+){0,2}$' && [ -f "$CONFIG_CHECK" ]; then
     if ! printf '{}' | bash "$CONFIG_CHECK" --verify-boundary "$(pwd)" >/dev/null 2>&1; then
         echo "FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -f and inspect the diff before shipping." >&2
         exit 2
@@ -293,6 +293,44 @@ if echo "$COMMAND" | grep -qE "^[[:space:]]*${_ENVP}gh[[:space:]]+pr[[:space:]]+
             fi
 
             # All checks passed; fall through to the existing checklist guard
+        fi
+    fi
+fi
+
+# Exact quick fixes use a direct focused check instead of the full candidate
+# receipt pipeline. Fail closed unless the immutable base is uniquely recorded,
+# valid, ancestral, and the complete base diff stays within the three-path cap.
+if printf '%s\n' "$WORKFLOW_CMD" | grep -qE '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'; then
+    QUICK_BASE_COUNT=$(tr -d '\r' < "$STATE_FILE" | awk -F'|' '
+        /^## Identity$/ { in_identity=1; next }
+        in_identity && /^## / { in_identity=0 }
+        in_identity {
+            key=$2; gsub(/^[ \t]+|[ \t]+$/, "", key)
+            if (key == "Workflow base SHA") n++
+        }
+        END { print n+0 }
+    ')
+    QUICK_BASE_SHA=$(tr -d '\r' < "$STATE_FILE" | awk -F'|' '
+        /^## Identity$/ { in_identity=1; next }
+        in_identity && /^## / { in_identity=0 }
+        in_identity {
+            key=$2; gsub(/^[ \t]+|[ \t]+$/, "", key)
+            if (key == "Workflow base SHA") { value=$3; gsub(/^[ \t]+|[ \t]+$/, "", value); print value; exit }
+        }
+    ')
+    if [ "$QUICK_BASE_COUNT" -eq 1 ] \
+        && printf '%s\n' "$QUICK_BASE_SHA" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' \
+        && git cat-file -e "${QUICK_BASE_SHA}^{commit}" 2>/dev/null \
+        && git merge-base --is-ancestor "$QUICK_BASE_SHA" HEAD 2>/dev/null; then
+        QUICK_SCOPE_OK=true
+        QUICK_COMMITTED=$(git diff --no-renames --name-only "${QUICK_BASE_SHA}..HEAD" -- 2>/dev/null) || QUICK_SCOPE_OK=false
+        QUICK_CACHED=$(git diff --cached --no-renames --name-only "$QUICK_BASE_SHA" -- 2>/dev/null) || QUICK_SCOPE_OK=false
+        QUICK_UNSTAGED=$(git diff --no-renames --name-only -- 2>/dev/null) || QUICK_SCOPE_OK=false
+        QUICK_IMPL_COUNT=$(printf '%s\n%s\n%s\n' "$QUICK_COMMITTED" "$QUICK_CACHED" "$QUICK_UNSTAGED" \
+            | LC_ALL=C sort -u \
+            | awk '$0 != "README.md" && $0 != "docs/CHANGELOG.md" && length($0) > 0 { n++ } END { print n+0 }')
+        if [ "$QUICK_SCOPE_OK" = true ] && [ "$QUICK_IMPL_COUNT" -le 3 ]; then
+            forge_allow
         fi
     fi
 fi

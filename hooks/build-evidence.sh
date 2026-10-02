@@ -484,6 +484,41 @@ RECEIPT_GATE_OK=true
 CANDIDATE_ID=""
 WORKFLOW_ACTIVE=true
 case "$ACTIVE_WORKFLOW_CMD" in ''|none|'—'|'-') WORKFLOW_ACTIVE=false ;; esac
+QUICK_FIX_DIRECT=false
+if printf '%s\n' "$ACTIVE_WORKFLOW_CMD" | grep -qE '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'; then
+    QUICK_BASE_COUNT=$(tr -d '\r' < "$STATE_MD" | awk -F'|' '
+        /^## Identity$/ { in_identity=1; next }
+        in_identity && /^## / { in_identity=0 }
+        in_identity {
+            key=$2; gsub(/^[ \t]+|[ \t]+$/, "", key)
+            if (key == "Workflow base SHA") n++
+        }
+        END { print n+0 }
+    ')
+    QUICK_BASE_SHA=$(tr -d '\r' < "$STATE_MD" | awk -F'|' '
+        /^## Identity$/ { in_identity=1; next }
+        in_identity && /^## / { in_identity=0 }
+        in_identity {
+            key=$2; gsub(/^[ \t]+|[ \t]+$/, "", key)
+            if (key == "Workflow base SHA") { value=$3; gsub(/^[ \t]+|[ \t]+$/, "", value); print value; exit }
+        }
+    ')
+    if [ "$QUICK_BASE_COUNT" -eq 1 ] \
+        && printf '%s\n' "$QUICK_BASE_SHA" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' \
+        && git cat-file -e "${QUICK_BASE_SHA}^{commit}" 2>/dev/null \
+        && git merge-base --is-ancestor "$QUICK_BASE_SHA" HEAD 2>/dev/null; then
+        QUICK_SCOPE_OK=true
+        QUICK_COMMITTED=$(git diff --no-renames --name-only "${QUICK_BASE_SHA}..HEAD" -- 2>/dev/null) || QUICK_SCOPE_OK=false
+        QUICK_CACHED=$(git diff --cached --no-renames --name-only "$QUICK_BASE_SHA" -- 2>/dev/null) || QUICK_SCOPE_OK=false
+        QUICK_UNSTAGED=$(git diff --no-renames --name-only -- 2>/dev/null) || QUICK_SCOPE_OK=false
+        if [ "$QUICK_SCOPE_OK" = true ]; then
+            QUICK_IMPL_COUNT=$(printf '%s\n%s\n%s\n' "$QUICK_COMMITTED" "$QUICK_CACHED" "$QUICK_UNSTAGED" \
+                | LC_ALL=C sort -u \
+                | awk '$0 != "README.md" && $0 != "docs/CHANGELOG.md" && length($0) > 0 { n++ } END { print n+0 }')
+            [ "$QUICK_IMPL_COUNT" -le 3 ] && QUICK_FIX_DIRECT=true
+        fi
+    fi
+fi
 if [ "$STATE_IS_V6" = true ] && [ "$WORKFLOW_ACTIVE" = true ]; then
     RECEIPT_GATE_OK=false
     RG_CLEAN=false
@@ -548,9 +583,9 @@ PR_HEAD_MATCH="false"
 
 PR_READY="false"
 if [ "$PR_OPEN" = "true" ] && [ "$PR_HEAD_MATCH" = "true" ] && \
-   [ "$RG_CLEAN" = "true" ] && [ "$E2E_FRESH" = "true" ] && \
    [ "$PA_AUTH" = "true" ] && [ "$BREAKER_OK" = "true" ] && \
-   [ "$RECEIPT_GATE_OK" = "true" ]; then
+   { [ "$QUICK_FIX_DIRECT" = "true" ] || { [ "$RG_CLEAN" = "true" ] \
+       && [ "$E2E_FRESH" = "true" ] && [ "$RECEIPT_GATE_OK" = "true" ]; }; }; then
     PR_READY="true"
 fi
 
@@ -637,6 +672,7 @@ CANDIDATE_ID_JSON=$(json_str_field "candidate_id" "$CANDIDATE_ID")
     printf '"produced_at_unix":%d,' "$NOW_UNIX"
     printf '%s,' "$SESSION_NONCE_JSON"
     printf '%s,' "$WORKFLOW_CMD_JSON"
+    printf '"quick_fix_direct":%s,' "$QUICK_FIX_DIRECT"
     printf '"state":{%s,%s,"checklist_total":%d,"checklist_done":%d},' \
         "$PHASE_JSON" "$NEXT_STEP_JSON" "$TOTAL_COUNT" "$DONE_COUNT"
     printf '"reviewer_gate":{"clean_same_iteration":%s,%s,%s,"post_cert_rounds":%d,"breaker":"%s"},' \

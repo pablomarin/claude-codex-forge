@@ -151,7 +151,7 @@ render_adapter() {
     esac
     description="Forge adapter for $name"
     case "$canonical_path" in
-        .forge/workflows/opinion.md|.forge/workflows/new-feature.md|.forge/workflows/fix-bug.md|.forge/workflows/quick-fix.md|.forge/workflows/review-pr-comments.md|.forge/skills/council/SKILL.template.md)
+        .forge/workflows/opinion.md|.forge/workflows/new-feature.md|.forge/workflows/fix-bug.md|.forge/workflows/review-pr-comments.md|.forge/skills/council/SKILL.template.md)
             description="$description. Invoking it authorizes only ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services. Investigation is excluded; investigate launches a separate full agent in the real worktree with normal config, tools, network, and write access under host approvals."
             ;;
     esac
@@ -475,14 +475,14 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$MATERIALIZE_REPO" ] && [ -n "$MATERIALIZE_TARGET" ] || {
-    echo "Usage: materialize-adapters.sh --repo-root DIR --target DIR --scope project --release-version MAJOR.MINOR" >&2
+    echo "Usage: materialize-adapters.sh --repo-root DIR --target DIR --scope project --release-version MAJOR.MINOR.PATCH" >&2
     exit 2
 }
 [ "$MATERIALIZE_SCOPE" = project ] || {
     echo "BLOCKED: active Forge materialization is project-only" >&2
     exit 1
 }
-[[ "$MATERIALIZE_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || {
+[[ "$MATERIALIZE_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
     echo "BLOCKED: invalid release version" >&2
     exit 2
 }

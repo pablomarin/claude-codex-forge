@@ -2116,11 +2116,13 @@ for f in state.template.md rules/workflow.md commands/opinion.md; do
     done
 done
 
-start_test "active v6 policy selects strict receipts by schema, never candidate population"
-assert_contains "$REPO_ROOT/FORGE.template.md" "Every active canonical V6 shipping action requires" \
-    "root policy requires strict active-v6 receipts"
-assert_contains "$REPO_ROOT/FORGE.template.md" "legacy prose cannot certify" \
+start_test "full workflows select strict receipts while quick-fix stays direct"
+assert_contains "$REPO_ROOT/FORGE.template.md" 'For `/fix-bug` and' \
+    "root policy scopes strict receipts to full workflows"
+assert_contains "$REPO_ROOT/FORGE.template.md" "Legacy prose" \
     "root policy rejects legacy prose certification"
+assert_contains "$REPO_ROOT/FORGE.template.md" 'Exact bounded `/quick-fix` work instead requires one direct focused check' \
+    "root policy defines the direct quick-fix boundary"
 for active_source in "$REPO_ROOT/hooks/check-workflow-gates.sh" \
     "$REPO_ROOT/hooks/check-workflow-gates.ps1" "$REPO_ROOT/hooks/build-evidence.sh" \
     "$REPO_ROOT/hooks/build-evidence.ps1" "$REPO_ROOT/hooks/lib/review-breaker.sh" \
@@ -2677,7 +2679,6 @@ for concurrency_doc in \
   "$REPO_ROOT/FORGE.template.md" \
   "$REPO_ROOT/rules/critical-rules.md" \
   "$REPO_ROOT/rules/workflow.md" \
-  "$REPO_ROOT/commands/quick-fix.md" \
   "$REPO_ROOT/docs/explanation/harness-philosophy.md" \
   "$REPO_ROOT/docs/guides/multi-project-isolation.md" \
   "$REPO_ROOT/docs/guides/parallel-sessions.md"; do
@@ -2686,6 +2687,10 @@ for concurrency_doc in \
     assert_contains "$concurrency_doc" 'candidate-bound evidence becomes stale' \
         "$(basename "$concurrency_doc") explains candidate evidence invalidation"
 done
+assert_contains "$REPO_ROOT/commands/quick-fix.md" 'Concurrent sessions are allowed' \
+    "quick-fix allows concurrent sessions without a Forge lock"
+assert_contains "$REPO_ROOT/commands/quick-fix.md" 'unexpected mutation or base drift invalidates the direct scope check' \
+    "quick-fix explains direct-check invalidation"
 for active_doc in \
   "$REPO_ROOT/FORGE.template.md" \
   "$REPO_ROOT/rules/critical-rules.md" \
@@ -2965,22 +2970,57 @@ assert_contains "$UPGRADING" 'setup.sh --retire-global --apply --confirm' \
 start_test "release version is synchronized across installer source and README"
 assert_contains "$REPO_ROOT/docs/adr/README.md" '0010-dual-engine-canonical-harness.md' \
     "ADR index includes the dual-engine decision"
-EXPECTED_FORGE_VERSION='6.3'
 FIRST_CHANGELOG_RELEASE=$(grep -m1 '^## ' "$REPO_ROOT/docs/CHANGELOG.md")
-FIRST_CHANGELOG_VERSION=$(printf '%s\n' "$FIRST_CHANGELOG_RELEASE" | sed -E 's/^## ([0-9]+\.[0-9]+).*/\1/')
+FIRST_CHANGELOG_VERSION=$(printf '%s\n' "$FIRST_CHANGELOG_RELEASE" \
+    | sed -E 's/^## ([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+if printf '%s\n' "$FIRST_CHANGELOG_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    pass "top changelog release is exact MAJOR.MINOR.PATCH"
+else
+    fail "top changelog release is exact MAJOR.MINOR.PATCH"
+fi
+EXPECTED_FORGE_VERSION="$FIRST_CHANGELOG_VERSION"
+EXPECTED_README_HISTORY_VERSION='6.4.0'
 README_BADGE_VERSION=$(sed -n 's/.*badge\/version-\([0-9][0-9.]*\)-blue.*/\1/p' "$README" | head -1)
 README_HISTORY_VERSION=$(sed -n '/^## Version history/,$p' "$README" \
     | sed -n 's/^| \([0-9][0-9.]*\)[[:space:]]*|.*/\1/p' | head -1)
-assert_equals "$FIRST_CHANGELOG_RELEASE" '## 6.3 — 2026-09-28' \
-    "6.3 is the top changelog release"
 assert_equals "$FIRST_CHANGELOG_VERSION" "$EXPECTED_FORGE_VERSION" \
     "top changelog release carries the expected version"
 assert_equals "$README_BADGE_VERSION" "$EXPECTED_FORGE_VERSION" \
     "README badge matches the release version"
-assert_equals "$README_HISTORY_VERSION" "$EXPECTED_FORGE_VERSION" \
+assert_equals "$README_HISTORY_VERSION" "$EXPECTED_README_HISTORY_VERSION" \
     "first README history row matches the release version"
 assert_contains "$README" 'Project-only complete installation' \
-    "README 6.3 history describes the project-only complete installation"
+    "README history describes the material project-only complete installation"
+
+start_test "quick-fix is direct-check only and excluded from review transport"
+assert_contains "$REPO_ROOT/commands/quick-fix.md" 'dispatches no `code-spec`' \
+    "quick-fix explicitly dispatches no spec reviewer"
+assert_contains "$REPO_ROOT/commands/quick-fix.md" '`code-quality`, `verify-app`, or `verify-e2e`' \
+    "quick-fix explicitly dispatches no quality or verifier roles"
+assert_not_contains "$REPO_ROOT/commands/quick-fix.md" 'freeze the staged-clean candidate' \
+    "quick-fix no longer freezes a receipt candidate"
+assert_not_contains "$REPO_ROOT/scripts/materialize-adapters.sh" \
+    '.forge/workflows/quick-fix.md|.forge/workflows/review-pr-comments.md' \
+    "Bash materializer excludes quick-fix from review disclosure"
+assert_not_contains "$REPO_ROOT/scripts/materialize-adapters.ps1" \
+    "'.forge/workflows/quick-fix.md'," \
+    "PowerShell materializer excludes quick-fix from review disclosure"
+assert_contains "$REPO_ROOT/hooks/build-evidence.sh" '"quick_fix_direct"' \
+    "Bash evidence exposes direct quick-fix mode"
+assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" '"quick_fix_direct"' \
+    "PowerShell evidence exposes direct quick-fix mode"
+
+start_test "source repository release policy is discoverable and exact"
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`docs/agent-context.md`' \
+    "contributor guide discovers source agent context"
+assert_contains "$REPO_ROOT/docs/agent-context.md" 'Every merged change set or pull request MUST bump' \
+    "source context requires a version bump per merged change set"
+assert_contains "$REPO_ROOT/docs/agent-context.md" 'exact `MAJOR.MINOR.PATCH`' \
+    "source context requires exact SemVer"
+assert_contains "$REPO_ROOT/docs/agent-context.md" '`docs/CHANGELOG.md` MUST record every released change' \
+    "source context assigns complete release detail to changelog"
+assert_contains "$REPO_ROOT/docs/agent-context.md" '`README.md` MUST mention only material changes' \
+    "source context keeps README history material"
 
 start_test "Forge source repository uses one contributor guide with thin host adapters"
 assert_file_exists "$REPO_ROOT/CONTRIBUTING.md" \
@@ -3161,9 +3201,11 @@ for relative in commands/new-feature.md commands/fix-bug.md commands/quick-fix.m
     assert_not_contains "$surface" 'Read `.forge/local/state.md`' \
         "$relative contains no direct canonical state-read instruction"
 done
-for relative in commands/new-feature.md commands/fix-bug.md commands/quick-fix.md; do
+for relative in commands/new-feature.md commands/fix-bug.md; do
     assert_contains "$REPO_ROOT/$relative" '--begin-review' \
         "$relative begins review through the monotonic helper transition"
 done
+assert_not_contains "$REPO_ROOT/commands/quick-fix.md" '--begin-review' \
+    "quick-fix has no review-iteration transition"
 
 report "test-contracts.sh"

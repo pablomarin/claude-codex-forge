@@ -43,6 +43,12 @@ commit, push, or PR creation. A successful process exit is not a clean gate. PR 
 bound to the active goal nonce and candidate.
 Artifact-bound review prompts, outputs, and receipts live under `.forge/local/reviews/`.
 
+For an exact `/quick-fix <valid-slug>`, the same hook keeps configuration and Goal authorization
+checks, then validates one recorded ancestral base and a maximum of three implementation paths.
+Exact `README.md` and `docs/CHANGELOG.md` release metadata is excluded from that path budget. Only
+that bounded case skips final review and verifier receipts; malformed commands or invalid scope fall
+through to the full fail-closed boundary.
+
 `check-external-mutation-auth.{sh,ps1}` preserves the v6 human boundary without reducing
 investigation to a special sandbox. A full investigator can use the selected host's normal tools,
 network, databases, APIs, and write access. When an operation is classified as a protected external

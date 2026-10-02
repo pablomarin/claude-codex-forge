@@ -222,7 +222,7 @@ assert_equals "$?" "1" "empty Forge version never downgrades to legacy state"
 assert_contains "$S2/empty-version-err" "invalid Forge v6 state" \
     "empty Forge version is treated as an invalid migrated surface"
 
-EXPECTED_RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' \
+EXPECTED_RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' \
     "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
 start_test "exact project release is published last and legacy V6 is adopted"
 V=$(scratch_dir exact-project-version)
@@ -235,6 +235,33 @@ assert_equals "$(tr -d '\r\n' < "$V/.forge/version")" "$EXPECTED_RELEASE" \
     "unversioned V6 becomes the exact release"
 assert_contains "$V/apply.log" "FORGE_VERSION_CHANGE: 6 -> $EXPECTED_RELEASE" \
     "refresh reports the exact version transition"
+
+for installed_version in 6.3 6.4.0; do
+    VCOMPAT=$(scratch_dir "exact-project-version-${installed_version//./-}")
+    git -C "$VCOMPAT" init -q
+    mkdir -p "$VCOMPAT/.forge"
+    printf '%s\n' "$installed_version" > "$VCOMPAT/.forge/version"
+    (cd "$VCOMPAT" && HOME="$VCOMPAT/home" "$REPO_ROOT/setup.sh" -f) \
+        > "$VCOMPAT/apply.log" 2>&1
+    assert_equals "$?" "0" "installed $installed_version refresh succeeds"
+    assert_equals "$(tr -d '\r\n' < "$VCOMPAT/.forge/version")" "$EXPECTED_RELEASE" \
+        "installed $installed_version refresh publishes exact SemVer"
+done
+
+for malformed_version in 6.4.0.1 6.4.x; do
+    VMALFORMED=$(scratch_dir "malformed-version-${malformed_version//./-}")
+    git -C "$VMALFORMED" init -q
+    mkdir -p "$VMALFORMED/.forge"
+    printf '%s\n' "$malformed_version" > "$VMALFORMED/.forge/version"
+    malformed_before=$(hash_file "$VMALFORMED/.forge/version")
+    (cd "$VMALFORMED" && HOME="$VMALFORMED/home" "$REPO_ROOT/setup.sh" -f) \
+        > "$VMALFORMED/apply.log" 2>&1
+    assert_equals "$?" "1" "malformed installed $malformed_version blocks"
+    assert_hash_equals "$VMALFORMED/.forge/version" "$malformed_before" \
+        "malformed installed $malformed_version remains byte-identical"
+    assert_contains "$VMALFORMED/apply.log" 'BLOCKED: malformed Forge release' \
+        "malformed installed $malformed_version is diagnosed"
+done
 
 start_test "unsupported Forge layout major is rejected without mutation"
 BAD=$(scratch_dir unsupported-forge-major)
@@ -655,12 +682,16 @@ assert_contains "$S6/symlink.log" "AGENT_APPROVAL: do not modify files or run fu
 S6F=$(scratch_dir full-refresh-rollback)
 make_git_repo "$S6F"
 printf 'developer root bytes\n' > "$S6F/CLAUDE.md"
+mkdir -p "$S6F/.forge"
+printf '6.3\n' > "$S6F/.forge/version"
 root_before=$(hash_file "$S6F/CLAUDE.md")
+legacy_version_before=$(hash_file "$S6F/.forge/version")
 (cd "$S6F" && HOME="$S6F/.fakehome" FORGE_FULL_REFRESH_FAIL_AFTER=2 \
     "$REPO_ROOT/setup.sh" -f) >"$S6F/failure.log" 2>&1
 assert_equals "$?" "1" "injected commit-phase failure returns nonzero"
 assert_hash_equals "$S6F/CLAUDE.md" "$root_before" "rollback restores replaced developer file"
-assert_file_missing "$S6F/.forge/version" "rollback never leaves a readiness stamp"
+assert_hash_equals "$S6F/.forge/version" "$legacy_version_before" \
+    "rollback preserves the legacy two-component stamp byte-identically"
 assert_contains "$S6F/failure.log" "ROLLED_BACK" "rollback disposition is reported"
 
 for failure_point in 1 @penultimate; do

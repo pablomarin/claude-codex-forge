@@ -7,6 +7,7 @@ are materialized into downstream projects.
 ## Sources of truth
 
 - `CONTRIBUTING.md` is the canonical guide for developing this repository.
+- `docs/agent-context.md` defines the source repository's per-change release and documentation policy.
 - `FORGE.template.md` is the canonical policy installed into downstream projects as
   `.forge/instructions.md`.
 - `manifests/managed-v6.tsv` defines which source owns each installed destination.

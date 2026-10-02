@@ -35,15 +35,15 @@ $claudeExpected = @{
 $routerPrefix = 'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh" '
 $codexExpected = @{
     "host-context"=@("SessionStart", 'bash "$(git rev-parse --show-toplevel)/.forge/hooks/lib/host-context.sh" hook --host codex', "host-context.ps1")
-    "session-start"=@("SessionStart", $routerPrefix + "session-start.sh", "session-start.ps1")
-    "bash-safety"=@("PreToolUse", $routerPrefix + "check-bash-safety.sh", "check-bash-safety.ps1")
-    "workflow-gates"=@("PreToolUse", $routerPrefix + "check-workflow-gates.sh", "check-workflow-gates.ps1")
-    "external-mutation-auth"=@("PreToolUse", $routerPrefix + "check-external-mutation-auth.sh", "check-external-mutation-auth.ps1")
-    "format"=@("PostToolUse", $routerPrefix + "post-tool-format.sh", "post-tool-format.ps1")
-    "subagent-review-receipt"=@("SubagentStop", $routerPrefix + "check-subagent-review.sh", "check-subagent-review.ps1")
-    "precompact-memory"=@("PreCompact", $routerPrefix + "pre-compact-memory.sh", "pre-compact-memory.ps1")
-    "build-evidence"=@("Stop", $routerPrefix + "build-evidence.sh", "build-evidence.ps1")
-    "state-updated"=@("Stop", $routerPrefix + "check-state-updated.sh", "check-state-updated.ps1")
+    "session-start"=@("SessionStart", ($routerPrefix + "session-start.sh"), "session-start.ps1")
+    "bash-safety"=@("PreToolUse", ($routerPrefix + "check-bash-safety.sh"), "check-bash-safety.ps1")
+    "workflow-gates"=@("PreToolUse", ($routerPrefix + "check-workflow-gates.sh"), "check-workflow-gates.ps1")
+    "external-mutation-auth"=@("PreToolUse", ($routerPrefix + "check-external-mutation-auth.sh"), "check-external-mutation-auth.ps1")
+    "format"=@("PostToolUse", ($routerPrefix + "post-tool-format.sh"), "post-tool-format.ps1")
+    "subagent-review-receipt"=@("SubagentStop", ($routerPrefix + "check-subagent-review.sh"), "check-subagent-review.ps1")
+    "precompact-memory"=@("PreCompact", ($routerPrefix + "pre-compact-memory.sh"), "pre-compact-memory.ps1")
+    "build-evidence"=@("Stop", ($routerPrefix + "build-evidence.sh"), "build-evidence.ps1")
+    "state-updated"=@("Stop", ($routerPrefix + "check-state-updated.sh"), "check-state-updated.ps1")
 }
 $codexTokens = @{
     "host-context"="host-context.sh"; "session-start"="session-start.sh";
@@ -60,8 +60,9 @@ foreach ($event in $claude.hooks.PSObject.Properties) {
 }
 foreach ($event in $codex.hooks.PSObject.Properties) {
     foreach ($group in @($event.Value)) { foreach ($hook in @($group.hooks)) {
+        $commandText = [string]$hook.command
         $matches = @($codexTokens.Keys | Where-Object {
-            [string]$hook.command -like "*/$($codexTokens[$_])" -or [string]$hook.command -like "* $($codexTokens[$_])"
+            $commandText.Contains("/$($codexTokens[$_])") -or $commandText.EndsWith(" $($codexTokens[$_])")
         })
         if ($matches.Count -eq 1) {
             $rows.Add("codex|$($matches[0])|$($event.Name)|$($hook.command)|$($hook.commandWindows)|$($hook.type)")

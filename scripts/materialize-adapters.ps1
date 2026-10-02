@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$RepoRoot,
     [Parameter(Mandatory=$true)][string]$Target,
-    [Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+$')][string]$ReleaseVersion,
+    [Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$ReleaseVersion,
     [ValidateSet("project")][string]$Scope = "project",
     [ValidateSet("windows")][string]$Platform = "windows"
 )
@@ -311,7 +311,6 @@ function Render-Adapter {
         '.forge/workflows/opinion.md',
         '.forge/workflows/new-feature.md',
         '.forge/workflows/fix-bug.md',
-        '.forge/workflows/quick-fix.md',
         '.forge/workflows/review-pr-comments.md',
         '.forge/skills/council/SKILL.template.md'
     )) {

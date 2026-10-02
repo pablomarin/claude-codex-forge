@@ -581,6 +581,47 @@ $ReceiptGateOk = $true
 $CandidateId = ""
 $WorkflowActive = (-not [string]::IsNullOrEmpty($ActiveWorkflowCmd)) -and
     $ActiveWorkflowCmd -ne 'none' -and $ActiveWorkflowCmd -ne ([char]0x2014).ToString() -and $ActiveWorkflowCmd -ne '-'
+$QuickFixDirect = $false
+if ($ActiveWorkflowCmd -cmatch '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$') {
+    $quickBaseRows = @()
+    $inIdentity = $false
+    foreach ($line in (((Get-Content -LiteralPath $StateMd -Raw) -replace "`r", "") -split "`n")) {
+        if ($line -ceq '## Identity') { $inIdentity = $true; continue }
+        if ($inIdentity -and $line.StartsWith('## ')) { $inIdentity = $false }
+        if (-not $inIdentity) { continue }
+        $parts = $line -split '\|'
+        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Workflow base SHA') {
+            $quickBaseRows += $parts[2].Trim()
+        }
+    }
+    if ($quickBaseRows.Count -eq 1 -and $quickBaseRows[0] -cmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') {
+        $quickBaseSha = [string]$quickBaseRows[0]
+        $null = & git cat-file -e "$quickBaseSha`^{commit}" 2>$null
+        $quickBaseValid = $LASTEXITCODE -eq 0
+        if ($quickBaseValid) {
+            $null = & git merge-base --is-ancestor $quickBaseSha HEAD 2>$null
+            $quickBaseValid = $LASTEXITCODE -eq 0
+        }
+        if ($quickBaseValid) {
+            $quickCommitted = @(& git diff --no-renames --name-only "$quickBaseSha..HEAD" -- 2>$null)
+            $quickBaseValid = $LASTEXITCODE -eq 0
+            if ($quickBaseValid) {
+                $quickCached = @(& git diff --cached --no-renames --name-only $quickBaseSha -- 2>$null)
+                $quickBaseValid = $LASTEXITCODE -eq 0
+            }
+            if ($quickBaseValid) {
+                $quickUnstaged = @(& git diff --no-renames --name-only -- 2>$null)
+                $quickBaseValid = $LASTEXITCODE -eq 0
+            }
+            if ($quickBaseValid) {
+                $quickPaths = @($quickCommitted + $quickCached + $quickUnstaged | Sort-Object -Unique -CaseSensitive | Where-Object {
+                    -not [string]::IsNullOrEmpty($_) -and $_ -cne 'README.md' -and $_ -cne 'docs/CHANGELOG.md'
+                })
+                if ($quickPaths.Count -le 3) { $QuickFixDirect = $true }
+            }
+        }
+    }
+}
 if ($StateIsV6 -and $WorkflowActive) {
     $ReceiptGateOk = $false
     $RgClean = "false"
@@ -634,7 +675,8 @@ if ((-not [string]::IsNullOrEmpty($HeadSha)) -and ($PrHeadOid -eq $HeadSha)) {
 }
 
 $PrReady = "false"
-if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $RgClean -eq "true" -and $E2eFresh -eq "true" -and $PaAuth -eq "true" -and $BreakerOk -and $ReceiptGateOk) {
+if ($PrOpen -eq "true" -and $PrHeadMatch -eq "true" -and $PaAuth -eq "true" -and $BreakerOk -and
+    ($QuickFixDirect -or ($RgClean -eq "true" -and $E2eFresh -eq "true" -and $ReceiptGateOk))) {
     $PrReady = "true"
 }
 
@@ -761,6 +803,7 @@ $json = '{' +
     '"produced_at_unix":' + $NowUnix + ',' +
     $SessionNonceJson + ',' +
     $WorkflowCmdJson + ',' +
+    '"quick_fix_direct":' + $(if ($QuickFixDirect) { 'true' } else { 'false' }) + ',' +
     '"state":{' + $PhaseJson + ',' + $NextStepJson + ',"checklist_total":' + $TotalCount + ',"checklist_done":' + $DoneCount + '},' +
     '"reviewer_gate":{"clean_same_iteration":' + $RgClean + ',' + $RgIterJson + ',' + $RgHeadJson + ',"post_cert_rounds":' + $PostCertRounds + ',"breaker":"' + $Breaker + '"},' +
     '"candidate_gate":{"staged_clean":' + $CandidateClean + ',' + $CandidateIdJson + ',"all_receipts_same_candidate":' + $ShipReceiptsClean + '},' +

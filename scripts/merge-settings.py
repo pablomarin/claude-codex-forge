@@ -505,7 +505,7 @@ def inventory_legacy(
     v6_stamp = target / ".forge/version"
     if v6_stamp.is_file() and not v6_stamp.is_symlink():
         current_version = v6_stamp.read_text(encoding="utf-8", errors="replace").strip()
-        current_v6 = current_version == "6" or re.fullmatch(r"6\.[0-9]+", current_version) is not None
+        current_v6 = re.fullmatch(r"6(?:\.[0-9]+){0,2}", current_version) is not None
 
     stamp_relative = ".claude/.forge-version"
     stamp = target / stamp_relative
@@ -1744,7 +1744,7 @@ def reconcile_legacy_hook_settings(
         if version_path.is_file() and not version_path.is_symlink()
         else ""
     )
-    current_v6 = current_version == "6" or re.fullmatch(r"6\.[0-9]+", current_version) is not None
+    current_v6 = re.fullmatch(r"6(?:\.[0-9]+){0,2}", current_version) is not None
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -2034,7 +2034,7 @@ def full_refresh(
     repo_root = repo_root.resolve(strict=True)
     if scope != "project" or platform not in {"unix", "windows"}:
         raise RefreshBlocked("invalid full-refresh scope or platform")
-    if re.fullmatch(r"[0-9]+\.[0-9]+", release_version) is None:
+    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", release_version) is None:
         raise RefreshBlocked("invalid release version")
     lexical_target = target.absolute()
     if lexical_target.is_symlink():
@@ -2045,14 +2045,13 @@ def full_refresh(
     if installed_version_path.is_file() and not installed_version_path.is_symlink():
         installed_version = installed_version_path.read_text(encoding="utf-8", errors="replace").strip()
         previous_version = installed_version
-        if installed_version != "6":
-            installed_match = re.fullmatch(r"([0-9]+)\.([0-9]+)", installed_version)
-            if installed_match is None:
-                raise RefreshBlocked("malformed Forge release at .forge/version")
-            if installed_match.group(1) != "6":
-                raise RefreshBlocked(
-                    f"unsupported Forge layout major {installed_match.group(1)}"
-                )
+        installed_match = re.fullmatch(r"([0-9]+)(?:\.[0-9]+){0,2}", installed_version)
+        if installed_match is None:
+            raise RefreshBlocked("malformed Forge release at .forge/version")
+        if installed_match.group(1) != "6":
+            raise RefreshBlocked(
+                f"unsupported Forge layout major {installed_match.group(1)}"
+            )
     if scope == "global":
         if lexical_target != target:
             raise RefreshBlocked(f"selected global Forge home is not canonical: {lexical_target}")
