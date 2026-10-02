@@ -4,6 +4,12 @@ All notable changes to claude-codex-forge.
 
 ## 6.3 — 2026-09-28
 
+### Unreleased runtime verifier execution fix — 2026-10-02
+
+**The documented Unix discovery command is directly executable from the Forge checkout.**
+`scripts/verify-runtime.sh` now carries the executable bit expected by the README and setup guides.
+The installed `.forge/bin/verify-runtime` behavior is unchanged.
+
 ### Unreleased inactive-worktree recovery — 2026-10-01
 
 **Inactive fast-forwarded worktrees have a bounded recovery path.** `workflow-state rebind` can
