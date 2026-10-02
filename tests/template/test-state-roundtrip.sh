@@ -58,7 +58,7 @@ for retained in "base SHA" "review iteration" "next step" "candidate linkage"; d
     assert_contains "$REPO_ROOT/state.template.md" "$retained" \
         "cross-host continuation retains $retained"
 done
-for helper_action in "workflow-state.sh show" "workflow-state.sh activate" "workflow-state.sh checkpoint"; do
+for helper_action in "workflow-state.sh show" "workflow-state.sh rebind" "workflow-state.sh activate" "workflow-state.sh checkpoint"; do
     assert_contains "$REPO_ROOT/state.template.md" "$helper_action" \
         "state template routes control transitions through $helper_action"
 done

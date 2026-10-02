@@ -152,9 +152,10 @@ populated candidate path is progress, not an evidence-mode switch.
 ## Update Rules
 
 The currently active host is responsible for advancing this file. Inspect control state with
-`.forge/hooks/lib/workflow-state.sh show`, start it with `workflow-state.sh activate`, and advance
-it with `workflow-state.sh checkpoint` (use the `.ps1` twin on Windows). Only those bounded helpers
-may update identity, workflow, receipt-path, or review-iteration control rows. Use native file tools
+`.forge/hooks/lib/workflow-state.sh show`; recover an inactive fast-forwarded binding with
+`workflow-state.sh rebind`; start it with `workflow-state.sh activate`; and advance it with
+`workflow-state.sh checkpoint` (use the `.ps1` twin on Windows). Only those bounded helpers may
+update identity, workflow, receipt-path, or review-iteration control rows. Use native file tools
 only for checklist and narrative content. The Stop hook reminds Claude or Codex of the active
 workflow; the ship hook gates commit/push/PR on the checklist.
 

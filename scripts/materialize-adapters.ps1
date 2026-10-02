@@ -52,6 +52,94 @@ function Get-PrimaryCheckout {
     return ""
 }
 
+function Get-MaterializerStateValue {
+    param([string]$Path, [string]$Section, [string]$Key)
+    $currentSection = ""
+    $values = @()
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        if ($line.StartsWith("## ")) {
+            $currentSection = $line.Substring(3)
+            continue
+        }
+        if ($currentSection -ne $Section -or -not $line.StartsWith("|")) { continue }
+        $cells = $line.Split('|')
+        if ($cells.Count -ge 4 -and $cells[1].Trim() -eq $Key) {
+            $values += $cells[2].Trim()
+        }
+    }
+    if ($values.Count -ne 1) { throw "canonical state field is missing or duplicated: $Section/$Key" }
+    return $values[0]
+}
+
+function Write-NormalProjectWorkflowStatus {
+    param([string]$Project)
+    $state = Join-Path $Project ".forge\local\state.md"
+    if (-not (Test-Path -LiteralPath $state)) {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+        return
+    }
+    $stateItem = Get-Item -LiteralPath $state -Force
+    if ($stateItem.PSIsContainer -or ($stateItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=canonical-state-not-regular action=workflow-state-show"
+        return
+    }
+    try {
+        $command = Get-MaterializerStateValue $state Workflow Command
+        $phase = Get-MaterializerStateValue $state Workflow Phase
+        $nextStep = Get-MaterializerStateValue $state Workflow "Next step"
+        $stateRoot = Get-MaterializerStateValue $state Identity "Worktree root"
+        $stateCommon = Get-MaterializerStateValue $state Identity "Git common directory"
+        $baseRef = Get-MaterializerStateValue $state Identity "Workflow base ref"
+        $baseSha = Get-MaterializerStateValue $state Identity "Workflow base SHA"
+    } catch {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=canonical-state-unreadable action=workflow-state-show"
+        return
+    }
+    if ($command -and $command -notin @("none", "-", ([string][char]0x2014))) {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+        return
+    }
+    if ($baseSha -notmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+        return
+    }
+    if ($phase -or $nextStep) {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-state-invalid action=workflow-state-show"
+        return
+    }
+    $common = (& git -C $Project rev-parse --git-common-dir 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or -not $common) {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-git-unavailable action=workflow-state-show"
+        return
+    }
+    $common = $common.Trim()
+    if (-not [IO.Path]::IsPathRooted($common)) { $common = Join-Path $Project $common }
+    try { $common = (Resolve-Path -LiteralPath $common).Path } catch { $common = "" }
+    if (-not [string]::Equals($stateRoot, $Project, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $common -or
+        -not [string]::Equals($stateCommon, $common, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-identity-mismatch action=workflow-state-show"
+        return
+    }
+    $currentHead = (& git -C $Project rev-parse --verify HEAD 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or -not $currentHead) {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-head-unavailable action=workflow-state-show"
+        return
+    }
+    $currentHead = $currentHead.Trim()
+    if ($currentHead -eq $baseSha) {
+        Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+        return
+    }
+    $action = "workflow-state-show"
+    $resolvedRef = (& git -C $Project rev-parse --verify "$baseRef`^{commit}" 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -eq 0 -and $resolvedRef -and $resolvedRef.Trim() -eq $currentHead) {
+        $null = & git -C $Project merge-base --is-ancestor $baseSha $currentHead 2>$null
+        if ($LASTEXITCODE -eq 0) { $action = "workflow-state-rebind" }
+    }
+    Write-Host "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-head-mismatch action=$action base_ref=$baseRef base_sha=$baseSha head=$currentHead"
+}
+
 function Assert-NoLinkAncestor {
     param([string]$Root, [string]$Relative)
     $current = (Resolve-Path $Root).Path
@@ -673,6 +761,6 @@ if ($primary -and -not [string]::Equals($primary, $diagnosticTarget, [StringComp
 } else {
     Write-Host "CODEX_HOOKS: MATERIALIZED primary worktree registration; trust remains unverified"
 }
-Write-Host "NORMAL_PROJECT_WORKFLOWS: READY"
+Write-NormalProjectWorkflowStatus $diagnosticTarget
 Write-Host "NATIVE_GOAL_RUNTIME: PENDING reason=live-qualification-not-run"
 Write-Host "RUNTIME_QUALIFICATION: final owner '$(Join-Path $RepoRoot 'scripts\qualify-runtime-final.ps1')'; live project '$diagnosticTarget'; command and required operator evidence: '$(Join-Path $RepoRoot 'docs\qualification\agent-mode-selection.md')'"

@@ -166,6 +166,125 @@ assert_contains "$PREBOUND_WORKTREE/.forge/local/state.md" "| Workflow base SHA 
 assert_equals "$(git -C "$PREBOUND_WORKTREE" rev-parse HEAD)" "$PREBOUND_BASE" \
     "native activation leaves the checked-out adopted base unchanged"
 
+start_test "rebind repairs an inactive prebound worktree advanced to a descendant"
+REBIND_PRIMARY=$(make_repo)
+REBIND_BASE=$(git -C "$REBIND_PRIMARY" rev-parse main)
+REBIND_WORKTREE="$REBIND_PRIMARY/rebind-worktree"
+git -C "$REBIND_PRIMARY" worktree add -q -b claude/rebind "$REBIND_WORKTREE" "$REBIND_BASE"
+mkdir -p "$REBIND_WORKTREE/.forge/local"
+cp "$REPO_ROOT/state.template.md" "$REBIND_WORKTREE/.forge/local/state.md"
+REBIND_COMMON=$(cd "$(git -C "$REBIND_WORKTREE" rev-parse --git-common-dir)" && pwd -P)
+awk -v root="$REBIND_WORKTREE" -v common="$REBIND_COMMON" -v sha="$REBIND_BASE" '
+    /^\| Worktree root /        { print "| Worktree root        | " root " |"; next }
+    /^\| Git common directory / { print "| Git common directory | " common " |"; next }
+    /^\| Workflow base ref /    { print "| Workflow base ref    | main |"; next }
+    /^\| Workflow base SHA /    { print "| Workflow base SHA    | " sha " |"; next }
+    { print }
+' "$REBIND_WORKTREE/.forge/local/state.md" > "$REBIND_WORKTREE/.forge/local/state.next"
+mv "$REBIND_WORKTREE/.forge/local/state.next" "$REBIND_WORKTREE/.forge/local/state.md"
+printf 'advanced\n' > "$REBIND_PRIMARY/advanced.txt"
+git -C "$REBIND_PRIMARY" add advanced.txt
+git -C "$REBIND_PRIMARY" commit -q -m advance-main
+REBIND_HEAD=$(git -C "$REBIND_PRIMARY" rev-parse main)
+git -C "$REBIND_WORKTREE" merge -q --ff-only main
+printf 'preserve dirty work\n' > "$REBIND_WORKTREE/dirty.txt"
+run_sh "$REBIND_WORKTREE" activate --host claude --workflow new-feature --task rebound \
+    --base-ref main --phase requirements --next-step 'complete approved PRD'
+if [ "$?" -ne 0 ]; then pass "mismatched inactive activation is rejected"; else fail "mismatched inactive activation must be rejected"; fi
+assert_contains "$REBIND_WORKTREE/helper.err" 'workflow-state rebind' \
+    "mismatched inactive activation names the bounded recovery action"
+bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" \
+    --target "$REBIND_WORKTREE" --scope project --platform unix --release-version 6.3 \
+    > "$REBIND_WORKTREE/materializer.out" 2> "$REBIND_WORKTREE/materializer.err"
+assert_equals "$?" "0" "materializer diagnoses the recoverable mismatch without failing installation"
+assert_contains "$REBIND_WORKTREE/materializer.out" \
+    'NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-head-mismatch action=workflow-state-rebind' \
+    "materializer blocks workflow readiness and names the bounded recovery"
+assert_not_contains "$REBIND_WORKTREE/materializer.out" 'NORMAL_PROJECT_WORKFLOWS: READY' \
+    "materializer does not claim ordinary workflows are ready during the mismatch"
+cp "$REBIND_WORKTREE/.forge/local/state.md" "$REBIND_WORKTREE/state.before-rebind"
+
+sed 's#| Candidate receipt      | .forge/local/evidence/<task-id>/candidate.receipt |#| Candidate receipt      | .forge/local/evidence/prior/candidate.receipt |#' \
+    "$REBIND_WORKTREE/state.before-rebind" > "$REBIND_WORKTREE/.forge/local/state.md"
+assert_rejected_unchanged "$REBIND_WORKTREE" "inactive review evidence" rebind \
+    --base-ref main --expected-base-sha "$REBIND_BASE"
+cp "$REBIND_WORKTREE/state.before-rebind" "$REBIND_WORKTREE/.forge/local/state.md"
+
+sed 's/| nonce            | <uuid-v4-lowercase>/| nonce            | 11111111-1111-4111-8111-111111111111/' \
+    "$REBIND_WORKTREE/state.before-rebind" > "$REBIND_WORKTREE/.forge/local/state.md"
+assert_rejected_unchanged "$REBIND_WORKTREE" "active Goal evidence" rebind \
+    --base-ref main --expected-base-sha "$REBIND_BASE"
+cp "$REBIND_WORKTREE/state.before-rebind" "$REBIND_WORKTREE/.forge/local/state.md"
+
+sed 's#^- \[x\] PR creation authorized — `<ISO-8601-UTC-timestamp>`#- [x] PR creation authorized — `2026-10-01T12:00:00Z`#' \
+    "$REBIND_WORKTREE/state.before-rebind" > "$REBIND_WORKTREE/.forge/local/state.md"
+assert_rejected_unchanged "$REBIND_WORKTREE" "existing PR authorization" rebind \
+    --base-ref main --expected-base-sha "$REBIND_BASE"
+cp "$REBIND_WORKTREE/state.before-rebind" "$REBIND_WORKTREE/.forge/local/state.md"
+
+REBIND_SIBLING=$(printf 'sibling\n' | git -C "$REBIND_WORKTREE" commit-tree "$(git -C "$REBIND_WORKTREE" write-tree)")
+sed "s/$REBIND_BASE/$REBIND_SIBLING/" "$REBIND_WORKTREE/state.before-rebind" \
+    > "$REBIND_WORKTREE/.forge/local/state.md"
+assert_rejected_unchanged "$REBIND_WORKTREE" "non-descendant binding" rebind \
+    --base-ref main --expected-base-sha "$REBIND_SIBLING"
+cp "$REBIND_WORKTREE/state.before-rebind" "$REBIND_WORKTREE/.forge/local/state.md"
+
+run_sh "$REBIND_WORKTREE" rebind --base-ref main --expected-base-sha "$REBIND_BASE"
+assert_equals "$?" "0" "inactive descendant rebind exits zero"
+assert_contains "$REBIND_WORKTREE/helper.out" \
+    "REBOUND: base_ref=main old=$REBIND_BASE new=$REBIND_HEAD" \
+    "rebind reports the exact old and new bindings"
+assert_contains "$REBIND_WORKTREE/.forge/local/state.md" "| Workflow base SHA    | $REBIND_HEAD |" \
+    "rebind records current HEAD as the new base"
+assert_contains "$REBIND_WORKTREE/.forge/local/state.md" '| Command   | none  |' \
+    "rebind leaves the workflow inactive"
+sed "s/$REBIND_BASE/$REBIND_HEAD/" "$REBIND_WORKTREE/state.before-rebind" \
+    > "$REBIND_WORKTREE/state.expected-rebind"
+if cmp -s "$REBIND_WORKTREE/state.expected-rebind" "$REBIND_WORKTREE/.forge/local/state.md"; then
+    pass "rebind changes only the workflow base SHA row"
+else
+    fail "rebind must change only the workflow base SHA row"
+fi
+assert_contains "$REBIND_WORKTREE/dirty.txt" 'preserve dirty work' \
+    "rebind preserves dirty application work"
+bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" \
+    --target "$REBIND_WORKTREE" --scope project --platform unix --release-version 6.3 \
+    > "$REBIND_WORKTREE/materializer.out" 2> "$REBIND_WORKTREE/materializer.err"
+assert_equals "$?" "0" "materializer rechecks the repaired binding"
+assert_contains "$REBIND_WORKTREE/materializer.out" 'NORMAL_PROJECT_WORKFLOWS: READY' \
+    "materializer reports ordinary workflows ready after rebind"
+
+REBIND_PWSH=$(command -v pwsh 2>/dev/null || command -v powershell 2>/dev/null || true)
+if [ -z "$REBIND_PWSH" ]; then
+    skip_test "no pwsh/powershell on PATH; rebind runtime parity remains externally required"
+else
+    cp "$REBIND_WORKTREE/state.before-rebind" "$REBIND_WORKTREE/.forge/local/state.md"
+    (cd "$REBIND_WORKTREE" && "$REBIND_PWSH" -NoProfile -File \
+        "$REPO_ROOT/scripts/materialize-adapters.ps1" -RepoRoot "$REPO_ROOT" \
+        -Target "$REBIND_WORKTREE" -Scope project -Platform windows -ReleaseVersion 6.3) \
+        > "$REBIND_WORKTREE/materializer-ps.out" 2> "$REBIND_WORKTREE/materializer-ps.err"
+    assert_equals "$?" "0" "PowerShell materializer diagnoses the recoverable mismatch"
+    assert_contains "$REBIND_WORKTREE/materializer-ps.out" \
+        'NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-head-mismatch action=workflow-state-rebind' \
+        "PowerShell materializer blocks workflow readiness and names rebind"
+    assert_not_contains "$REBIND_WORKTREE/materializer-ps.out" 'NORMAL_PROJECT_WORKFLOWS: READY' \
+        "PowerShell materializer does not claim readiness during the mismatch"
+    (cd "$REBIND_WORKTREE" && "$REBIND_PWSH" -NoProfile -File "$HELPER_PS1" rebind \
+        --base-ref main --expected-base-sha "$REBIND_BASE") \
+        > "$REBIND_WORKTREE/helper.out" 2> "$REBIND_WORKTREE/helper.err"
+    assert_equals "$?" "0" "PowerShell inactive descendant rebind exits zero"
+    assert_contains "$REBIND_WORKTREE/.forge/local/state.md" "| Workflow base SHA    | $REBIND_HEAD |" \
+        "PowerShell rebind records current HEAD as the new base"
+fi
+
+assert_rejected_unchanged "$REBIND_WORKTREE" "stale expected base" rebind \
+    --base-ref main --expected-base-sha "$REBIND_BASE"
+run_sh "$REBIND_WORKTREE" activate --host claude --workflow new-feature --task rebound \
+    --base-ref main --phase requirements --next-step 'complete approved PRD'
+assert_equals "$?" "0" "activation succeeds after explicit rebind"
+assert_rejected_unchanged "$REBIND_WORKTREE" "active workflow rebind" rebind \
+    --base-ref main --expected-base-sha "$REBIND_HEAD"
+
 start_test "non-terminal identical activation preserves review progress"
 awk '{ if ($0 == "| Review iteration       | 0 |") print "| Review iteration       | 2 |"; else print }' \
     "$ACT_REPO/.forge/local/state.md" > "$ACT_REPO/.forge/local/state.next"

@@ -109,6 +109,15 @@ else
         "$C_DIM" "$C_RESET"
 fi
 
+start_test "Windows PowerShell 5.1 source decoding"
+for f in "$REPO_ROOT/scripts/materialize-adapters.ps1" "$REPO_ROOT/hooks/lib/workflow-state.ps1"; do
+    if rg -q "['\"]—['\"]" "$f"; then
+        fail "standalone Unicode em dash is unsafe in UTF-8-without-BOM PowerShell 5.1 source: ${f#$REPO_ROOT/}"
+    else
+        pass "PowerShell 5.1-safe dash tokens: ${f#$REPO_ROOT/}"
+    fi
+done
+
 # ---------------------------------------------------------------------------
 # JSON templates must parse cleanly
 # ---------------------------------------------------------------------------

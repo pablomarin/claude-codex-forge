@@ -125,6 +125,26 @@ function Get-OptionalFirstCertifiedIteration {
     return $values[0]
 }
 
+function Get-OptionalWorkflowStateValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$State,
+        [Parameter(Mandatory = $true)][string]$Section,
+        [Parameter(Mandatory = $true)][string]$Key
+    )
+    $values = New-Object Collections.Generic.List[string]
+    $current = ""
+    foreach ($line in [IO.File]::ReadAllLines($State)) {
+        if ($line -match '^## (.+)$') { $current = $Matches[1]; continue }
+        if ($current -eq $Section -and $line -match '^\|') {
+            $cells = $line -split '\|'
+            if ($cells.Count -ge 4 -and $cells[1].Trim() -eq $Key) { $values.Add($cells[2].Trim()) }
+        }
+    }
+    if ($values.Count -gt 1) { Throw-WorkflowStateBlocked "state must contain at most one $Section/$Key row" }
+    if ($values.Count -eq 0) { return '' }
+    return $values[0]
+}
+
 function Write-WorkflowStateLines {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -253,6 +273,28 @@ function Set-WorkflowStateActivationFile {
     Write-WorkflowStateLines -Path $Next -Lines $output.ToArray()
 }
 
+function Set-WorkflowStateRebindFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$State,
+        [Parameter(Mandatory = $true)][string]$Next,
+        [Parameter(Mandatory = $true)][string]$BaseSha
+    )
+    $section = ""
+    $output = New-Object Collections.Generic.List[string]
+    foreach ($line in [IO.File]::ReadAllLines($State)) {
+        $current = $line
+        if ($line -match '^## (.+)$') { $section = $Matches[1] }
+        if ($section -eq 'Identity' -and $line -match '^\|') {
+            $cells = $line -split '\|'
+            if ($cells.Count -ge 4 -and $cells[1].Trim() -eq 'Workflow base SHA') {
+                $current = "| Workflow base SHA    | $BaseSha |"
+            }
+        }
+        $output.Add($current)
+    }
+    Write-WorkflowStateLines -Path $Next -Lines $output.ToArray()
+}
+
 function Get-NextWorkflowReviewIteration {
     param([Parameter(Mandatory = $true)][string]$Value)
     $digits = $Value.ToCharArray()
@@ -354,6 +396,107 @@ function Invoke-WorkflowStateShow {
     $stream.Write($bytes, 0, $bytes.Length)
 }
 
+function Convert-WorkflowStateRebindArguments {
+    param([Parameter(Mandatory = $true)][string[]]$Tokens)
+    $values = @{}
+    for ($i = 0; $i -lt $Tokens.Count; $i += 2) {
+        if ($i + 1 -ge $Tokens.Count) { Throw-WorkflowStateBlocked "option requires a value: $($Tokens[$i])" }
+        $name = $Tokens[$i]
+        if ($name -notin @('--base-ref', '--expected-base-sha')) {
+            Throw-WorkflowStateBlocked "unsupported rebind option: $name"
+        }
+        if ($values.ContainsKey($name)) { Throw-WorkflowStateBlocked "duplicate rebind option: $name" }
+        $values[$name] = $Tokens[$i + 1]
+    }
+    foreach ($name in @('--base-ref', '--expected-base-sha')) {
+        if (-not $values.ContainsKey($name)) { Throw-WorkflowStateBlocked 'rebind requires base-ref and expected-base-sha' }
+    }
+    return $values
+}
+
+function Invoke-WorkflowStateRebind {
+    param([Parameter(Mandatory = $true)][string[]]$Tokens)
+    $values = Convert-WorkflowStateRebindArguments -Tokens $Tokens
+    $baseRef = $values['--base-ref']
+    $expectedBaseSha = $values['--expected-base-sha']
+    Assert-WorkflowStateRef -Ref $baseRef
+    if ($expectedBaseSha -cnotmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') {
+        Throw-WorkflowStateBlocked 'expected base SHA must be a full lowercase Git object id'
+    }
+
+    $root = Get-WorkflowStateRoot
+    $common = Get-WorkflowStateCommonDirectory -Root $root
+    $state = Get-CanonicalWorkflowState -Root $root
+    $stateHash = Get-WorkflowStateHash -Path $state
+    $currentRoot = Get-WorkflowStateValue -Path $state -Section Identity -Key 'Worktree root'
+    $currentCommon = Get-WorkflowStateValue -Path $state -Section Identity -Key 'Git common directory'
+    $currentBaseRef = Get-WorkflowStateValue -Path $state -Section Identity -Key 'Workflow base ref'
+    $currentBaseSha = Get-WorkflowStateValue -Path $state -Section Identity -Key 'Workflow base SHA'
+    $currentCommand = Get-WorkflowStateValue -Path $state -Section Workflow -Key Command
+    $currentPhase = Get-WorkflowStateValue -Path $state -Section Workflow -Key Phase
+    $currentNext = Get-WorkflowStateValue -Path $state -Section Workflow -Key 'Next step'
+    $currentIteration = Get-WorkflowStateValue -Path $state -Section Receipts -Key 'Review iteration'
+    $firstCertified = Get-OptionalFirstCertifiedIteration -State $state
+    $goalNonce = Get-OptionalWorkflowStateValue -State $state -Section '/goal session' -Key nonce
+
+    if ($currentRoot -ne $root -or $currentCommon -ne $common -or $currentBaseRef -ne $baseRef) {
+        Throw-WorkflowStateBlocked 'rebind identity differs from the inactive worktree binding'
+    }
+    if ($currentBaseSha -ne $expectedBaseSha) {
+        Throw-WorkflowStateBlocked 'inactive workflow base changed; rerun show before rebind'
+    }
+    if (($currentCommand -and $currentCommand -notin @('none', '-', ([string][char]0x2014))) -or $currentPhase -or $currentNext) {
+        Throw-WorkflowStateBlocked 'rebind requires an inactive workflow with no phase or next step'
+    }
+    $placeholders = @{
+        'Candidate receipt' = '.forge/local/evidence/<task-id>/candidate.receipt'
+        'Spec review receipt' = '.forge/local/reviews/<task-id>/spec.receipt'
+        'Quality review receipt' = '.forge/local/reviews/<task-id>/quality.receipt'
+        'Verify app receipt' = '.forge/local/evidence/<task-id>/verify-app.receipt'
+        'E2E receipt' = '.forge/local/evidence/<task-id>/e2e.receipt'
+        'Promotion receipt' = '.forge/local/evidence/<task-id>/promotion.receipt'
+        'Council receipt' = '.forge/local/council/<council-id>/receipt.json'
+    }
+    $placeholderMatch = ($currentIteration -in @('0', '<integer>') -and $firstCertified -eq 'none')
+    foreach ($key in $placeholders.Keys) {
+        if ((Get-WorkflowStateValue -Path $state -Section Receipts -Key $key) -ne $placeholders[$key]) {
+            $placeholderMatch = $false
+        }
+    }
+    if (-not $placeholderMatch) { Throw-WorkflowStateBlocked 'rebind refuses workflow or review evidence' }
+    if ($goalNonce -and $goalNonce -ne '<uuid-v4-lowercase>') {
+        Throw-WorkflowStateBlocked 'rebind refuses an active or malformed Goal session'
+    }
+    foreach ($line in [IO.File]::ReadAllLines($state)) {
+        if ($line -match '^- \[x\] PR creation authorized \u2014 `[0-9]{4}-[0-9]{2}-[0-9]{2}T') {
+            Throw-WorkflowStateBlocked 'rebind refuses existing PR authorization'
+        }
+    }
+    $null = & git -C $root cat-file -e "$currentBaseSha`^{commit}" 2>$null
+    if ($LASTEXITCODE -ne 0) { Throw-WorkflowStateBlocked 'inactive workflow base does not resolve to a commit' }
+    $resolvedBase = (& git -C $root rev-parse --verify "$baseRef`^{commit}" 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or -not $resolvedBase) { Throw-WorkflowStateBlocked "base ref does not resolve to a commit: $baseRef" }
+    $resolvedBase = $resolvedBase.Trim()
+    $currentHead = (& git -C $root rev-parse --verify HEAD 2>$null | Select-Object -First 1)
+    if (-not $currentHead) { Throw-WorkflowStateBlocked 'cannot resolve worktree HEAD' }
+    $currentHead = $currentHead.Trim()
+    if ($resolvedBase -ne $currentHead) { Throw-WorkflowStateBlocked 'rebind target must resolve to current worktree HEAD' }
+    if ($currentBaseSha -eq $currentHead) { Throw-WorkflowStateBlocked 'inactive workflow base already matches current HEAD' }
+    $null = & git -C $root merge-base --is-ancestor $currentBaseSha $currentHead 2>$null
+    if ($LASTEXITCODE -ne 0) { Throw-WorkflowStateBlocked 'rebind refuses a non-descendant worktree HEAD' }
+
+    $temporary = Join-Path (Split-Path $state -Parent) ('state.md.tmp.' + [Guid]::NewGuid().ToString('N'))
+    try {
+        Set-WorkflowStateRebindFile -State $state -Next $temporary -BaseSha $currentHead
+        if (-not (Test-WorkflowStateShape -Path $temporary)) { Throw-WorkflowStateBlocked 'rebind produced invalid state' }
+        Publish-ForgeWorkflowState -State $state -Next $temporary -ExpectedHash $stateHash
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    }
+    Write-Output "REBOUND: base_ref=$baseRef old=$currentBaseSha new=$currentHead"
+}
+
 function Invoke-WorkflowStateActivate {
     param([Parameter(Mandatory = $true)][string[]]$Tokens)
     $values = Convert-WorkflowStateArguments -Tokens $Tokens
@@ -382,8 +525,8 @@ function Invoke-WorkflowStateActivate {
     $currentCommon = Get-WorkflowStateValue -Path $state -Section Identity -Key "Git common directory"
     $currentBaseRef = Get-WorkflowStateValue -Path $state -Section Identity -Key "Workflow base ref"
     $currentBaseSha = Get-WorkflowStateValue -Path $state -Section Identity -Key "Workflow base SHA"
-    $activeWorkflow = $currentCommand -and $currentCommand -notin @("none", "-", "—") -and -not ($currentPhase -eq "complete" -and $currentNext -eq "none")
-    $inactiveWorkflow = -not $currentCommand -or $currentCommand -in @("none", "-", "—")
+    $activeWorkflow = $currentCommand -and $currentCommand -notin @("none", "-", ([string][char]0x2014)) -and -not ($currentPhase -eq "complete" -and $currentNext -eq "none")
+    $inactiveWorkflow = -not $currentCommand -or $currentCommand -in @("none", "-", ([string][char]0x2014))
     $boundMode = if ($currentBaseSha -match '^[0-9a-f]{40}([0-9a-f]{24})?$' -and $activeWorkflow) { "active" } elseif ($currentBaseSha -match '^[0-9a-f]{40}([0-9a-f]{24})?$' -and $inactiveWorkflow) { "prebound" } else { "none" }
     if ($boundMode -ne "none") {
         if ($currentRoot -ne $root -or $currentCommon -ne $common -or $currentBaseRef -ne $baseRef) {
@@ -395,7 +538,7 @@ function Invoke-WorkflowStateActivate {
         if (-not $currentHead) { Throw-WorkflowStateBlocked "cannot resolve bound worktree HEAD" }
         $currentHead = $currentHead.Trim()
         if ($boundMode -eq "prebound" -and $currentHead -ne $currentBaseSha) {
-            Throw-WorkflowStateBlocked "prebound worktree HEAD differs from its adopted base"
+            Throw-WorkflowStateBlocked "prebound worktree HEAD differs from its adopted base; inspect with show, then use workflow-state rebind only for the approved descendant base"
         }
         if ($boundMode -eq "active") {
             $null = & git -C $root merge-base --is-ancestor $currentBaseSha $currentHead 2>$null
@@ -581,7 +724,7 @@ function Invoke-WorkflowStateCheckpoint {
 
 function Invoke-ForgeWorkflowState {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    if ($Arguments.Count -eq 0) { Throw-WorkflowStateBlocked "usage: workflow-state show|activate|checkpoint" }
+    if ($Arguments.Count -eq 0) { Throw-WorkflowStateBlocked "usage: workflow-state show|rebind|activate|checkpoint" }
     $action = $Arguments[0]
     $remaining = if ($Arguments.Count -gt 1) { @($Arguments[1..($Arguments.Count - 1)]) } else { @() }
     switch ($action) {
@@ -589,9 +732,10 @@ function Invoke-ForgeWorkflowState {
             if ($remaining.Count -ne 0) { Throw-WorkflowStateBlocked "show accepts no arguments" }
             Invoke-WorkflowStateShow
         }
+        "rebind" { Invoke-WorkflowStateRebind -Tokens $remaining }
         "activate" { Invoke-WorkflowStateActivate -Tokens $remaining }
         "checkpoint" { Invoke-WorkflowStateCheckpoint -Tokens $remaining }
-        default { Throw-WorkflowStateBlocked "usage: workflow-state show|activate|checkpoint" }
+        default { Throw-WorkflowStateBlocked "usage: workflow-state show|rebind|activate|checkpoint" }
     }
 }
 
