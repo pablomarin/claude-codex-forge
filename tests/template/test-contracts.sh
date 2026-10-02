@@ -984,6 +984,17 @@ for f in "$REPO_ROOT/scripts/verify-runtime.sh" "$REPO_ROOT/scripts/verify-runti
 done
 [ "$fv_ok" = "1" ] && pass "exact project release is canonical and machine drift dependency is absent"
 
+start_test "documented runtime verifier is directly executable"
+VERIFY_RUNTIME_DIRECT_OUTPUT="/tmp/forge-verify-runtime-direct.$$"
+"$REPO_ROOT/scripts/verify-runtime.sh" identity --host codex \
+    --fixture "$REPO_ROOT/tests/template/fixtures/host-events/codex-0.144.1.jsonl" \
+    --requested-model gpt-6-astra --invocation-hash direct-contract \
+    > "$VERIFY_RUNTIME_DIRECT_OUTPUT" 2>&1
+assert_equals "$?" "0" "verify-runtime.sh supports its documented direct invocation"
+assert_contains "$VERIFY_RUNTIME_DIRECT_OUTPUT" '"invocation_hash":"direct-contract"' \
+    "direct invocation preserves verifier output"
+rm -f "$VERIFY_RUNTIME_DIRECT_OUTPUT"
+
 # ---------------------------------------------------------------------------
 # Contract 4: CI template placeholder ↔ setup.sh substitution
 # ---------------------------------------------------------------------------
