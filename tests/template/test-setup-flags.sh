@@ -123,7 +123,7 @@ MATERIALIZE_GLOBAL=$(scratch_dir materialize-global-rejected)
 mkdir -p "$MATERIALIZE_GLOBAL/target"
 bash "$REPO_ROOT/scripts/materialize-adapters.sh" \
     --repo-root "$REPO_ROOT" --target "$MATERIALIZE_GLOBAL/target" \
-    --scope global --platform unix --release-version 6.3 \
+    --scope global --platform unix --release-version 6.4.0 \
     > "$MATERIALIZE_GLOBAL/output.log" 2>&1
 assert_equals "$?" "1" "active materializer rejects global scope"
 assert_file_missing "$MATERIALIZE_GLOBAL/target/.forge/version" \
@@ -135,9 +135,20 @@ INVALID_PLATFORM_TARGET="$INVALID_PLATFORM/target"
 mkdir -p "$INVALID_PLATFORM_TARGET"
 printf '%s\n' 'PROJECT_SENTINEL' > "$INVALID_PLATFORM_TARGET/project.txt"
 invalid_platform_before=$(snapshot_project "$INVALID_PLATFORM_TARGET")
+
+INVALID_RELEASE=$(scratch_dir materialize-invalid-release)
+mkdir -p "$INVALID_RELEASE/target"
+bash "$REPO_ROOT/scripts/materialize-adapters.sh" \
+    --repo-root "$REPO_ROOT" --target "$INVALID_RELEASE/target" \
+    --scope project --platform unix --release-version 6.4 \
+    > "$INVALID_RELEASE/output.log" 2>&1
+assert_equals "$?" "2" "two-component source release exits with a usage error"
+assert_contains "$INVALID_RELEASE/output.log" 'BLOCKED: invalid release version' \
+    "two-component source release is rejected"
+
 bash "$REPO_ROOT/scripts/materialize-adapters.sh" \
     --repo-root "$REPO_ROOT" --target "$INVALID_PLATFORM_TARGET" \
-    --scope project --platform typo --release-version 6.3 \
+    --scope project --platform typo --release-version 6.4.0 \
     > "$INVALID_PLATFORM/output.log" 2>&1
 assert_equals "$?" "2" "unknown platform exits with a usage error"
 assert_contains "$INVALID_PLATFORM/output.log" 'invalid materializer platform' \
@@ -160,7 +171,7 @@ printf '%s\n' '{"mcpServers":{"project-custom":{"command":"custom"}}}' > "$NO_PY
 no_python_before=$(snapshot_project "$NO_PYTHON_TARGET")
 PATH="$NO_PYTHON_BIN" /bin/bash "$REPO_ROOT/scripts/materialize-adapters.sh" \
     --repo-root "$REPO_ROOT" --target "$NO_PYTHON_TARGET" \
-    --scope project --platform unix --release-version 6.3 \
+    --scope project --platform unix --release-version 6.4.0 \
     > "$NO_PYTHON/output.log" 2>&1
 assert_equals "$?" "1" "missing Python blocks an existing-config merge"
 assert_contains "$NO_PYTHON/output.log" 'python3 is required before Forge materialization' \
@@ -205,7 +216,7 @@ S3=$(scratch_dir setup-flags-force)
 git -C "$S3" init -q
 run_setup "$S3" "$S3/force.log" -f
 assert_equals "$?" "0" "-f succeeds on a fresh project"
-EXPECTED_RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' \
+EXPECTED_RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)([[:space:]]|$).*/\1/p' \
     "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
 assert_equals "$(tr -d '\r\n' < "$S3/.forge/version")" "$EXPECTED_RELEASE" \
     "project stamp records the exact Forge release"

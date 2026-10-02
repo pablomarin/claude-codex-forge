@@ -127,7 +127,7 @@ $hookDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $configCheck = Join-Path $hookDir "check-config-change.ps1"
 $forgeVersionPath = Join-Path (Get-Location).Path ".forge\version"
 $forgeVersion = if (Test-Path -LiteralPath $forgeVersionPath -PathType Leaf) { (@(Get-Content -LiteralPath $forgeVersionPath)[0]).Trim() } else { "" }
-if ($forgeVersion -match '^6(\.\d+)?$' -and (Test-Path -LiteralPath $configCheck)) {
+if ($forgeVersion -match '^6(\.\d+){0,2}$' -and (Test-Path -LiteralPath $configCheck)) {
     $null = '{}' | & $configCheck -Mode boundary -Root (Get-Location).Path 2>$null
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("FORGE_CONFIG_TAMPERED: managed hook configuration changed; run setup -f and inspect the diff before shipping.")
@@ -283,6 +283,50 @@ if ($command -match $prCreatePattern) {
             }
 
             # All checks passed; fall through to the existing checklist guard
+        }
+    }
+}
+
+# Exact quick fixes use a direct focused check instead of the full candidate
+# receipt pipeline. Fail closed unless one valid ancestral base is recorded and
+# the complete base diff stays within the three implementation-path cap.
+if ($cmd -cmatch '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$') {
+    $quickBaseRows = @()
+    $inIdentity = $false
+    foreach ($line in (($content -replace "`r", "") -split "`n")) {
+        if ($line -ceq '## Identity') { $inIdentity = $true; continue }
+        if ($inIdentity -and $line.StartsWith('## ')) { $inIdentity = $false }
+        if (-not $inIdentity) { continue }
+        $parts = $line -split '\|'
+        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Workflow base SHA') {
+            $quickBaseRows += $parts[2].Trim()
+        }
+    }
+    if ($quickBaseRows.Count -eq 1 -and $quickBaseRows[0] -cmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') {
+        $quickBaseSha = [string]$quickBaseRows[0]
+        $null = & git cat-file -e "$quickBaseSha`^{commit}" 2>$null
+        $quickBaseValid = $LASTEXITCODE -eq 0
+        if ($quickBaseValid) {
+            $null = & git merge-base --is-ancestor $quickBaseSha HEAD 2>$null
+            $quickBaseValid = $LASTEXITCODE -eq 0
+        }
+        if ($quickBaseValid) {
+            $quickCommitted = @(& git diff --no-renames --name-only "$quickBaseSha..HEAD" -- 2>$null)
+            $quickBaseValid = $LASTEXITCODE -eq 0
+            if ($quickBaseValid) {
+                $quickCached = @(& git diff --cached --no-renames --name-only $quickBaseSha -- 2>$null)
+                $quickBaseValid = $LASTEXITCODE -eq 0
+            }
+            if ($quickBaseValid) {
+                $quickUnstaged = @(& git diff --no-renames --name-only -- 2>$null)
+                $quickBaseValid = $LASTEXITCODE -eq 0
+            }
+            if ($quickBaseValid) {
+                $quickPaths = @($quickCommitted + $quickCached + $quickUnstaged | Sort-Object -Unique -CaseSensitive | Where-Object {
+                    -not [string]::IsNullOrEmpty($_) -and $_ -cne 'README.md' -and $_ -cne 'docs/CHANGELOG.md'
+                })
+                if ($quickPaths.Count -le 3) { Exit-ForgeAllow }
+            }
         }
     }
 }

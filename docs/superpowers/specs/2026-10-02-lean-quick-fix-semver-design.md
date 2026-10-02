@@ -25,7 +25,7 @@ contributors to use `MAJOR.MINOR.PATCH` would therefore contradict the executabl
    clearly understood, low-risk, non-user-facing, and bounded to `/fix-bug` or `/new-feature`.
 3. Exempt only an exact active `/quick-fix <slug>` from review and verifier evidence at ship time;
    retain common state validation, configuration-integrity checks, compound-ship protection, Goal
-   PR authorization, and other shared safety hooks.
+   PR authorization, activation provenance, changed-path scope, and other shared safety hooks.
 4. Publish exact three-component SemVer and bump it once for every merged change set/PR so routine
    `--upgrade` can distinguish every released Forge tree.
 5. Record every released change in `docs/CHANGELOG.md`, while keeping README release prose limited
@@ -51,7 +51,8 @@ three files. It will:
 2. record the acceptance check and affected files;
 3. require RED-first TDD for behavior changes or a direct static/rendered check for documentation;
 4. make the smallest change and run the focused owning check directly in the main session;
-5. update the changelog and release version when the change will be merged;
+5. apply any repository-specific changelog and release-version policy when the change will be
+   merged;
 6. stage, inspect, and commit the intended diff; and
 7. pause for explicit authorization before push, PR creation, merge, or another external mutation.
 
@@ -63,8 +64,19 @@ escalates to the full workflow before implementation continues.
 ## Enforcement Boundary
 
 Both `hooks/check-workflow-gates.sh` and `hooks/check-workflow-gates.ps1` will recognize only the
-canonical command form `/quick-fix <lowercase-hyphenated-slug>`. The exemption will occur after the
-hook has:
+canonical command form `/quick-fix <lowercase-hyphenated-slug>` using case-sensitive matching. A
+new quick-fix activation is allowed only from a clean worktree whose `HEAD` equals its resolved
+workflow base; an exact resume retains the already-bound base. This prevents completing or
+abandoning a broader workflow and reclassifying its existing delta as quick-fix.
+
+At every quick-fix ship boundary, the hook will validate that the recorded base is a real ancestor
+of `HEAD` and that the complete tracked delta from that base contains no more than three
+implementation paths. Exact repository release metadata paths `README.md` and
+`docs/CHANGELOG.md` do not consume that three-path implementation budget. Missing/invalid base
+identity, more than three implementation paths, or a path-like/uppercase slug follows the ordinary
+full-workflow evidence gate.
+
+The exemption will occur after the hook has:
 
 - recognized and decompounded the ship action;
 - resolved the real repository and canonical V6 state;
@@ -74,6 +86,12 @@ hook has:
 The exemption occurs before checklist, convergence-breaker, and structured final-receipt checks.
 Malformed commands, missing or invalid canonical state, other workflows, and legacy state do not
 receive the exemption. Bash and PowerShell implementations must remain behaviorally equivalent.
+
+The Stop hooks and evidence builders will recognize the same exact command as a direct-check path:
+they will not emit stale reviewer/verifier warnings or require full-workflow receipts for
+quick-fix, while retaining truthful quick-fix-specific evidence. Generated quick-fix adapters will
+also omit the ordinary-review transport-consent disclosure because invocation no longer sends a
+candidate to reviewers.
 
 The shared state schema may continue allocating receipt paths for all workflows. For quick-fix they
 remain unused placeholders; changing the state schema is unnecessary and would increase migration
@@ -100,11 +118,15 @@ It will require one release bump and changelog entry per merged change set/PR an
 selection above. It will also state that README release prose changes only for material high-level
 changes. The README version badge remains exact metadata and may change for every release; its
 version-history prose does not become a patch-by-patch duplicate of the changelog.
+`CONTRIBUTING.md` will require both hosts to read that context so the source repository actually
+discovers the policy.
 
 ## Documentation Behavior
 
 - `docs/CHANGELOG.md` receives the complete release record for every merged change set/PR. The top
   heading is always the exact current release and therefore drives setup.
+- The `6.4.0` release folds every currently unreleased subsection that sits beneath `6.3` into the
+  new release instead of leaving shipped work misattributed to the older version.
 - `README.md` describes the stable product and major user-visible changes. This release merits a
   concise `6.4.0` history row because it changes quick-fix behavior and the public version contract.
   Later patch releases update the badge but do not add release-history prose unless the underlying
@@ -122,7 +144,8 @@ version-history prose does not become a patch-by-patch duplicate of the changelo
 - A malformed stamp or unsupported major remains blocking. Failed setup or refresh preserves the
   previous stamp.
 - Quick-fix exemption is fail-closed: only the exact canonical command and canonical V6 state are
-  eligible. Any ambiguity follows the ordinary full-workflow evidence gate.
+  eligible, activation begins from a clean base, and the base-bound implementation delta stays
+  within three paths. Any ambiguity follows the ordinary full-workflow evidence gate.
 
 ## Verification Strategy
 
@@ -145,11 +168,16 @@ Implementation follows RED-GREEN TDD:
 
 - An active canonical `/quick-fix <slug>` can commit, push, and create a PR without reviewer or
   verifier receipts after its direct focused check and normal human authorization boundaries.
+- A new quick-fix cannot activate over an existing dirty/ahead delta, and ship hooks allow at most
+  three base-bound implementation paths plus exact required README/changelog release metadata.
 - The same missing receipt set still blocks `/fix-bug` and `/new-feature`.
 - `quick-fix.md` contains no reviewer, verification-agent, E2E, candidate receipt, review iteration,
   or closure-loop requirement.
 - Fresh installation and upgrade write `6.4.0`; runtime verification reports it as valid.
 - Existing supported V6 stamps `6` and `6.MINOR` upgrade safely to the exact three-component release.
 - `docs/agent-context.md` requires one SemVer bump and complete changelog entry per merged change
-  set/PR and reserves README release prose for material changes.
+  set/PR, is discovered through `CONTRIBUTING.md`, and reserves README release prose for material
+  changes.
+- Stop/evidence hooks and generated adapters do not demand or disclose reviewer transport for
+  quick-fix, while full workflows retain those contracts.
 - Bash and PowerShell focused parity tests and the Forge fast gate pass on the final candidate.

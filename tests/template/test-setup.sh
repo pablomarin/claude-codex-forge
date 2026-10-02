@@ -1022,7 +1022,7 @@ EOF
 test_forge_version_stamp() {
     start_test "forge version stamp: exact project pin with no machine dependency"
     local EXPECT
-    EXPECT=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
+    EXPECT=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)([[:space:]]|$).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
 
     local S; S=$(scratch_dir fvstamp); make_project "$S" flat
     run_setup "$S" "$S/.setup.log" -p FV -t python
@@ -1038,13 +1038,17 @@ test_forge_version_stamp() {
     assert_file_missing "$S/.fakehome/.claude/.forge-version" \
         "fv: machine-wide version stamp is retired"
 
-    printf '6\n' > "$S/.forge/version"
-    run_setup "$S" "$S/.up.log" -p FV -t python --upgrade
-    assert_equals "$?" "0" "fv: major-only V6 upgrade exits 0"
-    assert_contains "$S/.up.log" "FORGE_VERSION_CHANGE: 6 -> $EXPECT" \
-        "fv: upgrade reports the exact repository version transition"
-    assert_equals "$(tr -d '\r\n' < "$S/.forge/version")" "$EXPECT" \
-        "fv: legacy major-only V6 advances to exact release"
+    local legacy_version
+    for legacy_version in 6 6.3; do
+        printf '%s\n' "$legacy_version" > "$S/.forge/version"
+        run_setup "$S" "$S/.up-$legacy_version.log" -p FV -t python --upgrade
+        assert_equals "$?" "0" "fv: legacy $legacy_version V6 upgrade exits 0"
+        assert_contains "$S/.up-$legacy_version.log" \
+            "FORGE_VERSION_CHANGE: $legacy_version -> $EXPECT" \
+            "fv: upgrade reports $legacy_version to exact SemVer"
+        assert_equals "$(tr -d '\r\n' < "$S/.forge/version")" "$EXPECT" \
+            "fv: legacy $legacy_version advances to exact SemVer"
+    done
 }
 
 # Extract + unit-test the real forge_version() parser (mirrors extract_copy_file).
@@ -1069,8 +1073,17 @@ EOF
     }
 
     # Normal version heading → parsed.
-    mkdir -p "$work/good/docs"; printf '# Changelog\n\n## 7.3 — 2026-01-01\n' > "$work/good/docs/CHANGELOG.md"
-    assert_equals "$(_run_fv "$work/good")" "7.3" "forge_version: parses a normal '## 7.3' heading"
+    mkdir -p "$work/good/docs"; printf '# Changelog\n\n## 7.3.2 — 2026-01-01\n' > "$work/good/docs/CHANGELOG.md"
+    assert_equals "$(_run_fv "$work/good")" "7.3.2" \
+        "forge_version: parses a normal three-component heading"
+
+    mkdir -p "$work/incomplete/docs"; printf '# Changelog\n\n## 7.3 — 2026-01-01\n' > "$work/incomplete/docs/CHANGELOG.md"
+    assert_equals "$(_run_fv "$work/incomplete")" "unknown" \
+        "forge_version: rejects a two-component source release"
+
+    mkdir -p "$work/overlong/docs"; printf '# Changelog\n\n## 7.3.2.1 — 2026-01-01\n' > "$work/overlong/docs/CHANGELOG.md"
+    assert_equals "$(_run_fv "$work/overlong")" "unknown" \
+        "forge_version: rejects an overlong four-component source release"
 
     # Non-version TOP heading → unknown (only the first heading is inspected; we must
     # NOT scan past "## [Unreleased]" to a stale older release — Codex code-review P2-1).

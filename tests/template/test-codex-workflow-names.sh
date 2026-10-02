@@ -3,7 +3,7 @@
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 source "$REPO_ROOT/tests/template/lib.sh"
 init_counters
-RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
+RELEASE=$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)
 CASE=$(scratch_dir codex-workflow-names)
 PROJECT="$CASE/project"
 mkdir -p "$PROJECT"
@@ -13,7 +13,7 @@ materialize() {
     PATH=/usr/bin:/bin:/usr/sbin:/sbin FORGE_ENGINE_IDENTITY_FIXTURE=1 \
         bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" \
         --target "$PROJECT" --scope project \
-        --release-version "$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)" > "$CASE/install.log" 2>&1
+        --release-version "$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)" > "$CASE/install.log" 2>&1
 }
 seed_old() {
     local name canonical path

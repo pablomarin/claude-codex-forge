@@ -194,11 +194,11 @@ report_native_goal_collisions() {
 forge_version() {
     local top v
     top=$(grep -m1 '^## ' "$SCRIPT_DIR/docs/CHANGELOG.md" 2>/dev/null)
-    v=$(printf '%s' "$top" | sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p')
-    if [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]]; then printf '%s' "$v"; else printf 'unknown'; fi
+    v=$(printf '%s' "$top" | sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)([[:space:]]|$).*/\1/p')
+    if [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then printf '%s' "$v"; else printf 'unknown'; fi
 }
 FORGE_VERSION="$(forge_version)"
-[[ "$FORGE_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || {
+[[ "$FORGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
     echo "BLOCKED: published Forge release is unavailable" >&2
     exit 2
 }
@@ -224,15 +224,16 @@ v6_preflight_no_legacy() {
     local kind source destination row_scope platform host ownership selector proof extra family mixed_path
     if [ -f "$root/.forge/version" ]; then
         installed_version=$(tr -d '\r\n' < "$root/.forge/version" 2>/dev/null)
-        case "$installed_version" in 6|6.*) installed_major=6 ;; [0-9]*.*) installed_major=${installed_version%%.*} ;; *) installed_major="$installed_version" ;; esac
+        if [[ "$installed_version" =~ ^([0-9]+)(\.[0-9]+){0,2}$ ]]; then
+            installed_major=${BASH_REMATCH[1]}
+        else
+            echo "BLOCKED: malformed Forge release at $root/.forge/version" >&2
+            return 1
+        fi
         [ "$installed_major" = 6 ] || {
             echo "BLOCKED: unsupported Forge layout major ${installed_major:-unknown}" >&2
             return 1
         }
-        case "$installed_version" in 6|6.[0-9]*) ;; *)
-            echo "BLOCKED: malformed Forge release at $root/.forge/version" >&2
-            return 1
-        esac
         return 0
     fi
     if [ "$scope" = project ] && { [ -e "$root/CONTINUITY.md" ] || [ -L "$root/CONTINUITY.md" ]; }; then

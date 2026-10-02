@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$Target,
-    [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+$')][string]$ReleaseVersion,
+    [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$ReleaseVersion,
     [Parameter(Mandatory = $false)][ValidateSet("project")][string]$Scope = "project",
     [switch]$DryRun
 )

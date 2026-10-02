@@ -487,7 +487,7 @@ public static class ForgeFakeEngine {
 
     Write-Host 'PowerShell materialized Codex host-context invocation'
     $installed = Join-Path $temporary 'materialized adapters'; New-Item -ItemType Directory -Path $installed | Out-Null
-    $release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+)')).Groups[1].Value
+    $release = ([regex]::Match([IO.File]::ReadAllText((Join-Path $root 'docs/CHANGELOG.md')), '(?m)^##\s+(\d+\.\d+\.\d+)')).Groups[1].Value
     Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $root 'scripts/materialize-adapters.ps1'),'-RepoRoot',$root,'-Target',$installed,'-Scope','project','-Platform','windows','-ReleaseVersion',$release)) 0 'PowerShell adapters materialize'
     $hooks = Get-Content -LiteralPath (Join-Path $installed '.codex/hooks.json') -Raw | ConvertFrom-Json
     $sessionHandlers = @($hooks.hooks.SessionStart | ForEach-Object { @($_.hooks) })

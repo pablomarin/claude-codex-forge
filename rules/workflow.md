@@ -116,6 +116,10 @@ P3, naming, cosmetic, purely theoretical, and unchanged candidate concerns never
 Schema-valid `FINDINGS/P3` is advisory and certifying, just like `CLEAN/P3`; preserve
 the notes without repairing or reopening review solely for them. Any P0/P1/P2
 finding row still blocks certification regardless of the reported maximum severity.
+Stop the review cycle when further iterations have diminishing returns or the remaining proposals
+would violate KISS or YAGNI. Preserve those advisory findings and surface them to the developer;
+do not spend another broad review on speculative improvements. This stop rule never waives a
+reachable P0/P1, a concrete material P2, or an explicit acceptance criterion.
 P2 means a concrete material maintainability, reliability, performance, or test risk, not a merely
 imaginable rare case. Rare but catastrophic security or data loss triggers remain P0/P1. Resource
 discipline never excuses reachable security failure, data loss, incorrect supported behavior, or an
@@ -182,8 +186,8 @@ file capabilities for local evidence. Never infer a clean gate from a successful
 
 ### Canonical V6 state transitions
 
-Every development workflow follows this state machine; receipt population records progress and
-never activates a mode:
+Feature and bug-fix workflows follow this full-certification state machine; receipt population
+records progress and never activates a mode:
 
 1. **Recover inactive binding when required:** if `show` reports that an inactive pre-bound
    worktree no longer matches `HEAD`, use the bounded `workflow-state.sh rebind` transition above.
@@ -191,12 +195,11 @@ never activates a mode:
 2. **Activate:** resolve and persist the immutable workflow base ref/SHA, create one task-local
    `.forge/local/` evidence directory, populate every receipt path, and set `Review iteration` to
    `0`. Invoke `.forge/hooks/lib/workflow-state.sh activate --host <claude|codex> --workflow
-   <new-feature|fix-bug|quick-fix> --task <slug> --base-ref <ref-or-sha> --phase <phase>
+   <new-feature|fix-bug> --task <slug> --base-ref <ref-or-sha> --phase <phase>
    --next-step '<exact next step>'` before any discretionary investigation or tracked mutation.
    The active V6 schema selects structured evidence immediately. An identical in-flight V6.1
    placeholder bundle is adopted by this activation; partial or conflicting bundles fail closed.
-3. **Plan before code:** for planned feature and bug work, obtain clean candidate-bound plan evidence
-   before production implementation. Quick fixes must record their acceptance check before editing.
+3. **Plan before code:** obtain clean candidate-bound plan evidence before production implementation.
 4. **Exercise early:** run preliminary E2E while mutation is still allowed, or record why no
    supported user journey exists; this is not final certification.
 5. **Freeze:** finish TDD, documentation, and simplification; stage the intended tree and freeze one
@@ -211,6 +214,14 @@ never activates a mode:
    affected final gates.
 9. **Promote:** revalidate the complete receipt set and promote only the exact certified tree.
 
+Quick-fix is deliberately separate. It requires a clean exact-base activation, a clearly understood
+low-risk non-user-facing change, at most three implementation paths, and one direct focused check by
+the main agent. Exact `README.md` and `docs/CHANGELOG.md` release metadata does not consume that path
+budget. It dispatches no plan, `code-spec`, `code-quality`, `verify-app`, or `verify-e2e` role; does
+not freeze a candidate or create final receipts; and ships only when the hook revalidates its single
+recorded ancestral base and complete changed-path scope. Any ambiguity, higher risk, user-facing
+behavior, architecture choice, or scope overflow must restart as `/fix-bug` or `/new-feature`.
+
 At every other durable boundary, invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host
 <claude|codex> --phase <phase> --next-step '<exact next step>'`. End a completed workflow with the
 exact terminal transition `workflow-state.sh checkpoint --host <claude|codex> --phase complete
@@ -221,7 +232,7 @@ twin with the same action and arguments.
 - Compare viable approaches and run the cheapest safe falsifying check first. Do not invoke /council
   as a routine planning, review, or implementation step. Invoke it only when the developer explicitly requests it
   or a concrete high-impact architectural fork remains unresolved after that check.
-- Freeze the exact staged-clean candidate before final review or verification.
+- For `/fix-bug` and `/new-feature`, freeze the exact staged-clean candidate before final review or verification.
 - Dispatch fresh independent `plan`, `code-spec`, and `code-quality` roles through the installed
   structured dispatcher. Automatic fallback is visible in its receipt.
 - Code review requires distinct clean `code-spec` and `code-quality` receipts for the same candidate.
@@ -229,8 +240,9 @@ twin with the same action and arguments.
   or access is `BLOCKED`/`UNVERIFIED`, never PASS.
 - Any candidate mutation invalidates affected receipts and restarts from staging/freeze.
 
-The compatibility reader may consume genuine unmigrated v5 state. Every active canonical V6
-workflow uses the current structured receipts; legacy prose never certifies a migrated gate.
+The compatibility reader may consume genuine unmigrated v5 state. Active canonical V6 feature and
+bug-fix workflows use the current structured receipts; the exact bounded quick-fix flow uses direct
+base/scope enforcement instead. Legacy prose never certifies a migrated gate.
 
 ## Autonomous Goal Composition
 

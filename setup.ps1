@@ -47,15 +47,15 @@ $ScriptDir = $PSScriptRoot
 function Get-ForgeVersion {
     try {
         $top = Select-String -Path (Join-Path $ScriptDir "docs/CHANGELOG.md") -Pattern '^##\s' -List 2>$null
-        if ($top -and $top.Line -match '^##\s+([0-9]+\.[0-9]+)') {
+        if ($top -and $top.Line -match '^##\s+([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)') {
             $v = $Matches[1]
-            if ($v -match '^\d+\.\d+$') { return $v }
+            if ($v -match '^\d+\.\d+\.\d+$') { return $v }
         }
     } catch {}
     return "unknown"
 }
 $ForgeVersion = Get-ForgeVersion
-if ($ForgeVersion -notmatch '^\d+\.\d+$') {
+if ($ForgeVersion -notmatch '^\d+\.\d+\.\d+$') {
     [Console]::Error.WriteLine('BLOCKED: published Forge release is unavailable')
     exit 2
 }
@@ -195,8 +195,7 @@ function Test-V6PreflightNoLegacy {
     $version = Join-Path $Root ".forge\version"
     if (Test-Path $version) {
         $installedVersion = ((Get-Content -Raw $version).Trim())
-        if ($installedVersion -eq "6") { return }
-        if ($installedVersion -match '^(\d+)\.(\d+)$') {
+        if ($installedVersion -match '^(\d+)(\.\d+){0,2}$') {
             if ($Matches[1] -ne "6") { throw "BLOCKED: unsupported Forge layout major $($Matches[1])" }
             return
         }

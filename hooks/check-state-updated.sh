@@ -131,11 +131,16 @@ if [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ]; then
             }
         }
     ')
-    case "$_workflow_command" in ''|none|-|'—') ;; *)
+    case "$_workflow_command" in ''|none|-|'—') ;;
+    *)
+        if printf '%s\n' "$_workflow_command" | grep -qE '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'; then
+            :
+        else
         _vr="$HOOK_DIR/lib/verification-receipt.sh"
         [ -f "$_vr" ] || _vr="hooks/lib/verification-receipt.sh"
         if [ ! -f "$_vr" ] || ! bash "$_vr" check --state "$STATE_MD" >/dev/null 2>&1; then
             echo "FORGE_FINAL_EVIDENCE_STALE: candidate-bound review, verify-app, and E2E receipts no longer certify the current staged-clean candidate." >&2
+        fi
         fi
         ;;
     esac

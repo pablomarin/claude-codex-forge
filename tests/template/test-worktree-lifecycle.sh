@@ -151,7 +151,7 @@ mkdir -p "$NATIVE_PRIMARY"
 NATIVE_BASE_SHA=$(git -C "$NATIVE_PRIMARY" rev-parse HEAD)
 mkdir -p "$NATIVE_PRIMARY/.forge/local"
 cp "$REPO_ROOT/state.template.md" "$NATIVE_PRIMARY/.forge/state.template.md"
-printf '6.3\n' > "$NATIVE_PRIMARY/.forge/version"
+printf '6.4.0\n' > "$NATIVE_PRIMARY/.forge/version"
 printf 'private policy\n' > "$NATIVE_PRIMARY/.forge/instructions.md"
 printf '.forge/state.template.md\tfixture\tv6\n.forge/instructions.md\tfixture\tv6\n' \
     > "$NATIVE_PRIMARY/.forge/installed-files.tsv"

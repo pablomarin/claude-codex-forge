@@ -250,7 +250,7 @@ assert_receipt_value "$S" semantic_verdict CLEAN
 start_test "materialized native hook context and fixed launcher invoke the installed dispatcher"
 S=$(scratch_dir "dispatch installed path"); make_repo "$S"
 bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" --target "$S" --scope project --platform unix \
-    --release-version "$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)" > "$S/install.log" 2>&1
+    --release-version "$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)" > "$S/install.log" 2>&1
 mkdir -p "$S/.forge/local/reviews"
 printf 'installed review\n' > "$S/.forge/local/reviews/prompt.txt"
 mkdir -p "$S/home"
@@ -473,7 +473,7 @@ assert_equals "$legacy_env_rc" "0" "legacy receipt variables cannot block or aut
 
 S=$(scratch_dir dispatch-context-launcher); make_repo "$S"
 bash "$REPO_ROOT/scripts/materialize-adapters.sh" --repo-root "$REPO_ROOT" --target "$S" --scope project --platform unix \
-    --release-version "$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)" >/dev/null 2>&1
+    --release-version "$(sed -nE 's/^##[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$REPO_ROOT/docs/CHANGELOG.md" | head -1)" >/dev/null 2>&1
 mkdir -p "$S/home"
 (cd "$S" && printf '{"thread_id":"codex-old"}' | HOME="$S/home" bash .forge/hooks/lib/host-context.sh hook --host codex) >/dev/null 2>&1
 (cd "$S" && printf '{"session_id":"claude-current"}' | HOME="$S/home" bash .forge/hooks/lib/host-context.sh hook --host claude) >/dev/null 2>&1

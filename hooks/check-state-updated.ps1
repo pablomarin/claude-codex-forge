@@ -106,7 +106,8 @@ if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd
         if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Command') { $workflowCommandRows += $parts[2].Trim() }
     }
     $workflowCommand = if ($workflowCommandRows.Count -eq 1) { [string]$workflowCommandRows[0] } else { "" }
-    if ($workflowCommand -and $workflowCommand -notin @('none', '-', '—')) {
+    $quickFixDirect = $workflowCommand -cmatch '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'
+    if ($workflowCommand -and $workflowCommand -notin @('none', '-', '—') -and -not $quickFixDirect) {
         $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
         if (-not (Test-Path -LiteralPath $verificationReceipt)) { $verificationReceipt = Join-Path (Get-Location) 'hooks\lib\verification-receipt.ps1' }
         $receiptStatus = 2

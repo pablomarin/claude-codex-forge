@@ -102,7 +102,7 @@ function Assert-WorkflowStateCell {
 function Assert-WorkflowStateTask {
     param([Parameter(Mandatory = $true)][string]$Task)
     Assert-WorkflowStateCell -Label "task slug" -Value $Task
-    if ($Task.Length -gt 64 -or $Task -notmatch '^[a-z0-9]+(-[a-z0-9]+)*$') {
+    if ($Task.Length -gt 64 -or $Task -cnotmatch '^[a-z0-9]+(-[a-z0-9]+)*$') {
         Throw-WorkflowStateBlocked "invalid task slug: $Task"
     }
 }
@@ -506,8 +506,8 @@ function Invoke-WorkflowStateActivate {
     $baseRef = $values["--base-ref"]
     $phase = $values["--phase"]
     $nextStep = $values["--next-step"]
-    if ($hostName -notin @("claude", "codex")) { Throw-WorkflowStateBlocked "invalid host: $hostName" }
-    if ($workflow -notin @("new-feature", "fix-bug", "quick-fix")) { Throw-WorkflowStateBlocked "invalid workflow: $workflow" }
+    if ($hostName -cnotin @("claude", "codex")) { Throw-WorkflowStateBlocked "invalid host: $hostName" }
+    if ($workflow -cnotin @("new-feature", "fix-bug", "quick-fix")) { Throw-WorkflowStateBlocked "invalid workflow: $workflow" }
     Assert-WorkflowStateTask -Task $task
     Assert-WorkflowStateRef -Ref $baseRef
     Assert-WorkflowStateCell -Label "phase" -Value $phase
@@ -601,6 +601,27 @@ function Invoke-WorkflowStateActivate {
         }
     }
 
+    if ($workflow -ceq "quick-fix" -and $mode -ceq "new") {
+        $quickFixHead = (& git -C $root rev-parse --verify HEAD 2>$null | Select-Object -First 1)
+        $quickFixBranch = (& git -C $root symbolic-ref -q --short HEAD 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0 -or -not $quickFixBranch -or $quickFixBranch.Trim() -cne "quick-fix/$task") {
+            Throw-WorkflowStateBlocked "new quick-fix activation requires branch quick-fix/$task"
+        }
+        $quickFixBaseRef = (& git -C $root rev-parse --symbolic-full-name $baseRef 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0 -or -not $quickFixBaseRef -or
+            $quickFixBaseRef.Trim() -cnotmatch '^refs/(heads|remotes)/' -or
+            $quickFixBaseRef.Trim() -ceq "refs/heads/$($quickFixBranch.Trim())") {
+            Throw-WorkflowStateBlocked "new quick-fix activation requires a distinct named base branch"
+        }
+        if (-not $quickFixHead -or $quickFixHead.Trim() -cne $baseSha) {
+            Throw-WorkflowStateBlocked "new quick-fix activation requires HEAD to equal the resolved base"
+        }
+        $quickFixStatus = @(& git -C $root status --porcelain --untracked-files=all 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $quickFixStatus.Count -gt 0) {
+            Throw-WorkflowStateBlocked "new quick-fix activation requires a clean worktree"
+        }
+    }
+
     $evidenceDir = Join-Path $root ".forge\local\evidence\$task"
     $reviewDir = Join-Path $root ".forge\local\reviews\$task"
     foreach ($candidate in @((Split-Path $evidenceDir -Parent), $evidenceDir, (Split-Path $reviewDir -Parent), $reviewDir)) {
@@ -684,7 +705,7 @@ function Invoke-WorkflowStateCheckpoint {
     $recordedCommon = Get-WorkflowStateValue -Path $state -Section Identity -Key "Git common directory"
     $iteration = Get-WorkflowStateValue -Path $state -Section Receipts -Key "Review iteration"
     $firstCertified = Get-OptionalFirstCertifiedIteration -State $state
-    if ($command -notmatch '^/(new-feature|fix-bug|quick-fix) [a-z0-9]+(-[a-z0-9]+)*$' -or
+    if ($command -cnotmatch '^/(new-feature|fix-bug|quick-fix) [a-z0-9]+(-[a-z0-9]+)*$' -or
         $recordedRoot -ne $root -or $recordedCommon -ne $common) {
         Throw-WorkflowStateBlocked "checkpoint requires an active workflow in this worktree"
     }

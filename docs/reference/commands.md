@@ -14,6 +14,12 @@ The host-native entry points and shared agent roles available after setup.
 **Workflow commands guide the process.** `.forge/local/state.md` is the host-neutral durable
 checkpoint; hooks validate its current candidate evidence before commit/push/PR.
 
+`/quick-fix` is the narrow exception: it is limited to a clean exact-base, low-risk,
+non-user-facing change with no more than three implementation paths and one obvious focused check.
+The main agent runs that check directly; quick-fix does not dispatch review or verification agents
+and does not create a final candidate receipt set. Scope drift restarts as `/fix-bug` or
+`/new-feature`.
+
 ### Upgrading from prefixed Codex names
 
 Codex now uses `$fix-bug`, `$new-feature`, `$quick-fix`, `$finish-branch`,

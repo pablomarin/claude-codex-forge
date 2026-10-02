@@ -15,7 +15,7 @@ if ($Mode -eq "identity") {
     $versionPath = Join-Path $ProjectRoot ".forge\version"
     if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) { throw "FORGE_VERSION: BLOCKED missing project release" }
     $version = [IO.File]::ReadAllText($versionPath).Trim()
-    if ($version -notmatch '^\d+\.\d+$') { throw "FORGE_VERSION: BLOCKED malformed project release" }
+    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "FORGE_VERSION: BLOCKED malformed project release" }
     if (Test-Path -LiteralPath (Join-Path $ProjectRoot ".claude\commands\goal.md")) {
         [Console]::Error.WriteLine("RUNTIME_READY=BLOCKED host=claude custom native goal collision; rename .claude/commands/goal.md")
         exit 5

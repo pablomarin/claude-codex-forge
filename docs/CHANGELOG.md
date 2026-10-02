@@ -2,15 +2,46 @@
 
 All notable changes to claude-codex-forge.
 
-## 6.3 — 2026-09-28
+## 6.4.0 — 2026-10-02
 
-### Unreleased runtime verifier execution fix — 2026-10-02
+### Lean quick-fix workflow and release policy
+
+**Quick fixes now stay deliberately small.** An exact `/quick-fix <slug>` starts only from a clean
+worktree at its resolved base, permits at most three implementation paths, and uses one focused
+check run directly by the main agent. It dispatches no `code-spec`, `code-quality`, `verify-app`, or
+`verify-e2e` role and creates no final candidate receipt set. Ship-hook twins preserve configuration
+and Goal authorization checks, then revalidate the single recorded ancestral base and complete path
+scope; malformed commands, invalid bases, or scope overflow fall through to full fail-closed receipt
+enforcement. Stop evidence applies the same base and scope proof before reporting
+`quick_fix_direct:true`. Feature and bug-fix certification is unchanged.
+Quick-fix activation additionally requires the exact `quick-fix/<slug>` branch and a distinct named
+base branch, preventing existing branch commits from being reclassified. Scope proof now fails closed
+and unions committed, staged, and unstaged `--no-renames` paths so index or worktree state cannot hide
+an implementation path. PowerShell deduplication is case-sensitive, so case-only rename endpoints
+cannot collapse the scope count.
+PowerShell managed-config validation also recognizes the argument-bearing Codex host-context hook,
+preserving fail-closed parity with Bash on a valid Windows materialization.
+The PowerShell full-refresh regression fixture now compares the live project through Git's canonical
+worktree path, normalized through PowerShell, so macOS `/var` aliases and Windows path separators do
+not create false failures.
+
+**Review cycles stop at diminishing returns.** Remaining speculative findings or proposals that
+conflict with KISS or YAGNI are preserved and surfaced instead of triggering another broad review;
+reachable material correctness, safety, and acceptance-criterion failures remain blocking.
+
+**Every merged Forge change set publishes exact SemVer.** Source, materializer, refresh, and runtime
+boundaries now require `MAJOR.MINOR.PATCH`, while upgrade readers retain compatibility with legacy
+V6 stamps `6` and `6.MINOR`. The new source-repository context requires one version bump per merged
+change set, complete changelog coverage, and README history only for material releases. Bash and
+Windows PowerShell 5.1 implementations remain paired.
+
+### Runtime verifier execution fix
 
 **The documented Unix discovery command is directly executable from the Forge checkout.**
 `scripts/verify-runtime.sh` now carries the executable bit expected by the README and setup guides.
 The installed `.forge/bin/verify-runtime` behavior is unchanged.
 
-### Unreleased inactive-worktree recovery — 2026-10-01
+### Inactive-worktree recovery
 
 **Inactive fast-forwarded worktrees have a bounded recovery path.** `workflow-state rebind` can
 atomically advance only the recorded base SHA when the workflow is inactive, the recorded base is
@@ -20,7 +51,7 @@ evidence and preserves application changes. Bash and PowerShell implementations 
 Setup diagnostics now report this mismatch as `NORMAL_PROJECT_WORKFLOWS: BLOCKED` with the rebind
 action instead of incorrectly claiming readiness; activation failures provide the same remediation.
 
-### Unreleased council improvement — 2026-09-30
+### Council improvement
 
 **Council dispatch runs in three waves.** The five initial advice turns now run concurrently, then
 the five exact-session anonymous peer reviews run concurrently, followed by the chairman. Bash
@@ -38,7 +69,7 @@ available without being treated as a successful council receipt.
 Advisor repository snapshots are created inside their owned session store, so successful peer
 completion and failed-attempt cleanup reclaim the complete private candidate as well as session data.
 
-### Unreleased verification policy — 2026-09-30
+### Verification policy
 
 **Exhaustive local regression is opt-in.** Local development uses focused owning checks and the
 project's fast gate. The full regression runners remain available for CI/release coverage, but
@@ -46,7 +77,7 @@ agents may launch them locally only when the developer explicitly requests that 
 activation, candidate freeze, version bumps, and integration boundaries do not supply that consent.
 Feature-specific acceptance checks remain required; unexecuted coverage must be reported honestly.
 
-### Unreleased review authorization — 2026-09-30
+### Review authorization
 
 **Ordinary reviews are human-preapproved.** Standing developer approval covers bounded read-only
 reviews through the project's configured Claude Code/Codex services, including fallback,
@@ -55,7 +86,7 @@ consent question. Approval permits running reviews, not accepting findings or sh
 data, investigation, external mutations, and host security controls retain their existing boundaries.
 Live Desktop approval behavior remains separately unqualified.
 
-### Unreleased reviewer model pins — 2026-09-30
+### Reviewer model pins
 
 **Reviews and council use explicit current model pins.** Claude Code requests
 `claude-opus-5-5`; Codex requests `gpt-6-astra`. The certifying, council-advisor,
@@ -65,6 +96,8 @@ Opus 5.5. Codex model profiles declare Forge's 0.156.1 supported baseline, rathe
 claiming an undocumented vendor minimum. The README lists both CLI baselines and
 version-check/update commands. Captured historical identities remain historical; deterministic model
 fixtures do not establish authenticated access to either new model.
+
+## 6.3 — 2026-09-28
 
 ### Released 6.3 changes
 
