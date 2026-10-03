@@ -31,9 +31,11 @@ BASH_FILES=(
     "$REPO_ROOT/hooks/lib/default-branch.sh"
     "$REPO_ROOT/hooks/lib/review-breaker.sh"
     "$REPO_ROOT/hooks/lib/workflow-state.sh"
+    "$REPO_ROOT/scripts/materialize-adapters.sh"
     "$REPO_ROOT/tests/template/test-review-breaker.sh"
     "$REPO_ROOT/tests/template/lib.sh"
     "$REPO_ROOT/tests/template/test-setup.sh"
+    "$REPO_ROOT/tests/template/test-state-compatibility.sh"
     "$REPO_ROOT/tests/template/test-fixtures.sh"
     "$REPO_ROOT/tests/template/test-contracts.sh"
     "$REPO_ROOT/tests/template/test-hooks.sh"
@@ -110,7 +112,10 @@ else
 fi
 
 start_test "Windows PowerShell 5.1 source decoding"
-for f in "$REPO_ROOT/scripts/materialize-adapters.ps1" "$REPO_ROOT/hooks/lib/workflow-state.ps1"; do
+for f in \
+    "$REPO_ROOT/scripts/materialize-adapters.ps1" \
+    "$REPO_ROOT/hooks/lib/workflow-state.ps1" \
+    "$REPO_ROOT/tests/template/test-full-refresh.ps1"; do
     if rg -q "['\"]—['\"]" "$f"; then
         fail "standalone Unicode em dash is unsafe in UTF-8-without-BOM PowerShell 5.1 source: ${f#$REPO_ROOT/}"
     else

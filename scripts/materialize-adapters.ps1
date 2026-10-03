@@ -61,9 +61,9 @@ function Get-MaterializerStateValue {
             $currentSection = $line.Substring(3)
             continue
         }
-        if ($currentSection -ne $Section -or -not $line.StartsWith("|")) { continue }
+        if ($currentSection -cne $Section -or -not $line.StartsWith("|", [StringComparison]::Ordinal)) { continue }
         $cells = $line.Split('|')
-        if ($cells.Count -ge 4 -and $cells[1].Trim() -eq $Key) {
+        if ($cells.Count -ge 4 -and $cells[1].Trim() -ceq $Key) {
             $values += $cells[2].Trim()
         }
     }
@@ -138,6 +138,150 @@ function Write-NormalProjectWorkflowStatus {
         if ($LASTEXITCODE -eq 0) { $action = "workflow-state-rebind" }
     }
     Write-Host "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=inactive-prebound-head-mismatch action=$action base_ref=$baseRef base_sha=$baseSha head=$currentHead"
+}
+
+function Test-HasByteOrderMark {
+    param([byte[]]$Bytes)
+    return ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) -or
+        ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFF -and $Bytes[1] -eq 0xFE) -or
+        ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFE -and $Bytes[1] -eq 0xFF) -or
+        ($Bytes.Length -ge 4 -and $Bytes[0] -eq 0x00 -and $Bytes[1] -eq 0x00 -and $Bytes[2] -eq 0xFE -and $Bytes[3] -eq 0xFF)
+}
+
+function Get-LegacyStateSkeleton {
+    param([string]$Path)
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if (Test-HasByteOrderMark $bytes) { return $null }
+    $output = New-Object Collections.Generic.List[string]
+    $narrative = $false
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        if (@('## State', '## Open Questions', '## Blockers') -ccontains $line) {
+            $output.Add($line)
+            $output.Add('<forge-preserved-narrative>')
+            $narrative = $true
+            continue
+        }
+        if ($line.StartsWith('## ', [StringComparison]::Ordinal)) { $narrative = $false }
+        if ($narrative) { continue }
+        if ($line -cmatch '^<!-- forge:migrated \d{4}-\d{2}-\d{2} -->$') {
+            $output.Add('<!-- forge:migrated <date> -->')
+        } elseif ($line -cmatch '^\|\s*Command\s*\|') {
+            $output.Add('| Command | <inactive> |')
+        } elseif ($line -cmatch '^\|\s*Phase\s*\|') {
+            $output.Add('| Phase | <inactive> |')
+        } elseif ($line -cmatch '^\|\s*Next step\s*\|') {
+            $output.Add('| Next step | <inactive> |')
+        } else {
+            $output.Add($line)
+        }
+    }
+    return [string]::Join("`n", $output)
+}
+
+function Invoke-LegacyStateMigration {
+    if ($Scope -ne 'project' -or $env:FORGE_TRANSACTION_STAGE -eq '1') { return }
+    $state = Join-Path $Target '.forge\local\state.md'
+    if (-not (Test-Path -LiteralPath $state)) { return }
+    $item = Get-Item -LiteralPath $state -Force
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        Write-Host 'STATE_COMPATIBILITY: BLOCKED reason=canonical-state-not-regular action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative'
+        return
+    }
+    Assert-NoLinkAncestor $Target '.forge\local\state.md'
+    $bytes = [IO.File]::ReadAllBytes($state)
+    $snapshot = [IO.Path]::GetTempFileName()
+    [IO.File]::WriteAllBytes($snapshot, $bytes)
+    try {
+        $hasBom = Test-HasByteOrderMark $bytes
+        $lines = @([IO.File]::ReadAllLines($snapshot))
+        $portableMarker = $lines.Count -gt 0 -and $lines[0] -ceq '<!-- forge:state-schema v6 -->' -and -not $hasBom
+        $workflowHelper = Join-Path $RepoRoot 'hooks\lib\workflow-state.ps1'
+        $current = $false
+        if ($portableMarker) {
+            $current = & { param($Helper, $State) . $Helper; Test-WorkflowStateShape -Path $State } $workflowHelper $snapshot
+        }
+        if ($current) { return }
+
+        $fixture = Join-Path $RepoRoot 'tests\template\fixtures\state-v6-transitional-inactive.md'
+        try {
+            $command = Get-MaterializerStateValue $snapshot Workflow Command
+            $phase = Get-MaterializerStateValue $snapshot Workflow Phase
+            $nextStep = Get-MaterializerStateValue $snapshot Workflow 'Next step'
+        } catch {
+            Write-Host 'STATE_COMPATIBILITY: BLOCKED reason=unrecognized-canonical-state action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative'
+            return
+        }
+        $commandInactive = @('', 'none', '-', [string][char]0x2014)
+        $flowInactive = @('', '-', [string][char]0x2014)
+        if ($commandInactive -cnotcontains $command -or $flowInactive -cnotcontains $phase -or $flowInactive -cnotcontains $nextStep) {
+            Write-Host 'STATE_COMPATIBILITY: BLOCKED reason=active-or-unrecognized-canonical-state action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative'
+            return
+        }
+        $raw = [IO.File]::ReadAllText($snapshot)
+        $skeleton = Get-LegacyStateSkeleton $snapshot
+        $fixtureSkeleton = Get-LegacyStateSkeleton $fixture
+        if ($null -eq $skeleton -or $skeleton -cne $fixtureSkeleton) {
+            Write-Host 'STATE_COMPATIBILITY: BLOCKED reason=unrecognized-canonical-state action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative'
+            return
+        }
+        if ($raw -cmatch '(?m)^- \[[xX]\]|PR creation authorized|\|\s*nonce\s*\|\s*[0-9a-fA-F]{8}-|Review iteration\s*\||Candidate receipt\s*\||Spec review receipt\s*\||Quality review receipt\s*\||Verify app receipt\s*\||E2E receipt\s*\||Promotion receipt\s*\||Council receipt\s*\|') {
+            Write-Host 'STATE_COMPATIBILITY: BLOCKED reason=legacy-state-contains-evidence action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative'
+            return
+        }
+
+        $stateHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $snapshot).Hash.ToLowerInvariant()
+        if ((Get-FileHash -Algorithm SHA256 -LiteralPath $state).Hash.ToLowerInvariant() -cne $stateHash) {
+            throw 'canonical state changed during compatibility classification'
+        }
+    $backup = "$state.bak.$stateHash"
+    if (Test-Path -LiteralPath $backup) {
+        $backupItem = Get-Item -LiteralPath $backup -Force
+        if ($backupItem.PSIsContainer -or ($backupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $backup).Hash.ToLowerInvariant() -cne $stateHash) {
+            throw "canonical state backup collision: $backup"
+        }
+    } else {
+        $backupTemporary = "$backup.tmp.$([Guid]::NewGuid().ToString('N'))"
+        [IO.File]::WriteAllBytes($backupTemporary, $bytes)
+        if ((Get-FileHash -Algorithm SHA256 -LiteralPath $backupTemporary).Hash.ToLowerInvariant() -cne $stateHash) {
+            Remove-Item -LiteralPath $backupTemporary -Force
+            throw 'canonical state backup verification failed'
+        }
+        [IO.File]::Move($backupTemporary, $backup)
+    }
+
+        $patterns = @{
+        State = '(?ms)^## State\r?\n.*?(?=^## Open Questions\r?$)'
+        Questions = '(?ms)^## Open Questions\r?\n.*?(?=^## Blockers\r?$)'
+        Blockers = '(?ms)^## Blockers\r?\n.*?(?=^## Update Rules\r?$)'
+    }
+    $ranges = @{}
+    foreach ($key in $patterns.Keys) {
+        $matches = [regex]::Matches($raw, $patterns[$key])
+        if ($matches.Count -ne 1) { throw "legacy state has an ambiguous $key narrative range" }
+        $ranges[$key] = $matches[0].Value
+    }
+    $candidateText = [IO.File]::ReadAllText((Join-Path $RepoRoot 'state.template.md'))
+    foreach ($key in @('State', 'Questions', 'Blockers')) {
+        $replacement = $ranges[$key]
+        $candidateText = [regex]::Replace($candidateText, $patterns[$key], { param($match) $replacement }, 1)
+    }
+    $candidate = "$state.tmp.$([Guid]::NewGuid().ToString('N'))"
+    try {
+        [IO.File]::WriteAllText($candidate, $candidateText, $Utf8NoBom)
+        $valid = & { param($Helper, $State) . $Helper; Test-WorkflowStateShape -Path $State } $workflowHelper $candidate
+        if (-not $valid) { throw 'migrated canonical state failed current shape validation' }
+        if ((Get-FileHash -Algorithm SHA256 -LiteralPath $state).Hash.ToLowerInvariant() -cne $stateHash) {
+            throw 'canonical state changed during compatibility migration'
+        }
+        [IO.File]::Replace($candidate, $state, [System.Management.Automation.Language.NullString]::Value)
+    } finally {
+        if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Force }
+    }
+        Write-Host "STATE_COMPATIBILITY: MIGRATED backup=$backup"
+    } finally {
+        if (Test-Path -LiteralPath $snapshot) { Remove-Item -LiteralPath $snapshot -Force }
+    }
 }
 
 function Assert-NoLinkAncestor {
@@ -678,21 +822,25 @@ function Write-InstallManifest {
     foreach ($record in ($Records | Sort-Object Path -Unique)) {
         $relative = $record.Path
         $full = Join-Path $Target $relative
-        if (Test-Path $full -PathType Leaf) {
-            $revision = Get-FileRevision $full
-        } elseif ($relative -eq '.forge/version') {
+        if ($relative -eq '.forge/version') {
             $revision = Get-ForgeMaterializerTextHash "$ReleaseVersion`n"
+        } elseif (Test-Path $full -PathType Leaf) {
+            $revision = Get-FileRevision $full
         } else {
             continue
         }
         $lines += "$relative`t$revision`t$($record.CanonicalRevision)"
     }
-    [IO.File]::WriteAllLines($out, $lines, $Utf8NoBom)
+    $temporary = "$out.tmp.$([Guid]::NewGuid().ToString('N'))"
+    [IO.File]::WriteAllLines($temporary, $lines, $Utf8NoBom)
+    if (Test-Path -LiteralPath $out) { [IO.File]::Replace($temporary, $out, [System.Management.Automation.Language.NullString]::Value) }
+    else { [IO.File]::Move($temporary, $out) }
 }
 
 Invoke-LegacyAliasCleanup "check"
 $rows = Read-ManagedManifest $Manifest
 $retiredWorkflowSkills = Get-RetiredWorkflowSkills $rows
+Invoke-LegacyStateMigration
 foreach ($row in $rows) {
     if ($row.Scope -ne $Scope -or @("all", $Platform) -notcontains $row.Platform) { continue }
     $source = Join-Path $RepoRoot ($row.Source -replace '/', '\')
@@ -739,7 +887,11 @@ foreach ($relative in $retiredWorkflowSkills.Keys) {
 }
 $Installed += [pscustomobject]@{ Path=".forge/version"; CanonicalRevision="-" }
 Write-InstallManifest -Records $Installed
-[IO.File]::WriteAllText((Join-Path $Target ".forge\version"), "$ReleaseVersion`n", $Utf8NoBom)
+$version = Join-Path $Target ".forge\version"
+$versionTemporary = "$version.tmp.$([Guid]::NewGuid().ToString('N'))"
+[IO.File]::WriteAllText($versionTemporary, "$ReleaseVersion`n", $Utf8NoBom)
+if (Test-Path -LiteralPath $version) { [IO.File]::Replace($versionTemporary, $version, [System.Management.Automation.Language.NullString]::Value) }
+else { [IO.File]::Move($versionTemporary, $version) }
 Write-Host "FORGE_VERSION: $ReleaseVersion"
 Write-Host "INSTALLATION: MATERIALIZED"
 foreach ($engine in Get-EngineAvailability) {
