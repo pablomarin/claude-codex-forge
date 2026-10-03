@@ -29,12 +29,13 @@ materializer_state_value() {
         }
         /^## / {
             section = $0
+            sub(/\r$/, "", section)
             sub(/^## /, "", section)
             next
         }
         /^\|/ {
             key = trim($2)
-            if (section == wanted_section && key == wanted_key) {
+            if (section == wanted_section && key == wanted_key && NF >= 4) {
                 count++
                 value = trim($3)
             }
@@ -122,7 +123,8 @@ load_managed_manifest() {
 }
 
 assert_no_link_ancestors() {
-    local root="$1" relative="$2" old_ifs="$IFS" part current="$root"
+    local root="$1" relative="$2" old_ifs="$IFS" part current
+    current="$root"
     IFS='/'
     for part in $relative; do
         current="$current/$part"
@@ -289,23 +291,180 @@ $($binary exec --help 2>&1 || true)"
 }
 
 write_install_manifest() {
-    local destination="$MATERIALIZE_TARGET/.forge/installed-files.tsv" relative canonical_revision revision
+    local destination="$MATERIALIZE_TARGET/.forge/installed-files.tsv" temporary relative canonical_revision revision
     mkdir -p "$(dirname "$destination")"
-    : > "$destination"
+    temporary=$(mktemp "$destination.tmp.XXXXXX")
     while IFS=$'\t' read -r relative canonical_revision; do
-        if [ -f "$MATERIALIZE_TARGET/$relative" ]; then
-            revision=$(hash_file_materializer "$MATERIALIZE_TARGET/$relative")
-        elif [ "$relative" = .forge/version ]; then
+        if [ "$relative" = .forge/version ]; then
             if command -v shasum >/dev/null 2>&1; then
                 revision=$(printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" | shasum -a 256 | awk '{print $1}')
             else
                 revision=$(printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" | sha256sum | awk '{print $1}')
             fi
+        elif [ -f "$MATERIALIZE_TARGET/$relative" ]; then
+            revision=$(hash_file_materializer "$MATERIALIZE_TARGET/$relative")
         else
             continue
         fi
-        printf '%s\t%s\t%s\n' "$relative" "$revision" "$canonical_revision" >> "$destination"
+        printf '%s\t%s\t%s\n' "$relative" "$revision" "$canonical_revision" >> "$temporary"
     done < "$MATERIALIZE_INSTALLED_LIST"
+    mv "$temporary" "$destination"
+}
+
+legacy_state_skeleton() {
+    awk '
+        { sub(/\r$/, "") }
+        /^## (State|Open Questions|Blockers)$/ {
+            print
+            print "<forge-preserved-narrative>"
+            narrative=1
+            next
+        }
+        /^## / { narrative=0 }
+        narrative { next }
+        /^<!-- forge:migrated [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] -->$/ {
+            print "<!-- forge:migrated <date> -->"
+            next
+        }
+        /^\|[ \t]*Command[ \t]*\|/ { print "| Command | <inactive> |"; next }
+        /^\|[ \t]*Phase[ \t]*\|/ { print "| Phase | <inactive> |"; next }
+        /^\|[ \t]*Next step[ \t]*\|/ { print "| Next step | <inactive> |"; next }
+        { print }
+    ' "$1"
+}
+
+extract_legacy_state_section() {
+    local source="$1" heading="$2" destination="$3"
+    awk -v heading="$heading" '
+        { line=$0; normalized=$0; sub(/\r$/, "", normalized) }
+        normalized == heading { capture=1 }
+        capture && normalized ~ /^## / && normalized != heading { exit }
+        capture { print line }
+    ' "$source" > "$destination"
+}
+
+migrate_legacy_state_if_safe() {
+    local state="$MATERIALIZE_TARGET/.forge/local/state.md" fixture
+    local command phase next_step snapshot state_hash backup backup_tmp skeleton fixture_skeleton
+    local state_section questions_section blockers_section candidate current_hash
+    [ "$MATERIALIZE_SCOPE" = project ] || return 0
+    [ "${FORGE_TRANSACTION_STAGE:-0}" != 1 ] || return 0
+    [ -e "$state" ] || return 0
+    [ -f "$state" ] && [ ! -L "$state" ] || {
+        echo "STATE_COMPATIBILITY: BLOCKED reason=canonical-state-not-regular action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative"
+        return 0
+    }
+    assert_no_link_ancestors "$MATERIALIZE_TARGET" ".forge/local/state.md" || return 1
+    snapshot=$(mktemp "${TMPDIR:-/tmp}/forge-state-source.XXXXXX")
+    cp "$state" "$snapshot"
+    state_hash=$(hash_file_materializer "$snapshot")
+
+    # Use the canonical current reader for already-current files. Historical
+    # compatibility is deliberately narrower and fixture-bound below.
+    if (
+        # shellcheck source=../hooks/lib/workflow-state.sh
+        source "$MATERIALIZE_REPO/hooks/lib/workflow-state.sh"
+        workflow_state_validate_shape "$snapshot"
+    ); then
+        rm -f "$snapshot"
+        return 0
+    fi
+
+    fixture="$MATERIALIZE_REPO/tests/template/fixtures/state-v6-transitional-inactive.md"
+    if ! command=$(materializer_state_value "$snapshot" Workflow Command 2>/dev/null) \
+        || ! phase=$(materializer_state_value "$snapshot" Workflow Phase 2>/dev/null) \
+        || ! next_step=$(materializer_state_value "$snapshot" Workflow 'Next step' 2>/dev/null); then
+        rm -f "$snapshot"
+        echo "STATE_COMPATIBILITY: BLOCKED reason=unrecognized-canonical-state action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative"
+        return 0
+    fi
+    case "$command" in ''|none|-|'—') ;; *)
+        rm -f "$snapshot"
+        echo "STATE_COMPATIBILITY: BLOCKED reason=active-or-unrecognized-canonical-state action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative"
+        return 0 ;;
+    esac
+    case "$phase:$next_step" in
+        ':'|'-:'|'—:'|':-'|':—'|'-:-'|'-:—'|'—:-'|'—:—') ;;
+        *)
+            rm -f "$snapshot"
+            echo "STATE_COMPATIBILITY: BLOCKED reason=active-or-unrecognized-canonical-state action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative"
+            return 0 ;;
+    esac
+
+    skeleton=$(mktemp "${TMPDIR:-/tmp}/forge-state-skeleton.XXXXXX")
+    fixture_skeleton=$(mktemp "${TMPDIR:-/tmp}/forge-state-fixture.XXXXXX")
+    legacy_state_skeleton "$snapshot" > "$skeleton"
+    legacy_state_skeleton "$fixture" > "$fixture_skeleton"
+    if ! cmp -s "$skeleton" "$fixture_skeleton"; then
+        rm -f "$snapshot" "$skeleton" "$fixture_skeleton"
+        echo "STATE_COMPATIBILITY: BLOCKED reason=unrecognized-canonical-state action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative"
+        return 0
+    fi
+    rm -f "$skeleton" "$fixture_skeleton"
+    if grep -aEq '^- \[[xX]\]|PR creation authorized|\|[[:space:]]*nonce[[:space:]]*\|[[:space:]]*[0-9a-fA-F]{8}-|Review iteration[[:space:]]*\||Candidate receipt[[:space:]]*\||Spec review receipt[[:space:]]*\||Quality review receipt[[:space:]]*\||Verify app receipt[[:space:]]*\||E2E receipt[[:space:]]*\||Promotion receipt[[:space:]]*\||Council receipt[[:space:]]*\|' "$snapshot"; then
+        rm -f "$snapshot"
+        echo "STATE_COMPATIBILITY: BLOCKED reason=legacy-state-contains-evidence action=copy-state-aside-seed-current-template-and-restore-reviewed-narrative"
+        return 0
+    fi
+
+    current_hash=$(hash_file_materializer "$state" 2>/dev/null || true)
+    [ "$current_hash" = "$state_hash" ] || {
+        rm -f "$snapshot"
+        echo "BLOCKED: canonical state changed during compatibility classification" >&2
+        return 1
+    }
+    backup="$state.bak.$state_hash"
+    if [ -e "$backup" ]; then
+        [ -f "$backup" ] && [ ! -L "$backup" ] && cmp -s "$snapshot" "$backup" || {
+            rm -f "$snapshot"
+            echo "BLOCKED: canonical state backup collision: $backup" >&2
+            return 1
+        }
+    else
+        backup_tmp=$(mktemp "$backup.tmp.XXXXXX")
+        cp "$snapshot" "$backup_tmp"
+        [ "$(hash_file_materializer "$backup_tmp")" = "$state_hash" ] || {
+            rm -f "$snapshot" "$backup_tmp"
+            echo "BLOCKED: canonical state backup verification failed" >&2
+            return 1
+        }
+        mv "$backup_tmp" "$backup"
+    fi
+
+    state_section=$(mktemp "${TMPDIR:-/tmp}/forge-state-section.XXXXXX")
+    questions_section=$(mktemp "${TMPDIR:-/tmp}/forge-questions-section.XXXXXX")
+    blockers_section=$(mktemp "${TMPDIR:-/tmp}/forge-blockers-section.XXXXXX")
+    candidate=$(mktemp "$state.tmp.XXXXXX")
+    extract_legacy_state_section "$snapshot" '## State' "$state_section"
+    extract_legacy_state_section "$snapshot" '## Open Questions' "$questions_section"
+    extract_legacy_state_section "$snapshot" '## Blockers' "$blockers_section"
+    awk -v state_section="$state_section" -v questions_section="$questions_section" -v blockers_section="$blockers_section" '
+        function emit(path, line) { while ((getline line < path) > 0) print line; close(path) }
+        /^## State$/ { emit(state_section); skip=1; next }
+        /^## Open Questions$/ { emit(questions_section); skip=1; next }
+        /^## Blockers$/ { emit(blockers_section); skip=1; next }
+        /^## / { skip=0 }
+        !skip { print }
+    ' "$MATERIALIZE_REPO/state.template.md" > "$candidate"
+    rm -f "$state_section" "$questions_section" "$blockers_section"
+    (
+        # shellcheck source=../hooks/lib/workflow-state.sh
+        source "$MATERIALIZE_REPO/hooks/lib/workflow-state.sh"
+        workflow_state_validate_shape "$candidate"
+    ) || {
+        rm -f "$snapshot" "$candidate"
+        echo "BLOCKED: migrated canonical state failed current shape validation" >&2
+        return 1
+    }
+    current_hash=$(hash_file_materializer "$state")
+    [ "$current_hash" = "$state_hash" ] || {
+        rm -f "$snapshot" "$candidate"
+        echo "BLOCKED: canonical state changed during compatibility migration" >&2
+        return 1
+    }
+    mv "$candidate" "$state"
+    rm -f "$snapshot"
+    echo "STATE_COMPATIBILITY: MIGRATED backup=$backup"
 }
 
 merge_json_config() {
@@ -413,7 +572,8 @@ materialize_project_config() {
 }
 
 materialize_scope() {
-    local kind source destination platform host scope ownership canonical revision extra selected canonical_file actual_revision marker_template
+    local kind source destination platform host scope ownership canonical revision extra selected canonical_file actual_revision marker_template version_tmp
+    migrate_legacy_state_if_safe
     MATERIALIZE_INSTALLED_LIST=$(mktemp "${TMPDIR:-/tmp}/forge-installed.XXXXXX")
     trap 'rm -f "$MATERIALIZE_INSTALLED_LIST"' EXIT HUP INT TERM
     while IFS=$'\t' read -r kind source destination platform host scope ownership canonical revision extra; do
@@ -454,7 +614,9 @@ materialize_scope() {
         workflow_skill_cleanup apply
     printf '.forge/version\t-\n' >> "$MATERIALIZE_INSTALLED_LIST"
     write_install_manifest
-    printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" > "$MATERIALIZE_TARGET/.forge/version"
+    version_tmp=$(mktemp "$MATERIALIZE_TARGET/.forge/version.tmp.XXXXXX")
+    printf '%s\n' "$MATERIALIZE_RELEASE_VERSION" > "$version_tmp"
+    mv "$version_tmp" "$MATERIALIZE_TARGET/.forge/version"
     echo "FORGE_VERSION: $MATERIALIZE_RELEASE_VERSION"
 }
 

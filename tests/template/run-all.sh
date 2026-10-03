@@ -46,6 +46,7 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-session-start.sh"
     "$REPO_ROOT/tests/template/test-setup-flags.sh"
     "$REPO_ROOT/tests/template/test-full-refresh.sh"
+    "$REPO_ROOT/tests/template/test-state-compatibility.sh"
     "$REPO_ROOT/tests/template/test-setup.sh"
 )
 

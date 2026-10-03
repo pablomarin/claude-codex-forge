@@ -2,6 +2,21 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.1 — 2026-10-03
+
+### Safe transitional-state and version-ledger upgrades
+
+Routine V6 upgrades now migrate only the exact inactive pre-Identity transitional state shape into
+the current `Identity`/`Receipts` schema. The migration preserves the developer narrative and
+`### Now`, invalidates old control evidence by rebuilding from the current template, writes an exact
+content-addressed local backup, and leaves active, custom, or ambiguous state byte-identical with an
+actionable compatibility diagnostic. Full-refresh staging retains its existing transaction owner.
+
+The Bash and Windows PowerShell materializers now hash the intended release bytes for
+`.forge/version`, publish the installed-file ledger atomically, and replace the version stamp last.
+The first successful upgrade therefore records the final version digest without needing a second
+setup run.
+
 ## 6.4.0 — 2026-10-02
 
 ### Lean quick-fix workflow and release policy

@@ -1574,6 +1574,78 @@ assert_contains "$SUMMARY_CASE/setup.log" 'AGENTS.md' "summary names the Codex r
 assert_contains "$SUMMARY_CASE/setup.log" 'git add .forge/ .claude/ .codex/ .agents/ .mcp.json CLAUDE.md AGENTS.md docs/' \
     "summary gives complete v6 commit command"
 
+start_test "first V6 upgrade records the final version digest"
+LEDGER_CASE=$(scratch_dir v6-version-ledger)
+make_project "$LEDGER_CASE" flat
+mkdir -p "$LEDGER_CASE/.forge" "$LEDGER_CASE/home"
+printf '6\n' > "$LEDGER_CASE/.forge/version"
+(cd "$LEDGER_CASE" && HOME="$LEDGER_CASE/home" "$REPO_ROOT/setup.sh" >setup.log 2>&1)
+assert_equals "$?" "0" "legacy V6 stamp upgrades successfully"
+LEDGER_VERSION_HASH=$(hash_file "$LEDGER_CASE/.forge/version")
+if awk -F '\t' -v expected="$LEDGER_VERSION_HASH" \
+    '$1 == ".forge/version" && $2 == expected { found=1 } END { exit found ? 0 : 1 }' \
+    "$LEDGER_CASE/.forge/installed-files.tsv"; then
+    pass "first upgrade ledger hashes the final version bytes"
+else
+    fail "first upgrade ledger retained the pre-upgrade version digest"
+fi
+
+start_test "inactive transitional V6 state migrates once with exact backup"
+STATE_CASE=$(scratch_dir v6-transitional-state)
+make_project "$STATE_CASE" flat
+mkdir -p "$STATE_CASE/.forge/local" "$STATE_CASE/home"
+printf '6\n' > "$STATE_CASE/.forge/version"
+cp "$REPO_ROOT/tests/template/fixtures/state-v6-transitional-inactive.md" \
+    "$STATE_CASE/.forge/local/state.md"
+STATE_LEGACY_HASH=$(hash_file "$STATE_CASE/.forge/local/state.md")
+(cd "$STATE_CASE" && HOME="$STATE_CASE/home" "$REPO_ROOT/setup.sh" >setup.log 2>&1)
+assert_equals "$?" "0" "inactive transitional V6 state upgrades successfully"
+assert_contains "$STATE_CASE/setup.log" "state.md.bak.$STATE_LEGACY_HASH" \
+    "state migration reports its content-addressed backup"
+STATE_BACKUP="$STATE_CASE/.forge/local/state.md.bak.$STATE_LEGACY_HASH"
+assert_file_exists "$STATE_BACKUP" "legacy state backup exists"
+assert_hash_equals "$STATE_BACKUP" "$STATE_LEGACY_HASH" \
+    "legacy state backup preserves exact bytes"
+for token in TRANSITIONAL_DONE_TOKEN TRANSITIONAL_NOW_TOKEN TRANSITIONAL_NEXT_TOKEN \
+    TRANSITIONAL_DEFERRED_TOKEN TRANSITIONAL_QUESTION_TOKEN TRANSITIONAL_BLOCKER_TOKEN; do
+    assert_contains "$STATE_CASE/.forge/local/state.md" "$token" \
+        "migrated state preserves $token"
+done
+(cd "$STATE_CASE" && .forge/hooks/lib/workflow-state.sh show >state-show.log 2>&1)
+assert_equals "$?" "0" "migrated transitional state is accepted by current workflow reader"
+STATE_AFTER=$(hash_file "$STATE_CASE/.forge/local/state.md")
+BACKUP_AFTER=$(hash_file "$STATE_BACKUP")
+LEDGER_AFTER=$(hash_file "$STATE_CASE/.forge/installed-files.tsv")
+(cd "$STATE_CASE" && HOME="$STATE_CASE/home" "$REPO_ROOT/setup.sh" >setup-2.log 2>&1)
+assert_equals "$?" "0" "second setup after state migration succeeds"
+assert_hash_equals "$STATE_CASE/.forge/local/state.md" "$STATE_AFTER" \
+    "second setup preserves migrated state bytes"
+assert_hash_equals "$STATE_BACKUP" "$BACKUP_AFTER" \
+    "second setup preserves backup bytes"
+assert_hash_equals "$STATE_CASE/.forge/installed-files.tsv" "$LEDGER_AFTER" \
+    "second setup preserves installed ledger bytes"
+
+start_test "active transitional V6 state is preserved while installation continues"
+ACTIVE_STATE_CASE=$(scratch_dir v6-transitional-active)
+make_project "$ACTIVE_STATE_CASE" flat
+mkdir -p "$ACTIVE_STATE_CASE/.forge/local" "$ACTIVE_STATE_CASE/home"
+printf '6\n' > "$ACTIVE_STATE_CASE/.forge/version"
+cp "$REPO_ROOT/tests/template/fixtures/state-v6-transitional-inactive.md" \
+    "$ACTIVE_STATE_CASE/.forge/local/state.md"
+sed -i.bak 's/| Command   | none  |/| Command   | \/fix-bug held |/' \
+    "$ACTIVE_STATE_CASE/.forge/local/state.md"
+rm "$ACTIVE_STATE_CASE/.forge/local/state.md.bak"
+ACTIVE_STATE_HASH=$(hash_file "$ACTIVE_STATE_CASE/.forge/local/state.md")
+(cd "$ACTIVE_STATE_CASE" && HOME="$ACTIVE_STATE_CASE/home" "$REPO_ROOT/setup.sh" >setup.log 2>&1)
+assert_equals "$?" "0" "active transitional state does not fail installation"
+assert_hash_equals "$ACTIVE_STATE_CASE/.forge/local/state.md" "$ACTIVE_STATE_HASH" \
+    "active transitional state remains byte-identical"
+assert_contains "$ACTIVE_STATE_CASE/setup.log" \
+    "NORMAL_PROJECT_WORKFLOWS: BLOCKED reason=canonical-state-unreadable" \
+    "existing blocked-workflow semantics remain unchanged for active legacy state"
+assert_contains "$ACTIVE_STATE_CASE/setup.log" "STATE_COMPATIBILITY: BLOCKED" \
+    "active transitional state receives an actionable compatibility diagnostic"
+
 # ===========================================================================
 # Report
 # ===========================================================================

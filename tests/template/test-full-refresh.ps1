@@ -208,6 +208,105 @@ function Invoke-IsolatedPowerShell {
 }
 
 try {
+    $transitionProject = New-Project "transitional-v6-materializer"
+    $transitionState = Join-Path $transitionProject ".forge\local\state.md"
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $transitionState)) | Out-Null
+    [IO.File]::WriteAllBytes(
+        $transitionState,
+        [IO.File]::ReadAllBytes((Join-Path $root "tests\template\fixtures\state-v6-transitional-inactive.md"))
+    )
+    Write-Text (Join-Path $transitionProject ".forge\version") "6`n"
+    $transitionHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $transitionState).Hash.ToLowerInvariant()
+    $transitionMaterializer = Invoke-IsolatedPowerShell -Script (Join-Path $root "scripts\materialize-adapters.ps1") `
+        -Arguments @("-RepoRoot", $root, "-Target", $transitionProject, "-Scope", "project", "-Platform", "windows", "-ReleaseVersion", $expectedRelease)
+    Assert-True ($transitionMaterializer.Code -eq 0 -and $transitionMaterializer.Output.Contains("STATE_COMPATIBILITY: MIGRATED")) `
+        "PowerShell materializer migrates the exact inactive transitional V6 state"
+    Assert-True (Test-Path -LiteralPath "$transitionState.bak.$transitionHash" -PathType Leaf) `
+        "PowerShell transition keeps an exact content-addressed backup"
+    Assert-True ([IO.File]::ReadAllText($transitionState).Contains("## Identity") -and [IO.File]::ReadAllText($transitionState).Contains("TRANSITIONAL_NOW_TOKEN")) `
+        "PowerShell transition produces current control state and preserves narrative"
+    $transitionVersion = Join-Path $transitionProject ".forge\version"
+    $transitionVersionHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $transitionVersion).Hash.ToLowerInvariant()
+    $transitionLedgerRow = @([IO.File]::ReadAllLines((Join-Path $transitionProject ".forge\installed-files.tsv")) | Where-Object { $_.StartsWith(".forge/version`t") })
+    Assert-True ($transitionLedgerRow.Count -eq 1 -and $transitionLedgerRow[0].Split("`t")[1] -ceq $transitionVersionHash) `
+        "PowerShell first upgrade ledger records the final version digest"
+    $transitionStateAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath $transitionState).Hash
+    $transitionBackup = "$transitionState.bak.$transitionHash"
+    $transitionBackupAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath $transitionBackup).Hash
+    $transitionLedger = Join-Path $transitionProject ".forge\installed-files.tsv"
+    $transitionLedgerAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath $transitionLedger).Hash
+    $transitionSecond = Invoke-IsolatedPowerShell -Script (Join-Path $root "scripts\materialize-adapters.ps1") `
+        -Arguments @("-RepoRoot", $root, "-Target", $transitionProject, "-Scope", "project", "-Platform", "windows", "-ReleaseVersion", $expectedRelease)
+    Assert-True ($transitionSecond.Code -eq 0) "PowerShell second transitional materialization succeeds"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $transitionState).Hash -ceq $transitionStateAfter) `
+        "PowerShell second run preserves migrated state bytes"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $transitionBackup).Hash -ceq $transitionBackupAfter) `
+        "PowerShell second run preserves backup bytes"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $transitionLedger).Hash -ceq $transitionLedgerAfter) `
+        "PowerShell second run preserves installed ledger bytes"
+
+    $activeCrLfProject = New-Project "transitional-v6-active-crlf"
+    $activeCrLfState = Join-Path $activeCrLfProject ".forge\local\state.md"
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $activeCrLfState)) | Out-Null
+    $activeCrLfText = [IO.File]::ReadAllText((Join-Path $root "tests\template\fixtures\state-v6-transitional-inactive.md"))
+    $activeCrLfText = $activeCrLfText.Replace('| Command   | none  |', '| Command   | /fix-bug held |').Replace("`r`n", "`n").Replace("`n", "`r`n")
+    [IO.File]::WriteAllText($activeCrLfState, $activeCrLfText, $utf8NoBom)
+    $activeCrLfHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $activeCrLfState).Hash
+    $activeCrLfResult = Invoke-IsolatedPowerShell -Script (Join-Path $root "scripts\materialize-adapters.ps1") `
+        -Arguments @("-RepoRoot", $root, "-Target", $activeCrLfProject, "-Scope", "project", "-Platform", "windows", "-ReleaseVersion", $expectedRelease)
+    Assert-True ($activeCrLfResult.Code -eq 0) "PowerShell CRLF active transitional state does not fail installation"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $activeCrLfState).Hash -ceq $activeCrLfHash) `
+        "PowerShell CRLF active transitional state remains byte-identical"
+    Assert-True ($activeCrLfResult.Output.Contains('STATE_COMPATIBILITY: BLOCKED')) `
+        "PowerShell CRLF active transitional state is visibly blocked"
+
+    foreach ($variant in @('phase-none', 'lowercase-key', 'checked-row', 'bom', 'utf16le', 'missing-closing-pipe')) {
+        $variantProject = New-Project "transitional-v6-$variant"
+        $variantState = Join-Path $variantProject ".forge\local\state.md"
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $variantState)) | Out-Null
+        $variantBytes = [IO.File]::ReadAllBytes((Join-Path $root "tests\template\fixtures\state-v6-transitional-inactive.md"))
+        if ($variant -eq 'bom') {
+            $bomBytes = New-Object byte[] ($variantBytes.Length + 3)
+            $bomBytes[0] = 0xEF; $bomBytes[1] = 0xBB; $bomBytes[2] = 0xBF
+            [Array]::Copy($variantBytes, 0, $bomBytes, 3, $variantBytes.Length)
+            [IO.File]::WriteAllBytes($variantState, $bomBytes)
+        } elseif ($variant -eq 'utf16le') {
+            [IO.File]::WriteAllText($variantState, $utf8NoBom.GetString($variantBytes), [Text.Encoding]::Unicode)
+        } else {
+            $variantText = $utf8NoBom.GetString($variantBytes)
+            if ($variant -eq 'phase-none') {
+                $phaseDashRow = '| Phase     | ' + [char]0x2014 + '     |'
+                $variantText = $variantText.Replace($phaseDashRow, '| Phase     | none  |')
+            }
+            elseif ($variant -eq 'lowercase-key') { $variantText = $variantText.Replace('| Command   | none  |', '| command   | none  |') }
+            elseif ($variant -eq 'missing-closing-pipe') { $variantText = $variantText.Replace('| Command   | none  |', '| Command   | none') }
+            else { $variantText = $variantText.Replace('- TRANSITIONAL_NOW_TOKEN', "- TRANSITIONAL_NOW_TOKEN`n- [x] historical review passed") }
+            [IO.File]::WriteAllText($variantState, $variantText, $utf8NoBom)
+        }
+        $variantHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $variantState).Hash
+        $variantResult = Invoke-IsolatedPowerShell -Script (Join-Path $root "scripts\materialize-adapters.ps1") `
+            -Arguments @("-RepoRoot", $root, "-Target", $variantProject, "-Scope", "project", "-Platform", "windows", "-ReleaseVersion", $expectedRelease)
+        Assert-True ($variantResult.Code -eq 0) "PowerShell $variant transitional state does not fail installation"
+        Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $variantState).Hash -ceq $variantHash) `
+            "PowerShell $variant transitional state remains byte-identical"
+        Assert-True ($variantResult.Output.Contains('STATE_COMPATIBILITY: BLOCKED')) `
+            "PowerShell $variant transitional state is visibly blocked"
+    }
+
+    $stageOwnerProject = New-Project "transitional-v6-transaction-stage"
+    $stageOwnerState = Join-Path $stageOwnerProject ".forge\local\state.md"
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $stageOwnerState)) | Out-Null
+    [IO.File]::WriteAllBytes($stageOwnerState, [IO.File]::ReadAllBytes((Join-Path $root "tests\template\fixtures\state-v6-transitional-inactive.md")))
+    $stageOwnerHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stageOwnerState).Hash
+    $stageOwnerResult = Invoke-IsolatedPowerShell -Script (Join-Path $root "scripts\materialize-adapters.ps1") `
+        -Arguments @("-RepoRoot", $root, "-Target", $stageOwnerProject, "-Scope", "project", "-Platform", "windows", "-ReleaseVersion", $expectedRelease) `
+        -Environment @{ FORGE_TRANSACTION_STAGE = '1' }
+    Assert-True ($stageOwnerResult.Code -eq 0) "PowerShell transaction-stage materialization completes"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $stageOwnerState).Hash -ceq $stageOwnerHash) `
+        "PowerShell transaction stage preserves legacy state bytes"
+    Assert-True (-not $stageOwnerResult.Output.Contains('STATE_COMPATIBILITY: MIGRATED')) `
+        "PowerShell transaction stage leaves migration ownership to full refresh"
+
     $exactProject = New-Project "exact-project-version"
     Write-Text (Join-Path $exactProject ".forge\version") "6`n"
     $exactResult = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-Force") -WorkingDirectory $exactProject `
