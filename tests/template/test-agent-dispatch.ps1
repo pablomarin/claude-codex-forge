@@ -67,6 +67,7 @@ function Get-ShaTextForTest([string]$Text) { $bytes = [Text.Encoding]::UTF8.GetB
 function Get-ShaFileForTest([string]$Path) { $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($Path)))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
 
 try {
+    New-Item -ItemType Directory -Path $temporary -Force | Out-Null
     Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-Command','exit 2')) 2 'PowerShell child helper preserves a nonzero exit code'
     $hookRepo = New-Repository 'no receipt hook'; $hookAuthority = Join-Path $hookRepo '.forge/local/test-host-authority'; $env:FORGE_HOST_CONTEXT_TEST_MODE = '1'; $env:FORGE_HOST_CONTEXT_TEST_ROOT = $hookAuthority; $env:FORGE_HOST_CONTEXT_TEST_LAUNCHER = $dispatcher
     Push-Location $hookRepo
@@ -124,6 +125,7 @@ public static class ForgeFakeEngine {
     if(behavior=="delayed-clean") Thread.Sleep(1000);
     if(behavior=="swap-output") { var paths=File.ReadAllLines(E("FAKE_CHILD_PID_FILE")); File.Delete(paths[0]); if(!CreateHardLink(paths[0],paths[1],IntPtr.Zero)) return 71; }
     if(behavior=="exit") return 23;
+    if(behavior=="permission-denied") { Console.Error.WriteLine("Permission denied by host policy"); return 1; }
     string expired="Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
     if(behavior=="auth-expired" || behavior=="auth-expired-zero" || behavior=="auth-expired-delayed" || behavior=="auth-string-true" || behavior=="auth-false" || behavior=="forbidden" || behavior=="rate-limited" || behavior=="network-error") {
       if(behavior=="auth-expired-delayed") Thread.Sleep(1000);
@@ -146,6 +148,7 @@ public static class ForgeFakeEngine {
     else if(behavior=="malformed") text="prose only\n";
     else if(behavior=="empty") text="";
     else if(behavior=="blocked-artifact") text="schema_version=1\nverdict=BLOCKED\nmax_severity=NONE\nblocked_class=artifact\n";
+    else if(behavior=="blocked-authorization") text="schema_version=1\nverdict=BLOCKED\nmax_severity=NONE\nblocked_class=authorization\n";
     else if(behavior=="duplicate-canary") text="schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nforge_canary_hash="+E("FORGE_DISPATCH_CANARY_HASH")+"\nforge_config_hash="+E("FORGE_DISPATCH_CONFIG_HASH")+"\nforge_qualification_revision="+E("FORGE_DISPATCH_QUALIFICATION_REVISION")+"\n";
     else if(behavior=="conflicting-canary") text="schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nforge_canary_hash=WRONG\n";
     if(behavior!="malformed" && behavior!="empty") text=Qualified(engine,text);
@@ -157,6 +160,57 @@ public static class ForgeFakeEngine {
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'claude.exe')
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'codex.exe')
     $env:PATH = "$bin;$($env:PATH)"; $env:FORGE_DISPATCH_TEST_MODE = '1'
+
+    Write-Host 'PowerShell permission failures and timeouts preserve ordinary review access'
+    foreach ($engineHost in @('claude', 'codex')) {
+        $first = if ($engineHost -eq 'claude') { 'codex' } else { 'claude' }
+        foreach ($behavior in @('blocked-authorization', 'permission-denied', 'timeout')) {
+            $repo = New-Repository ('access-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+            $appBefore = Get-ShaFileForTest (Join-Path $repo 'app.txt')
+            $stateBefore = Get-ShaFileForTest (Join-Path $repo '.forge/local/state.md')
+            $env:FAKE_CLAUDE_BEHAVIOR = 'clean'; $env:FAKE_CODEX_BEHAVIOR = 'clean'
+            if ($first -eq 'claude') { $env:FAKE_CLAUDE_BEHAVIOR = $behavior } else { $env:FAKE_CODEX_BEHAVIOR = $behavior }
+            $env:FAKE_CLAUDE_LOG = Join-Path $repo '.forge/local/reviews/claude.log'
+            $env:FAKE_CODEX_LOG = Join-Path $repo '.forge/local/reviews/codex.log'
+            $rc = Invoke-Dispatch $repo $engineHost 'sid' 'auto'
+            Assert-True (Test-Path -LiteralPath (Join-Path $repo ".forge/local/reviews/$first.log")) 'initial process argv is recorded'
+            if ($behavior -eq 'blocked-authorization') {
+                Assert-Equal $rc 2 'typed authorization block stops review'
+                Assert-Equal (Get-ReceiptValue $repo 'fallback') 'false' 'typed block does not trigger fallback'
+                Assert-Equal (Get-ReceiptValue $repo 'attempted_engines') $first 'only the initial reviewer is attempted'
+                Assert-Equal (Get-ReceiptValue $repo 'blocked_class') 'authorization' 'typed authorization reason is retained'
+                Assert-True (-not (Test-Path -LiteralPath (Join-Path $repo ".forge/local/reviews/$engineHost.log"))) 'typed authorization block does not launch fallback'
+            } else {
+                Assert-Equal $rc 0 "$behavior uses the ordinary fresh fallback"
+                Assert-True (Test-Path -LiteralPath (Join-Path $repo ".forge/local/reviews/$engineHost.log")) 'fallback process argv is recorded'
+                Assert-Equal (Get-ReceiptValue $repo 'fallback') 'true' 'ordinary fallback is recorded'
+                Assert-Equal (Get-ReceiptValue $repo 'attempted_engines') "$first,$engineHost" 'both ordinary attempts are recorded'
+                Assert-Equal (Get-ReceiptValue $repo 'actual_engine') $engineHost 'fallback engine completes the review'
+            }
+            Assert-Equal (Get-ReceiptValue $repo 'role') 'general' 'role stays ordinary'
+            Assert-Equal (Get-ReceiptValue $repo 'profile') 'review' 'profile stays ordinary'
+            Assert-Equal (Get-ReceiptValue $repo 'investigation_mode') 'not-applicable' 'failure never selects investigation mode'
+            Assert-Equal (Get-ReceiptValue $repo 'auth_recovery_engine') 'none' 'host permission denial does not trigger login recovery'
+            foreach ($engine in @($first, $engineHost)) {
+                $log = Join-Path $repo ".forge/local/reviews/$engine.log"
+                if (-not (Test-Path -LiteralPath $log)) { continue }
+                if ($engine -eq 'claude') {
+                    Assert-Contains $log '--permission-mode dontAsk' 'attempted Claude process stays in ordinary permission mode'
+                    Assert-Contains $log '--tools Read,Grep,Glob' 'attempted Claude process grants only review tools'
+                } else {
+                    Assert-Contains $log '--sandbox read-only' 'attempted Codex process stays read-only'
+                    Assert-Contains $log '-a never' 'attempted Codex process cannot ask for broader access'
+                }
+                Assert-NotContains $log '--sandbox danger-full-access' 'attempted process never gains full investigation access'
+                Assert-NotContains $log "cwd=$repo " 'attempted process never runs in the live worktree'
+            }
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $repo '.forge/local/investigation-artifacts'))) 'failure creates no live investigation writes'
+            Assert-Equal (Get-ShaFileForTest (Join-Path $repo 'app.txt')) $appBefore 'failure preserves live application bytes'
+            Assert-Equal (Get-ShaFileForTest (Join-Path $repo '.forge/local/state.md')) $stateBefore 'failure preserves canonical state bytes'
+        }
+    }
+    $env:FAKE_CLAUDE_BEHAVIOR = 'clean'; $env:FAKE_CODEX_BEHAVIOR = 'clean'
+    Remove-Item Env:FAKE_CLAUDE_LOG, Env:FAKE_CODEX_LOG -ErrorAction SilentlyContinue
 
     Write-Host 'PowerShell explicit authentication handoff preserves fallback results'
     foreach ($case in @(

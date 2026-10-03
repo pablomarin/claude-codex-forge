@@ -8,7 +8,7 @@
 | Reproduce and fix a defect | `/fix-bug <name>` |
 | Trivial, low-risk change under the quick-fix limits | `/quick-fix <name>` |
 | Fresh second opinion or code review | Claude: `/opinion <request>`; Codex: `$opinion <request>` |
-| Investigation with disposable write/network capability | Claude: `/opinion investigate <request>`; Codex: `$opinion investigate <request>` |
+| Investigation requiring live project tools, network, or real-worktree writes | Claude: `/opinion investigate <request>`; Codex: `$opinion investigate <request>` |
 | Resolve an explicitly requested or still-unresolved high-impact architectural fork | `/council <question>` |
 | Process PR feedback | `/review-pr-comments` |
 | Merge and clean up after approval | `/finish-branch` |
@@ -17,6 +17,13 @@ The current host is the main agent for the session. Resolve it through the insta
 never persist a permanent main-engine preference. Reviewer `auto` selects the other installed
 engine and automatically falls back to a fresh same-engine reviewer when launch/capability failure
 occurs. A finding is a review result, not a fallback reason.
+
+Ordinary reviews use an immutable disposable candidate. Select full-agent investigation from the
+task's actual need for live project capabilities, under the standing Human-Approved Reviews policy;
+explain the mode without another Forge consent question. Investigation runs in the real worktree
+with normal host/project capabilities. A permission denial or timeout alone must never switch an
+ordinary review or its fallback to investigation. Native host security and the existing destructive
+and external-mutation boundaries remain in force.
 
 ## Reviewer authentication recovery
 

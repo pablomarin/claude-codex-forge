@@ -52,5 +52,12 @@ instead of inventing authorization.
 ## How it triggers
 
 Claude Code uses `/opinion investigate <request>`; Codex uses `$opinion investigate <request>`.
+Both ordinary review and full-agent investigation have standing human approval. The main agent
+may also select investigation from the task's need for live project tools, services, network,
+or worktree writes. It explains the mode and launches without another Forge consent or permission
+question; no new authorization token is required. Ordinary source review stays isolated and
+read-only. A permission denial or timeout alone never switches ordinary review or its fallback
+to full investigation. Native host security and existing destructive/external mutation boundaries
+still apply.
 The dispatcher prefers the other engine and visibly falls back to a fresh same-engine process on a
 launch/capability failure. There is no permanent main-engine choice.

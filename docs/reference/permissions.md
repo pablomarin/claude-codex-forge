@@ -10,12 +10,12 @@ sandbox prompts can differ between Claude Code and Codex; Forge's human-authorit
 | Read any file                              | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Edit/Write files                           | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Run an ordinary shell command              | Host-dependent | Claude Code recognizes some read-only commands directly. In Auto mode it drops blanket Bash allow rules and evaluates other actions; commands it cannot parse completely can still prompt. Forge therefore requires small, literal, single-purpose calls but does not promise that every shell command is prompt-free                                                                         |
-| Forge reviewer dispatch                    | No extra Forge question | Ordinary bounded read-only reviews through configured Claude Code/Codex services are human-preapproved, including fallback and resumed sessions. Approval permits running reviews, not accepting findings or shipping; host security controls still apply |
+| Forge reviewer dispatch                    | No extra Forge question | Ordinary reviews and task-selected full investigations through configured Claude Code/Codex services have standing human launch approval, including fallback and resumed sessions. Approval permits running reviews, not accepting findings or shipping; host security controls still apply |
 | Skill invocation                           | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Web search and fetch                       | No      | Allowed                                                                                                                                                                                                                                                                                                                                                                                      |
 | Context7 MCP tools                         | No      | Auto-approved for docs lookup                                                                                                                                                                                                                                                                                                                                                                |
 | Playwright MCP tools                       | No      | Auto-approved — used by verify-e2e for UI flows                                                                                                                                                                                                                                                                                                                                              |
-| **Full investigation**                     | No extra Forge restriction | Fresh agent uses the selected host's normal project/user config, state, memory, tools, MCP, network, databases, APIs, and real-worktree write access                                                                                                                                                |
+| **Full investigation**                     | No extra Forge question | Main agent selects this mode from task needs under standing launch approval. Fresh agent uses normal project/user config, state, memory, tools, MCP, network, databases, APIs, and real-worktree write access; existing host controls still apply |
 | **gh pr create**                           | Yes     | Creating a PR requires explicit human approval plus the matching nonce/candidate authorization in `.forge/local/state.md`; native sessions cannot replay it across a different objective or candidate                                                                                                                          |
 | **gh pr merge**                            | Yes     | Merging requires approval                                                                                                                                                                                                                                                                                                                                                                    |
 | **Protected external mutation**            | Yes     | Uses the same operation-specific host prompt and current human authorization whether initiated by the main agent or an investigator; Forge grants no extra authority                                                                                                                                                          |
@@ -56,18 +56,22 @@ See Anthropic's current [permission rules](https://code.claude.com/docs/en/permi
 | Protected DB/cloud/API mutation | Current explicit human authority is required |
 | Windows: `Remove-Item -Recurse` | Destructive deletion (Windows template only) |
 
-Ordinary reviews have standing human approval under the canonical Human-Approved Reviews policy.
-Forge does not add a consent question for the first review, a follow-up, fallback, or a resumed
-session. This approves executing reviews, not their findings or shipping. Reviewer transport
+Ordinary reviews and full-agent investigations have standing human approval under the canonical
+Human-Approved Reviews policy. The main agent may select investigation when the task needs live
+project capabilities, explain the selection, and launch without another Forge consent or permission
+question. This includes the first review, follow-up, fallback, and resumed sessions. This approves
+executing reviews, not their findings or shipping. Ordinary reviewer transport
 remains narrowly scoped: the complete bounded candidate, prompt, and evidence go only to the
 configured Claude Code/Codex services. The candidate can include private or sensitive tracked and
 in-scope non-ignored content; remove or gitignore anything that must not leave before review.
 This transfer is not an external mutation and does not grant arbitrary network access, additional
 secrets, credentials, or gitignored state beyond the candidate; outside-worktree paths; other
-projects; arbitrary destinations; full-agent investigation; deployment; publication; or destructive
+projects; arbitrary destinations; deployment; publication; or destructive
 work. Host security controls still apply, and an agent must never invent human approval. Ordinary
-review remains hermetic; explicit investigation retains its separate capability authorization and
-the existing human mutation boundaries.
+review remains hermetic. Full investigation uses the normal host/project capabilities in the real
+worktree under standing launch approval. A permission denial or timeout alone never upgrades
+ordinary review or its fallback to investigation. Existing host security and human authority for
+destructive or external mutations remain unchanged; Forge adds no launch token or permission gate.
 
 The installed contract and materialization tests do not prove Codex Desktop Auto-review behavior.
 That host boundary remains `PENDING` until the physical-operator journeys in

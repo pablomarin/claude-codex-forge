@@ -12,9 +12,9 @@ Claude Code invokes this workflow as `/opinion <request>`; Codex invokes it as `
 Adding `investigate` after either host-native entry point selects the investigation profile.
 Otherwise classify the request as one of: general second opinion/analysis/brainstorming/question
 (`general`), plan, PRD, review comments, code review, or independent investigation reproduction.
-General is hermetic and read-only. Resolve the workflow's persisted immutable base SHA/ref from
-`.forge/local/state.md`; never recompute it from a moving default branch. Put the exact request in a
-regular prompt file under `.forge/local/reviews/`.
+General is hermetic and read-only. Resolve the workflow's persisted immutable base SHA/ref through
+the bounded `workflow-state.sh show` reader; never recompute it from a moving default branch.
+Put the exact request in a regular prompt file under `.forge/local/reviews/`.
 
 For the ordinary review profile, `FORGE_REVIEW_TRANSPORT_AUTHORIZED` communicates the developer's
 standing human approval in the canonical Human-Approved Reviews section (`.forge/instructions.md`;
@@ -27,16 +27,70 @@ does not grant arbitrary network tools, additional secrets or credentials, gitig
 state beyond the candidate, outside-worktree access, other projects, arbitrary destinations, or
 external mutations. Respect host security controls and cite the actual human standing instruction
 when authorization provenance is required.
-This standing review consent does not authorize `investigate`.
+The same standing human approval covers full-agent investigation selected from task needs;
+its different capabilities are described below. Neither mode adds a Forge launch-consent question.
 
-Invoke the fixed launcher for this host:
+Read workflow state in its own single-program shell tool call:
 
-- Claude Code: `.forge/hooks/lib/host-context.sh launch --host claude -- .forge/hooks/lib/agent-dispatch.sh run ...`
-- Codex: `.forge/hooks/lib/host-context.sh launch --host codex -- .forge/hooks/lib/agent-dispatch.sh run ...`
-- Windows uses `host-context.ps1 -Mode launch -Host <host> -LaunchArguments ...`.
+```bash
+bash .forge/hooks/lib/workflow-state.sh show
+```
 
-The stable dispatcher arguments are documented by `agent-dispatch run`; pass an explicit artifact,
-workflow base, role/profile, prompt, output, and 20-minute timeout. Show its selection/fallback line
+Copy `Workflow base ref` and `Workflow base SHA` from the returned canonical `Identity` table.
+Replace the quoted `COPY_WORKFLOW_BASE_REF` and `COPY_WORKFLOW_BASE_SHA` placeholders below
+with those literal values before launching; do not use shell variables, substitutions, or a
+raw state-file parser. Replace `UNIQUE_INVOCATION` with a fresh identifier and write the exact
+request to that prompt path through the host's structured file tool. Put `review_mode=broad`
+in the initial prompt, or `review_mode=closure` for named findings and direct regressions.
+Use a fresh prompt/output path for every invocation, including each code-review lens and closure.
+Change `--role general` to the requested review role when appropriate. Submit only the single
+launcher command for the active host in the next shell tool call.
+
+Claude Code host (automatically selects Codex, with visible fresh Claude fallback):
+
+```bash
+bash .forge/hooks/lib/host-context.sh launch --host claude -- \
+  .forge/hooks/lib/agent-dispatch.sh run --engine auto --fallback-policy automatic \
+  --role general --profile review --artifact git:working-tree \
+  --workflow-base-ref 'COPY_WORKFLOW_BASE_REF' --workflow-base-sha 'COPY_WORKFLOW_BASE_SHA' \
+  --prompt-file '.forge/local/reviews/UNIQUE_INVOCATION.prompt' \
+  --output '.forge/local/reviews/UNIQUE_INVOCATION-claude-host.result' --timeout-seconds 1200
+```
+
+Submit this command to Claude Code's Bash tool with `run_in_background: true` and
+`timeout: 3000000` (50 minutes). These are outer tool parameters; the reviewer timeout stays
+1,200 seconds per attempt. The outer budget covers two attempts plus dispatch overhead.
+The default foreground ceiling is only 10 minutes, and the default background budget can be
+30 minutes; explicitly started background tasks support a longer timeout on Claude Code
+2.1.285+. See the [official tools reference](https://code.claude.com/docs/en/tools-reference#time-limit-for-background-commands).
+Retain the returned task ID, keep the main agent active, and wait for the completion result and
+receipt before declaring the review finished. Do not end an unattended main run while it waits.
+
+Codex host (automatically selects Claude, with visible fresh Codex fallback):
+
+```bash
+bash .forge/hooks/lib/host-context.sh launch --host codex -- \
+  .forge/hooks/lib/agent-dispatch.sh run --engine auto --fallback-policy automatic \
+  --role general --profile review --artifact git:working-tree \
+  --workflow-base-ref 'COPY_WORKFLOW_BASE_REF' --workflow-base-sha 'COPY_WORKFLOW_BASE_SHA' \
+  --prompt-file '.forge/local/reviews/UNIQUE_INVOCATION.prompt' \
+  --output '.forge/local/reviews/UNIQUE_INVOCATION-codex-host.result' --timeout-seconds 1200
+```
+
+Retain the running Codex execution session and poll it until the dispatcher completes and its
+receipt is available. A tool's yield interval only controls when it returns progress; it is not
+a process deadline. Keep the main agent active and do not terminate the session for silence or
+impose an outer deadline shorter than two complete attempts plus overhead.
+
+Windows uses the same contract through `host-context.ps1 -Mode launch -Host claude|codex`;
+pass the PowerShell dispatcher flags in `-LaunchArguments`, including `-TimeoutSeconds 1200`.
+The dispatcher selects the fixed ordinary models, `xhigh` effort and vendor fast mode; callers
+must not substitute direct vendor commands or override those settings. The 20-minute timeout
+is a ceiling per attempt, including fallback and closure, not a required running time.
+Allow both attempts and dispatch overhead in any outer deadline. Never stop a silent reviewer
+before its dispatcher-owned timeout.
+
+The stable dispatcher arguments are documented by `agent-dispatch run`. Show its selection/fallback line
 and receipt path. Never reinterpret missing, empty, malformed, contradictory, or prose-only output
 as a verdict.
 
@@ -73,16 +127,12 @@ inferred Gate-1 briefing edges are exempt.
 
 ## Investigation
 
-Ordinary reviewer transport consent does not authorize `investigate`. An explicit user-authored
-`/opinion investigate` or `$opinion investigate` invocation authorizes the separately disclosed
-full-agent launch. If the main agent inferred investigation from ordinary prose, ask exactly:
-
-> May I launch a fresh full-capability reviewer agent in the real worktree? It will inherit the
-> normal user/project configuration, Forge state and memory, tools, MCP servers, network, databases,
-> APIs, and worktree write access. Individual external or destructive mutations still require their
-> existing host approvals.
-
-Stop until the developer answers. Do not substitute ordinary review consent for this authorization.
+Standing human approval covers full-agent investigation launches, including mode selection by the
+main agent from the task's actual requirements. Select this mode when live project tools, services,
+network, or worktree writes are needed; explain that choice without an extra consent or permission
+question. The host-native `investigate` entry point also selects it. Do not require a new token or
+stop for launch approval. A permission denial or timeout in ordinary review alone is never a reason
+to switch it or its fallback to investigation; keep those attempts isolated and read-only.
 
 Use `--profile investigate --role investigation`. This launches a fresh full-capability process of
 the selected engine in the real worktree. It inherits the normal user/project configuration,
@@ -91,7 +141,7 @@ Forge does not add a safe-mode, tool allowlist, stripped home/config, disposable
 replay boundary to this role. Claude uses safety-classified `auto` permission mode so an
 unattended cross-engine call can use normal tools without bypassing safety checks. Because
 non-interactive Codex otherwise defaults to read-only, Forge selects `danger-full-access` with
-native `on-request` approval and search enabled for this explicit role. The developer's existing
+native `on-request` approval and search enabled for this role. The developer's existing
 authorization boundaries still apply. Because the investigator may edit the live worktree, its
 receipt is evidence of the investigation run, not immutable-candidate review certification.
 

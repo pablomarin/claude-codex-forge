@@ -62,6 +62,168 @@ assert_receipt_value() {
     assert_equals "$got" "$want" "$key=$want"
 }
 
+# A shorter or longer production review budget must fail before even reading a prompt
+# or creating candidate/review storage. Valid and test/investigation budgets reach the
+# deliberately missing prompt instead; these controls never launch an engine.
+start_test "production review budgets are fixed before prompt and candidate work"
+for platform in bash powershell; do
+    if [ "$platform" = powershell ] && ! command -v pwsh >/dev/null 2>&1; then
+      skip_test 'PowerShell timeout runtime checks require pwsh'; continue
+    fi
+    S=$(scratch_dir dispatch-timeout-policy)
+    for tuple in 'review 180 0 reject' 'review 600 0 reject' 'review 1201 0 reject' \
+      'review 1200 0 accept' 'review default 0 accept' 'review 2 1 accept' \
+      'investigate 180 0 accept' 'review 0 1 invalid'; do
+      set -- $tuple; policy_profile="$1"; budget="$2"; test_mode="$3"; want="$4"
+      policy_role=general; [ "$policy_profile" != investigate ] || policy_role=investigation
+      policy_log="$S/$policy_profile-$budget-$test_mode.log"
+      if [ "$platform" = bash ]; then
+        budget_args=(); [ "$budget" = default ] || budget_args=(--timeout-seconds "$budget")
+        (cd "$S" && FORGE_DISPATCH_TEST_MODE="$test_mode" bash "$DISPATCH" run \
+          --engine auto --fallback-policy automatic --role "$policy_role" --profile "$policy_profile" \
+          --prompt-file "$S/missing.prompt" ${budget_args[@]+"${budget_args[@]}"}) >"$policy_log" 2>&1
+      else
+        budget_args=(); [ "$budget" = default ] || budget_args=(-TimeoutSeconds "$budget")
+        (cd "$S" && FORGE_DISPATCH_TEST_MODE="$test_mode" pwsh -NoProfile -File \
+          "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" -Mode run -Profile "$policy_profile" \
+          -Role "$policy_role" -PromptFile "$S/missing.prompt" ${budget_args[@]+"${budget_args[@]}"}) >"$policy_log" 2>&1
+      fi
+      assert_equals "$?" 2 "$platform $policy_profile/$budget stops without launching an engine"
+      if [ "$want" = reject ]; then
+        assert_contains "$policy_log" 'review timeout must be exactly 1200 seconds' "$platform rejects $budget before prompt work"
+      else
+        assert_not_contains "$policy_log" 'review timeout must be exactly 1200 seconds' "$platform preserves $policy_profile/$budget control"
+        if [ "$platform" = bash ] && [ "$want" = accept ]; then
+          assert_contains "$policy_log" 'regular prompt file required' "$platform accepted budget reaches prompt validation"
+        elif [ "$platform" = powershell ]; then
+          assert_contains "$policy_log" 'valid timeout and prompt are required' "$platform control reaches ordinary validation"
+        fi
+      fi
+      assert_file_missing "$S/.forge" "$platform creates no review or candidate storage"
+    done
+done
+
+EXECUTION_SEQ=0
+run_execution_dispatch() {
+    local dir="$1" platform="$2" selected="$3" budget="$4" host="${5:-codex}" base output
+    EXECUTION_SEQ=$((EXECUTION_SEQ + 1)); output="$dir/.forge/local/reviews/execution-$EXECUTION_SEQ.txt"
+    base=$(git -C "$dir" rev-parse HEAD)
+    if [ "$platform" = bash ]; then
+      launch_dispatch "$dir" "$host" run --engine "$selected" --fallback-policy automatic --role general \
+        --profile review --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref refs/heads/test-base \
+        --prompt-file "$dir/prompt.txt" --output "$output" --timeout-seconds "$budget"
+    else
+      (cd "$dir" && PATH="$FAKES:$PATH" FORGE_NATIVE_HOST="$host" FORGE_DISPATCH_TEST_MODE=1 \
+        pwsh -NoProfile -File "$REPO_ROOT/hooks/lib/agent-dispatch.ps1" -Mode run -Engine "$selected" \
+        -FallbackPolicy automatic -Role general -Profile review -Artifact git:working-tree \
+        -WorkflowBaseSha "$base" -WorkflowBaseRef refs/heads/test-base -PromptFile "$dir/prompt.txt" \
+        -Output "$output" -TimeoutSeconds "$budget")
+    fi
+}
+
+start_test "ordinary launches and receipts request xhigh fast mode and the exact budget"
+for platform in bash powershell; do
+    if [ "$platform" = powershell ] && ! command -v pwsh >/dev/null 2>&1; then
+      skip_test 'PowerShell execution runtime checks require pwsh'; continue
+    fi
+    for selected in claude codex; do
+      S=$(scratch_dir dispatch-execution); S=$(cd "$S" && pwd -P); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+      log="$S/.forge/local/reviews/engine.log"
+      FAKE_CLAUDE_LOG="$log" FAKE_CODEX_LOG="$log" FAKE_CLAUDE_BEHAVIOR=require-fast FAKE_CODEX_BEHAVIOR=require-fast \
+        run_execution_dispatch "$S" "$platform" "$selected" 1200 >"$S/.forge/local/reviews/execution.log" 2>&1
+      assert_equals "$?" 0 "$platform $selected completes with the production budget and fast mode"
+      assert_receipt_value "$S" timeout_seconds 1200
+      assert_receipt_value "$S" requested_fast_mode true
+      assert_receipt_value "$S" requested_reasoning_effort xhigh
+      if [ "$selected" = claude ]; then
+        assert_contains "$log" '--effort xhigh' "$platform requests Claude xhigh in actual engine argv"
+      else
+        assert_contains "$log" 'model_reasoning_effort=xhigh' "$platform requests Codex xhigh in actual engine argv"
+      fi
+    done
+    S=$(scratch_dir dispatch-execution-hash); S=$(cd "$S" && pwd -P); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+    for budget in 2 3; do
+      run_execution_dispatch "$S" "$platform" claude "$budget" >/dev/null 2>&1
+      assert_equals "$?" 0 "$platform shortened fixture budget $budget remains supported"
+      receipt=$(find "$S/.forge/local/reviews" -name '*.receipt' -type f | sort | tail -1)
+      current_hash=$(awk -F= '$1=="invocation_config_hash" {print $2}' "$receipt")
+      expected_hash=$(python3 - "$receipt" "$platform" "$budget" <<'PY'
+import hashlib, sys
+from pathlib import Path
+receipt, platform, budget = sys.argv[1:]
+d = dict(line.split('=', 1) for line in Path(receipt).read_text().splitlines() if '=' in line)
+output = dict(line.split('=', 1) for line in Path(d['output_path']).read_text().splitlines() if '=' in line)
+config = output['forge_config_hash']
+if platform == 'bash':
+    fields = [d['attempted_engines'], config, d['model_qualification_revision'], d['artifact_hash'],
+              d['prompt_hash'], 'general', 'review', budget, 'true']
+    text = '\n'.join(fields) + '\n'
+else:
+    text = '|'.join([d['attempted_engines'], config, d['artifact_hash'], d['prompt_hash'], budget, 'true'])
+print(hashlib.sha256(text.encode()).hexdigest())
+PY
+)
+      assert_equals "$current_hash" "$expected_hash" "$platform invocation hash binds timeout=$budget and requested fast mode"
+    done
+done
+
+start_test "permission failures and timeouts never upgrade ordinary review or fallback capabilities"
+for platform in bash powershell; do
+    if [ "$platform" = powershell ] && ! command -v pwsh >/dev/null 2>&1; then
+      skip_test 'PowerShell permission-failure runtime checks require pwsh'; continue
+    fi
+    for host in claude codex; do
+      first=claude; [ "$host" != claude ] || first=codex
+      for behavior in blocked-authorization permission-denied timeout; do
+        if [ "$platform" = powershell ] && [ "$behavior" = timeout ] && ! command -v taskkill.exe >/dev/null 2>&1; then
+          skip_test 'PowerShell timeout cleanup is covered by the native Windows suite'; continue
+        fi
+        S=$(scratch_dir dispatch-permission); S=$(cd "$S" && pwd -P); make_repo "$S"; printf 'review\n' > "$S/prompt.txt"
+        state_before=$(hash_file "$S/.forge/local/state.md"); app_before=$(hash_file "$S/app.txt")
+        claude_behavior=clean; codex_behavior=clean
+        if [ "$first" = claude ]; then claude_behavior="$behavior"; else codex_behavior="$behavior"; fi
+        claude_log="$S/.forge/local/reviews/claude.log"; codex_log="$S/.forge/local/reviews/codex.log"
+        FAKE_CLAUDE_BEHAVIOR="$claude_behavior" FAKE_CODEX_BEHAVIOR="$codex_behavior" \
+          FAKE_CLAUDE_LOG="$claude_log" FAKE_CODEX_LOG="$codex_log" \
+          run_execution_dispatch "$S" "$platform" auto 2 "$host" >/dev/null 2>&1
+        rc=$?
+        assert_file_exists "$S/.forge/local/reviews/$first.log" "$platform/$host records the initial process argv"
+        if [ "$behavior" = blocked-authorization ]; then
+          assert_equals "$rc" 2 "$platform/$host typed authorization block stops review"
+          assert_receipt_value "$S" fallback false
+          assert_receipt_value "$S" attempted_engines "$first"
+          assert_receipt_value "$S" blocked_class authorization
+          assert_file_missing "$S/.forge/local/reviews/$host.log" "$platform typed authorization block does not launch fallback"
+        else
+          assert_equals "$rc" 0 "$platform/$host $behavior uses the ordinary fresh fallback"
+          assert_file_exists "$S/.forge/local/reviews/$host.log" "$platform/$host records the fallback process argv"
+          assert_receipt_value "$S" fallback true
+          assert_receipt_value "$S" attempted_engines "$first,$host"
+          assert_receipt_value "$S" actual_engine "$host"
+        fi
+        assert_receipt_value "$S" role general
+        assert_receipt_value "$S" profile review
+        assert_receipt_value "$S" investigation_mode not-applicable
+        assert_receipt_value "$S" auth_recovery_engine none
+        for selected in "$first" "$host"; do
+          log="$S/.forge/local/reviews/$selected.log"; [ -f "$log" ] || continue
+          if [ "$selected" = claude ]; then
+            assert_contains "$log" '--permission-mode dontAsk' "$platform attempted Claude process stays in ordinary permission mode"
+            assert_contains "$log" '--tools Read,Grep,Glob' "$platform attempted Claude process grants only review tools"
+          else
+            assert_contains "$log" '--sandbox read-only' "$platform attempted Codex process stays read-only"
+            assert_contains "$log" '-a never' "$platform attempted Codex process cannot ask for broader access"
+          fi
+          assert_not_contains "$log" '--sandbox danger-full-access' "$platform attempted process never gains full investigation access"
+          assert_not_contains "$log" 'cwd='"$S " "$platform attempted process never runs in the live worktree"
+        done
+        assert_file_missing "$S/.forge/local/investigation-artifacts" "$platform/$host $behavior creates no live investigation writes"
+        assert_hash_equals "$S/app.txt" "$app_before" "$platform/$host $behavior preserves live application bytes"
+        assert_hash_equals "$S/.forge/local/state.md" "$state_before" "$platform/$host $behavior preserves canonical state bytes"
+      done
+    done
+done
+
 start_test "expired Claude login survives final failure and does not defeat automatic fallback"
 for tuple in 'codex none exit authentication-required claude' 'claude automatic exit authentication-required claude' 'codex automatic exit process-exit-23 claude' 'codex automatic clean semantic-result none' 'codex automatic findings semantic-result none' 'codex automatic blocked-artifact semantic-result none' 'codex automatic blocked-unobserved isolation-canary-unobserved claude'; do
     set -- $tuple; host="$1"; policy="$2"; codex_behavior="$3"; reason="$4"; recovery="$5"
