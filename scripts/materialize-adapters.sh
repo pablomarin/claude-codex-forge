@@ -154,7 +154,7 @@ render_adapter() {
     description="Forge adapter for $name"
     case "$canonical_path" in
         .forge/workflows/opinion.md|.forge/workflows/new-feature.md|.forge/workflows/fix-bug.md|.forge/workflows/review-pr-comments.md|.forge/skills/council/SKILL.template.md)
-            description="$description. Invoking it authorizes only ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services. Investigation is excluded; investigate launches a separate full agent in the real worktree with normal config, tools, network, and write access under host approvals."
+            description="$description. Standing human approval covers ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services, and full-agent investigation selected from task needs. No extra Forge consent question. Ordinary review stays hermetic; investigate uses normal config, tools, network, and real-worktree write access. Host security and external/destructive mutation boundaries still apply."
             ;;
     esac
     capabilities=$(awk '

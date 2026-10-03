@@ -25,6 +25,7 @@ qualified_json() {
 }
 case "${FAKE_CLAUDE_BEHAVIOR:-clean}" in
   clean) clean_json ;;
+  permission-denied) printf '%s\n' '{"is_error":true,"result":"Permission denied by host policy"}'; exit 1 ;;
   auth-expired|auth-expired-zero|auth-expired-delayed)
     [ "${FAKE_CLAUDE_BEHAVIOR}" != auth-expired-delayed ] || sleep 1
     printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.","num_turns":1,"total_cost_usd":0,"modelUsage":{}}'
@@ -45,6 +46,7 @@ case "${FAKE_CLAUDE_BEHAVIOR:-clean}" in
   require-fast) fast_mode_enabled "$@" || exit 63; clean_json ;;
   findings) qualified_json 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|reachable defect' ;;
   blocked-artifact) qualified_json 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=artifact' ;;
+  blocked-authorization) qualified_json 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=authorization' ;;
   blocked-engine) qualified_json 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=engine' ;;
   contradictory) qualified_json 'schema_version=1' 'verdict=CLEAN' 'max_severity=P1' 'blocked_class=none' 'finding=F-1|P1|contradiction' ;;
   malformed) printf '%s\n' 'This is prose, not an envelope.' ;;

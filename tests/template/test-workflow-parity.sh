@@ -107,7 +107,7 @@ if [[ "$stage" == development || "$stage" == complete ]]; then
     assert_contains "$REPO_ROOT/commands/fix-bug.md" "same-engine fallback" "fix-bug has automatic reviewer fallback"
 
     quick_fix="$REPO_ROOT/commands/quick-fix.md"
-    for contract in "workflow-state.sh show" "workflow-state.sh activate" "workflow-state.sh checkpoint" 'worktree whose `HEAD`' "focused check directly" "at most three implementation paths" 'use `/fix-bug`' "required human authorization"; do
+    for contract in "workflow-state.sh show" "workflow-state.sh activate" "workflow-state.sh checkpoint" 'quick-fix/<slug>` branch whose `HEAD` equals a distinct named base branch' "focused check directly" "at most three implementation paths" 'use `/fix-bug`' "required human authorization"; do
         assert_contains "$quick_fix" "$contract" "quick-fix preserves the direct-check contract: $contract"
     done
     assert_contains "$quick_fix" 'dispatches no `code-spec`' "quick-fix explicitly removes the spec reviewer"
@@ -253,7 +253,7 @@ for workflow in $converted; do
 done
 
 start_test "review-capable native workflow entries disclose transport before user invocation"
-review_transport_disclosure='Invoking it authorizes only ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services. Investigation is excluded; investigate launches a separate full agent in the real worktree with normal config, tools, network, and write access under host approvals.'
+review_transport_disclosure='Standing human approval covers ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services, and full-agent investigation selected from task needs. No extra Forge consent question. Ordinary review stays hermetic; investigate uses normal config, tools, network, and real-worktree write access. Host security and external/destructive mutation boundaries still apply.'
 for adapter in \
     .claude/commands/opinion.md \
     .claude/commands/new-feature.md \

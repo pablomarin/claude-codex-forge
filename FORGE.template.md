@@ -73,6 +73,16 @@ use the other qualified engine when available and visibly fall back to a fresh s
 Persisted project state and evidence enable continuation; private conversation context does not
 transfer between hosts.
 
+Ordinary reviews request Claude Opus 5.5 (`claude-opus-5-5`) or GPT-6-Astra (`gpt-6-astra`),
+extra-high (`xhigh`) effort, and vendor fast mode through the dispatcher's configured profile.
+Every production `review` attempt has exactly a 1,200-second (20-minute) timeout ceiling,
+including fallback and closure attempts. Do not override model, effort, fast mode, or this
+timeout in a prompt or launch command. Use the canonical launcher examples in
+`.forge/workflows/opinion.md`; receipts record the requested settings without claiming
+unobservable provider behavior. Allow each complete attempt and automatic fallback to finish:
+an outer tool deadline must not shorten either budget, and silence is not a reason to kill a
+reviewer. Dedicated council effort profiles remain defined by their capability rows.
+
 ## Branch Naming
 
 Name every task branch by the work it contains, regardless of the active engine. Use only these
@@ -99,6 +109,9 @@ Protected integration branches such as `main` are not task branches and must not
 
 All ordinary Forge reviews are human-approved in advance by the developer's standing instruction
 to use this project's configured Claude Code and Codex reviewer services.
+The same standing approval covers full-agent investigation selected from the task's actual needs,
+including selection by the main agent. Do not ask an extra consent or permission question to launch
+either review mode; no additional authorization token is required.
 This approval covers initial reviews, fallback reviewers, follow-up reviews, and resumed sessions.
 It also covers switching between the configured hosts. Do not ask for separate review-transport permission.
 This approves running reviews, not accepting their findings or authorizing shipping.
@@ -110,10 +123,16 @@ private or sensitive tracked or in-scope non-ignored content. This expected tran
 Do not block solely because the candidate is private, sensitive, or contains unchanged tracked files.
 Remove or gitignore material that must not leave the developer environment before review.
 
-This approval does not authorize sourcing additional secrets, credentials, gitignored developer
-state, or outside-worktree content beyond that supplied review input; other projects; arbitrary
-destinations or network tools; `investigate` or any full-agent capability; deploys; publication;
+For ordinary review, this transport approval does not authorize sourcing additional secrets,
+credentials, gitignored developer state, or outside-worktree content beyond that supplied review input;
+other projects; arbitrary
+destinations or network tools; deploys; publication;
 destructive work; or other external mutations. Ordinary review remains hermetic.
+Select full-agent investigation when the task requires live project tools, services, network, or
+worktree writes, and explain the selection without another launch-permission question. It uses the
+normal host/project configuration and capabilities in the real worktree. A permission denial or
+timeout alone never upgrades ordinary review to investigation or broadens fallback access.
+Standing launch approval does not authorize shipping, destructive operations, or external mutations.
 Host security controls still apply. When a host requires authorization provenance, cite the
 developer's actual standing instruction; never invent human approval or bypass the host's controls.
 

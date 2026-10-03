@@ -2,6 +2,30 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.2 — 2026-10-03
+
+### Exact reviewer execution settings
+
+Ordinary Claude reviews now request Opus 5.5 with extra-high (`xhigh`) effort, matching the
+configured GPT-6-Astra extra-high Codex reviewer. Both retain vendor fast mode. The Bash and
+PowerShell dispatchers reject production review timeout overrides: each attempt, including
+fallback and closure, receives exactly 1,200 seconds (20 minutes). Investigation budgets and
+short deterministic test budgets remain configurable.
+
+Invocation receipts and configuration hashes now bind the requested timeout and fast mode.
+The shared instructions prohibit shortening outer deadlines or killing silent reviewers, and
+the opinion workflow provides complete launcher examples for both hosts using the persisted
+immutable workflow base.
+
+Standing human approval now consistently covers ordinary reviews and full-agent investigations,
+including mode selection by the main agent from task needs, without an extra Forge consent
+question or launch token. Investigation is correctly described as a fresh agent in the real
+worktree with normal project/host capabilities. Permission denials or timeouts never upgrade
+ordinary review or broaden fallback access; host security and destructive/external mutation
+boundaries remain. Native adapter disclosures and current permission/qualification guidance
+match this contract, with behavioral permission-failure and timeout coverage on both dispatch twins.
+Native regression fixtures initialize temporary storage before capturing the first child process output.
+
 ## 6.4.1 — 2026-10-03
 
 ### Safe transitional-state and version-ledger upgrades

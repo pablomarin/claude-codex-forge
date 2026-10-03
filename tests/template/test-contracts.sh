@@ -2493,7 +2493,7 @@ else
     assert_not_contains "$REPO_ROOT/commands/codex.md" "## D) Investigate Mode" "codex shim has no duplicate investigation policy"
     assert_not_contains "$REPO_ROOT/commands/codex.md" "--output-last-message" "codex shim has no direct model argv"
 fi
-assert_contains "$REPO_ROOT/commands/opinion.md" "disposable candidate" "opinion workflow owns bounded investigation"
+assert_contains "$REPO_ROOT/commands/opinion.md" "disposable candidate" "opinion distinguishes disposable review from real-worktree investigation"
 assert_contains "$REPO_ROOT/commands/opinion.md" "independent control" "opinion workflow requires independent reproduction control"
 
 # ---------------------------------------------------------------------------
@@ -2872,8 +2872,8 @@ assert_contains "$CHEATSHEET_DOC" 'one repair and one closure' \
     "cheatsheet states the default review-loop bound"
 assert_contains "$GOAL_DOC" 'same native `/goal`' \
     "goal guide explains host-native composition"
-assert_contains "$INVESTIGATE_DOC" 'explicit authorization' \
-    "investigation guide requires explicit capability authorization"
+assert_contains "$INVESTIGATE_DOC" 'standing human approval' \
+    "investigation guide uses standing launch approval"
 assert_contains "$COUNCIL_DOC" 'three advisors use the current host' \
     "council guide documents the healthy topology"
 assert_contains "$COUNCIL_DOC" 'whole council' \

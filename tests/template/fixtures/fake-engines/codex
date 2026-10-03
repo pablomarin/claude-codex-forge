@@ -23,6 +23,7 @@ qualified_envelope() {
 }
 case "${FAKE_CODEX_BEHAVIOR:-clean}" in
   clean) clean_envelope ;;
+  permission-denied) printf '%s\n' 'Permission denied by host policy' >&2; exit 1 ;;
   require-proxy)
     for proxy_name in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy; do
       [ "${!proxy_name:-}" = "forge-test-$proxy_name" ] || exit 62
@@ -34,6 +35,7 @@ case "${FAKE_CODEX_BEHAVIOR:-clean}" in
   findings-p3) qualified_envelope 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P3' 'blocked_class=none' 'finding=F-1|P3|open|advisory note' ;;
   contradictory-p3) qualified_envelope 'schema_version=1' 'verdict=FINDINGS' 'max_severity=P3' 'blocked_class=none' 'finding=F-1|P1|open|material defect under false maximum' ;;
   blocked-artifact) qualified_envelope 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=artifact' ;;
+  blocked-authorization) qualified_envelope 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=authorization' ;;
   blocked-engine) qualified_envelope 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=engine' ;;
   blocked-unobserved)
     emit 'schema_version=1' 'verdict=BLOCKED' 'max_severity=NONE' 'blocked_class=capability' \

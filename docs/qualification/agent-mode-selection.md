@@ -56,20 +56,26 @@ skills, MCP, state, memory, network, and worktree access. Forge does not add a d
 disposable-candidate restriction there. `investigation-repro` remains the separate isolated path for
 certifying a reproduction.
 
-## Codex Desktop consent qualification
+## Codex Desktop reviewer-launch qualification
 
-This boundary remains `PENDING` until a physical operator records all three journeys against the
+This boundary remains `PENDING` until a physical operator records all five journeys against the
 same release candidate and Codex Desktop version:
 
 1. Explicitly invoke a review-capable Forge entry point in a project with the developer's standing
-   human approval. Confirm Forge adds no consent question to the first or second ordinary review.
+   human approval. Confirm Forge adds no consent question to ordinary review or an explicitly
+   selected full-agent investigation.
 2. Start the same workflow from ordinary prose under that standing approval. Confirm Forge adds
-   no consent question to either ordinary review; record any independent host security gate
+   no consent question to ordinary source review or to task-selected investigation requiring live
+   project tools, services, network, or worktree writes; record any independent host security gate
    separately rather than treating this policy as permission to bypass it.
 3. Resume the authorized project workflow in a fresh Desktop task or switch configured hosts.
-   Confirm Forge does not re-ask for ordinary bounded review transport. Confirm that new
-   destinations, expanded access, investigation, and external mutations are not authorized by
-   ordinary review approval.
+   Confirm Forge does not re-ask for either review-mode launch. Confirm the ordinary bounded
+   candidate remains isolated and full investigation uses the disclosed real-worktree capabilities.
+4. Deny a host permission or force an ordinary-review timeout. Confirm Forge does not change its
+   role/profile or grant live investigation capabilities; any automatic fresh fallback remains
+   ordinary review. Record its requested sandbox/tools and unchanged real-worktree bytes.
+5. Confirm standing launch approval does not authorize new arbitrary destinations, destructive
+   actions, publication, or external mutations; their existing operation-specific boundaries remain.
 
 Record the Desktop version, exact candidate SHA, task identifiers, and pass/fail outcome outside the
 repository. Do not store candidate content, credentials, or private transcript text in the receipt.

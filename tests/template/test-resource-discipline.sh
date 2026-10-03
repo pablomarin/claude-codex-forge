@@ -95,10 +95,12 @@ assert_contains "$REPO_ROOT/commands/opinion.md" "FORGE_REVIEW_TRANSPORT_AUTHORI
     "opinion workflow distinguishes reviewer transport from agent network capability"
 assert_contains "$REPO_ROOT/commands/opinion.md" "standing human approval" \
     "opinion workflow uses bounded standing human approval without another question"
-assert_contains "$REPO_ROOT/commands/opinion.md" 'does not authorize `investigate`' \
-    "ordinary reviewer consent cannot authorize a full-agent investigation"
-assert_contains "$REPO_ROOT/commands/opinion.md" "May I launch a fresh full-capability" \
-    "inferred investigation receives its own exact disclosure"
+assert_contains "$REPO_ROOT/commands/opinion.md" 'standing human approval covers full-agent investigation' \
+    "task-selected investigation has standing human launch approval"
+assert_not_contains "$REPO_ROOT/commands/opinion.md" "May I launch a fresh full-capability" \
+    "task-selected investigation does not add a consent question"
+assert_not_contains "$REPO_ROOT/commands/opinion.md" 'does not authorize `investigate`' \
+    "opinion does not exclude investigation from standing launch approval"
 assert_contains "$REPO_ROOT/agents/independent-reviewer.md" "FORGE_REVIEW_TRANSPORT_AUTHORIZED" \
     "native reviewer treats the supplied private candidate as authorized review input"
 assert_contains "$REPO_ROOT/agents/independent-reviewer.md" "main session obtained explicit user authorization" \

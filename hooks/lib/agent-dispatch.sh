@@ -660,6 +660,9 @@ case "$role:$profile" in investigation:investigate|investigation-repro:investiga
 case "$role:$fallback_policy" in plan:none|code-spec:none|code-quality:none) die_dispatch authorization 'certifying review roles require automatic fallback' ;; esac
 case "$conversation" in ephemeral|new|resume) ;; *) die_dispatch invariant 'unsupported conversation transport' ;; esac
 case "$timeout_seconds" in ''|*[!0-9]*) die_dispatch invariant 'timeout must be a positive integer' ;; esac; [ "$timeout_seconds" -gt 0 ] || die_dispatch invariant 'timeout must be positive'
+if [ "$profile" = review ] && [ "${FORGE_DISPATCH_TEST_MODE:-}" != 1 ] && [ "$timeout_seconds" -ne 1200 ]; then
+  die_dispatch invariant 'review timeout must be exactly 1200 seconds (20 minutes)'
+fi
 [ -f "$prompt_file" ] && [ ! -L "$prompt_file" ] || die_dispatch artifact 'regular prompt file required'; [ -n "$output" ] || die_dispatch invariant 'output is required'
 [ "$conversation" = ephemeral ] || [ "$role" = council-advisor ] || die_dispatch capability 'only council-advisor supports multi-turn transport'
 [ "$conversation" != resume ] || [ -n "$session_id" ] || die_dispatch invariant 'exact session id is required for resume'
@@ -756,7 +759,7 @@ if [ -n "${ATTEMPT_OUTPUT:-}" ] && [ -s "$ATTEMPT_OUTPUT" ]; then publish_owned_
 if [ "$final_rc" -eq 0 ] && [ "$conversation" = resume ]; then
   if ! complete_session_dispatch; then ATTEMPT_CLASS=invariant; ATTEMPT_REASON=session-cleanup-failed; ATTEMPT_VERDICT=BLOCKED; ATTEMPT_SEVERITY=NONE; final_rc=2; fi
 fi
-output_hash=$(hash_file_dispatch "$output"); invocation_config_hash=$(printf '%s\n' "$attempted" "${ATTEMPT_CONFIG_HASH:-MISSING}" "$qualification_revision" "$artifact_hash" "$prompt_hash" "$role" "$profile" | hash_stream_dispatch)
+output_hash=$(hash_file_dispatch "$output"); invocation_config_hash=$(printf '%s\n' "$attempted" "${ATTEMPT_CONFIG_HASH:-MISSING}" "$qualification_revision" "$artifact_hash" "$prompt_hash" "$role" "$profile" "$timeout_seconds" true | hash_stream_dispatch)
 auth_recovery_engine=none
 if [ "$profile" = review ] && [ "$conversation" = ephemeral ] && [ "$final_rc" -ne 0 ] \
    && [ "${ATTEMPT_VERDICT:-BLOCKED}" = BLOCKED ]; then
@@ -771,6 +774,7 @@ receipt="$reviews_dir/$invocation_id.receipt"
  printf 'schema_version=1\ninvocation_id=%s\ntimestamp=%s\nmain_host=%s\nrequested_engine=%s\nfirst_attempted_engine=%s\nactual_engine=%s\nfallback=%s\nfallback_reason=%s\nattempted_engines=%s\nrole=%s\nprofile=%s\nreview_iteration=%s\nfresh_process=true\nconversation=%s\nsession_id=%s\nartifact_kind=%s\nartifact_identity=%s\nartifact_hash=%s\nworktree_identity=%s\ngit_head=%s\nprompt_hash=%s\nworkflow_base_ref=%s\nworkflow_base_sha=%s\noutput_path=%s\noutput_hash=%s\nprocess_exit_status=%s\nsemantic_verdict=%s\nmax_severity=%s\nfindings_digest=%s\nresult_schema_version=%s\nrequested_provider=%s\nrequested_model=%s\nrequested_reasoning_effort=%s\nbound_provider=%s\nbound_model=%s\nbound_reasoning_effort=%s\nactual_provider=%s\nactual_model=%s\nactual_reasoning_effort=%s\ninvocation_config_hash=%s\nmodel_qualification_revision=%s\nblocked_class=%s\ninvestigation_mode=%s\ninvestigation_replay=%s\nreproduction_status=%s\nhypothesis_hash=%s\nprimary_check_hash=%s\ncontrol_hash=%s\n' \
   "$invocation_id" "$(now_dispatch)" "$active_host" "$engine" "$first_attempted" "$actual" "$fallback" "$(escape_dispatch "$fallback_reason")" "$attempted" "$role" "$profile" "$review_iteration" "$conversation" "${ATTEMPT_SESSION_ID:-none}" "$artifact_kind" "$artifact_hash" "$artifact_hash" "$worktree_identity" "$git_head" "$prompt_hash" "$(escape_dispatch "$workflow_base_ref")" "$base_resolved" "$(escape_dispatch "$output")" "$output_hash" "${ATTEMPT_EXIT:-127}" "${ATTEMPT_VERDICT:-BLOCKED}" "${ATTEMPT_SEVERITY:-NONE}" "${ATTEMPT_FINDINGS_DIGEST:-MISSING}" "${ATTEMPT_SCHEMA:-none}" "${ATTEMPT_REQUESTED_PROVIDER:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_MODEL:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_EFFORT:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_PROVIDER:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_MODEL:-UNQUALIFIED}" "${ATTEMPT_REQUESTED_EFFORT:-UNQUALIFIED}" "${ATTEMPT_ACTUAL_PROVIDER:-UNOBSERVABLE}" "${ATTEMPT_ACTUAL_MODEL:-UNOBSERVABLE}" "${ATTEMPT_ACTUAL_EFFORT:-UNOBSERVABLE}" "$invocation_config_hash" "$qualification_revision" "${ATTEMPT_CLASS:-engine}" "$INVESTIGATION_MODE" "$INVESTIGATION_REPLAY" "$REPRODUCTION_STATUS" "${REPRO_HYPOTHESIS_HASH:-MISSING}" "${REPRO_PRIMARY_HASH:-MISSING}" "${REPRO_CONTROL_HASH:-MISSING}"
  printf 'failure_reason=%s\nauth_recovery_engine=%s\n' "$(escape_dispatch "$ATTEMPT_REASON")" "$auth_recovery_engine"
+ printf 'timeout_seconds=%s\nrequested_fast_mode=true\n' "$timeout_seconds"
 } > "$receipt"
 printf 'Reviewer selection: main=%s requested=%s actual=%s fallback=%s role=%s receipt=%s\n' "$active_host" "$engine" "$actual" "$fallback" "$role" "$receipt"
 if [ "$auth_recovery_engine" = claude ]; then
