@@ -10,8 +10,23 @@ $Pass = 0; $Fail = 0
 function Check([bool]$Condition, [string]$Message) { if ($Condition) { $script:Pass++; Write-Host "  PASS $Message" } else { $script:Fail++; Write-Error "FAIL $Message" -ErrorAction Continue } }
 function Write-State([string]$Path, [string]$Command, [string]$Done, [string]$Now, [string]$Next) {
     $null = New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force
-    [IO.File]::WriteAllText($Path, "<!-- forge:state-schema v6 -->`n## Workflow`n| Field | Value |`n| Command | $Command |`n| Phase | fixture |`n| Next step | fixture |`n## /goal session`nnone`n## PR authorization`nnone`n## State`n### Done (recent 2-3 only)`n- $Done`n### Now`n- $Now`n### Next`n- $Next`n### Deferred`n- deferred`n## Open Questions`n- question`n## Blockers`n- blocker`n## Update Rules`nfixture`n")
+    $nowLine = if ($Now) { "- $Now`n" } else { '' }
+    [IO.File]::WriteAllText($Path, "<!-- forge:state-schema v6 -->`n## Workflow`n| Field | Value |`n| Command | $Command |`n| Phase | fixture |`n| Next step | fixture |`n## /goal session`nnone`n## PR authorization`nnone`n## State`n### Done (recent 2-3 only)`n- $Done`n### Now`n$nowLine### Next`n- $Next`n### Deferred`n- deferred`n## Open Questions`n- question`n## Blockers`n- blocker`n## Update Rules`nfixture`n")
 }
+function Edit-Lines([string]$Path, [scriptblock]$Map) {
+    $out = New-Object Collections.Generic.List[string]
+    foreach ($line in [IO.File]::ReadAllLines($Path)) { foreach ($mapped in @(& $Map $line)) { $out.Add([string]$mapped) } }
+    [IO.File]::WriteAllText($Path, (($out -join "`n") + "`n"))
+}
+function Invoke-Fold([string]$Worktree) {
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = (& powershell.exe -NoProfile -File $Helper -Action Fold -Worktree $Worktree *>&1 | Out-String)
+        return @{ Rc = $LASTEXITCODE; Output = $output }
+    } finally { $ErrorActionPreference = $previous }
+}
+function Get-StateHash([string]$Path) { return (Get-FileHash -Algorithm SHA256 $Path).Hash }
 try {
     $null = New-Item -ItemType Directory -Path $Primary -Force
     & git -C $Primary init -q --initial-branch=main
@@ -98,11 +113,100 @@ try {
     Check ($duplicateRc -ne 0) 'duplicate narrative heading exits nonzero'
     Check ((Get-FileHash -Algorithm SHA256 (Join-Path $Primary '.forge\local\state.md')).Hash -eq $primaryHash) 'duplicate narrative heading leaves primary bytes unchanged'
 
+    $primaryState = Join-Path $Primary '.forge\local\state.md'
     Write-State (Join-Path $Target '.forge\local\state.md') '/fix-bug bug-one' 'done-worktree' 'active' 'next-worktree'
-    & powershell.exe -NoProfile -File $Helper -Action Fold -Worktree $Target | Out-Null
-    $folded = Get-Content (Join-Path $Primary '.forge\local\state.md') -Raw
+    $primaryHash = Get-StateHash $primaryState
+    $nowFold = Invoke-Fold $Target
+    Check ($nowFold.Rc -ne 0) 'non-empty worktree Now exits nonzero'
+    Check ($nowFold.Output -match 'FOLD_SAFE_STOP: worktree ### Now still lists work') 'non-empty worktree Now explains how to record the status first'
+    Check ((Get-StateHash $primaryState) -eq $primaryHash) 'non-empty worktree Now leaves primary bytes unchanged'
+
+    Write-State (Join-Path $Target '.forge\local\state.md') '/fix-bug bug-one' 'done-worktree' '' 'next-worktree'
+    $replaceFold = Invoke-Fold $Target
+    Check ($replaceFold.Rc -eq 0) 'unchanged primary narrative folds successfully'
+    Check ($replaceFold.Output -match 'mode=replace') 'unchanged primary uses the exact replace path'
+    $folded = Get-Content $primaryState -Raw
     Check ($folded -match 'done-worktree') 'folded narrative reaches primary'
+    Check ($folded -notmatch 'now-primary') 'fold clears primary Now'
     Check ($folded -match '\| Command \| /fix-bug prior \|') 'primary workflow authority preserved'
+
+    Write-State (Join-Path $Target '.forge\local\state.md') '/fix-bug bug-one' 'done-second' '' 'next-worktree'
+    Write-State $primaryState '/fix-bug prior' 'independent-main' 'main-active' 'next-main-only'
+    $mergeFold = Invoke-Fold $Target
+    Check ($mergeFold.Rc -eq 0) 'diverged primary narrative folds by merge'
+    Check ($mergeFold.Output -match 'mode=merge') 'diverged primary uses the three-way merge path'
+    $merged = Get-Content $primaryState -Raw
+    Check ($merged -match 'done-second') 'worktree Done edit reaches primary'
+    Check ($merged -match 'independent-main') 'independent primary Done edit survives'
+    Check ($merged -match 'next-main-only') 'independent primary Next edit survives'
+    Check ($merged -notmatch 'done-worktree') 'line removed by the worktree stays removed'
+    Check ($merged -match '\| Command \| /fix-bug prior \|') 'merge leaves primary workflow authority untouched'
+
+    $parPrimary = Join-Path $Scratch 'parallel-project'
+    $null = New-Item -ItemType Directory -Path $parPrimary -Force
+    & git -C $parPrimary init -q --initial-branch=main
+    & git -C $parPrimary config user.email t@t; & git -C $parPrimary config user.name t
+    [IO.File]::WriteAllText((Join-Path $parPrimary 'app.txt'), "tracked`n")
+    & git -C $parPrimary add app.txt; & git -C $parPrimary commit -q -m base
+    $null = New-Item -ItemType Directory -Path (Join-Path $parPrimary '.forge\local') -Force
+    Copy-Item (Join-Path $RepoRoot 'state.template.md') (Join-Path $parPrimary '.forge\state.template.md')
+    [IO.File]::WriteAllText((Join-Path $parPrimary '.forge\version'), "6`n")
+    [IO.File]::WriteAllText((Join-Path $parPrimary '.forge\installed-files.tsv'), ".forge/state.template.md`tfixture`tv6`n")
+    [IO.File]::AppendAllText((Join-Path $parPrimary '.git\info\exclude'), ".forge/`n.worktrees/`n")
+    $parState = Join-Path $parPrimary '.forge\local\state.md'
+    Copy-Item (Join-Path $RepoRoot 'state.template.md') $parState
+    Edit-Lines $parState { param($l) switch -Exact ($l) {
+        '- (your most recent completed work)' { '- shipped login' }
+        "- (what's queued)" { '- build auth', '- build billing', '- polish docs' }
+        '- (questions needing resolution)' { '- which auth provider?', '- billing currency?' }
+        default { $l } } }
+    Push-Location $parPrimary
+    & powershell.exe -NoProfile -File $Helper -Action Create -Kind feat -Name auth -Base HEAD | Out-Null
+    & powershell.exe -NoProfile -File $Helper -Action Create -Kind feat -Name billing -Base HEAD | Out-Null
+    Pop-Location
+    $authTarget = Join-Path $parPrimary '.worktrees\auth'
+    $billingTarget = Join-Path $parPrimary '.worktrees\billing'
+    $authState = Join-Path $authTarget '.forge\local\state.md'
+    $billingState = Join-Path $billingTarget '.forge\local\state.md'
+    Check (Test-Path $authState) 'first parallel worktree is seeded'
+    Check (Test-Path $billingState) 'second parallel worktree is seeded'
+    Edit-Lines $parState { param($l) if ($l -eq '- polish docs') { $l, '- main hotfix follow-up' } else { $l } }
+    Edit-Lines $authState { param($l) switch -Exact ($l) {
+        '- shipped login' { '- shipped auth (PR 12)', $l }
+        '- build auth' { }
+        '- which auth provider?' { }
+        '- (parked items with reason)' { '- auth: rotate signing keys later' }
+        '### Now' { $l, '', '- finishing auth' }
+        default { $l } } }
+    Edit-Lines $billingState { param($l) switch -Exact ($l) {
+        '- shipped login' { '- shipped billing (PR 13)', $l }
+        '- build billing' { }
+        '- polish docs' { $l, '- billing: add invoices' }
+        default { $l } } }
+
+    $parBefore = Get-StateHash $parState
+    $authNow = Invoke-Fold $authTarget
+    Check ($authNow.Rc -ne 0) 'auth fold stops while Now still lists work'
+    Check ((Get-StateHash $parState) -eq $parBefore) 'stopped fold leaves primary bytes unchanged'
+    Edit-Lines $authState { param($l) if ($l -ne '- finishing auth') { $l } }
+    $authFold = Invoke-Fold $authTarget
+    Check ($authFold.Rc -eq 0) 'first parallel fold succeeds after main changed'
+    Check ($authFold.Output -match 'mode=merge') 'first parallel fold merges around the main edit'
+    $authFolded = Get-StateHash $parState
+    $authRetry = Invoke-Fold $authTarget
+    Check ($authRetry.Rc -eq 0) 'retrying a completed fold succeeds'
+    Check ((Get-StateHash $parState) -eq $authFolded) 'retrying a completed fold is idempotent'
+    $billingFold = Invoke-Fold $billingTarget
+    Check ($billingFold.Rc -eq 0) 'second parallel fold succeeds after its sibling folded'
+    Check ($billingFold.Output -match 'mode=merge') 'second parallel fold merges with its sibling'
+    $expectedNarrative = "## State`n`n### Done (recent 2-3 only)`n`n- shipped billing (PR 13)`n- shipped auth (PR 12)`n- shipped login`n`n### Now`n`n### Next`n`n- polish docs`n- billing: add invoices`n- main hotfix follow-up`n`n### Deferred`n`n- auth: rotate signing keys later`n`n---`n`n## Open Questions`n`n- billing currency?`n`n## Blockers`n`n- (anything blocking forward progress)`n`n---`n`n"
+    $parText = [IO.File]::ReadAllText($parState)
+    $narrativeStart = [regex]::Match($parText, '(?m)^## State\n').Index
+    $narrativeEnd = [regex]::Match($parText, '(?m)^## Update Rules$').Index
+    $actualNarrative = $parText.Substring($narrativeStart, $narrativeEnd - $narrativeStart)
+    Check ($actualNarrative -ceq $expectedNarrative) 'primary narrative holds both finished statuses and the main edit, in order'
+    if ($actualNarrative -cne $expectedNarrative) { Write-Host $actualNarrative }
+    Check ($parText -match '\| Command   \| none  \|') 'parallel folds leave primary workflow control untouched'
 
     $sourcePrimary = Join-Path $Scratch 'source-project'
     $sourceTarget = Join-Path $sourcePrimary '.worktrees\source-bug'
@@ -123,6 +227,9 @@ try {
     Check ((Get-Content (Join-Path $sourceTarget '.forge\local\state.md') -Raw) -match 'source-done') 'source checkout carries continuity narrative'
 } finally {
     if (Test-Path $Primary) { & git -C $Primary worktree remove --force $Target 2>$null | Out-Null }
+    if ($parPrimary -and (Test-Path $parPrimary)) {
+        foreach ($name in @('auth', 'billing')) { & git -C $parPrimary worktree remove --force (Join-Path $parPrimary ".worktrees\$name") 2>$null | Out-Null }
+    }
     Remove-Item -LiteralPath $Scratch -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Host "test-worktree-lifecycle.ps1: $Pass passed, $Fail failed"

@@ -28,28 +28,40 @@ worktrees.
 
 When running inside an isolated worktree:
 
-1. Run `.forge/hooks/lib/worktree-lifecycle.sh fold --worktree <absolute-worktree-path>`
+1. Record the finished status in the worktree narrative with native file tools: add the merged work
+   (branch, PR URL, outcome) under `### Done`; move each remaining `### Now` item to `### Done` when
+   finished or to `### Next` or `### Deferred` when not, leaving `### Now` empty; resolve
+   `## Open Questions` and `## Blockers` that this work settled.
+2. Run `.forge/hooks/lib/worktree-lifecycle.sh fold --worktree <absolute-worktree-path>`
    (PowerShell: `worktree-lifecycle.ps1 -Action Fold -Worktree <absolute-worktree-path>`) before
    navigating away. Only in the Forge source checkout, when the installed path is absent, use the
    tracked `hooks/lib/worktree-lifecycle.sh` or `.ps1` instead.
-2. The helper compares the primary foldable narrative with the exact seed snapshot. Missing or
-   malformed inputs emit `FOLD_SAFE_STOP`; primary divergence emits `FOLD_DIVERGED`. Both preserve
-   every state file for manual reconciliation—no engine guesses a merge.
-3. On an exact seed match, the helper atomically replaces only `## State` (Done/Next/Deferred, with
-   `### Now` cleared), `## Open Questions`, and `## Blockers` in primary state. It never touches
-   `## Workflow`, `## /goal session`, `## PR authorization`, receipts, objective nonce, or
-   persistent Forge turn records.
-4. Fold verified durable learnings separately into `.forge/memory/`; never copy local receipts or
+3. The helper atomically folds only `## State` (Done/Next/Deferred, with `### Now` cleared),
+   `## Open Questions`, and `## Blockers` into primary state and reports `FOLD_OK` with a mode:
+   - `mode=replace`: primary is unchanged since the seed snapshot, so it takes the worktree narrative.
+   - `mode=merge`: primary changed after the seed (a sibling worktree folded first, a quick fix, or
+     a hand edit). A deterministic three-way merge applies only the lines this worktree added or
+     removed since the seed and keeps every other primary line.
+   - `mode=unchanged`: this fold already happened; rerunning a fold is always safe.
+   It never touches `## Workflow`, `## /goal session`, `## PR authorization`, receipts, objective
+   nonce, or persistent Forge turn records.
+4. `FOLD_SAFE_STOP` reports a missing or malformed input, or work still listed under the worktree
+   `### Now`. It leaves every state file unchanged; fix the named cause and rerun the fold.
+5. Read primary `.forge/local/state.md` with the host file-read tool and confirm the finished work
+   appears under `### Done`.
+6. Fold verified durable learnings separately into `.forge/memory/`; never copy local receipts or
    volatile session history there.
 
-When not in a worktree, record `FOLD_SKIP` and continue.
+Only `FOLD_OK` permits removing the worktree: `git worktree remove` deletes its ignored
+`.forge/local/state.md`, so stop cleanup after `FOLD_SAFE_STOP`. When not in a worktree, record
+`FOLD_SKIP` and continue.
 
 ## 4. Cleanup
 
 From the primary checkout, derive the physical worktree path and branch from Git rather than path
 name assumptions. Then:
 
-1. Remove the merged worktree.
+1. Remove the merged worktree only after its fold reported `FOLD_OK`.
 2. Delete the merged local branch with safe deletion. A force deletion is a separate destructive
    action requiring new human authorization.
 3. Check whether the remote branch exists. If it does, show the exact deletion and pause for new

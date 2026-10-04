@@ -177,8 +177,102 @@ forge_lifecycle_seed() {
     printf 'SEED_OK: worktree=%s snapshot=.forge/local/.state-seed-snapshot.md\n' "$target"
 }
 
+forge_lifecycle_now_is_empty() {
+    awk '
+        { sub(/\r$/, "") }
+        /^## State$/ { in_state=1; next }
+        in_state && /^## / { exit }
+        in_state && /^### Now$/ { in_now=1; next }
+        in_now && /^### Next$/ { exit }
+        in_now && /[^ \t]/ { found=1; exit }
+        END { exit found }
+    ' "$1"
+}
+
+# Deterministic three-way narrative merge: base (seed snapshot), primary, worktree.
+# Per section, lines the worktree removed since seed leave primary; lines it added
+# are inserted after their nearest preceding worktree line that primary still has
+# (else at the section top). Everything else in primary, including edits made after
+# the seed, is kept. Blank and `---` divider lines are layout, never merged content.
+# Keep the PowerShell twin byte-identical.
+forge_lifecycle_merge_three_way() {
+    awk '
+        function blank(line) { return line !~ /[^ \t]/ }
+        function rule(line) { return line ~ /^[ \t]*---[ \t]*$/ }
+        function layout(line) { return blank(line) || rule(line) }
+        function find(line,   k) {
+            for (k = 1; k <= rn; k++) if (r[k] "" == line "") return k
+            return 0
+        }
+        FNR == 1 { f++; sec = -1 }
+        {
+            line = $0; to = -1
+            if (sec == -1 && line == "## State") to = 0
+            else if (sec == 0 && line ~ /^### Done/) to = 1
+            else if (sec == 1 && line == "### Now") to = 2
+            else if (sec == 2 && line == "### Next") to = 3
+            else if (sec == 3 && line == "### Deferred") to = 4
+            else if (sec == 4 && line == "## Open Questions") to = 5
+            else if (sec == 5 && line == "## Blockers") to = 6
+            if (to >= 0) { sec = to; head[f, sec] = line; n[f, sec] = 0; next }
+            if (sec >= 0) { n[f, sec]++; body[f, sec, n[f, sec]] = line }
+        }
+        END {
+            if (f != 3) exit 1
+            for (s = 0; s <= 6; s++) for (g = 1; g <= 3; g++) if (!((g, s) in head)) exit 1
+            for (s = 0; s <= 6; s++) {
+                for (g = 1; g <= 3; g++) {
+                    lo[g] = 1; hi[g] = n[g, s] + 0; foot[g] = ""
+                    while (hi[g] >= lo[g] && blank(body[g, s, hi[g]])) hi[g]--
+                    if (hi[g] >= lo[g] && rule(body[g, s, hi[g]])) {
+                        foot[g] = body[g, s, hi[g]]; hi[g]--
+                        while (hi[g] >= lo[g] && blank(body[g, s, hi[g]])) hi[g]--
+                    }
+                    while (lo[g] <= hi[g] && blank(body[g, s, lo[g]])) lo[g]++
+                }
+                split("", inb); split("", inw); split("", r); rn = 0
+                for (i = lo[1]; i <= hi[1]; i++) if (!layout(body[1, s, i])) inb[body[1, s, i]] = 1
+                for (i = lo[3]; i <= hi[3]; i++) if (!layout(body[3, s, i])) inw[body[3, s, i]] = 1
+                for (i = lo[2]; i <= hi[2]; i++) {
+                    line = body[2, s, i]
+                    if (!layout(line) && (line in inb) && !(line in inw)) continue
+                    r[++rn] = line
+                }
+                for (i = lo[3]; i <= hi[3]; i++) {
+                    line = body[3, s, i]
+                    if (layout(line) || (line in inb) || find(line)) continue
+                    pos = -1
+                    for (j = i - 1; j >= lo[3]; j--) {
+                        if (layout(body[3, s, j])) continue
+                        p = find(body[3, s, j])
+                        if (p) { pos = p; break }
+                    }
+                    if (pos < 0) {
+                        pos = 0
+                        while (pos < rn && blank(r[pos + 1])) pos++
+                    } else if (line !~ /^[ \t]/) {
+                        while (pos < rn && r[pos + 1] ~ /^[ \t]/ && !layout(r[pos + 1])) pos++
+                    }
+                    for (k = rn; k > pos; k--) r[k + 1] = r[k]
+                    r[pos + 1] = line; rn++
+                }
+                print head[2, s]; print ""
+                printed = 0; gap = 0
+                for (k = 1; k <= rn; k++) {
+                    if (blank(r[k])) { if (printed) gap = 1; continue }
+                    if (rule(r[k]) && printed) gap = 1
+                    if (gap) print ""
+                    print r[k]; printed = 1; gap = rule(r[k])
+                }
+                if (printed) print ""
+                if (foot[2] != "") { print foot[2]; print "" }
+            }
+        }
+    ' "$1" "$2" "$3"
+}
+
 forge_lifecycle_fold() {
-    local requested="$1" pair target primary snapshot worktree_state primary_state local_dir primary_narrative worktree_narrative merged before
+    local requested="$1" pair target primary snapshot worktree_state primary_state work mode folded before
     pair=$(forge_lifecycle_validate_worktree "$requested") || return 1
     target=${pair%%$'\t'*}; primary=${pair#*$'\t'}
     [ "$target" != "$primary" ] \
@@ -190,36 +284,46 @@ forge_lifecycle_fold() {
         [ -f "$_forge_file" ] && [ ! -L "$_forge_file" ] \
             || { forge_lifecycle_fail "FOLD_SAFE_STOP: missing or aliased state input: $_forge_file"; return 1; }
     done
-    local_dir="$target/.forge/local"
-    primary_narrative=$(mktemp "$local_dir/.primary-narrative.XXXXXX") || return 1
-    worktree_narrative=$(mktemp "$local_dir/.worktree-narrative.XXXXXX") || { rm -f "$primary_narrative"; return 1; }
-    merged=$(mktemp "$local_dir/.folded-state.XXXXXX") || { rm -f "$primary_narrative" "$worktree_narrative"; return 1; }
-    if ! forge_lifecycle_extract_narrative "$primary_state" "$primary_narrative" \
-        || ! forge_lifecycle_extract_narrative "$worktree_state" "$worktree_narrative"; then
-        rm -f "$primary_narrative" "$worktree_narrative" "$merged"
+    work=$(mktemp -d "$target/.forge/local/.fold.XXXXXX") || return 1
+    if ! forge_lifecycle_extract_narrative "$primary_state" "$work/primary" \
+        || ! forge_lifecycle_extract_narrative "$worktree_state" "$work/worktree" \
+        || ! forge_lifecycle_extract_narrative "$snapshot" "$work/base"; then
+        rm -rf "$work"
         forge_lifecycle_fail "FOLD_SAFE_STOP: state narrative is structurally incomplete"
         return 1
     fi
-    if ! cmp -s "$snapshot" "$primary_narrative"; then
-        rm -f "$primary_narrative" "$worktree_narrative" "$merged"
-        forge_lifecycle_fail "FOLD_DIVERGED: primary narrative changed after worktree seed; reconcile manually"
+    if ! forge_lifecycle_now_is_empty "$worktree_state"; then
+        rm -rf "$work"
+        forge_lifecycle_fail "FOLD_SAFE_STOP: worktree ### Now still lists work; record finished work under ### Done and move unfinished items to ### Next or ### Deferred, then rerun fold"
         return 1
     fi
-    if ! forge_lifecycle_merge_narrative "$primary_state" "$worktree_narrative" "$merged"; then
-        rm -f "$primary_narrative" "$worktree_narrative" "$merged"
+    # replace: primary is unchanged since seed; unchanged: already folded (retry);
+    # merge: primary changed after seed (sibling fold, quick fix, or hand edit).
+    folded="$work/worktree"
+    if cmp -s "$work/base" "$work/primary"; then
+        mode=replace
+    elif cmp -s "$work/primary" "$work/worktree"; then
+        mode=unchanged
+    else
+        mode=merge; folded="$work/folded"
+        forge_lifecycle_merge_three_way "$work/base" "$work/primary" "$work/worktree" > "$folded" \
+            || { rm -rf "$work"; forge_lifecycle_fail "FOLD_SAFE_STOP: narrative merge failed"; return 1; }
+    fi
+    if ! forge_lifecycle_merge_narrative "$primary_state" "$folded" "$work/merged"; then
+        rm -rf "$work"
         forge_lifecycle_fail "FOLD_SAFE_STOP: primary state cannot accept folded narrative"
         return 1
     fi
-    before=$(mktemp "$primary/.forge/local/.state-before-fold.XXXXXX") || return 1
-    cp "$primary_state" "$before" || { rm -f "$before"; return 1; }
-    if ! forge_lifecycle_publish "$merged" "$primary_state"; then
+    before=$(mktemp "$primary/.forge/local/.state-before-fold.XXXXXX") || { rm -rf "$work"; return 1; }
+    cp "$primary_state" "$before" || { rm -f "$before"; rm -rf "$work"; return 1; }
+    if ! forge_lifecycle_publish "$work/merged" "$primary_state"; then
         cp "$before" "$primary_state" 2>/dev/null || true
-        rm -f "$before" "$primary_narrative" "$worktree_narrative" "$merged"
+        rm -f "$before"; rm -rf "$work"
         forge_lifecycle_fail "FOLD_SAFE_STOP: atomic primary state publication failed"
         return 1
     fi
-    rm -f "$before" "$primary_narrative" "$worktree_narrative" "$merged"
-    printf 'FOLD_OK: worktree=%s primary=%s\n' "$target" "$primary"
+    rm -f "$before"; rm -rf "$work"
+    printf 'FOLD_OK: worktree=%s primary=%s mode=%s\n' "$target" "$primary" "$mode"
 }
 
 forge_lifecycle_bind_identity() {

@@ -208,10 +208,11 @@ workflow; the ship hook gates commit/push/PR on the checklist.
 The continuity narrative **round-trips** through main so it survives worktree teardown (it is otherwise gitignored and dies with the worktree). The **foldable** sections are `### Done` / `### Next` / `### Deferred` (under `## State`), plus `## Open Questions` and `## Blockers`. The **gate** sections (`## Workflow`, `## /goal session`, `## PR authorization`) NEVER travel — they stay worktree-local with their REPLACE/singleton semantics.
 
 1. A fresh worktree's foldable narrative is copied **verbatim** from main's `state.md`, with `### Now` cleared (a new feature has no active "Now").
-2. A narrative-only **seed snapshot** is written to `.forge/local/.state-seed-snapshot.md` (gitignored, worktree-local) — a record of main's foldable narrative at seed time, used by `/finish-branch` to detect divergence.
+2. A narrative-only **seed snapshot** is written to `.forge/local/.state-seed-snapshot.md` (gitignored, worktree-local) — a record of main's foldable narrative at seed time, used by `/finish-branch` as the base for fold-back.
 
 **On `/finish-branch` (round-trip fold-back, BEFORE the worktree is removed):**
 
-1. Compare main's current foldable narrative to the seed snapshot.
-2. **Unchanged** → deterministically replace main's foldable sections with the worktree's; set main's `### Now` empty. Gate sections on main are left untouched.
-3. **Changed / snapshot missing / worktree state absent / structurally incomplete** → **loud safe-stop**: warn and do NOT overwrite; leave files intact for manual reconciliation. (No LLM merge — divergence is a safe-stop in this version.)
+1. Record the finished work under the worktree's `### Done` and leave its `### Now` empty: move unfinished `### Now` items to `### Next` or `### Deferred`. Fold refuses a worktree `### Now` that still lists work.
+2. **Main unchanged since seed** → deterministically replace main's foldable sections with the worktree's; set main's `### Now` empty. Gate sections on main are left untouched.
+3. **Main changed since seed** (a sibling worktree folded first, a quick fix, or a hand edit) → deterministic three-way merge with the seed snapshot as base: lines the worktree added or removed since seed are applied and every other line on main is kept; main's `### Now` is emptied. Rerunning a completed fold changes nothing.
+4. **Snapshot missing / worktree state absent / structurally incomplete / worktree `### Now` not empty** → **loud safe-stop**: warn and do NOT overwrite; leave files intact. Remove the worktree only after the fold reports `FOLD_OK`.

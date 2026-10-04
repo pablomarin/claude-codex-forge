@@ -1340,8 +1340,12 @@ assert_contains "$FBR" "## State"                       "finish-branch fold name
 assert_contains "$FBR" "## Open Questions"              "finish-branch fold names Open Questions"
 assert_contains "$FBR" "## Blockers"                    "finish-branch fold names Blockers"
 assert_contains "$FBR" "FOLD_SAFE_STOP"                 "finish-branch stops on a missing or malformed seed"
-assert_contains "$FBR" "FOLD_DIVERGED"                  "finish-branch stops on primary-state divergence"
+assert_contains "$FBR" "mode=merge"                     "finish-branch merges a primary narrative that changed after seed"
+assert_not_contains "$FBR" "FOLD_DIVERGED"              "finish-branch no longer stops parallel worktrees on divergence"
 assert_contains "$FBR" "every state file"               "finish-branch preserves inputs after a fold failure"
+assert_contains "$FBR" "Record the finished status"     "finish-branch records the finished work before folding"
+assert_contains "$FBR" 'work still listed under the worktree' "finish-branch explains the non-empty Now safe stop"
+assert_contains "$FBR" 'Only `FOLD_OK` permits removing the worktree' "finish-branch gates worktree removal on a successful fold"
 assert_contains "$FBR" "never touches"                  "finish-branch preserves workflow and gate sections"
 assert_contains "$FBR" "## /goal session"               "finish-branch preserves goal authority"
 assert_contains "$FBR" ".forge/memory/"                 "finish-branch keeps durable memory separate"
@@ -1403,6 +1407,9 @@ assert_contains "$STATE_TMPL" "round-trip"     "state.template documents the rou
 # Contract: ADR 0008 exists for state continuity round-trip (v5.52)
 start_test "ADR 0008 exists for state continuity round-trip"
 assert_file_exists "$REPO_ROOT/docs/adr/0008-state-continuity-round-trip.md" "ADR 0008 present"
+assert_file_exists "$REPO_ROOT/docs/adr/0011-three-way-continuity-fold.md" "ADR 0011 three-way fold present"
+assert_contains "$REPO_ROOT/docs/adr/README.md" '0011-three-way-continuity-fold.md' \
+    "ADR index includes the three-way fold decision"
 
 # AC-2b STATE-INIT block must NOT contain Bash writes under .claude/. The state.md
 # init was moved off `cp`/`mkdir` to Read+Write tool calls because Bash writes under
@@ -2979,7 +2986,7 @@ else
     fail "top changelog release is exact MAJOR.MINOR.PATCH"
 fi
 EXPECTED_FORGE_VERSION="$FIRST_CHANGELOG_VERSION"
-EXPECTED_README_HISTORY_VERSION='6.4.3'
+EXPECTED_README_HISTORY_VERSION='6.4.4'
 README_BADGE_VERSION=$(sed -n 's/.*badge\/version-\([0-9][0-9.]*\)-blue.*/\1/p' "$README" | head -1)
 README_HISTORY_VERSION=$(sed -n '/^## Version history/,$p' "$README" \
     | sed -n 's/^| \([0-9][0-9.]*\)[[:space:]]*|.*/\1/p' | head -1)
