@@ -13,10 +13,10 @@ developer continuity, and removes the feature worktree without choosing a perman
 ## 2. Authorize and Merge
 
 Show the exact merge mutation, including PR URL and merge strategy. Pause for explicit human
-authorization. Council, reviewer, native `/goal`, and prior PR-creation authority cannot authorize
+authorization unless the human already approved this exact still-current merge. Council, reviewer, native `/goal`, and prior PR-creation authority cannot authorize
 merge.
 
-After authorization, run the selected `gh pr merge` command once. Do not combine it with branch
+After authorization, the agent records the actual decision and runs the selected `gh pr merge` command once. Do not combine it with branch
 deletion. Re-read PR state after any local checkout error: if the server says `MERGED`, continue;
 if it remains `OPEN`, report the failure and stop rather than retrying or force-merging.
 

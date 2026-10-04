@@ -12,5 +12,5 @@
 - **KISS AND YAGNI** — Build the smallest correct solution required by current evidence and acceptance criteria. Do not add speculative abstractions, compatibility layers, hardening, or edge-case machinery without a concrete supported need.
 - **RESOURCE DISCIPLINE** — Use the smallest correct solution and the one-broad/one-repair/one-closure budget. Do not chase perfection or speculative rare cases; never waive reachable security, data loss, supported correctness, or explicit acceptance criteria.
 - **GROUND YOUR CLAIMS** — Distinguish verified facts, inferences, unverified results, and blockers. Confident guessing is a defect. Bind every certification to the exact candidate.
-- **HUMAN AUTHORITY** — PR creation and other new external mutations require an explicit human-created authorization record.
+- **HUMAN AUTHORITY** — PR creation and other consequential external mutations require explicit human approval. The agent records the actual decision and executes through normal host controls; no manual command or authorization-file edit is required. Configured reviews and investigations launch under standing approval.
 - **HOST FREEDOM** — Either host may resume at the next durable step. Forge creates no edit lock: concurrent sessions are allowed. Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.

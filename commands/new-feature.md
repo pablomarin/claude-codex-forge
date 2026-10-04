@@ -211,8 +211,9 @@ not current-behavior claims.
 Use `workflow-state.sh checkpoint` for workflow control, update checklist/narrative content and
 project memory with verified learnings only, and finish with `workflow-state.sh checkpoint --host
 <claude|codex> --phase complete --next-step none`. Show the exact PR
-title/body/base/head and pause for human authorization. The developer creates the authorization
-record bound to the active objective nonce and candidate. Only then push and run `gh pr create`.
+title/body/base/head and obtain explicit human authorization if it is not already granted for that
+exact scope. The agent records the human decision bound to the active objective nonce and candidate.
+Only then execute the authorized push and `gh pr create`; the developer need not edit state or run commands.
 
 If E2E truly does not apply, use the canonical checklist form
 `- [x] E2E verified — N/A: <concrete supported reason>` and persist the matching

@@ -203,8 +203,9 @@ unsupported claimed-current edge is P1.
 Use `workflow-state.sh checkpoint` for workflow control, update checklist/narrative content,
 changelog, and project memory with verified facts, and finish with `workflow-state.sh checkpoint
 --host <claude|codex> --phase complete --next-step none`. Show the exact PR
-mutation and pause. Only fresh human authorization bound to the active nonce/candidate permits push
-and `gh pr create`. Native Goal activation does not grant it. Reviewer engine fallback is automatic;
+mutation and obtain explicit human authorization if not already granted for that exact scope. The
+agent records the actual decision bound to the active nonce/candidate, then executes the authorized
+push and `gh pr create`; the developer need not edit state or run commands. Native Goal activation does not grant it. Reviewer engine fallback is automatic;
 PR creation is not.
 
 If E2E truly does not apply, use the canonical checklist form

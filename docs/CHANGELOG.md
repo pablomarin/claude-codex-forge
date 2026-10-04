@@ -2,6 +2,23 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.3 — 2026-10-03
+
+### Human decisions, agent execution
+
+Approved merges and other consequential actions can be executed by the main agent through normal
+host controls. Forge no longer demands that the developer run a terminal command or edit PR and
+convergence-breaker authorization records. The human still decides; the agent records the actual
+decision, executes the exact approved action, and verifies the result. Native Claude ask rules cover
+the common command families previously denied outright. Unattended investigators hand consequential
+actions back to the main session; ordinary review isolation remains unchanged.
+
+Plan/code reviews, investigations, retries, fallback, and resumed reviews retain standing launch
+approval for configured Claude Code/Codex services, including bounded private review inputs. Launch
+requests carry existing human authorization provenance instead of asking again. Native host denials
+still apply; repository policy cannot override them. Pending action helpers now describe approval
+followed by agent execution, while retaining legacy audit compatibility and unverified report status.
+
 ## 6.4.2 — 2026-10-03
 
 ### Exact reviewer execution settings
