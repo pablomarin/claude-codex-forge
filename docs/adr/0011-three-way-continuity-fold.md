@@ -31,12 +31,15 @@ rule moves the next queued item from `### Next` into `### Now`.
 
 ## Decision
 
-When the primary is unchanged since seed, fold keeps ADR 0008's exact replace (`mode=replace`). When
-the primary equals the worktree narrative, the fold has already happened (`mode=unchanged`).
-Otherwise it merges each foldable section (`mode=merge`): lines the worktree removed since seed leave
-the primary; lines it added are inserted after their nearest preceding worktree line that the
-primary still has, or at the section top; every other primary line is kept. Blank and `---` divider
-lines are layout, not merged content. Bash and PowerShell produce byte-identical results.
+When the primary already equals the worktree narrative, nothing changes (`mode=unchanged`). When the
+primary is unchanged since seed, fold keeps ADR 0008's exact replace (`mode=replace`). Otherwise it
+merges each foldable section (`mode=merge`): lines the worktree removed since seed leave the primary;
+lines it added are inserted after their nearest preceding worktree line that the primary still has,
+or at the section top; every other primary line is kept. Blank and `---` divider lines are layout,
+not merged content. After a successful fold the worktree narrative replaces the seed snapshot, so a
+refold after a worktree edit applies only that edit. The fold replaces the narrative only up to the
+first `##` section after `## Blockers`, so primary-only sections there survive. Bash and PowerShell
+produce byte-identical results.
 
 The fold refuses with `FOLD_SAFE_STOP` while the worktree `### Now` still lists work.
 `/finish-branch` records the finished work under `### Done` first, confirms it reached the primary,
@@ -45,9 +48,12 @@ and removes the worktree only after `FOLD_OK`.
 ## Consequences
 
 - ✅ Parallel worktrees, quick fixes on the primary, and retries fold without manual
-  reconciliation. Only lines the worktree itself removed since seed leave the primary.
+  reconciliation. Only lines the worktree itself removed since its seed or previous fold leave the
+  primary.
 - ✅ The merge is deterministic, idempotent, and covered by executable Bash and PowerShell tests.
 - ⚠️ A line both sides edited differently survives in both versions for the developer to tidy.
 - ⚠️ Lines two worktrees insert at the same spot are ordered by fold order.
+- ⚠️ Merging is line-based: identical lines count as one, so a sub-bullet repeated verbatim under
+  different items can stay under the wrong item.
 - 🔮 Unchanged from ADR 0008: gate sections never travel, the primary `### Now` is emptied on fold,
   and a worktree removed without `/finish-branch` still loses its narrative.

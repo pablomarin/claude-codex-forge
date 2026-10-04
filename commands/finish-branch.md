@@ -42,7 +42,9 @@ When running inside an isolated worktree:
    - `mode=merge`: primary changed after the seed (a sibling worktree folded first, a quick fix, or
      a hand edit). A deterministic three-way merge applies only the lines this worktree added or
      removed since the seed and keeps every other primary line.
-   - `mode=unchanged`: this fold already happened; rerunning a fold is always safe.
+   - `mode=unchanged`: primary already holds exactly this worktree narrative.
+   Each fold becomes the base for the next one, so rerunning after a worktree edit applies only
+   that edit, and an unedited rerun changes nothing.
    It never touches `## Workflow`, `## /goal session`, `## PR authorization`, receipts, objective
    nonce, or persistent Forge turn records.
 4. `FOLD_SAFE_STOP` reports a missing or malformed input, or work still listed under the worktree

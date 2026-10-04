@@ -121,6 +121,12 @@ try {
     Check ($nowFold.Output -match 'FOLD_SAFE_STOP: worktree ### Now still lists work') 'non-empty worktree Now explains how to record the status first'
     Check ((Get-StateHash $primaryState) -eq $primaryHash) 'non-empty worktree Now leaves primary bytes unchanged'
 
+    Write-State (Join-Path $Target '.forge\local\state.md') '/fix-bug bug-one' 'done-worktree' 'unfinished-work' 'next-worktree'
+    Edit-Lines (Join-Path $Target '.forge\local\state.md') { param($l) if ($l -ceq '### Now') { '### NOW' } else { $l } }
+    $caseFold = Invoke-Fold $Target
+    Check ($caseFold.Rc -ne 0) 'case-variant Now heading exits nonzero'
+    Check ((Get-StateHash $primaryState) -eq $primaryHash) 'case-variant Now heading leaves primary bytes unchanged'
+
     Write-State (Join-Path $Target '.forge\local\state.md') '/fix-bug bug-one' 'done-worktree' '' 'next-worktree'
     $replaceFold = Invoke-Fold $Target
     Check ($replaceFold.Rc -eq 0) 'unchanged primary narrative folds successfully'
@@ -129,6 +135,11 @@ try {
     Check ($folded -match 'done-worktree') 'folded narrative reaches primary'
     Check ($folded -notmatch 'now-primary') 'fold clears primary Now'
     Check ($folded -match '\| Command \| /fix-bug prior \|') 'primary workflow authority preserved'
+    $replacedHash = Get-StateHash $primaryState
+    $replaceRetry = Invoke-Fold $Target
+    Check ($replaceRetry.Rc -eq 0) 'retrying a replace fold succeeds'
+    Check ($replaceRetry.Output -match 'mode=unchanged') 'retrying a replace fold reports nothing to fold'
+    Check ((Get-StateHash $primaryState) -eq $replacedHash) 'retrying a replace fold keeps primary bytes'
 
     Write-State (Join-Path $Target '.forge\local\state.md') '/fix-bug bug-one' 'done-second' '' 'next-worktree'
     Write-State $primaryState '/fix-bug prior' 'independent-main' 'main-active' 'next-main-only'
@@ -141,6 +152,13 @@ try {
     Check ($merged -match 'next-main-only') 'independent primary Next edit survives'
     Check ($merged -notmatch 'done-worktree') 'line removed by the worktree stays removed'
     Check ($merged -match '\| Command \| /fix-bug prior \|') 'merge leaves primary workflow authority untouched'
+
+    Edit-Lines $primaryState { param($l) if ($l -ceq '## Update Rules') { '## Notes', '', '- keep my notes', '', $l } else { $l } }
+    $notesFold = Invoke-Fold $Target
+    Check ($notesFold.Rc -eq 0) 'fold succeeds beside a primary-only section'
+    $notesText = Get-Content $primaryState -Raw
+    Check ($notesText -match '- keep my notes') 'primary-only section after Blockers survives the fold'
+    Check ($notesText -match 'fixture') 'primary Update Rules survive the fold'
 
     $parPrimary = Join-Path $Scratch 'parallel-project'
     $null = New-Item -ItemType Directory -Path $parPrimary -Force
@@ -170,7 +188,7 @@ try {
     $billingState = Join-Path $billingTarget '.forge\local\state.md'
     Check (Test-Path $authState) 'first parallel worktree is seeded'
     Check (Test-Path $billingState) 'second parallel worktree is seeded'
-    Edit-Lines $parState { param($l) if ($l -eq '- polish docs') { $l, '- main hotfix follow-up' } else { $l } }
+    Edit-Lines $parState { param($l) if ($l -eq '- polish docs') { $l, '  - include hotfix notes', '- main hotfix follow-up' } else { $l } }
     Edit-Lines $authState { param($l) switch -Exact ($l) {
         '- shipped login' { '- shipped auth (PR 12)', $l }
         '- build auth' { }
@@ -199,7 +217,7 @@ try {
     $billingFold = Invoke-Fold $billingTarget
     Check ($billingFold.Rc -eq 0) 'second parallel fold succeeds after its sibling folded'
     Check ($billingFold.Output -match 'mode=merge') 'second parallel fold merges with its sibling'
-    $expectedNarrative = "## State`n`n### Done (recent 2-3 only)`n`n- shipped billing (PR 13)`n- shipped auth (PR 12)`n- shipped login`n`n### Now`n`n### Next`n`n- polish docs`n- billing: add invoices`n- main hotfix follow-up`n`n### Deferred`n`n- auth: rotate signing keys later`n`n---`n`n## Open Questions`n`n- billing currency?`n`n## Blockers`n`n- (anything blocking forward progress)`n`n---`n`n"
+    $expectedNarrative = "## State`n`n### Done (recent 2-3 only)`n`n- shipped billing (PR 13)`n- shipped auth (PR 12)`n- shipped login`n`n### Now`n`n### Next`n`n- polish docs`n  - include hotfix notes`n- billing: add invoices`n- main hotfix follow-up`n`n### Deferred`n`n- auth: rotate signing keys later`n`n---`n`n## Open Questions`n`n- billing currency?`n`n## Blockers`n`n- (anything blocking forward progress)`n`n---`n`n"
     $parText = [IO.File]::ReadAllText($parState)
     $narrativeStart = [regex]::Match($parText, '(?m)^## State\n').Index
     $narrativeEnd = [regex]::Match($parText, '(?m)^## Update Rules$').Index
@@ -207,6 +225,14 @@ try {
     Check ($actualNarrative -ceq $expectedNarrative) 'primary narrative holds both finished statuses and the main edit, in order'
     if ($actualNarrative -cne $expectedNarrative) { Write-Host $actualNarrative }
     Check ($parText -match '\| Command   \| none  \|') 'parallel folds leave primary workflow control untouched'
+
+    Edit-Lines $authState { param($l) if ($l -ceq '- shipped auth (PR 12)') { '- shipped auth (PR 12, verified)' } else { $l } }
+    $editFold = Invoke-Fold $authTarget
+    Check ($editFold.Rc -eq 0) 'refold after a worktree edit succeeds'
+    $editText = [IO.File]::ReadAllText($parState)
+    Check ($editText.Contains('- shipped auth (PR 12, verified)')) 'post-fold edit reaches primary'
+    Check (-not $editText.Contains("- shipped auth (PR 12)`n")) 'post-fold edit replaces the earlier folded line'
+    Check ($editText.Contains('- shipped billing (PR 13)')) 'post-fold edit keeps the sibling fold'
 
     $sourcePrimary = Join-Path $Scratch 'source-project'
     $sourceTarget = Join-Path $sourcePrimary '.worktrees\source-bug'

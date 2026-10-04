@@ -13,13 +13,15 @@ stopped with `FOLD_DIVERGED`; cleanup could then delete the ignored worktree sta
 status. The fold keeps the exact replace when main is unchanged since seed (`mode=replace`), and
 otherwise applies a deterministic three-way merge against the seed snapshot (`mode=merge`): lines
 the worktree added or removed since seed are applied and every other line on main is kept.
-Rerunning a completed fold is a no-op (`mode=unchanged`). `FOLD_DIVERGED` is retired.
+Each fold becomes the base for the next, so rerunning after a worktree edit applies only that edit
+and an unedited rerun changes nothing. `FOLD_DIVERGED` is retired.
 
 The fold now stops with `FOLD_SAFE_STOP` while the worktree `### Now` still lists work, instead of
 silently dropping it. `/finish-branch` records the finished work under `### Done` first, confirms it
-reached main, and removes the worktree only after `FOLD_OK`. The PowerShell helper now preserves the
-same surrounding blank lines as Bash, so both hosts write byte-identical state. ADR 0011 amends
-ADR 0008.
+reached main, and removes the worktree only after `FOLD_OK`. A fold no longer deletes a
+primary-only `##` section placed after `## Blockers`. The PowerShell helper now matches narrative
+headings case-sensitively and preserves the same surrounding blank lines as Bash, so both hosts
+accept the same state and write byte-identical results. ADR 0011 amends ADR 0008.
 
 ## 6.4.3 — 2026-10-03
 

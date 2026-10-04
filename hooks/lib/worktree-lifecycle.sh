@@ -117,10 +117,13 @@ forge_lifecycle_extract_narrative() {
 forge_lifecycle_merge_narrative() {
     local base="$1" narrative="$2" output="$3"
     grep -qxF '## State' "$base" && grep -qxF '## Update Rules' "$base" || return 1
+    # Replace the narrative only: it ends at the first section after `## Blockers`
+    # (the extractor's boundary), so primary-only sections there survive.
     awk '
         NR==FNR { snapshot=snapshot $0 ORS; next }
-        /^## State$/ { printf "%s", snapshot; skip=1; next }
-        skip && /^## Update Rules$/ { skip=0; print; next }
+        /^## State$/ { printf "%s", snapshot; skip=1; blockers=0; next }
+        skip && /^## Blockers$/ { blockers=1; next }
+        skip && ((blockers && /^## /) || /^## Update Rules$/) { skip=0 }
         !skip { print }
     ' "$narrative" "$base" > "$output"
 }
@@ -297,13 +300,13 @@ forge_lifecycle_fold() {
         forge_lifecycle_fail "FOLD_SAFE_STOP: worktree ### Now still lists work; record finished work under ### Done and move unfinished items to ### Next or ### Deferred, then rerun fold"
         return 1
     fi
-    # replace: primary is unchanged since seed; unchanged: already folded (retry);
-    # merge: primary changed after seed (sibling fold, quick fix, or hand edit).
+    # unchanged: primary already holds this narrative; replace: primary is unchanged
+    # since the base; merge: primary changed after it (sibling fold, quick fix, edit).
     folded="$work/worktree"
-    if cmp -s "$work/base" "$work/primary"; then
-        mode=replace
-    elif cmp -s "$work/primary" "$work/worktree"; then
+    if cmp -s "$work/primary" "$work/worktree"; then
         mode=unchanged
+    elif cmp -s "$work/base" "$work/primary"; then
+        mode=replace
     else
         mode=merge; folded="$work/folded"
         forge_lifecycle_merge_three_way "$work/base" "$work/primary" "$work/worktree" > "$folded" \
@@ -322,7 +325,12 @@ forge_lifecycle_fold() {
         forge_lifecycle_fail "FOLD_SAFE_STOP: atomic primary state publication failed"
         return 1
     fi
-    rm -f "$before"; rm -rf "$work"
+    rm -f "$before"
+    # The folded narrative is the base for any later refold of this worktree, so a
+    # rerun after a worktree edit applies only that edit.
+    forge_lifecycle_publish "$work/worktree" "$snapshot" \
+        || printf 'FOLD_WARNING: seed snapshot not advanced; a later refold may repeat edited lines\n' >&2
+    rm -rf "$work"
     printf 'FOLD_OK: worktree=%s primary=%s mode=%s\n' "$target" "$primary" "$mode"
 }
 

@@ -100,7 +100,8 @@ Each worktree's narrative folds back independently, in any order. The first fold
 replaces main's narrative (`mode=replace`). When main changed after a worktree was seeded, because a
 sibling folded first, a quick fix landed, or someone edited main's state, the fold merges instead
 (`mode=merge`): it applies only the lines that worktree added or removed since its seed and keeps
-everything else on main. Rerunning a fold is safe (`mode=unchanged`).
+everything else on main. Rerunning a fold is safe: it applies only worktree edits made since the
+previous fold, so an unedited rerun changes nothing.
 
 The fold stops with `FOLD_SAFE_STOP` while the worktree's `### Now` still lists work, so nothing is
 silently dropped: move finished items to `### Done`, unfinished ones to `### Next` or

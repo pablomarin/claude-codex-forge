@@ -112,33 +112,33 @@ function Get-FoldableNarrative([string]$Path) {
     $seenState = $false; $seenOpen = $false; $seenBlockers = $false; $inNow = $false
     $result = New-Object Collections.Generic.List[string]
     foreach ($line in $lines) {
-        if ($line -eq '## State') {
+        if ($line -ceq '## State') {
             if ($seenState) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: duplicate state narrative heading" }
             $seenState = $true; $section = 1; $result.Add($line); continue
         }
-        if ($section -eq 1 -and $line -eq '## Open Questions') {
+        if ($section -eq 1 -and $line -ceq '## Open Questions') {
             if ($stage -ne 4 -or $seenOpen) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
             $seenOpen = $true; $section = 2; $inNow = $false; $result.Add($line); continue
         }
-        if ($section -eq 2 -and $line -eq '## Blockers') {
+        if ($section -eq 2 -and $line -ceq '## Blockers') {
             if ($seenBlockers) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: duplicate state narrative heading" }
             $seenBlockers = $true; $section = 3; $result.Add($line); continue
         }
-        if ($section -gt 0 -and $line.StartsWith('## ')) { break }
+        if ($section -gt 0 -and $line.StartsWith('## ', [StringComparison]::Ordinal)) { break }
         if ($section -eq 1) {
-            if ($line.StartsWith('### Done')) {
+            if ($line.StartsWith('### Done', [StringComparison]::Ordinal)) {
                 if ($stage -ne 0) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
                 $stage = 1; $inNow = $false; $result.Add($line); continue
             }
-            if ($line -eq '### Now') {
+            if ($line -ceq '### Now') {
                 if ($stage -ne 1) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
                 $stage = 2; $inNow = $true; $result.Add($line); $result.Add(''); continue
             }
-            if ($line -eq '### Next') {
+            if ($line -ceq '### Next') {
                 if ($stage -ne 2) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
                 $stage = 3; $inNow = $false; $result.Add($line); continue
             }
-            if ($line -eq '### Deferred') {
+            if ($line -ceq '### Deferred') {
                 if ($stage -ne 3) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
                 $stage = 4; $inNow = $false; $result.Add($line); continue
             }
@@ -158,9 +158,18 @@ function Merge-FoldableNarrative([string]$BasePath, [string]$Narrative) {
     $state = [Array]::IndexOf($lines, '## State')
     $rules = [Array]::IndexOf($lines, '## Update Rules')
     if ($state -lt 0 -or $rules -le $state) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state template is structurally incomplete" }
+    # Replace the narrative only: it ends at the first section after `## Blockers`
+    # (the extractor's boundary), so primary-only sections there survive.
+    $end = $rules
+    $blockers = [Array]::IndexOf($lines, '## Blockers', $state)
+    if ($blockers -gt $state -and $blockers -lt $rules) {
+        for ($i = $blockers + 1; $i -lt $rules; $i++) {
+            if ($lines[$i].StartsWith('## ', [StringComparison]::Ordinal)) { $end = $i; break }
+        }
+    }
     # Keep surrounding bytes exactly as the Bash twin does.
     $prefix = if ($state -gt 0) { ($lines[0..($state - 1)] -join "`n") + "`n" } else { '' }
-    $suffix = $lines[$rules..($lines.Count - 1)] -join "`n"
+    $suffix = $lines[$end..($lines.Count - 1)] -join "`n"
     return ($prefix + $Narrative + $suffix + "`n")
 }
 
@@ -308,13 +317,18 @@ function Fold-ForgeWorktree([string]$Requested) {
     if (-not (Test-WorktreeNowEmpty $worktreePath)) {
         Fail-ForgeLifecycle "FOLD_SAFE_STOP: worktree ### Now still lists work; record finished work under ### Done and move unfinished items to ### Next or ### Deferred, then rerun fold"
     }
-    # replace: primary is unchanged since seed; unchanged: already folded (retry);
-    # merge: primary changed after seed (sibling fold, quick fix, or hand edit).
+    # unchanged: primary already holds this narrative; replace: primary is unchanged
+    # since the base; merge: primary changed after it (sibling fold, quick fix, edit).
     $folded = $worktreeNarrative
-    if ($baseNarrative -ceq $primaryNarrative) { $mode = 'replace' }
-    elseif ($primaryNarrative -ceq $worktreeNarrative) { $mode = 'unchanged' }
+    if ($primaryNarrative -ceq $worktreeNarrative) { $mode = 'unchanged' }
+    elseif ($baseNarrative -ceq $primaryNarrative) { $mode = 'replace' }
     else { $mode = 'merge'; $folded = Merge-ThreeWayNarrative $baseNarrative $primaryNarrative $worktreeNarrative }
     Publish-State (Merge-FoldableNarrative $primaryPath $folded) $primaryPath
+    # The folded narrative is the base for any later refold of this worktree, so a
+    # rerun after a worktree edit applies only that edit.
+    try { Publish-State $worktreeNarrative $snapshotPath } catch {
+        [Console]::Error.WriteLine('FOLD_WARNING: seed snapshot not advanced; a later refold may repeat edited lines')
+    }
     Write-Output "FOLD_OK: worktree=$target primary=$primary mode=$mode"
 }
 
