@@ -112,33 +112,33 @@ function Get-FoldableNarrative([string]$Path) {
     $seenState = $false; $seenOpen = $false; $seenBlockers = $false; $inNow = $false
     $result = New-Object Collections.Generic.List[string]
     foreach ($line in $lines) {
-        if ($line -eq '## State') {
+        if ($line -ceq '## State') {
             if ($seenState) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: duplicate state narrative heading" }
             $seenState = $true; $section = 1; $result.Add($line); continue
         }
-        if ($section -eq 1 -and $line -eq '## Open Questions') {
+        if ($section -eq 1 -and $line -ceq '## Open Questions') {
             if ($stage -ne 4 -or $seenOpen) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
             $seenOpen = $true; $section = 2; $inNow = $false; $result.Add($line); continue
         }
-        if ($section -eq 2 -and $line -eq '## Blockers') {
+        if ($section -eq 2 -and $line -ceq '## Blockers') {
             if ($seenBlockers) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: duplicate state narrative heading" }
             $seenBlockers = $true; $section = 3; $result.Add($line); continue
         }
-        if ($section -gt 0 -and $line.StartsWith('## ')) { break }
+        if ($section -gt 0 -and $line.StartsWith('## ', [StringComparison]::Ordinal)) { break }
         if ($section -eq 1) {
-            if ($line.StartsWith('### Done')) {
+            if ($line.StartsWith('### Done', [StringComparison]::Ordinal)) {
                 if ($stage -ne 0) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
                 $stage = 1; $inNow = $false; $result.Add($line); continue
             }
-            if ($line -eq '### Now') {
+            if ($line -ceq '### Now') {
                 if ($stage -ne 1) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
                 $stage = 2; $inNow = $true; $result.Add($line); $result.Add(''); continue
             }
-            if ($line -eq '### Next') {
+            if ($line -ceq '### Next') {
                 if ($stage -ne 2) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
                 $stage = 3; $inNow = $false; $result.Add($line); continue
             }
-            if ($line -eq '### Deferred') {
+            if ($line -ceq '### Deferred') {
                 if ($stage -ne 3) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state narrative headings are out of order" }
                 $stage = 4; $inNow = $false; $result.Add($line); continue
             }
@@ -158,9 +158,119 @@ function Merge-FoldableNarrative([string]$BasePath, [string]$Narrative) {
     $state = [Array]::IndexOf($lines, '## State')
     $rules = [Array]::IndexOf($lines, '## Update Rules')
     if ($state -lt 0 -or $rules -le $state) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: state template is structurally incomplete" }
-    $prefix = if ($state -gt 0) { $lines[0..($state - 1)] -join "`n" } else { '' }
-    $suffix = $lines[$rules..($lines.Count - 1)] -join "`n"
-    return ($prefix.TrimEnd("`r", "`n") + "`n" + $Narrative.TrimEnd("`r", "`n") + "`n" + $suffix + "`n")
+    # Replace the narrative only: it ends at the first section after `## Blockers`
+    # (the extractor's boundary), so primary-only sections there survive.
+    $end = $rules
+    $blockers = [Array]::IndexOf($lines, '## Blockers', $state)
+    if ($blockers -gt $state -and $blockers -lt $rules) {
+        for ($i = $blockers + 1; $i -lt $rules; $i++) {
+            if ($lines[$i].StartsWith('## ', [StringComparison]::Ordinal)) { $end = $i; break }
+        }
+    }
+    # Keep surrounding bytes exactly as the Bash twin does.
+    $prefix = if ($state -gt 0) { ($lines[0..($state - 1)] -join "`n") + "`n" } else { '' }
+    $suffix = $lines[$end..($lines.Count - 1)] -join "`n"
+    return ($prefix + $Narrative + $suffix + "`n")
+}
+
+function Test-BlankLine([string]$Line) { return ($Line -notmatch '[^ \t]') }
+function Test-RuleLine([string]$Line) { return ($Line -match '^[ \t]*---[ \t]*$') }
+function Test-LayoutLine([string]$Line) { return ((Test-BlankLine $Line) -or (Test-RuleLine $Line)) }
+
+function Get-NarrativeSections([string]$Narrative) {
+    $sections = New-Object object[] 7
+    for ($i = 0; $i -lt 7; $i++) {
+        $sections[$i] = @{ Heading = $null; Lines = (New-Object Collections.Generic.List[string]); Footer = '' }
+    }
+    $sec = -1
+    foreach ($line in ($Narrative -split "`n")) {
+        $to = -1
+        if ($sec -eq -1 -and $line -ceq '## State') { $to = 0 }
+        elseif ($sec -eq 0 -and $line.StartsWith('### Done', [StringComparison]::Ordinal)) { $to = 1 }
+        elseif ($sec -eq 1 -and $line -ceq '### Now') { $to = 2 }
+        elseif ($sec -eq 2 -and $line -ceq '### Next') { $to = 3 }
+        elseif ($sec -eq 3 -and $line -ceq '### Deferred') { $to = 4 }
+        elseif ($sec -eq 4 -and $line -ceq '## Open Questions') { $to = 5 }
+        elseif ($sec -eq 5 -and $line -ceq '## Blockers') { $to = 6 }
+        if ($to -ge 0) { $sec = $to; $sections[$sec].Heading = $line; continue }
+        if ($sec -ge 0) { $sections[$sec].Lines.Add($line) }
+    }
+    foreach ($section in $sections) {
+        if ($null -eq $section.Heading) { Fail-ForgeLifecycle "FOLD_SAFE_STOP: narrative merge failed" }
+        $lines = $section.Lines
+        while ($lines.Count -gt 0 -and (Test-BlankLine $lines[$lines.Count - 1])) { $lines.RemoveAt($lines.Count - 1) }
+        if ($lines.Count -gt 0 -and (Test-RuleLine $lines[$lines.Count - 1])) {
+            $section.Footer = $lines[$lines.Count - 1]; $lines.RemoveAt($lines.Count - 1)
+            while ($lines.Count -gt 0 -and (Test-BlankLine $lines[$lines.Count - 1])) { $lines.RemoveAt($lines.Count - 1) }
+        }
+        while ($lines.Count -gt 0 -and (Test-BlankLine $lines[0])) { $lines.RemoveAt(0) }
+    }
+    return ,$sections
+}
+
+# Deterministic three-way narrative merge: base (seed snapshot), primary, worktree.
+# Per section, lines the worktree removed since seed leave primary; lines it added
+# are inserted after their nearest preceding worktree line that primary still has
+# (else at the section top). Everything else in primary, including edits made after
+# the seed, is kept. Blank and `---` divider lines are layout, never merged content.
+# Keep the Bash twin byte-identical.
+function Merge-ThreeWayNarrative([string]$BaseNarrative, [string]$PrimaryNarrative, [string]$WorktreeNarrative) {
+    $base = Get-NarrativeSections $BaseNarrative
+    $prim = Get-NarrativeSections $PrimaryNarrative
+    $work = Get-NarrativeSections $WorktreeNarrative
+    $out = New-Object Text.StringBuilder
+    for ($s = 0; $s -lt 7; $s++) {
+        $inBase = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        $inWork = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        foreach ($line in $base[$s].Lines) { if (-not (Test-LayoutLine $line)) { $null = $inBase.Add($line) } }
+        foreach ($line in $work[$s].Lines) { if (-not (Test-LayoutLine $line)) { $null = $inWork.Add($line) } }
+        $result = New-Object Collections.Generic.List[string]
+        foreach ($line in $prim[$s].Lines) {
+            if (-not (Test-LayoutLine $line) -and $inBase.Contains($line) -and -not $inWork.Contains($line)) { continue }
+            $result.Add($line)
+        }
+        $workLines = $work[$s].Lines
+        for ($i = 0; $i -lt $workLines.Count; $i++) {
+            $line = $workLines[$i]
+            if ((Test-LayoutLine $line) -or $inBase.Contains($line) -or $result.Contains($line)) { continue }
+            $at = -1
+            for ($j = $i - 1; $j -ge 0; $j--) {
+                if (Test-LayoutLine $workLines[$j]) { continue }
+                $anchor = $result.IndexOf($workLines[$j])
+                if ($anchor -ge 0) { $at = $anchor + 1; break }
+            }
+            if ($at -lt 0) {
+                $at = 0
+                while ($at -lt $result.Count -and (Test-BlankLine $result[$at])) { $at++ }
+            } elseif ($line -notmatch '^[ \t]') {
+                while ($at -lt $result.Count -and $result[$at] -match '^[ \t]' -and -not (Test-LayoutLine $result[$at])) { $at++ }
+            }
+            $result.Insert($at, $line)
+        }
+        $null = $out.Append($prim[$s].Heading).Append("`n`n")
+        $printed = $false; $gap = $false
+        foreach ($line in $result) {
+            if (Test-BlankLine $line) { if ($printed) { $gap = $true }; continue }
+            if ((Test-RuleLine $line) -and $printed) { $gap = $true }
+            if ($gap) { $null = $out.Append("`n") }
+            $null = $out.Append($line).Append("`n"); $printed = $true; $gap = (Test-RuleLine $line)
+        }
+        if ($printed) { $null = $out.Append("`n") }
+        if ($prim[$s].Footer) { $null = $out.Append($prim[$s].Footer).Append("`n`n") }
+    }
+    return $out.ToString()
+}
+
+function Test-WorktreeNowEmpty([string]$Path) {
+    $inState = $false; $inNow = $false
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        if (-not $inState) { if ($line -ceq '## State') { $inState = $true }; continue }
+        if ($line.StartsWith('## ', [StringComparison]::Ordinal)) { break }
+        if (-not $inNow) { if ($line -ceq '### Now') { $inNow = $true }; continue }
+        if ($line -ceq '### Next') { break }
+        if (-not (Test-BlankLine $line)) { return $false }
+    }
+    return $true
 }
 
 function Publish-State([string]$Content, [string]$Destination) {
@@ -201,12 +311,25 @@ function Fold-ForgeWorktree([string]$Requested) {
     if (-not (Test-Path -LiteralPath $snapshotPath -PathType Leaf) -or (Test-Reparse $snapshotPath)) {
         Fail-ForgeLifecycle "FOLD_SAFE_STOP: missing or aliased seed snapshot: $snapshotPath"
     }
-    $snapshot = [IO.File]::ReadAllText($snapshotPath) -replace "`r", ''
     $primaryNarrative = Get-FoldableNarrative $primaryPath
-    if ($snapshot -ne $primaryNarrative) { Fail-ForgeLifecycle "FOLD_DIVERGED: primary narrative changed after worktree seed; reconcile manually" }
     $worktreeNarrative = Get-FoldableNarrative $worktreePath
-    Publish-State (Merge-FoldableNarrative $primaryPath $worktreeNarrative) $primaryPath
-    Write-Output "FOLD_OK: worktree=$target primary=$primary"
+    $baseNarrative = Get-FoldableNarrative $snapshotPath
+    if (-not (Test-WorktreeNowEmpty $worktreePath)) {
+        Fail-ForgeLifecycle "FOLD_SAFE_STOP: worktree ### Now still lists work; record finished work under ### Done and move unfinished items to ### Next or ### Deferred, then rerun fold"
+    }
+    # unchanged: primary already holds this narrative; replace: primary is unchanged
+    # since the base; merge: primary changed after it (sibling fold, quick fix, edit).
+    $folded = $worktreeNarrative
+    if ($primaryNarrative -ceq $worktreeNarrative) { $mode = 'unchanged' }
+    elseif ($baseNarrative -ceq $primaryNarrative) { $mode = 'replace' }
+    else { $mode = 'merge'; $folded = Merge-ThreeWayNarrative $baseNarrative $primaryNarrative $worktreeNarrative }
+    Publish-State (Merge-FoldableNarrative $primaryPath $folded) $primaryPath
+    # The folded narrative is the base for any later refold of this worktree, so a
+    # rerun after a worktree edit applies only that edit.
+    try { Publish-State $worktreeNarrative $snapshotPath } catch {
+        [Console]::Error.WriteLine('FOLD_WARNING: seed snapshot not advanced; a later refold may repeat edited lines')
+    }
+    Write-Output "FOLD_OK: worktree=$target primary=$primary mode=$mode"
 }
 
 function Set-ForgeWorktreeIdentity([string]$Target, [string]$BaseRef, [string]$BaseSha) {

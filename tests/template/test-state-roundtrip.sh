@@ -246,8 +246,10 @@ if [ "$WORKFLOW_STAGE" = "complete" ]; then
         "finish-branch invokes the executable guarded fold"
     assert_contains "$FBR" 'FOLD_SAFE_STOP' \
         "finish-branch stops on a missing or malformed baseline"
-    assert_contains "$FBR" 'FOLD_DIVERGED' \
-        "finish-branch stops when primary narrative changed"
+    assert_contains "$FBR" 'mode=merge' \
+        "finish-branch merges when primary narrative changed"
+    assert_contains "$REPO_ROOT/state.template.md" 'deterministic three-way merge' \
+        "state template documents the diverged-primary merge"
     assert_contains "$FBR" 'never touches' \
         "finish-branch preserves gate and authority sections"
     report "test-state-roundtrip.sh"

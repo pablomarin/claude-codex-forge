@@ -90,12 +90,31 @@ missing/stale registration or wrong-common-directory event keeps Codex `RUNTIME_
 - Use paths relative to the active worktree.
 - `quick-fix` uses the current branch and does not create a worktree.
 - State and volatile evidence are per worktree; ADRs, changelog, and committed memory remain shared.
-- Run `/finish-branch` only after the PR has merged; it folds eligible state back and cleans up.
+- Run `/finish-branch` only after the PR has merged. It records the finished work under the
+  worktree's `### Done`, folds the narrative into the primary `.forge/local/state.md`, and removes
+  the worktree only after the fold reports `FOLD_OK`.
 
-Manual cleanup remains standard Git:
+## Finishing Parallel Worktrees
+
+Each worktree's narrative folds back independently, in any order. The first fold after a quiet main
+replaces main's narrative (`mode=replace`). When main changed after a worktree was seeded, because a
+sibling folded first, a quick fix landed, or someone edited main's state, the fold merges instead
+(`mode=merge`): it applies only the lines that worktree added or removed since its seed and keeps
+everything else on main. Rerunning a fold is safe: it applies only worktree edits made since the
+previous fold, so an unedited rerun changes nothing.
+
+The fold stops with `FOLD_SAFE_STOP` while the worktree's `### Now` still lists work, so nothing is
+silently dropped: move finished items to `### Done`, unfinished ones to `### Next` or
+`### Deferred`, and rerun it.
+
+Manual cleanup remains standard Git, after folding the worktree's state:
 
 ```bash
+.forge/hooks/lib/worktree-lifecycle.sh fold --worktree "$PWD/.worktrees/auth"
 git worktree remove .worktrees/auth
 git worktree prune
 git branch -d feat/auth
 ```
+
+`git worktree remove` deletes the worktree's ignored `.forge/local/state.md`; skip it if the fold
+did not report `FOLD_OK`.

@@ -29,6 +29,7 @@ Each ADR follows the [Nygard 2011 template](https://www.cognitect.com/blog/2011/
 | [0005](0005-hard-platform-parity-rule.md)               | Cross-platform parity is a hard invariant, not a "should"                              | Accepted (2026-04-28) |
 | [0006](0006-write-tool-creates-missing-parents.md)      | Trust the Claude Write tool to create missing parents (v5 history)                     | Superseded by 0010   |
 | [0007](0007-codex-investigate-mode-capability-gated.md) | Separate hermetic review from full-agent investigation                                | Amended (2026-08-27) |
-| [0008](0008-state-continuity-round-trip.md)             | Per-developer continuity narrative round-trips through main                            | Amended by 0010      |
+| [0008](0008-state-continuity-round-trip.md)             | Per-developer continuity narrative round-trips through main                            | Amended by 0010, 0011 |
 | [0009](0009-scoped-review-certification.md)             | Convergence breaker for the code-review loop (scoped engine built, deferred)           | Accepted (2026-06-06) |
 | [0010](0010-dual-engine-canonical-harness.md)            | One canonical dual-engine harness with native host adapters                            | Accepted (2026-08-27) |
+| [0011](0011-three-way-continuity-fold.md)              | Fold a diverged continuity narrative by deterministic three-way merge                  | Accepted (2026-10-04) |

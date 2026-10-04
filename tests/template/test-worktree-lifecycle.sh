@@ -36,8 +36,8 @@ none
 - $done
 
 ### Now
-
-- $now
+${now:+
+- $now}
 
 ### Next
 
@@ -251,8 +251,35 @@ else
     pass "failed create removes the partial branch"
 fi
 
-start_test "fold replaces narrative only when primary still matches the seed"
+start_test "fold refuses to drop work still listed under the worktree Now"
 write_state "$TARGET/.forge/local/state.md" "/fix-bug bug-one" "done-worktree" "active-worktree" "next-worktree"
+PRIMARY_BEFORE=$(shasum -a 256 "$PRIMARY/.forge/local/state.md" | awk '{print $1}')
+if "$HELPER" fold --worktree "$TARGET" > "$BASE/fold-now.out" 2> "$BASE/fold-now.err"; then
+    FOLD_NOW_RC=0
+else
+    FOLD_NOW_RC=$?
+fi
+if [ "$FOLD_NOW_RC" -ne 0 ]; then pass "non-empty worktree Now exits nonzero"; else fail "non-empty worktree Now must exit nonzero"; fi
+assert_contains "$BASE/fold-now.err" 'FOLD_SAFE_STOP: worktree ### Now still lists work' \
+    "non-empty worktree Now explains how to record the status first"
+assert_equals "$(shasum -a 256 "$PRIMARY/.forge/local/state.md" | awk '{print $1}')" "$PRIMARY_BEFORE" \
+    "non-empty worktree Now leaves primary bytes unchanged"
+
+start_test "fold refuses a case-variant Now heading instead of dropping its work"
+write_state "$TARGET/.forge/local/state.md" "/fix-bug bug-one" "done-worktree" "unfinished-work" "next-worktree"
+sed 's/^### Now$/### NOW/' "$TARGET/.forge/local/state.md" > "$BASE/case-now.md"
+mv "$BASE/case-now.md" "$TARGET/.forge/local/state.md"
+if "$HELPER" fold --worktree "$TARGET" > "$BASE/case-now.out" 2> "$BASE/case-now.err"; then
+    CASE_NOW_RC=0
+else
+    CASE_NOW_RC=$?
+fi
+if [ "$CASE_NOW_RC" -ne 0 ]; then pass "case-variant Now heading exits nonzero"; else fail "case-variant Now heading must exit nonzero"; fi
+assert_equals "$(shasum -a 256 "$PRIMARY/.forge/local/state.md" | awk '{print $1}')" "$PRIMARY_BEFORE" \
+    "case-variant Now heading leaves primary bytes unchanged"
+
+start_test "fold replaces narrative when primary still matches the seed"
+write_state "$TARGET/.forge/local/state.md" "/fix-bug bug-one" "done-worktree" "" "next-worktree"
 if [ -x "$HELPER" ]; then
     "$HELPER" fold --worktree "$TARGET" > "$BASE/fold.out" 2> "$BASE/fold.err"
     FOLD_RC=$?
@@ -260,11 +287,23 @@ else
     FOLD_RC=127
 fi
 assert_equals "$FOLD_RC" "0" "unchanged primary narrative folds successfully"
+assert_contains "$BASE/fold.out" 'FOLD_OK: worktree=' "replace fold reports success"
+assert_contains "$BASE/fold.out" 'mode=replace' "unchanged primary uses the exact replace path"
 assert_contains "$PRIMARY/.forge/local/state.md" 'done-worktree' "worktree Done reaches primary"
 assert_contains "$PRIMARY/.forge/local/state.md" 'next-worktree' "worktree Next reaches primary"
-assert_not_contains "$PRIMARY/.forge/local/state.md" 'active-worktree' "fold clears worktree Now"
+assert_not_contains "$PRIMARY/.forge/local/state.md" 'now-primary' "fold clears primary Now"
 assert_contains "$PRIMARY/.forge/local/state.md" '| Command | /fix-bug prior |' \
     "primary workflow authority remains untouched"
+REPLACED=$(shasum -a 256 "$PRIMARY/.forge/local/state.md" | awk '{print $1}')
+if "$HELPER" fold --worktree "$TARGET" > "$BASE/fold-retry.out" 2> "$BASE/fold-retry.err"; then
+    REPLACE_RETRY_RC=0
+else
+    REPLACE_RETRY_RC=$?
+fi
+assert_equals "$REPLACE_RETRY_RC" "0" "retrying a replace fold succeeds"
+assert_contains "$BASE/fold-retry.out" 'mode=unchanged' "retrying a replace fold reports nothing to fold"
+assert_equals "$(shasum -a 256 "$PRIMARY/.forge/local/state.md" | awk '{print $1}')" "$REPLACED" \
+    "retrying a replace fold keeps primary bytes"
 
 start_test "fold rejects a complete narrative whose state sections are out of order"
 sed -n '/^## State$/,/^## Update Rules$/{ /^## Update Rules$/q; p; }' \
@@ -286,21 +325,179 @@ assert_contains "$BASE/out-of-order.err" 'FOLD_SAFE_STOP' "out-of-order narrativ
 assert_equals "$(shasum -a 256 "$PRIMARY/.forge/local/state.md" | awk '{print $1}')" "$PRIMARY_BEFORE" \
     "out-of-order narrative leaves primary bytes unchanged"
 
-start_test "fold safe-stops without overwriting a diverged primary narrative"
-# Re-seed the exact baseline manually, then change primary independently.
-cp "$TARGET/.forge/local/.state-seed-snapshot.md" "$BASE/original-snapshot"
-write_state "$TARGET/.forge/local/state.md" "/fix-bug bug-one" "done-worktree" "active-worktree" "next-worktree"
-write_state "$PRIMARY/.forge/local/state.md" "/fix-bug prior" "independent-main" "main-active" "next-primary"
-PRIMARY_BEFORE=$(shasum -a 256 "$PRIMARY/.forge/local/state.md" | awk '{print $1}')
-if [ -x "$HELPER" ]; then
-    "$HELPER" fold --worktree "$TARGET" > "$BASE/diverged.out" 2> "$BASE/diverged.err"
-    DIVERGED_RC=$?
+start_test "fold merges worktree changes into a primary narrative that changed after seed"
+# The snapshot now records done-worktree/next-worktree. Primary changes independently
+# while the worktree replaces its Done entry; both changes must survive.
+write_state "$TARGET/.forge/local/state.md" "/fix-bug bug-one" "done-second" "" "next-worktree"
+write_state "$PRIMARY/.forge/local/state.md" "/fix-bug prior" "independent-main" "main-active" "next-main-only"
+if "$HELPER" fold --worktree "$TARGET" > "$BASE/diverged.out" 2> "$BASE/diverged.err"; then
+    DIVERGED_RC=0
 else
-    DIVERGED_RC=127
+    DIVERGED_RC=$?
 fi
-if [ "$DIVERGED_RC" -ne 0 ]; then pass "diverged fold exits nonzero"; else fail "diverged fold must exit nonzero"; fi
-assert_contains "$BASE/diverged.err" 'FOLD_DIVERGED' "divergence is explained"
-assert_equals "$(shasum -a 256 "$PRIMARY/.forge/local/state.md" | awk '{print $1}')" "$PRIMARY_BEFORE" \
-    "diverged primary bytes are preserved"
+assert_equals "$DIVERGED_RC" "0" "diverged primary narrative folds by merge"
+assert_contains "$BASE/diverged.out" 'mode=merge' "diverged primary uses the three-way merge path"
+assert_contains "$PRIMARY/.forge/local/state.md" 'done-second' "worktree Done edit reaches primary"
+assert_contains "$PRIMARY/.forge/local/state.md" 'independent-main' "independent primary Done edit survives"
+assert_contains "$PRIMARY/.forge/local/state.md" 'next-main-only' "independent primary Next edit survives"
+assert_not_contains "$PRIMARY/.forge/local/state.md" 'done-worktree' "line removed by the worktree stays removed"
+assert_contains "$PRIMARY/.forge/local/state.md" '| Command | /fix-bug prior |' \
+    "merge leaves primary workflow authority untouched"
+
+start_test "fold keeps a primary-only section after the narrative"
+awk '$0 == "## Update Rules" { print "## Notes"; print ""; print "- keep my notes"; print "" } { print }' \
+    "$PRIMARY/.forge/local/state.md" > "$BASE/notes-state.md"
+mv "$BASE/notes-state.md" "$PRIMARY/.forge/local/state.md"
+if "$HELPER" fold --worktree "$TARGET" > "$BASE/notes.out" 2> "$BASE/notes.err"; then
+    NOTES_RC=0
+else
+    NOTES_RC=$?
+fi
+assert_equals "$NOTES_RC" "0" "fold succeeds beside a primary-only section"
+assert_contains "$PRIMARY/.forge/local/state.md" '- keep my notes' "primary-only section after Blockers survives the fold"
+assert_contains "$PRIMARY/.forge/local/state.md" 'fixture rules' "primary Update Rules survive the fold"
+
+start_test "parallel worktrees each fold their finished status into primary state"
+PAR_BASE=$(scratch_dir lifecycle-parallel)
+PAR_PRIMARY="$PAR_BASE/project"
+mkdir -p "$PAR_PRIMARY"
+(
+    cd "$PAR_PRIMARY" || exit 1
+    git init -q --initial-branch=main
+    git config user.email t@t
+    git config user.name t
+    printf 'tracked\n' > app.txt
+    git add app.txt
+    git commit -q -m base
+)
+mkdir -p "$PAR_PRIMARY/.forge/local"
+cp "$REPO_ROOT/state.template.md" "$PAR_PRIMARY/.forge/state.template.md"
+printf '6\n' > "$PAR_PRIMARY/.forge/version"
+printf '.forge/state.template.md\tfixture\tv6\n' > "$PAR_PRIMARY/.forge/installed-files.tsv"
+printf '%s\n' '.forge/' '.worktrees/' >> "$PAR_PRIMARY/.git/info/exclude"
+awk -v queued="- (what's queued)" '
+    $0 == "- (your most recent completed work)" { print "- shipped login"; next }
+    $0 == queued { print "- build auth"; print "- build billing"; print "- polish docs"; next }
+    $0 == "- (questions needing resolution)" { print "- which auth provider?"; print "- billing currency?"; next }
+    { print }
+' "$REPO_ROOT/state.template.md" > "$PAR_PRIMARY/.forge/local/state.md"
+(cd "$PAR_PRIMARY" && "$HELPER" create --kind feat --name auth --base HEAD) > /dev/null 2>&1
+(cd "$PAR_PRIMARY" && "$HELPER" create --kind feat --name billing --base HEAD) > /dev/null 2>&1
+AUTH_STATE="$PAR_PRIMARY/.worktrees/auth/.forge/local/state.md"
+BILLING_STATE="$PAR_PRIMARY/.worktrees/billing/.forge/local/state.md"
+assert_file_exists "$AUTH_STATE" "first parallel worktree is seeded"
+assert_file_exists "$BILLING_STATE" "second parallel worktree is seeded"
+rewrite_state() {
+    awk "$2" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+# Main records unrelated progress (for example a quick fix) after both seeds.
+rewrite_state "$PAR_PRIMARY/.forge/local/state.md" \
+    '$0 == "- polish docs" { print; print "  - include hotfix notes"; print "- main hotfix follow-up"; next } { print }'
+# auth finishes: records Done, drops its Next item, resolves a question, parks a follow-up.
+rewrite_state "$AUTH_STATE" '
+    $0 == "- shipped login" { print "- shipped auth (PR 12)" }
+    $0 == "- build auth" || $0 == "- which auth provider?" { next }
+    $0 == "- (parked items with reason)" { print "- auth: rotate signing keys later"; next }
+    $0 == "### Now" { print; getline; print; print "- finishing auth"; next }
+    { print }'
+# billing finishes: records Done, drops its Next item, queues a follow-up after polish docs.
+rewrite_state "$BILLING_STATE" '
+    $0 == "- shipped login" { print "- shipped billing (PR 13)" }
+    $0 == "- build billing" { next }
+    $0 == "- polish docs" { print; print "- billing: add invoices"; next }
+    { print }'
+
+PAR_BEFORE=$(shasum -a 256 "$PAR_PRIMARY/.forge/local/state.md" | awk '{print $1}')
+if "$HELPER" fold --worktree "$PAR_PRIMARY/.worktrees/auth" > "$PAR_BASE/auth-now.out" 2> "$PAR_BASE/auth-now.err"; then
+    pass_rc=0
+else
+    pass_rc=$?
+fi
+if [ "$pass_rc" -ne 0 ]; then pass "auth fold stops while Now still lists work"; else fail "auth fold must stop while Now still lists work"; fi
+assert_equals "$(shasum -a 256 "$PAR_PRIMARY/.forge/local/state.md" | awk '{print $1}')" "$PAR_BEFORE" \
+    "stopped fold leaves primary bytes unchanged"
+rewrite_state "$AUTH_STATE" '$0 == "- finishing auth" { next } { print }'
+
+if "$HELPER" fold --worktree "$PAR_PRIMARY/.worktrees/auth" > "$PAR_BASE/auth.out" 2> "$PAR_BASE/auth.err"; then
+    AUTH_RC=0
+else
+    AUTH_RC=$?
+fi
+assert_equals "$AUTH_RC" "0" "first parallel fold succeeds after main changed"
+assert_contains "$PAR_BASE/auth.out" 'mode=merge' "first parallel fold merges around the main edit"
+AUTH_FOLDED=$(shasum -a 256 "$PAR_PRIMARY/.forge/local/state.md" | awk '{print $1}')
+if "$HELPER" fold --worktree "$PAR_PRIMARY/.worktrees/auth" > "$PAR_BASE/auth-retry.out" 2> "$PAR_BASE/auth-retry.err"; then
+    RETRY_RC=0
+else
+    RETRY_RC=$?
+fi
+assert_equals "$RETRY_RC" "0" "retrying a completed fold succeeds"
+assert_equals "$(shasum -a 256 "$PAR_PRIMARY/.forge/local/state.md" | awk '{print $1}')" "$AUTH_FOLDED" \
+    "retrying a completed fold is idempotent"
+
+if "$HELPER" fold --worktree "$PAR_PRIMARY/.worktrees/billing" > "$PAR_BASE/billing.out" 2> "$PAR_BASE/billing.err"; then
+    BILLING_RC=0
+else
+    BILLING_RC=$?
+fi
+assert_equals "$BILLING_RC" "0" "second parallel fold succeeds after its sibling folded"
+assert_contains "$PAR_BASE/billing.out" 'mode=merge' "second parallel fold merges with its sibling"
+cat > "$PAR_BASE/expected-narrative.md" <<'EOF'
+## State
+
+### Done (recent 2-3 only)
+
+- shipped billing (PR 13)
+- shipped auth (PR 12)
+- shipped login
+
+### Now
+
+### Next
+
+- polish docs
+  - include hotfix notes
+- billing: add invoices
+- main hotfix follow-up
+
+### Deferred
+
+- auth: rotate signing keys later
+
+---
+
+## Open Questions
+
+- billing currency?
+
+## Blockers
+
+- (anything blocking forward progress)
+
+---
+
+EOF
+sed -n '/^## State$/,/^## Update Rules$/{ /^## Update Rules$/q; p; }' \
+    "$PAR_PRIMARY/.forge/local/state.md" > "$PAR_BASE/actual-narrative.md"
+if cmp -s "$PAR_BASE/expected-narrative.md" "$PAR_BASE/actual-narrative.md"; then
+    pass "primary narrative holds both finished statuses and the main edit, in order"
+else
+    fail "primary narrative must hold both finished statuses and the main edit, in order"
+    diff "$PAR_BASE/expected-narrative.md" "$PAR_BASE/actual-narrative.md" | head -20
+fi
+assert_contains "$PAR_PRIMARY/.forge/local/state.md" '| Command   | none  |' \
+    "parallel folds leave primary workflow control untouched"
+
+start_test "refolding after a post-fold worktree edit applies only that edit"
+rewrite_state "$AUTH_STATE" '$0 == "- shipped auth (PR 12)" { print "- shipped auth (PR 12, verified)"; next } { print }'
+if "$HELPER" fold --worktree "$PAR_PRIMARY/.worktrees/auth" > "$PAR_BASE/auth-edit.out" 2> "$PAR_BASE/auth-edit.err"; then
+    EDIT_RC=0
+else
+    EDIT_RC=$?
+fi
+assert_equals "$EDIT_RC" "0" "refold after a worktree edit succeeds"
+assert_contains "$PAR_PRIMARY/.forge/local/state.md" '- shipped auth (PR 12, verified)' "post-fold edit reaches primary"
+assert_not_contains "$PAR_PRIMARY/.forge/local/state.md" '- shipped auth (PR 12)' "post-fold edit replaces the earlier folded line"
+assert_contains "$PAR_PRIMARY/.forge/local/state.md" '- shipped billing (PR 13)' "post-fold edit keeps the sibling fold"
 
 report "test-worktree-lifecycle.sh"

@@ -5,6 +5,9 @@
 Amended by [ADR 0010](0010-dual-engine-canonical-harness.md) (2026-08-27). The guarded continuity
 round-trip remains, with v6 state and seed snapshots under `.forge/local/`.
 
+Amended by [ADR 0011](0011-three-way-continuity-fold.md) (2026-10-04): a primary narrative that
+changed after seed now folds by deterministic three-way merge instead of a safe-stop.
+
 ## Context
 
 ADR 0001 moved volatile per-developer workflow state to `.claude/local/state.md` — gitignored, not auto-loaded — to kill the cross-developer staleness bug a tracked `CONTINUITY.md` had caused. That split was correct, but it left a regression that only surfaced in the field (downstream, 2026-06): the per-developer **continuity narrative** (the `## State` Done/Now/Next/Deferred story, plus `## Open Questions` and `## Blockers`) became **worktree-local and ephemeral**.
