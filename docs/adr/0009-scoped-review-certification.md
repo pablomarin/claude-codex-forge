@@ -33,3 +33,10 @@ silently resetting. Legacy pre-V6 state retains its original checklist-row deriv
 - ⚠️ Docs-only rebinds after certification still trigger full re-review rounds — bounded at 3, not eliminated. The scoped engine that would make them free is deliberately deferred; that residual cost is accepted.
 - ⚠️ "Human-only adjudication" is procedural — the hook cannot prove a human typed the line. The head-binding and the explicit prose prohibition are the enforcement; the human reviews the audit trail at PR time.
 - 🔮 Betting that the bound alone (not scope optimization) removes the incident pain. Falsifier: repeated breaker trips on legitimately-converging docs rebinds → revisit the deferred engine at `ece4eae`, starting from the second council's five conditions (PS runtime CI, latency ceiling + observability + opt-out, deep pass opt-in, decision-table docs, rollback path).
+
+## Clarification — 6.4.3
+
+Human-only adjudication means the human makes the decision. The agent records that explicit decision
+in the existing head-bound checklist format and continues the approved work. It must never
+self-adjudicate; the developer is not required to edit the state file. The hook cannot authenticate
+who typed a record, and the record does not grant authority by itself.

@@ -357,7 +357,7 @@ if [ -n "$BRK_HEAD" ] && [ -f "$RS" ] && [ -f "$STATE_FILE" ]; then
         echo "" >&2
         echo "The review loop is not converging. STOP and surface the open tail" >&2
         echo "(severities + in-delta vs certified-unchanged) to the human. Ship is" >&2
-        echo "blocked until the human records:" >&2
+        echo "blocked until the human decides; then the agent records that decision:" >&2
         echo "  - [x] Post-certification tail adjudicated by human — <decision> — head=\`$BRK_HEAD\` — ts=\`<ISO8601>\`" >&2
         exit 2
     fi

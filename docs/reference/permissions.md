@@ -18,7 +18,7 @@ sandbox prompts can differ between Claude Code and Codex; Forge's human-authorit
 | **Full investigation**                     | No extra Forge question | Main agent selects this mode from task needs under standing launch approval. Fresh agent uses normal project/user config, state, memory, tools, MCP, network, databases, APIs, and real-worktree write access; existing host controls still apply |
 | **gh pr create**                           | Yes     | Creating a PR requires explicit human approval plus the matching nonce/candidate authorization in `.forge/local/state.md`; native sessions cannot replay it across a different objective or candidate                                                                                                                          |
 | **gh pr merge**                            | Yes     | Merging requires approval                                                                                                                                                                                                                                                                                                                                                                    |
-| **Protected external mutation**            | Yes     | Uses the same operation-specific host prompt and current human authorization whether initiated by the main agent or an investigator; Forge grants no extra authority                                                                                                                                                          |
+| **Protected external mutation**            | Yes     | The main agent obtains any missing human approval, records it, and executes through host controls. Investigators return consequential actions to the main session; Forge grants no extra authority                                                                                                                                                          |
 | **rm -rf**, **rm -r**                      | Yes     | Destructive deletion                                                                                                                                                                                                                                                                                                                                                                         |
 | **npm publish**                            | Yes     | Publishing requires approval                                                                                                                                                                                                                                                                                                                                                                 |
 | `sudo`, `su`                               | Denied  | Privilege escalation                                                                                                                                                                                                                                                                                                                                                                         |
@@ -76,6 +76,13 @@ destructive or external mutations remain unchanged; Forge adds no launch token o
 The installed contract and materialization tests do not prove Codex Desktop Auto-review behavior.
 That host boundary remains `PENDING` until the physical-operator journeys in
 `docs/qualification/agent-mode-selection.md` pass on the release candidate.
+
+Human approval authorizes the agent to execute the agreed action; it does not assign terminal or
+file-editing work to the human. The agent writes the existing PR or breaker audit record after the
+actual decision and verifies the result. Claude ask rules cover common shell forms of issue closure,
+Kubernetes apply/delete/patch, and curl POST/PUT/PATCH/DELETE, alongside PR/merge/publish/deletion.
+These are host controls, not proof of a chat reply; alternative command forms and MCP tools still
+follow the canonical Human Authorization policy and their native controls.
 
 ## What's Skipped by Auto-Formatter
 

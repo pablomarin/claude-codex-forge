@@ -279,18 +279,18 @@ function Get-CapabilityRow([string]$Selected, [string]$RequestedRole) {
 
 function Invoke-FullInvestigation([string]$Selected, [string]$Executable, [string]$Provider, [string]$Model, [string]$Effort, [string]$Scratch) {
     New-Item -ItemType Directory -Path $Scratch -Force | Out-Null
-    $configHash = Get-ShaText "$Selected|$root|$QualificationRevision|host-managed-full-agent-v1"
+    $configHash = Get-ShaText "$Selected|$root|$QualificationRevision|host-managed-full-agent-v2"
     $seatHash = Get-ShaText "$Selected|$Role|$SeatId|$QuestionHash"
-    $prompt = "You are a fresh full-capability $Selected investigation agent in the real project worktree $root. Use the normal user and project configuration, shared Forge state and memory, installed tools, MCP servers, network, databases, and APIs available to this host. Forge adds no tool, sandbox, configuration, or write restriction for this investigation. You may inspect and edit the worktree as needed. Return ONLY the Forge line envelope below.`n" + [IO.File]::ReadAllText($PromptFile) + "`nRequired envelope:`nschema_version=1`nverdict=CLEAN|FINDINGS|BLOCKED`nmax_severity=NONE|P0|P1|P2|P3`nblocked_class=none|engine|capability|artifact|authorization|invariant`n"
+    $prompt = "You are a fresh full-capability $Selected investigation agent in the real project worktree $root. Use the normal user and project configuration, shared Forge state and memory, installed tools, MCP servers, network, databases, and APIs available to this host. You may inspect and edit the worktree as needed using normal project capabilities. Launch is already human-approved. For shipping, destructive operations, or external mutations, return the exact proposed action to the main session for human approval and agent execution; never ask the developer to execute it manually. The investigator marker enforces a defense-in-depth handoff for recognized consequential commands. Return ONLY the Forge line envelope below.`n" + [IO.File]::ReadAllText($PromptFile) + "`nRequired envelope:`nschema_version=1`nverdict=CLEAN|FINDINGS|BLOCKED`nmax_severity=NONE|P0|P1|P2|P3`nblocked_class=none|engine|capability|artifact|authorization|invariant`n"
     $bound = Join-Path $Scratch 'bound.out'
     if ($Selected -eq 'claude') {
         $arguments = @('-p', '--settings', '{"fastMode":true}', '--permission-mode', 'auto', '--model', $Model, '--effort', $Effort, '--output-format', 'json', '--no-session-persistence', $prompt)
-        $process = Invoke-BoundProcess $Executable $arguments $root @{} $TimeoutSeconds $true
+        $process = Invoke-BoundProcess $Executable $arguments $root @{ FORGE_INVESTIGATION_CHILD = '1' } $TimeoutSeconds $true
         Copy-Item -LiteralPath $process.Stdout -Destination $bound -Force
     }
     else {
         $arguments = @('-a', 'on-request', '--search', 'exec', '-C', $root, '--sandbox', 'danger-full-access', '-m', $Model, '-c', "model_reasoning_effort=$Effort", '-c', 'service_tier=fast', '--output-last-message', $bound, '--ephemeral', $prompt)
-        $process = Invoke-BoundProcess $Executable $arguments $root @{} $TimeoutSeconds $true
+        $process = Invoke-BoundProcess $Executable $arguments $root @{ FORGE_INVESTIGATION_CHILD = '1' } $TimeoutSeconds $true
     }
     if ($process.Exit -eq 124) { return @{ Rc = 1; Class = 'engine'; Reason = 'timeout'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 124; InvestigationMode = 'full-agent-worktree' } }
     if ($process.Exit -ne 0) { return @{ Rc = 1; Class = 'engine'; Reason = "process-exit-$($process.Exit)"; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = $process.Exit; InvestigationMode = 'full-agent-worktree' } }

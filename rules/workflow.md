@@ -267,7 +267,7 @@ for:
 - a security-sensitive or irreversible action;
 - a broken invariant, exhausted persistent budget, or unresolved convergence blocker.
 
-PR creation requires a human-created authorization record bound to the active nonce and candidate.
+PR creation requires explicit human approval bound to the active nonce and candidate. The agent records the decision and executes the approved action; the human need not edit state or run a command.
 Ordinary reviewer/council engine failure uses automatic same-engine fallback and does not stop the
 workflow. If the active host cannot compose every Must goal behavior, mark runtime readiness
 `BLOCKED` rather than silently reducing the contract.
@@ -288,7 +288,7 @@ an engine failure, or a convergence limit is not a council trigger by itself. Re
 failure uses automatic fallback; unresolved convergence and every action requiring human authority
 still pause for the developer.
 PR creation authorization remains human-only. Ask-tier commands stall autonomous runs, so surface the
-deterministic action and pause instead of hiding a prompt.
+deterministic action for the human decision, then record and execute it through normal host controls. Do not ask again for a still-valid approval.
 
 ### Severity and Convergence Compatibility
 
@@ -298,7 +298,7 @@ surface any remaining blocker to the developer. In a Developer Demo, an unsuppor
 diagram edge without `file:line` evidence is P1.
 
 The v5 compatibility reader retains `POST_CERT_REVIEW_ROUND_LIMIT` and the convergence-breaker.
-Only a human may record `Post-certification tail adjudicated by human`. A compatibility N/A after a
+Only a human may decide the breaker adjudication. After their explicit decision, the agent records `Post-certification tail adjudicated by human` with the current HEAD and timestamp; it never self-adjudicates. A compatibility N/A after a
 counted loop preserves its count as `Code review loop (<N> iterations) — N/A:`; migrated workflows
 use candidate-bound structured receipts instead.
 

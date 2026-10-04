@@ -65,6 +65,7 @@ End native autonomy and persist the exact next step when:
 
 Record only `complete`, `blocked`, or `cancelled`. `complete` requires the workflow's current
 candidate-bound evidence and all authorized mutations to have succeeded; native goal exit is never
-proof. PR creation is always a fresh human pause with authorization bound to the active nonce and
-candidate. Merge, deployment, publishing, destructive work, and every other external mutation keep
+proof. PR creation requires explicit human approval bound to the active nonce and candidate. Reuse an
+already-granted approval only while that exact scope remains current; the agent records the decision
+and executes the approved action. No manual command or authorization-file edit is required. Merge, deployment, publishing, destructive work, and every other external mutation keep
 their existing explicit-authorization boundaries; native Goal activation does not authorize them.

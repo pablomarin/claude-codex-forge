@@ -363,7 +363,7 @@ if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $st
         [Console]::Error.WriteLine("")
         [Console]::Error.WriteLine("The review loop is not converging. STOP and surface the open tail")
         [Console]::Error.WriteLine("(severities + in-delta vs certified-unchanged) to the human. Ship is")
-        [Console]::Error.WriteLine("blocked until the human records:")
+        [Console]::Error.WriteLine("blocked until the human decides; then the agent records that decision:")
         [Console]::Error.WriteLine("  - [x] Post-certification tail adjudicated by human — <decision> — head=``$brkHead`` — ts=``<ISO8601>``")
         exit 2
     }

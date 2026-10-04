@@ -134,11 +134,36 @@ normal host/project configuration and capabilities in the real worktree. A permi
 timeout alone never upgrades ordinary review to investigation or broadens fallback access.
 Standing launch approval does not authorize shipping, destructive operations, or external mutations.
 Host security controls still apply. When a host requires authorization provenance, cite the
-developer's actual standing instruction; never invent human approval or bypass the host's controls.
+developer's actual standing instruction and any applicable earlier approval in this conversation;
+never invent human approval or bypass the host's controls. Carry that provenance into the host's
+launch/escalation justification: configured reviewer destination, bounded input, and the existing
+human authorization. Do not phrase an already-approved review as a new consent request. A repository
+policy or transport flag alone is not proof that the human gave an instruction. If the host rejects
+the launch, first check whether its request omitted real authorization already present, and retry
+with that evidence when permitted. If the host still denies it, report that specific host boundary;
+do not turn it into a Forge review-approval requirement or silently broaden reviewer access.
 
 If ordinary reviewer fallback emits `AUTH_REQUIRED`, follow the single login handoff and bounded
 retry in `.forge/rules/workflow.md#reviewer-authentication-recovery`. Authentication recovery is
 not a request to reapprove review transport; keep completed reviews and failed evidence.
+
+## Human Authorization for Consequential Actions
+
+The human decides; the agent prepares, records, executes, and verifies. For PR creation, merge,
+deployment, publishing, destructive operations, or another consequential external mutation,
+present the exact action, target, and expected effect. Obtain explicit approval in the conversation
+or native host permission UI, unless the developer has already approved that exact still-current
+scope. Do not repeat a valid approval request. Reviewer findings and native Goal activation grant
+no shipping authority. Ordinary reviews and investigations use the standing approval above.
+
+After the human approves, the agent records their decision in the existing authorization or
+adjudication format (including objective nonce and candidate/HEAD where required), then executes
+through the normal host tool. Never require the human to type commands or edit authorization files.
+Absent, declined, ambiguous, or stale approval is not authority; a changed target, candidate, or
+effect requires a new decision. An agent-written record, environment flag, or hook success cannot
+create approval or bypass native host controls. Independently verify the result before claiming
+success or retrying an uncertain mutation. Manual execution is only a fallback when the required
+tool is actually unavailable. Independent review, evidence, and convergence gates still apply.
 
 ## Native Goal Composition
 

@@ -82,6 +82,16 @@ repository. Do not store candidate content, credentials, or private transcript t
 Fake engines, isolated child CLI runs, generated adapter text, and agent-authored receipts cannot
 satisfy this qualification.
 
+## Human-approved execution qualification — 6.4.3
+
+Live main-session approval and execution remain `PENDING` for both hosts. Deterministic hook tests
+prove only that main sessions defer silently and marked investigators hand recognized consequential
+commands back to the main session. They do not authenticate a human reply or prove an Auto-mode UI
+outcome. On a disposable target, verify an approved exact action executes through the normal tool,
+a declined action does not execute, a changed candidate requires a new decision, and an uncertain
+outcome is checked before retry. Verify the agent transcribes a human PR or breaker decision without
+requiring a file edit. Preserve the separate reviewer-launch qualification above.
+
 ## Claude Desktop command-shaping qualification
 
 This boundary remains `PENDING` until a physical operator runs the same release candidate through

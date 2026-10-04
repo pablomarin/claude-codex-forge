@@ -58,19 +58,19 @@ try {
                 if ($Arg.Count -ne 2 -or $Arg[0] -notmatch '^[A-Za-z0-9_.-]+$' -or $Arg[1] -notmatch '^[A-Za-z0-9_.-]+$') { throw 'BLOCKED[authorization]: invalid kubectl rollout argv' }
                 $executable = 'kubectl'; $rendered = "kubectl -n $($Arg[0]) rollout restart deployment/$($Arg[1])"
             }
-            default { throw 'BLOCKED[authorization]: adapter is not allowlisted; MCP-only mutation remains manual and blocked' }
+            default { throw 'BLOCKED[authorization]: unsupported rendering adapter; prepare the exact action using the normal host tool and obtain human approval before execution' }
         }
         $Output = Get-LocalOutput $Output
         $nonce = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + "-$PID-" + [Guid]::NewGuid().ToString('N').Substring(0, 8)
         $actionHash = Get-Sha "$Adapter`n$System`n$Operation`n$Target`n$rendered`n$ExpectedEffect`n"
-        $body = "schema_version=1`nstatus=PENDING_HUMAN_EXECUTION`nnonce=$nonce`nworktree_identity=$(Get-Identity)`nadapter=$Adapter`nsystem=$System`noperation=$Operation`ntarget=$(Escape-Receipt $Target)`naction_hash=$actionHash`nexpected_effect=$(Escape-Receipt $ExpectedEffect)`ncommand_executable=$executable`ncommand_rendered=$(Escape-Receipt $rendered)`ncreated_at=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`n"
+        $body = "schema_version=1`nstatus=PENDING_HUMAN_APPROVAL`nnonce=$nonce`nworktree_identity=$(Get-Identity)`nadapter=$Adapter`nsystem=$System`noperation=$Operation`ntarget=$(Escape-Receipt $Target)`naction_hash=$actionHash`nexpected_effect=$(Escape-Receipt $ExpectedEffect)`ncommand_executable=$executable`ncommand_rendered=$(Escape-Receipt $rendered)`ncreated_at=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`n"
         [IO.File]::WriteAllText($Output, $body, $Utf8)
-        Write-Output "PENDING: developer must execute this exact command in their own terminal; Forge will not run it:`n$rendered"
+        Write-Output "PENDING: obtain human approval for this exact action, then the main agent executes it through the normal host tool and verifies the result:`n$rendered"
         exit 0
     }
     if (-not (Test-Path -LiteralPath $Manifest -PathType Leaf)) { throw 'BLOCKED[authorization]: regular pending manifest required' }
     $manifestItem = Get-Item -LiteralPath $Manifest -Force
-    if (($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or (Get-Value $Manifest 'status') -ne 'PENDING_HUMAN_EXECUTION') { throw 'BLOCKED[authorization]: valid pending manifest required' }
+    if (($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or (Get-Value $Manifest 'status') -notin @('PENDING_HUMAN_APPROVAL', 'PENDING_HUMAN_EXECUTION')) { throw 'BLOCKED[authorization]: valid pending manifest required' }
     if ((Get-Value $Manifest 'worktree_identity') -cne (Get-Identity)) { throw 'BLOCKED[authorization]: pending manifest belongs to another worktree' }
     $Output = Get-LocalOutput $Output
     $body = "schema_version=1`nstatus=REPORTED`nnonce=$(Get-Value $Manifest 'nonce')`nworktree_identity=$(Get-Identity)`naction_hash=$(Get-Value $Manifest 'action_hash')`nreported_outcome=$Outcome`nreported_at=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`nverification=UNVERIFIED`nnext_step=independent-investigation-repro`n"

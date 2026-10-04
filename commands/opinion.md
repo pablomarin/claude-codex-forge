@@ -26,7 +26,11 @@ tracked content does not require another approval. This transport is not an exte
 does not grant arbitrary network tools, additional secrets or credentials, gitignored developer
 state beyond the candidate, outside-worktree access, other projects, arbitrary destinations, or
 external mutations. Respect host security controls and cite the actual human standing instruction
-when authorization provenance is required.
+when authorization provenance is required. Include the existing human instruction in the launch
+justification, together with the configured destination and bounded input. Do not ask the human to
+reapprove private snapshot transport already covered by that instruction. If a host rejection omitted
+existing authorization, correct the request with that evidence through the normal host mechanism;
+if still denied, report the host limitation without changing reviewer scope or bypassing controls.
 The same standing human approval covers full-agent investigation selected from task needs;
 its different capabilities are described below. Neither mode adds a Forge launch-consent question.
 
@@ -149,10 +153,15 @@ An investigation is a hypothesis. Run a separate `investigation-repro` invocatio
 claim, exact primary check, and an independent control. Treat it as verified/actionable only when
 the reproduction receipt says `REPRODUCED` and both primary and control behave as predicted.
 
-Destructive or externally mutating actions still require the existing explicit human authority;
-the authorized action remains human-executed.
-Use `authorized-action prepare` only for an allowlisted
-fixed executable/argv adapter, show the deterministic command, and ask the developer to execute it.
-An agent-written approval or audit receipt grants no tool, runner, or credential. Record the
-developer-reported outcome as `UNVERIFIED` until independent reproduction succeeds. MCP-only
-mutation is `BLOCKED` in v1.
+Destructive or externally mutating actions remain human-approved and agent-executed. An unattended
+investigator returns the exact proposed action to the main session for that human decision and
+execution. The dispatcher sets `FORGE_INVESTIGATION_CHILD=1`; the mutation hook blocks recognized
+consequential commands in that child. This restriction marker grants no authority and is not a
+complete shell or tool-policy engine. Ordinary review restrictions remain unchanged.
+
+The main agent may use `authorized-action prepare` for a supported fixed executable/argv adapter,
+show the exact target/action/effect, obtain any missing human approval, and execute through the normal
+host tool. Unsupported rendering adapters, including MCP actions, use the same main-session approval
+and normal-tool path. Never require the developer to execute a command or edit a record. An agent-written
+approval or audit receipt grants no tool, runner, credential, or authority. The helper has no custom
+execute mode; its reported outcome remains `UNVERIFIED` until independent verification succeeds.

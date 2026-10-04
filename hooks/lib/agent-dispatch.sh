@@ -364,22 +364,22 @@ attempt_full_investigation_dispatch() {
     local selected="$1" binary="$2" provider="$3" model="$4" effort="$5" scratch="$6"
     local raw="$scratch/raw.out" stderr_file="$scratch/stderr.log" bound_output="$scratch/bound.out" rc extracted observed observed_provider identity_match=false
     local -a engine_args
-    ATTEMPT_CONFIG_HASH=$(printf '%s|%s|%s|host-managed-full-agent-v1' "$selected" "$root" "$qualification_revision" | hash_stream_dispatch)
+    ATTEMPT_CONFIG_HASH=$(printf '%s|%s|%s|host-managed-full-agent-v2' "$selected" "$root" "$qualification_revision" | hash_stream_dispatch)
     ATTEMPT_CANARY_HASH=NOT_APPLICABLE
     ATTEMPT_SEAT_HASH=$(printf '%s|%s|%s|%s' "$selected" "$role" "$seat_id" "$question_hash" | hash_stream_dispatch)
     ATTEMPT_SNAPSHOT="$root"; ATTEMPT_SNAPSHOT_BEFORE=""; ATTEMPT_SESSION_ID=none
     {
-      printf 'You are a fresh full-capability %s investigation agent in the real project worktree %s. Use the normal user and project configuration, shared Forge state and memory, installed tools, MCP servers, network, databases, and APIs available to this host. Forge adds no tool, sandbox, configuration, or write restriction for this investigation. You may inspect and edit the worktree as needed. Return ONLY the Forge line envelope below.\n' "$selected" "$root"
+      printf 'You are a fresh full-capability %s investigation agent in the real project worktree %s. Use the normal user and project configuration, shared Forge state and memory, installed tools, MCP servers, network, databases, and APIs available to this host. You may inspect and edit the worktree as needed using normal project capabilities. Launch is already human-approved. For shipping, destructive operations, or external mutations, return the exact proposed action to the main session for human approval and agent execution; never ask the developer to execute it manually. The investigator marker enforces a defense-in-depth handoff for recognized consequential commands. Return ONLY the Forge line envelope below.\n' "$selected" "$root"
       cat "$prompt_file"
       printf '\nRequired envelope:\nschema_version=1\nverdict=CLEAN|FINDINGS|BLOCKED\nmax_severity=NONE|P0|P1|P2|P3\nblocked_class=none|engine|capability|artifact|authorization|invariant\n'
     } > "$scratch/prompt.txt"
     if [ "$selected" = claude ]; then
       engine_args=(-p --settings '{"fastMode":true}' --permission-mode auto --model "$model" --effort "$effort" --output-format json --no-session-persistence "$(cat "$scratch/prompt.txt")")
-      run_with_timeout_dispatch "$timeout_seconds" "$raw" "$stderr_file" "$root" "$binary" "${engine_args[@]}"
+      run_with_timeout_dispatch "$timeout_seconds" "$raw" "$stderr_file" "$root" env FORGE_INVESTIGATION_CHILD=1 "$binary" "${engine_args[@]}"
       rc=$?; cp "$raw" "$bound_output"
     else
       engine_args=(-a on-request --search exec -C "$root" --sandbox danger-full-access -m "$model" -c "model_reasoning_effort=$effort" -c service_tier=fast --output-last-message "$bound_output" --ephemeral "$(cat "$scratch/prompt.txt")")
-      run_with_timeout_dispatch "$timeout_seconds" "$raw" "$stderr_file" "$root" "$binary" "${engine_args[@]}"
+      run_with_timeout_dispatch "$timeout_seconds" "$raw" "$stderr_file" "$root" env FORGE_INVESTIGATION_CHILD=1 "$binary" "${engine_args[@]}"
       rc=$?
     fi
     ATTEMPT_EXIT="$rc"

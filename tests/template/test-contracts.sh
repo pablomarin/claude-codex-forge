@@ -2284,7 +2284,7 @@ else
     assert_contains "$CODEX_MD" ".forge/workflows/opinion.md" "codex shim delegates to canonical opinion workflow"
     assert_not_contains "$CODEX_MD" "codex-pty.sh exec" "codex shim carries no direct engine launch policy"
 fi
-for stem in "--engine auto|claude|codex" "code-spec" "code-quality" "investigation-repro" "human-executed"; do
+for stem in "--engine auto|claude|codex" "code-spec" "code-quality" "investigation-repro" "human-approved"; do
     assert_contains "$REVIEW_MD" "$stem" "review workflow carries load-bearing dispatch stem: $stem"
 done
 
@@ -2323,8 +2323,8 @@ for f in rules/workflow.md commands/new-feature.md commands/fix-bug.md; do
 done
 
 start_test "convergence-breaker: human-only adjudication stem shared across its sites"
-# The exact stem the human records to release a tripped breaker. The agent NEVER
-# writes it; every site that emits/parses it must use the identical phrase, so an
+# The exact stem the agent records after the human decides to release a breaker.
+# Every site that emits/parses it must use the identical phrase, so an
 # edit to one fails CI until the others follow.
 ADJ_STEM='Post-certification tail adjudicated by human'
 for f in state.template.md rules/workflow.md \
@@ -2979,7 +2979,7 @@ else
     fail "top changelog release is exact MAJOR.MINOR.PATCH"
 fi
 EXPECTED_FORGE_VERSION="$FIRST_CHANGELOG_VERSION"
-EXPECTED_README_HISTORY_VERSION='6.4.0'
+EXPECTED_README_HISTORY_VERSION='6.4.3'
 README_BADGE_VERSION=$(sed -n 's/.*badge\/version-\([0-9][0-9.]*\)-blue.*/\1/p' "$README" | head -1)
 README_HISTORY_VERSION=$(sed -n '/^## Version history/,$p' "$README" \
     | sed -n 's/^| \([0-9][0-9.]*\)[[:space:]]*|.*/\1/p' | head -1)

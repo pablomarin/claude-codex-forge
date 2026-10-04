@@ -49,8 +49,14 @@ Exact `README.md` and `docs/CHANGELOG.md` release metadata is excluded from that
 that bounded case skips final review and verifier receipts; malformed commands or invalid scope fall
 through to the full fail-closed boundary.
 
-`check-external-mutation-auth.{sh,ps1}` preserves the v6 human boundary without reducing
-investigation to a special sandbox. A full investigator can use the selected host's normal tools,
-network, databases, APIs, and write access. When an operation is classified as a protected external
-mutation, the hook requires the same current human authorization as the main agent; an agent-written
-receipt cannot mint that authority.
+`check-external-mutation-auth.{sh,ps1}` silently defers main-session operations to human authorization
+and native host controls; it never emits an automatic allow decision or demands human terminal
+execution. Claude templates retain native ask rules for recognized merge, PR, issue-close, publish,
+recursive-delete, Kubernetes and curl mutation commands. Codex keeps its native permission controls.
+The hook cannot authenticate a chat reply or an agent-written receipt.
+
+Full investigators retain normal project capabilities and carry `FORGE_INVESTIGATION_CHILD=1`.
+For recognized consequential commands, the hook blocks the child and directs it to return the
+proposed action to the main session for human approval and agent execution. This is defense in
+depth for common command forms, not a complete shell parser, MCP policy engine, or security boundary.
+Ordinary review sandbox/tool restrictions are unchanged; review launch itself needs no extra consent.

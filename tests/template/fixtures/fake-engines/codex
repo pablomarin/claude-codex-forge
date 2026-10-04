@@ -61,6 +61,7 @@ case "${FAKE_CODEX_BEHAVIOR:-clean}" in
     real_root=$(cd "${FAKE_REAL_ROOT:?}" && pwd -P)
     [ "$(pwd -P)" = "$real_root" ] || exit 71
     [ "${FORGE_FULL_AGENT_PROBE:-}" = visible ] || exit 72
+    [ "${FORGE_INVESTIGATION_CHILD:-}" = 1 ] || exit 75
     grep -q 'shared durable memory' "$real_root/.forge/memory/shared.md" || exit 73
     grep -q 'shared local memory' "$real_root/.forge/local/memory/session.md" || exit 74
     mkdir -p "$real_root/.forge/local/investigation-artifacts"

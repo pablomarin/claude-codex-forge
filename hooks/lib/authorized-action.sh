@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Human-executed external action renderer. This file intentionally has no execute subcommand.
+# Human-approved external action renderer and audit helper. This file intentionally has no execute subcommand.
 set -u
 die_action() { printf 'BLOCKED[authorization]: %s\n' "$*" >&2; exit 2; }
 hash_stream_action() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'; else sha256sum | awk '{print $1}'; fi; }
@@ -55,22 +55,22 @@ prepare)
       [ "${#args[@]}" -eq 2 ] || die_action 'kubectl rollout restart requires namespace and deployment'
       case "${args[0]}${args[1]}" in *[!A-Za-z0-9_.-]*) die_action 'invalid Kubernetes identifier' ;; esac
       command_name=kubectl; rendered="kubectl -n ${args[0]} rollout restart deployment/${args[1]}" ;;
-    *) die_action 'adapter/system/operation is not allowlisted; MCP-only mutation remains manual and BLOCKED' ;;
+    *) die_action 'unsupported rendering adapter; prepare the exact action using the normal host tool and obtain human approval before execution' ;;
   esac
   local_action_path "$output"; output="$ACTION_PATH"
   nonce="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"; action_hash=$(printf '%s\n' "$adapter" "$system" "$operation" "$target" "$rendered" "$effect" | hash_stream_action)
   umask 077
   {
-    printf 'schema_version=1\nstatus=PENDING_HUMAN_EXECUTION\nnonce=%s\nworktree_identity=%s\nadapter=%s\nsystem=%s\noperation=%s\ntarget=%s\naction_hash=%s\nexpected_effect=%s\ncommand_executable=%s\ncommand_rendered=%s\ncreated_at=%s\n' \
+    printf 'schema_version=1\nstatus=PENDING_HUMAN_APPROVAL\nnonce=%s\nworktree_identity=%s\nadapter=%s\nsystem=%s\noperation=%s\ntarget=%s\naction_hash=%s\nexpected_effect=%s\ncommand_executable=%s\ncommand_rendered=%s\ncreated_at=%s\n' \
       "$nonce" "$(identity_action)" "$adapter" "$system" "$operation" "$(escape_action "$target")" "$action_hash" "$(escape_action "$effect")" "$command_name" "$(escape_action "$rendered")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$output"
-  printf 'PENDING: developer must execute this exact command in their own terminal, then report the result; Forge will not run it:\n%s\n' "$rendered"
+  printf 'PENDING: obtain human approval for this exact action, then the main agent executes it through the normal host tool and verifies the result:\n%s\n' "$rendered"
   ;;
 report)
   manifest=""; outcome=""; output=""
   while [ "$#" -gt 0 ]; do case "$1" in --manifest) manifest="$2"; shift 2 ;; --outcome) outcome="$2"; shift 2 ;; --output) output="$2"; shift 2 ;; *) die_action "unknown report argument $1" ;; esac; done
   [ -f "$manifest" ] && [ ! -L "$manifest" ] || die_action 'regular pending manifest required'
-  [ "$(value_action "$manifest" status)" = PENDING_HUMAN_EXECUTION ] || die_action 'manifest is not pending human execution'
+  case "$(value_action "$manifest" status)" in PENDING_HUMAN_APPROVAL|PENDING_HUMAN_EXECUTION) ;; *) die_action 'manifest is not a pending action' ;; esac
   [ "$(value_action "$manifest" worktree_identity)" = "$(identity_action)" ] || die_action 'pending manifest belongs to another worktree'
   case "$outcome" in SUCCESS|FAILED|UNCERTAIN) ;; *) die_action 'outcome must be SUCCESS, FAILED, or UNCERTAIN' ;; esac
   [ -n "$output" ] || die_action 'audit output required'; local_action_path "$output"; output="$ACTION_PATH"; umask 077
