@@ -33,9 +33,12 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
    the shared startup boundary; never create a second worktree for the same-directory handoff.
 4. Continue work in the linked worktree from the current or a later Claude Code or Codex session.
    A session opened in the primary checkout may continue the linked worktree by using it as the
-   working directory; opening the client at the worktree path remains optional. The installed
-   adapter declares the current host for reviewer routing. No per-worktree Forge receipt, copied
-   session identity, hook-trust bypass, or task-root reopening is required.
+   working directory for local edits and checks. Shipping hooks use the host's event `cwd`.
+   When Codex reports the session directory and omits a tool call's `workdir`, open a session
+   whose workspace is the task worktree before commit, push, or PR creation; selecting only the
+   tool working directory does not change that hook context. The installed adapter declares the
+   current host for reviewer routing. No per-worktree Forge receipt, copied session identity,
+   or hook-trust bypass is required.
 5. The helper seeds only `## State` (with `### Now` cleared), `## Open Questions`, and `## Blockers`
    from the primary checkout and writes the exact baseline to
    `.forge/local/.state-seed-snapshot.md`. It never seeds workflow, goal, authorization, receipts,

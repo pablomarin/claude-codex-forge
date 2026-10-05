@@ -1853,12 +1853,13 @@ assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh"  "PR creation authori
 assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" "PR creation authorized" \
     "check-workflow-gates.ps1 references PR auth line"
 
-# P1.2: Bash guard must use non-empty GOAL_NONCE as "active" definition
+# The nonce must be non-empty and differ from the exact template placeholder.
 assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh" 'if [ -n "$GOAL_NONCE"' \
     "Bash guard checks non-empty GOAL_NONCE (not just block presence)"
-# PS guard must also use non-empty goalNonce
-assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" 'if ($goalNonce)' \
-    "PS guard checks non-empty goalNonce"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.sh" '[ "$GOAL_NONCE" != '\''<uuid-v4-lowercase>'\'' ]' \
+    "Bash guard excludes the exact template nonce"
+assert_contains "$REPO_ROOT/hooks/check-workflow-gates.ps1" 'if ($goalNonce -and $goalNonce -cne '\''<uuid-v4-lowercase>'\'')' \
+    "PS guard excludes the exact template nonce case-sensitively"
 
 # ---------------------------------------------------------------------------
 # Contract: workflow-gate-semantics — no-code carve-out present in BOTH hooks
@@ -2270,8 +2271,10 @@ for workflow in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
         "$(basename "$workflow") allows primary-checkout sessions to continue linked worktrees"
     assert_contains "$workflow" 'No per-worktree Forge receipt' \
         "$(basename "$workflow") requires no worktree receipt ceremony"
-    assert_contains "$workflow" 'task-root reopening is required' \
-        "$(basename "$workflow") requires no task-root reopening"
+    assert_contains "$workflow" 'whose workspace is the task worktree before commit, push, or PR creation' \
+        "$(basename "$workflow") requires correct session context when Codex omits workdir"
+    assert_contains "$workflow" 'tool working directory does not change that hook context' \
+        "$(basename "$workflow") distinguishes tool workdir from hook context"
     assert_contains "$workflow" 'concurrent sessions are allowed' \
         "$(basename "$workflow") permits concurrent sessions"
     assert_contains "$workflow" 'candidate-bound evidence becomes stale' \

@@ -2945,7 +2945,7 @@ assert_contains "$QF/evidence.out" '"quick_fix_direct":true' \
     "quick-fix evidence reports the validated direct path"
 
 cp "$QF/.forge/local/state.md" "$QF/.forge/local/state.no-goal"
-awk '1; /^## \/goal session$/ { print ""; print "| nonce | 123e4567-e89b-42d3-a456-426614174000 |" }' \
+awk '/^\|[[:space:]]*nonce[[:space:]]*\|/ { print "| nonce | 123e4567-e89b-42d3-a456-426614174000 |"; next } { print }' \
     "$QF/.forge/local/state.no-goal" > "$QF/.forge/local/state.md"
 QF_PR_INPUT=$(printf '{"cwd":"%s","tool_input":{"command":"gh pr create"}}' "$QF")
 printf '%s' "$QF_PR_INPUT" | bash "$QF/.forge/hooks/check-workflow-gates.sh" > "$QF/pr-auth.out" 2>&1
@@ -2979,7 +2979,7 @@ if command -v pwsh >/dev/null 2>&1; then
     assert_equals "$?" "0" "PowerShell exact quick-fix bypasses final receipt roles"
 
     cp "$QF_PS/.forge/local/state.md" "$QF_PS/.forge/local/state.no-goal"
-    awk '1; /^## \/goal session$/ { print ""; print "| nonce | 123e4567-e89b-42d3-a456-426614174000 |" }' \
+    awk '/^\|[[:space:]]*nonce[[:space:]]*\|/ { print "| nonce | 123e4567-e89b-42d3-a456-426614174000 |"; next } { print }' \
         "$QF_PS/.forge/local/state.no-goal" > "$QF_PS/.forge/local/state.md"
     QF_PS_PR_INPUT=$(printf '{"cwd":"%s","tool_input":{"command":"gh pr create"}}' "$QF_PS")
     printf '%s' "$QF_PS_PR_INPUT" | pwsh -NoLogo -NoProfile \

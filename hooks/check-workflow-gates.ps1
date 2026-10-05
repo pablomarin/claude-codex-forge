@@ -97,8 +97,8 @@ if ($compoundTail -ne $commandNorm) {
 }
 
 # --- Resolve repo context (bug d, mirrors check-workflow-gates.sh) ---
-# cd to the harness-provided stdin `cwd` (the dir the command actually runs in —
-# trustworthy, NOT parsed from the command text), then normalize to the git
+# cd to the harness-provided stdin `cwd` (the session/worktree directory supplied
+# by the host, NOT parsed from the command text), then normalize to the git
 # worktree ROOT so state.md, git, and all repo-relative reads resolve in the
 # right repo. We deliberately do NOT parse `-C <dir>` from the command for repo
 # context: a `-C` can hide in a quoted -m message / `-c key='… -C …'` value / gh
@@ -203,9 +203,9 @@ if (-not $stateIsV6) {
 # ---------------------------------------------------------------------------
 # Layer 2 — /forge-goal PR-create authorization guard (PS parity for .sh)
 #
-# ACTIVE definition: $goalNonce is non-empty after parsing. An empty nonce
-# cell, missing /goal session section, or missing state.md → guard is no-op.
-# LAST-LINE defense: multiple PR auth lines → use last (REPLACE semantics
+# ACTIVE definition: $goalNonce is non-empty and not the exact example placeholder.
+# Empty/template nonce, missing /goal session or state.md → guard is no-op.
+# LAST-LINE defense: multiple lines in PR authorization → use last (REPLACE semantics
 # should keep exactly one; multiple = state.md corruption, surface to user).
 # PS 5.1 constraints: no ??, no Out-Null on STDERR, no pwsh spawn,
 # [Console]::Error.WriteLine for STDERR, CRLF normalize before regex.
@@ -231,15 +231,18 @@ if ($command -match $prCreatePattern) {
             }
         }
 
-        if ($goalNonce) {
-            # /forge-goal is active (non-empty nonce); enforce PR-auth requirements
+        if ($goalNonce -and $goalNonce -cne '<uuid-v4-lowercase>') {
+            # /forge-goal is active; enforce PR-auth requirements
             $headSha = ""
             try { $headSha = ((git rev-parse HEAD 2>$null) -join "").Trim() } catch {}
 
-            # Collect ALL auth lines, use LAST (stale-duplicate defense)
+            # Collect canonical auth lines, use LAST (stale-duplicate defense)
             $prAuthLines = @()
+            $inAuthorization = $false
             foreach ($line in $allLines) {
-                if ($line -match '^-\s*\[x\]\s+PR creation authorized') {
+                if ($line -match '^## PR authorization$') { $inAuthorization = $true; continue }
+                if ($inAuthorization -and $line -match '^## ') { break }
+                if ($inAuthorization -and $line -match '^-\s*\[x\]\s+PR creation authorized') {
                     $prAuthLines += $line
                 }
             }

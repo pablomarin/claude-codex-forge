@@ -46,7 +46,10 @@ Copying clean evidence to another worktree does not satisfy its gates.
 
 ## Switch Hosts Mid-Feature
 
-Open either host in the repository -> say "get into this worktree and continue" -> work there -> close or switch hosts -> repeat without reopening at the worktree path.
+Open either host in the repository and select the linked worktree as the tool working directory
+for local edits and checks. Before Codex commit, push, or PR creation, use a session whose workspace
+is the task worktree when the hook event `cwd` remains the session directory and the tool call's
+`workdir` is omitted.
 
 For example, a session that starts in the primary checkout can select the worktree for its tools:
 
@@ -59,7 +62,9 @@ codex
 The new host reads `.forge/local/state.md`, continues at the next incomplete checkpoint, and keeps
 still-valid artifact-bound evidence. It does not repeat planning merely because the host changed.
 The current host is main for the next action; reviewer selection is recomputed for that action.
-Opening the client directly at the linked worktree remains optional.
+Opening the client directly at the linked worktree remains optional for local edits and checks.
+When Codex reports the session directory and omits a tool call's `workdir`, use a session whose
+workspace is the task worktree before commit, push, or PR creation.
 
 Forge creates no edit lock: concurrent sessions are allowed. Forge intentionally adds no ownership daemon, so the
 developer still coordinates overlapping edits. When any session changes the candidate,
@@ -84,8 +89,10 @@ missing/stale registration or wrong-common-directory event keeps Codex `RUNTIME_
 - In Claude Desktop, turn on **worktree** before the first new-feature or bug-fix prompt. In other
   supported hosts, start from the primary checkout and use native isolation or let the portable
   helper create the worktree.
-- A current or later Codex or Claude Code session may continue it by setting tool cwd to that
-  worktree; no task-root reopen, copied identity, or per-worktree trust step is needed.
+- A current or later Codex or Claude Code session may continue local edits and checks by setting
+  tool cwd to that worktree; no copied identity or per-worktree trust step is needed. Before Codex
+  commit, push, or PR creation, use a session whose workspace is the task worktree when the hook
+  event `cwd` remains the session directory and the tool call's `workdir` is omitted.
 - Do not create nested worktrees.
 - Use paths relative to the active worktree.
 - `quick-fix` uses the current branch and does not create a worktree.
