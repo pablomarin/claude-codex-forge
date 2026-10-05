@@ -67,8 +67,9 @@ generates a new activation UUID, increments `activation_count`, and sets `turn_c
 never authority to start or resume native autonomy.
 
 **Guard "active" definition:** the `/goal session` is considered ACTIVE when the nonce
-row is non-empty (`nonce` column has a UUID value). A heading with no nonce row, or a
-missing section entirely, is treated as INACTIVE by all guards and hooks.
+row is non-empty and differs from the exact example `<uuid-v4-lowercase>`. The example,
+an empty nonce, a heading with no nonce row, or a missing section is INACTIVE. Any other
+non-empty nonce retains the authorization checks and fails closed on a mismatch.
 
 The immutable ledger lives under the physical Git common directory at
 `forge-goals/<nonce>/`, so linked worktrees and both engines share one monotonic count. User input,

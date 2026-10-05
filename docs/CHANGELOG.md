@@ -2,6 +2,20 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.5 — 2026-10-05
+
+### Canonical PR authorization parsing
+
+The example Goal nonce no longer activates PR authorization checks. The PR guard and evidence
+parser now read only `## PR authorization`, using the last checked line and preserving nonce/HEAD
+validation. Checklist and narrative summaries cannot authorize or invalidate publication. PowerShell
+evidence reads UTF-8 state explicitly, including files without a BOM. Focused real-hook tests cover
+both runtimes, stale approvals, duplicates, and LF/CRLF state.
+
+Worktree guidance now explains Codex's session `cwd` limitation: selecting an `exec_command`
+workdir does not establish the shipping hook's workspace. This Forge repair does not restore
+directory information omitted by the host; shipping must use a session bound to the task worktree.
+
 ## 6.4.4 — 2026-10-04
 
 ### Finished worktrees reliably fold their status into main state

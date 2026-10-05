@@ -138,7 +138,7 @@ function Build-JsonStringField {
 # ---------------------------------------------------------------------------
 function Read-StateMdLines {
     if (-not (Test-Path $StateMd)) { return @() }
-    $raw = Get-Content $StateMd -Raw -ErrorAction SilentlyContinue
+    $raw = Get-Content $StateMd -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
     if ([string]::IsNullOrEmpty($raw)) { return @() }
     # CRLF normalize: strip \r, then split on \n
     return ($raw -replace "`r", "") -split "`n"
@@ -178,6 +178,7 @@ function Parse-GoalSession {
             $result.workflow_command = $matches[1].Trim()
         }
     }
+    if ($result.nonce -ceq '<uuid-v4-lowercase>') { return @{ nonce = ""; workflow_command = "" } }
     return $result
 }
 
@@ -399,17 +400,19 @@ function Parse-PRAuthorization {
 
     $lines = Read-StateMdLines
     $matchLine = ""
+    $inAuthorization = $false
     foreach ($line in $lines) {
-        if ($line -match '^-\s*\[x\]\s+PR creation authorized') {
+        if ($line -match '^## PR authorization$') { $inAuthorization = $true; continue }
+        if ($inAuthorization -and $line -match '^## ') { break }
+        if ($inAuthorization -and $line -match '^-\s*\[x\]\s+PR creation authorized') {
             $matchLine = $line
-            break
         }
     }
 
     if ([string]::IsNullOrEmpty($matchLine)) { return $result }
 
     # Pattern: - [x] PR creation authorized — `<timestamp>` — nonce=`<nonce>` — head=`<sha>`
-    if ($matchLine -match '\[x\]\s+PR creation authorized\s+[—\-]+\s+`([^`]+)`\s+[—\-]+\s+nonce=`([^`]+)`\s+[—\-]+\s+head=`([^`]+)`') {
+    if ($matchLine -match '\[x\]\s+PR creation authorized\s+[\u2014\-]+\s+`([^`]+)`\s+[\u2014\-]+\s+nonce=`([^`]+)`\s+[\u2014\-]+\s+head=`([^`]+)`') {
         $at = $matches[1]
         $nonce = $matches[2]
         $head = $matches[3]

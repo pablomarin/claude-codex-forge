@@ -115,7 +115,7 @@ fi
 # --- Resolve repo context (bug d) ---
 # The hook reads state.md + runs git relative to its process CWD, which can be
 # the WRONG repo in worktree sessions. Fix: cd to the harness-provided stdin
-# `cwd` (the dir the command actually runs in — trustworthy, NOT parsed from the
+# `cwd` (the session/worktree directory supplied by the host, NOT parsed from the
 # command text), then normalize to the git worktree ROOT so state.md, git, and
 # all repo-relative reads resolve in the right repo.
 #
@@ -209,15 +209,15 @@ fi
 # ---------------------------------------------------------------------------
 # Layer 2 — /forge-goal PR-create authorization guard
 #
-# When /forge-goal is active (## /goal session has a non-empty nonce in state.md),
+# When /forge-goal is active (## /goal session has a real nonce in state.md),
 # gh pr create requires an explicit ## PR authorization line with matching nonce +
 # current HEAD SHA. The line is written by the workflow agent after the user
 # answers YES to the AskUserQuestion PR-create modal.
 #
-# ACTIVE definition: GOAL_NONCE is non-empty after parsing. An empty nonce cell,
-# a missing /goal session section, or missing state.md → guard is a no-op.
+# ACTIVE definition: GOAL_NONCE is non-empty and not the exact example placeholder.
+# An empty nonce cell, template nonce, missing section or state.md → guard is a no-op.
 #
-# LAST-LINE defense: if state.md has multiple PR auth lines (state corruption),
+# LAST-LINE defense: if the PR authorization section has multiple auth lines,
 # the guard uses the LAST one. Proper REPLACE semantics keep exactly one line;
 # multiple lines surface as a diagnostic in the error message.
 #
@@ -237,19 +237,21 @@ if echo "$COMMAND" | grep -qE "^[[:space:]]*${_ENVP}gh[[:space:]]+pr[[:space:]]+
                         | grep -E '\|[[:space:]]*nonce[[:space:]]*\|' \
                         | head -1 | awk -F'|' '{print $3}' | tr -d ' \t')
         fi
-        if [ -n "$GOAL_NONCE" ]; then
-            # /forge-goal is active (non-empty nonce); enforce PR-auth requirements
+        if [ -n "$GOAL_NONCE" ] && [ "$GOAL_NONCE" != '<uuid-v4-lowercase>' ]; then
+            # /forge-goal is active; enforce PR-auth requirements
             HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
 
+            PR_AUTH_BLOCK=$(tr -d '\r' < "$STATE_FILE" \
+                          | awk '/^## PR authorization$/{flag=1;next} flag && /^## /{exit} flag')
             # Use LAST matching auth line (stale-duplicate defense; REPLACE semantics
             # should keep exactly one, but guard defensively against state corruption)
-            PR_AUTH_LINE=$(tr -d '\r' < "$STATE_FILE" \
+            PR_AUTH_LINE=$(printf '%s\n' "$PR_AUTH_BLOCK" \
                           | grep -E '^-[[:space:]]*\[x\][[:space:]]+PR creation authorized' \
                           | tail -1)
 
             # Count auth lines for diagnostic
-            AUTH_LINE_COUNT=$(tr -d '\r' < "$STATE_FILE" \
-                             | grep -c '^-[[:space:]]*\[x\][[:space:]]*PR creation authorized' 2>/dev/null || echo 0)
+            AUTH_LINE_COUNT=$(printf '%s\n' "$PR_AUTH_BLOCK" \
+                             | grep -cE '^-[[:space:]]*\[x\][[:space:]]+PR creation authorized' || true)
 
             if [ -z "$PR_AUTH_LINE" ]; then
                 echo "WORKFLOW GATE: gh pr create blocked — no ## PR authorization line in state.md." >&2

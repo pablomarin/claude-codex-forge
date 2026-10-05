@@ -33,14 +33,24 @@ goal, authorization, and promotion evidence remain bound to the exact worktree a
 Codex may register a stable router from the primary checkout. For every linked-worktree event,
 `codex-worktree-dispatch.{sh,ps1}` validates an absolute event `cwd`, resolves the event repository,
 requires the same Git common directory as the registered checkout, and rejects missing or symlinked
-canonical hook targets. It then executes the named hook from that event worktree. This prevents a
-primary-checkout registration from reading or enforcing the wrong worktree's state.
+canonical hook targets. It then executes the named hook from that event worktree. This selects
+the correct worktree only when the host supplies that worktree in the event `cwd`.
+
+Codex hook `cwd` can remain the session directory while `exec_command` runs in a different
+`workdir`; its Bash hook payload omits that per-call directory. Forge cannot recover an omitted
+directory safely. Before commit, push, or PR creation, use a host session whose workspace is the
+task worktree when this limitation applies. Selecting only a tool working directory does not
+change the hook context. A Forge refresh repairs its parsers but does not repair this upstream
+payload loss. See [Codex issue #33986](https://github.com/openai/codex/issues/33986).
 
 ## Workflow Gates
 
 `check-workflow-gates.{sh,ps1}` validates structured receipts bound to the frozen candidate before
 commit, push, or PR creation. A successful process exit is not a clean gate. PR authorization is
-bound to the active goal nonce and candidate.
+bound to the active goal nonce and candidate. The exact example nonce `<uuid-v4-lowercase>` is
+inactive. Only checked authorization lines inside `## PR authorization` count; duplicates inside
+that section use the last line and emit a warning. Checklist and narrative summaries cannot
+authorize publication or invalidate the canonical approval.
 Artifact-bound review prompts, outputs, and receipts live under `.forge/local/reviews/`.
 
 For an exact `/quick-fix <valid-slug>`, the same hook keeps configuration and Goal authorization

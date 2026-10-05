@@ -194,6 +194,7 @@ parse_goal_session() {
     cmd=$(echo "$block" | grep -E '\|[[:space:]]*workflow_command[[:space:]]*\|' \
             | head -1 | awk -F'|' '{print $3}' | xargs)
 
+    [ "$nonce" = '<uuid-v4-lowercase>' ] && return 0
     printf '%s|%s' "$nonce" "$cmd"
 }
 
@@ -395,7 +396,7 @@ compute_plan_review_gate() {
 parse_pr_authorization() {
     # Echo "authorized_bool|authorized_at|head_sha_at_auth|nonce_at_auth" or "false|||" if
     # section missing, HEAD_SHA empty, or GOAL_NONCE empty.
-    # Section format (single line, one per state.md):
+    # Section format (single line under ## PR authorization):
     #   - [x] PR creation authorized — `<timestamp>` — nonce=`<nonce>` — head=`<sha>`
     # Return authorized=true ONLY if extracted nonce matches GOAL_NONCE AND
     # extracted head matches HEAD_SHA. Otherwise authorized=false (but emit values for debugging).
@@ -404,11 +405,12 @@ parse_pr_authorization() {
     [ -z "$HEAD_SHA" ] && { echo "false|||"; return 0; }
     [ -z "$GOAL_NONCE" ] && { echo "false|||"; return 0; }
 
-    # CRLF normalize BEFORE grep anchors (Codex P1.7 fix).
+    # Scope to canonical authorization and use the same last-line defense as the guard.
     local line
     line=$(tr -d '\r' < "$STATE_MD" \
+           | awk '/^## PR authorization$/{flag=1;next} flag && /^## /{exit} flag' \
            | grep -E '^-[[:space:]]*\[x\][[:space:]]+PR creation authorized' \
-           | head -1)
+           | tail -1)
 
     if [ -z "$line" ]; then
         echo "false|||"
