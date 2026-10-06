@@ -25,7 +25,7 @@ run_evidence() {
         } > .forge/local/state.md
         printf '6\n' > .forge/version
     fi
-    bash "$REPO_ROOT/hooks/build-evidence.sh"
+    bash "$REPO_ROOT/hooks/build-evidence.sh" --diagnostic
 }
 
 start_test "build-evidence.sh emits markers + valid JSON on empty state.md"
@@ -105,7 +105,7 @@ cat > "$scratch/.claude/local/state.md" <<EOF
 | workflow_command | /new-feature legacy |
 - [x] PR creation authorized — \`2026-08-27T00:00:00Z\` — nonce=\`11111111-1111-4111-8111-111111111111\` — head=\`$LEGACY_HEAD\`
 EOF
-(cd "$scratch" && printf '{"cwd":"%s","host":"claude"}' "$scratch" | bash "$REPO_ROOT/hooks/build-evidence.sh") > "$scratch/.out" 2>&1
+(cd "$scratch" && printf '{"cwd":"%s","host":"claude"}' "$scratch" | bash "$REPO_ROOT/hooks/build-evidence.sh" --diagnostic) > "$scratch/.out" 2>&1
 assert_contains "$scratch/.out" '"phase":"5 — Quality"' "legacy structural workflow context is retained"
 assert_contains "$scratch/.out" '"reviewer_gate":{"clean_same_iteration":false' "legacy Code review PASS cannot certify"
 assert_contains "$scratch/.out" '"plan_review_gate":{"clean_same_iteration":false' "legacy plan review PASS cannot certify"
@@ -120,7 +120,7 @@ printf '6\n' > "$scratch/.forge/version"
 printf '<!-- forge:state-schema v6 -->\n' > "$scratch/outside/state.md"
 rmdir "$scratch/.forge/local"
 ln -s "$scratch/outside" "$scratch/.forge/local"
-(cd "$scratch" && printf '{"cwd":"%s","host":"codex"}' "$scratch" | bash "$REPO_ROOT/hooks/build-evidence.sh") > "$scratch/.out" 2>&1
+(cd "$scratch" && printf '{"cwd":"%s","host":"codex"}' "$scratch" | bash "$REPO_ROOT/hooks/build-evidence.sh" --diagnostic) > "$scratch/.out" 2>&1
 assert_equals "$?" "2" "v6 state resolver rejection is preserved by build-evidence"
 assert_contains "$scratch/.out" 'FORGE_STATE_INVALID' "evidence failure names the invalid canonical state"
 
@@ -723,7 +723,7 @@ if command -v pwsh >/dev/null 2>&1; then
        "$scratch/.claude/local/state.md"
 
     OUT="$scratch/.out"
-    ( cd "$scratch" && pwsh -NoProfile -File "$REPO_ROOT/hooks/build-evidence.ps1" ) >"$OUT" 2>&1
+    ( cd "$scratch" && pwsh -NoProfile -File "$REPO_ROOT/hooks/build-evidence.ps1" -Diagnostic ) >"$OUT" 2>&1
     EXIT=$?
 
     assert_equals "$EXIT" "0" "ps1 exit code is 0"
@@ -749,8 +749,8 @@ cat > "$CS/.forge/local/state.md" <<'EOF'
 ### Checklist
 - [ ] Code review loop
 EOF
-(cd "$CS" && bash "$REPO_ROOT/hooks/build-evidence.sh" > "$CS/one.out" 2>&1) & c1=$!
-(cd "$CS" && bash "$REPO_ROOT/hooks/build-evidence.sh" > "$CS/two.out" 2>&1) & c2=$!
+(cd "$CS" && bash "$REPO_ROOT/hooks/build-evidence.sh" --diagnostic > "$CS/one.out" 2>&1) & c1=$!
+(cd "$CS" && bash "$REPO_ROOT/hooks/build-evidence.sh" --diagnostic > "$CS/two.out" 2>&1) & c2=$!
 wait "$c1"; r1=$?; wait "$c2"; r2=$?
 assert_equals "$r1:$r2" "0:0" "either concurrent Stop order completes"
 assert_matches "$CS/.forge/local/forge-goal-last-fingerprint" '^[0-9a-f]{64}$' \

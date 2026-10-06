@@ -42,18 +42,55 @@ complete() {
         --phase complete --next-step 'await new work') >/dev/null
 }
 run_stop() {
-    local registered="$1" event="$2" host="$3" active="${4:-false}" turn="${5:-}" command payload
-    command=$(python3 - "$registered" "$host" <<'PY'
+    local registered="$1" event="$2" host="$3" active="${4:-false}" turn="${5:-}" hook="${6:-check-state-updated.sh}" command payload
+    command=$(python3 - "$registered" "$host" "$hook" <<'PY'
 import json, pathlib, sys
 root, host = pathlib.Path(sys.argv[1]), sys.argv[2]
 settings = root / ('.codex/hooks.json' if host == 'codex' else '.claude/settings.json')
 commands = [h['command'] for g in json.loads(settings.read_text())['hooks']['Stop'] for h in g['hooks']]
-print(next(c for c in commands if 'check-state-updated.sh' in c))
+print(next(c for c in commands if sys.argv[3] in c))
 PY
 )
     payload=$(printf '{"cwd":"%s","host":"%s","hook_event_name":"Stop","stop_hook_active":%s,"session_id":"stop-smoke","turn_id":"%s"}' "$event" "$host" "$active" "$turn")
     (cd "$registered" && printf '%s' "$payload" | PATH="$registered/bin:$PATH" CLAUDE_PROJECT_DIR="$registered" bash -c "$command") \
         > "$registered/stop.out" 2> "$registered/stop.err"
+}
+inactive_goal() {
+    python3 - "$1/.forge/local/state.md" "$2" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1]); text = p.read_text()
+if sys.argv[2] == 'missing':
+    text = re.sub(r'(?ms)^## /goal session\n.*?(?=^## |\Z)', '', text)
+elif sys.argv[2] == 'empty':
+    text = text.replace('<uuid-v4-lowercase>', '', 1)
+p.write_text(text)
+PY
+}
+assert_no_goal_output() {
+    local root="$1" host="$2" label="$3" status="${4:-0}"
+    assert_not_contains "$root/stop.err" FORGE_GOAL_EVIDENCE "$label emits no Goal markers"
+    assert_not_contains "$root/stop.err" '"session_nonce"' "$label emits no inactive Goal JSON"
+    if python3 - "$root/stop.out" "$host" "$status" <<'PY'
+import json, pathlib, sys
+out = pathlib.Path(sys.argv[1]).read_text().strip()
+assert json.loads(out) == {} if sys.argv[2] == 'codex' and sys.argv[3] == '0' else out == ''
+PY
+    then pass "$label preserves host allow output"; else fail "$label preserves host allow output"; fi
+}
+non_goal_builder() {
+    local registered="$1" event="$2" host="$3" label="$4"
+    run_stop "$registered" "$event" "$host" false '' build-evidence.sh
+    assert_equals "$?" 0 "$label registered builder allows Stop"
+    assert_no_goal_output "$registered" "$host" "$label registered builder"
+}
+assert_goal_output() {
+    if python3 - "$1/stop.err" "$2" <<'PY'
+import json, pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+match = re.search(r'FORGE_GOAL_EVIDENCE_BEGIN\s*(.*?)\s*FORGE_GOAL_EVIDENCE_END', text, re.S)
+assert match and json.loads(match[1])['session_nonce'] == sys.argv[2]
+PY
+    then pass "$3 retains active Goal JSON"; else fail "$3 retains active Goal JSON"; fi
 }
 crlf_state() {
     python3 - "$1/.forge/local/state.md" <<'PY_CRLF'
@@ -67,17 +104,27 @@ quiet_stop() {
     assert_equals "$?" 0 "$label allows Stop"
     assert_not_contains "$root/stop.err" 'FORGE_FINAL_EVIDENCE_STALE' "$label suppresses historical receipt warning"
     assert_not_contains "$root/stop.err" 'WORKFLOW:' "$label suppresses completed-workflow continuation"
+    assert_no_goal_output "$root" "$host" "$label inline/check-state"
+    non_goal_builder "$root" "$root" "$host" "$label"
+    assert_file_exists "$root/.forge/local/forge-goal-last-fingerprint" "$label keeps fingerprint publication"
 }
 for host in claude codex; do
     for workflow in quick-fix new-feature fix-bug; do
-        start_test "$host main: completed $workflow repeats Stop quietly"
-        root="$SCRATCH/$host-$workflow"
+      for nonce_mode in missing empty template; do
+        start_test "$host main: $workflow with $nonce_mode Goal nonce repeats Stop quietly"
+        root="$SCRATCH/$host-$workflow-$nonce_mode"
         make_repo "$root" "$workflow" "$host"
+        inactive_goal "$root" "$nonce_mode"
         # Seed the active checkpoint hash so completion must not reuse its continuation path.
         run_stop "$root" "$root" "$host"
         assert_equals "$?" 0 'first active checkpoint stops normally'
+        assert_no_goal_output "$root" "$host" 'first active inline/check-state'
+        non_goal_builder "$root" "$root" "$host" 'first active'
+        assert_file_exists "$root/.forge/local/forge-goal-last-fingerprint" 'non-Goal active fingerprint remains published'
         complete "$root" "$host"
+        rm -f "$root/.forge/local/forge-goal-last-fingerprint"
         for delivery in 1 2 3; do quiet_stop "$root" "$host" "completed delivery $delivery"; done
+      done
     done
     start_test "$host main: CRLF active/completed controls preserve independent gates"
     root="$SCRATCH/$host-active"
@@ -86,9 +133,12 @@ for host in claude codex; do
     run_stop "$root" "$root" "$host"
     assert_equals "$?" 0 'changed active checkpoint allows Stop'
     assert_contains "$root/stop.err" FORGE_FINAL_EVIDENCE_STALE 'active missing receipts still warn'
+    assert_no_goal_output "$root" "$host" 'CRLF active inline/check-state'
+    non_goal_builder "$root" "$root" "$host" 'CRLF active'
     run_stop "$root" "$root" "$host"
     assert_equals "$?" 2 'unchanged active checkpoint continues'
     assert_contains "$root/stop.err" '/new-feature stop-smoke' 'active continuation names its workflow'
+    assert_no_goal_output "$root" "$host" 'CRLF unchanged active check-state' 2
     run_stop "$root" "$root" "$host" true
     assert_equals "$?" 0 'continuation-loop guard remains effective'
     assert_not_contains "$root/stop.err" 'WORKFLOW:' 'guard prevents another continuation'
@@ -134,10 +184,13 @@ PY_GATE
     primary_hash=$(hash_file "$primary/.forge/local/state.md")
     run_stop "$primary" "$linked/nested" "$host"
     assert_equals "$?" 0 'linked first checkpoint stops normally'
+    assert_no_goal_output "$primary" "$host" 'linked first inline/check-state'
+    non_goal_builder "$primary" "$linked/nested" "$host" 'linked first'
     run_stop "$primary" "$linked/nested" "$host"
     assert_equals "$?" 2 'linked active feature continues independently'
     assert_contains "$primary/stop.err" '/new-feature linked-smoke' 'event worktree feature is named'
     assert_not_contains "$primary/stop.err" '/quick-fix' 'primary quick-fix is absent from linked feedback'
+    assert_no_goal_output "$primary" "$host" 'linked active check-state' 2
     assert_file_exists "$linked/.forge/local/forge-goal-last-fingerprint" 'feature fingerprint is published in the event worktree'
     primary_leak=false
     for path in "$primary"/.forge/local/forge-goal-last-fingerprint* "$primary"/.forge/local/.state-last-stop.*; do
@@ -152,6 +205,8 @@ PY_GATE
     assert_equals "$?" 0 'linked completed feature stops normally'
     assert_not_contains "$primary/stop.err" FORGE_FINAL_EVIDENCE_STALE 'linked completion suppresses stale receipts'
     assert_not_contains "$primary/stop.err" WORKFLOW: 'linked completion suppresses continuation'
+    assert_no_goal_output "$primary" "$host" 'linked completed inline/check-state'
+    non_goal_builder "$primary" "$linked/nested" "$host" 'linked completed'
     # An activated linked Goal must keep the fingerprint and stuck counter local.
     cat >> "$linked/.forge/local/state.md" <<LINKED_GOAL
 
@@ -178,8 +233,9 @@ PY_LINKED_GOAL
     # Seed the counter from a real feature-process build, independently of
     # the Stop publication checked above.
     payload=$(printf '{"cwd":"%s","host":"%s","stop_hook_active":true}' "$linked/nested" "$host")
-    (cd "$linked" && printf '%s' "$payload" | PATH="$linked/bin:$PATH" bash .forge/hooks/build-evidence.sh) > "$linked/seed.out" 2> "$linked/seed.err"
+    run_stop "$linked" "$linked/nested" "$host" true '' build-evidence.sh
     assert_equals "$?" 0 'feature fingerprint seeds the counter control'
+    assert_goal_output "$linked" 66666666-6666-4666-8666-666666666666 'linked registered builder'
     primary_fp=$(hash_file "$primary/.forge/local/forge-goal-last-fingerprint")
     for delivery in 1 2; do
         run_stop "$primary" "$linked/nested" "$host" true linked-goal-turn
@@ -223,6 +279,9 @@ if b >= 0: p.write_text(text[:a] + text[b:])
 PY
     bash "$root/.forge/hooks/lib/goal-ledger.sh" activate --project "$root" --state "$root/.forge/local/state.md" >/dev/null
     assert_equals "$?" 0 'native Goal activation succeeds'
+    run_stop "$root" "$root" "$host" false '' build-evidence.sh
+    assert_equals "$?" 0 'active Goal registered builder allows Stop'
+    assert_goal_output "$root" "$nonce" 'active Goal registered builder'
     run_stop "$root" "$root" "$host" false goal-turn-1
     assert_equals "$?" 0 'completed workflow allows native Goal Stop'
     run_stop "$root" "$root" "$host" false goal-turn-1
@@ -231,5 +290,13 @@ PY
     assert_file_exists "$turns/00000001" 'complete phase still publishes the charged turn'
     assert_file_missing "$turns/00000002" 'duplicate Stop charges once'
     assert_contains "$turns/00000001" "host=$host" 'ledger retains main-host attribution'
+    # The emission guard must see the first nonce, even when later rows conflict.
+    python3 - "$root/.forge/local/state.md" "$nonce" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text().replace('| nonce | ' + sys.argv[2] + ' |', '| Nonce | ' + sys.argv[2] + ' |\n| nonce | <uuid-v4-lowercase> |'))
+PY
+    run_stop "$root" "$root" "$host" false '' build-evidence.sh
+    assert_goal_output "$root" "$nonce" 'uppercase first nonce with later placeholder'
 done
 report 'Stop workflow'

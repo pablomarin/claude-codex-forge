@@ -55,18 +55,20 @@ class AuthorizationTests(unittest.TestCase):
         encoding = "utf-8-sig" if bom else "utf-8"
         (self.root / ".forge/local/state.md").write_bytes(text.encode(encoding))
 
-    def hook(self, runtime, name):
+    def hook(self, runtime, name, diagnostic=False):
         if runtime == "powershell":
             self.assertIsNotNone(POWERSHELL, "PowerShell runtime is required")
             command = [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / f"hooks/{name}.ps1")]
         else:
             command = ["bash", str(ROOT / f"hooks/{name}.sh")]
+        if diagnostic:
+            command.append("-Diagnostic" if runtime == "powershell" else "--diagnostic")
         payload = {"cwd": str(self.root), "host": "codex", "tool_name": "Bash",
                    "tool_input": {"command": "gh pr create --title fixture"}}
         return subprocess.run(command, cwd=self.root, input=json.dumps(payload), text=True, capture_output=True)
 
     def evidence(self, runtime):
-        result = self.hook(runtime, "build-evidence")
+        result = self.hook(runtime, "build-evidence", diagnostic=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         body = result.stderr.split("FORGE_GOAL_EVIDENCE_BEGIN", 1)[1].split("FORGE_GOAL_EVIDENCE_END", 1)[0]
         return json.loads(body.strip())
