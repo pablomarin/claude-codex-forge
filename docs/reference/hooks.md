@@ -9,7 +9,7 @@ their native events into the same policy.
 | --- | --- | --- |
 | `SessionStart` | New/resumed host session, clear, or compaction | Runs the stable host-context compatibility no-op, then injects branch, state, and drift context; remote fetch remains source-gated |
 | `UserPromptSubmit` | Before each user prompt | Runs the same stable host-context compatibility no-op; it creates no worktree or session authority |
-| `Stop` | Main host finishes a turn | Builds candidate evidence and reminds the host to keep `.forge/local/state.md` current |
+| `Stop` | Main host finishes a turn | Builds candidate evidence and reminds the host to keep an unfinished workflow's `.forge/local/state.md` current |
 | `PreToolUse` | Before a shell command | Audits commands, blocks dangerous patterns, enforces workflow evidence, and checks protected external-mutation authority |
 | `PostToolUse` | After supported file writes | Runs the configured formatter |
 | `PreCompact` | Before context compression | Ensures the volatile memory directory exists and logs a diagnostic; it does not claim to inject a save instruction into model context |
@@ -44,6 +44,20 @@ change the hook context. A Forge refresh repairs its parsers but does not repair
 payload loss. See [Codex issue #33986](https://github.com/openai/codex/issues/33986).
 
 ## Workflow Gates
+
+`check-state-updated.{sh,ps1}` excludes workflows with `Phase: complete` from stale-receipt
+advisories and unchanged-checkpoint continuations. Their recorded command and historical receipts
+remain intact. An unfinished workflow still receives the checkpoint reminder, and the
+`stop_hook_active` guard prevents recursive continuation. Completion does not bypass canonical
+state validation, native Goal accounting, changelog enforcement, or shipping receipt checks.
+This behavior is shared by Claude Code and Codex. A completed primary-checkout quick-fix no longer
+interrupts a linked feature session with that historical workflow reminder; hook context still
+comes from the event `cwd`, under the routing limitations above.
+
+Codex Windows registrations end their PowerShell `-Command` wrapper with `exit $LASTEXITCODE`
+so the host receives the router's exact status, including exit 2 for continuation or blocking.
+Without explicit propagation, PowerShell maps a nonzero nested result to exit 1. See
+[Microsoft's exit-code documentation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1).
 
 `check-workflow-gates.{sh,ps1}` validates structured receipts bound to the frozen candidate before
 commit, push, or PR creation. A successful process exit is not a clean gate. PR authorization is

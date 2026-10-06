@@ -2,6 +2,8 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('forge-dual-e2e-' + [Guid]::NewGuid().ToString('N'))
 $originalPath = $env:PATH
+$originalHome = $env:HOME
+$powershellExe = (Get-Process -Id $PID).Path
 
 $coverage = @(
     'UC01|authoritative-legacy-refresh|test-full-refresh.ps1,test-setup.sh',
@@ -37,6 +39,24 @@ function Get-ReceiptValue([string]$Path, [string]$Key) {
     return $line.Substring($Key.Length + 1)
 }
 
+# Unix exercises the same installed PowerShell dispatcher with portable fake CLIs.
+# Windows retains its compiled native executable fixtures.
+function Install-PortableEngine([string]$Engine) {
+    $path=Join-Path $bin $Engine
+    $fixture=Join-Path $root "tests/template/fixtures/fake-engines/$Engine"
+    if($Engine -eq 'claude') {
+        [IO.File]::WriteAllText($path,@"
+#!/usr/bin/env bash
+case "`${1:-}" in
+  --version) printf '2.1.237 (Claude Code)\n'; exit 0 ;;
+  --help) printf '%s\n' '-p --safe-mode --strict-mcp-config --mcp-config --settings --setting-sources --tools --permission-mode --add-dir --model --effort --output-format --no-session-persistence --session-id --resume'; exit 0 ;;
+esac
+exec "$fixture" "`$@"
+"@)
+        & chmod +x $path
+    } else { New-Item -ItemType SymbolicLink -Path $path -Target $fixture | Out-Null }
+}
+
 try {
     Write-Host 'PowerShell acceptance ownership map'
     Assert-True ($coverage.Count -eq 17) 'coverage map has 17 rows'
@@ -48,10 +68,19 @@ try {
         }
     }
 
-    Write-Host 'PowerShell installed fallback seam'
+    Write-Host 'PowerShell installed two-main review/opinion and fallback seam'
     $project = Join-Path $temporary 'project'; $testHome = Join-Path $temporary 'home'; $bin = Join-Path $temporary 'bin'
     New-Item -ItemType Directory -Path $project,$testHome,$bin -Force | Out-Null
-    & git -C $project init -q; & git -C $project config user.email forge@example.invalid; & git -C $project config user.name Forge
+    if($env:OS -ne 'Windows_NT') {
+        # Installed .ps1 helpers use the Windows launcher name. Route that name
+        # to this PS7 process solely within the portable test's private PATH.
+        $launcher=Join-Path $bin 'powershell.exe'
+        [IO.File]::WriteAllText($launcher,"#!/bin/sh`nexec `"$powershellExe`" `"`$@`"`n")
+        & chmod +x $launcher
+    }
+    & git -C $project init -q
+    $project=(Resolve-Path (& git -C $project rev-parse --show-toplevel)).Path
+    & git -C $project config user.email forge@example.invalid; & git -C $project config user.name Forge
     [IO.File]::WriteAllText((Join-Path $project 'app.txt'), "base`n")
     & git -C $project add app.txt; & git -C $project commit -qm base
     $fake = @'
@@ -61,16 +90,27 @@ public static class ForgeTask11Fake {
   public static int Main(string[] args) {
     if (args.Length > 0 && args[0] == "--version") { Console.WriteLine("2.1.237 (Claude Code)"); return 0; }
     if (args.Length > 0 && args[0] == "--help") { Console.WriteLine("-p --safe-mode --strict-mcp-config --mcp-config --settings --setting-sources --tools --permission-mode --add-dir --model --effort --output-format --no-session-persistence --session-id --resume"); return 0; }
+    if (E("FAKE_CLAUDE_BEHAVIOR") == "exit") { return 23; }
     string body="schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nforge_canary_hash="+E("FORGE_DISPATCH_CANARY_HASH")+"\nforge_config_hash="+E("FORGE_DISPATCH_CONFIG_HASH")+"\nforge_qualification_revision="+E("FORGE_DISPATCH_QUALIFICATION_REVISION");
     Console.WriteLine("{\"result\":\""+body.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\n","\\n")+"\",\"modelUsage\":{\"opus\":{}},\"provider\":\"anthropic\"}");
     return 0;
   }
 }
 '@
-    Add-Type -TypeDefinition $fake -Language CSharp -OutputAssembly (Join-Path $bin 'claude.exe') -OutputType ConsoleApplication
-    $env:PATH = "$bin;$originalPath"; $env:FORGE_ENGINE_IDENTITY_FIXTURE = '1'; $env:HOME = $testHome
+    if($env:OS -eq 'Windows_NT') { Add-Type -TypeDefinition $fake -Language CSharp -OutputAssembly (Join-Path $bin 'claude.exe') -OutputType ConsoleApplication }
+    else { Install-PortableEngine claude }
+    $gitExecutable=(Get-Command git -CommandType Application | Select-Object -First 1).Source
+    if($env:OS -eq 'Windows_NT') {
+        # Installed helpers launch Windows PowerShell by name even from PS7.
+        $systemPath=(Split-Path -Parent $gitExecutable)+';'+$env:SystemRoot+'\System32;'+$env:SystemRoot+'\System32\WindowsPowerShell\v1.0'
+    } else {
+        # Expose only Git, not other vendor CLIs sharing a package-manager bin.
+        New-Item -ItemType SymbolicLink -Path (Join-Path $bin 'git') -Target $gitExecutable | Out-Null
+        $systemPath='/usr/bin:/bin'
+    }
+    $env:PATH = $bin+[IO.Path]::PathSeparator+$systemPath; $env:FORGE_ENGINE_IDENTITY_FIXTURE = '1'; $env:HOME = $testHome
     Push-Location $project
-    try { $setupOutput = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'setup.ps1') -Project Integration -Tech fullstack 2>&1) -join "`n"; $setupRc = $LASTEXITCODE }
+    try { $setupOutput = (& $powershellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'setup.ps1') -Project Integration -Tech fullstack 2>&1) -join "`n"; $setupRc = $LASTEXITCODE }
     finally { Pop-Location }
     Assert-True ($setupRc -eq 0) 'clean setup materializes the seam fixture'
     Assert-True ($setupOutput -like '*INSTALLATION: MATERIALIZED*') 'setup reports materialization'
@@ -82,34 +122,73 @@ public static class ForgeTask11Fake {
     $state = Join-Path $project '.forge\local\state.md'
     $stateBody = "<!-- forge:state-schema v6 -->`n# Project State`n`n## Identity`n`n| Field | Value |`n| --- | --- |`n| Worktree root | $project |`n| Git common directory | $common |`n| Last active host | claude |`n| Workflow base ref | refs/heads/$branch |`n| Workflow base SHA | $base |`n`n## Workflow`n`n## Receipts`n| Field | Value |`n| Review iteration | 1 |`n"
     [IO.File]::WriteAllText($state, $stateBody)
-    $prompt = Join-Path $reviews 'prompt.txt'; $result = Join-Path $reviews 'result.txt'; [IO.File]::WriteAllText($prompt, "Review the installed seam.`n")
+    # Preserve the one-engine setup case, then add the second deterministic CLI.
+    $codexFake = $fake.Replace('ForgeTask11Fake','ForgeTask11CodexFake').Replace('2.1.237 (Claude Code)','codex-cli 0.144.1').Replace('FAKE_CLAUDE_BEHAVIOR','FAKE_CODEX_BEHAVIOR')
+    $claudeReply = @($fake -split "`n" | Where-Object { $_ -like '    Console.WriteLine(*body.Replace*' })[0]
+    $codexFake = $codexFake.Replace($claudeReply, @'
+    for (int i=0; i<args.Length-1; i++) {
+      if (args[i] == "--output-last-message") { System.IO.File.WriteAllText(args[i+1],body+"\n"); return 0; }
+    }
+    Console.WriteLine(body);
+'@)
+    if($env:OS -eq 'Windows_NT') { Add-Type -TypeDefinition $codexFake -Language CSharp -OutputAssembly (Join-Path $bin 'codex.exe') -OutputType ConsoleApplication }
+    else { Install-PortableEngine codex }
+    $prompt = Join-Path $reviews 'prompt.txt'; [IO.File]::WriteAllText($prompt, "Review the installed seam.`n")
     $dispatcher = Join-Path $project '.forge\hooks\lib\agent-dispatch.ps1'; $context = Join-Path $project '.forge\hooks\lib\host-context.ps1'
-    $env:FORGE_DISPATCH_TEST_MODE='1';$env:FORGE_TEST_DISABLE_ENGINE='codex'
-    Push-Location $project
-    try {
-        $before = Get-Hash $state
-        $arguments = @('-Mode','run','-Engine','auto','-FallbackPolicy','automatic','-Role','general','-Profile','review','-Artifact','git:working-tree','-WorkflowBaseSha',$base,'-WorkflowBaseRef',"refs/heads/$branch",'-PromptFile',$prompt,'-Output',$result,'-TimeoutSeconds','2')
-        $argumentsJson = Join-Path $reviews 'launch-arguments.json'; [IO.File]::WriteAllText($argumentsJson, ($arguments | ConvertTo-Json -Compress))
-        $contextLauncher = Join-Path $reviews 'launch-host-context.ps1'
-        [IO.File]::WriteAllText($contextLauncher, @'
+    $env:FORGE_DISPATCH_TEST_MODE='1'
+    $argumentsJson = Join-Path $reviews 'launch-arguments.json'
+    $contextLauncher = Join-Path $reviews 'launch-host-context.ps1'
+    [IO.File]::WriteAllText($contextLauncher, @'
 param([string]$ContextPath, [string]$EngineHost, [string]$ArgumentsJsonPath)
 $argumentsJson = [IO.File]::ReadAllText($ArgumentsJsonPath)
 & $ContextPath -Mode launch -Host $EngineHost -LaunchArgumentsJson $argumentsJson
+exit $LASTEXITCODE
 '@)
-        $dispatchOutput = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $contextLauncher $context claude $argumentsJson 2>&1) -join "`n"; $dispatchRc = $LASTEXITCODE
-    } finally { Pop-Location }
-    Assert-True ($dispatchRc -eq 0) 'installed dispatcher completes same-engine fallback'
-    Assert-True ($dispatchOutput -like '*visible fallback*') 'fallback is visible'
-    $receipt = Get-ChildItem -LiteralPath $reviews -Filter '*.receipt' | Sort-Object Name | Select-Object -Last 1
-    Assert-True ((Get-ReceiptValue $receipt.FullName 'first_attempted_engine') -ceq 'codex') 'receipt records unavailable preferred engine'
-    Assert-True ((Get-ReceiptValue $receipt.FullName 'actual_engine') -ceq 'claude') 'receipt records Claude fallback'
-    Assert-True ((Get-ReceiptValue $receipt.FullName 'fallback') -ceq 'true') 'receipt records degraded selection'
-    Assert-True ((Get-Hash $state) -ceq $before) 'reviewer leaves canonical state unchanged'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $testHome '.forge\host-contexts'))) 'installed PowerShell review needs no host authority directory'
+    $before = Get-Hash $state
+    foreach ($main in @('claude','codex')) {
+        $other = if ($main -eq 'claude') { 'codex' } else { 'claude' }
+        foreach ($role in @('general','plan','code-spec','code-quality')) {
+            foreach ($topology in @('healthy','fallback')) {
+                $env:FAKE_CLAUDE_BEHAVIOR='clean'; $env:FAKE_CODEX_BEHAVIOR='clean'
+                if ($topology -eq 'fallback') {
+                    if ($other -eq 'claude') { $env:FAKE_CLAUDE_BEHAVIOR='exit' } else { $env:FAKE_CODEX_BEHAVIOR='exit' }
+                }
+                $result = Join-Path $reviews "$main-$role-$topology.txt"
+                $arguments = @('-Mode','run','-Engine','auto','-FallbackPolicy','automatic','-Role',$role,'-Profile','review','-Artifact','git:working-tree','-WorkflowBaseSha',$base,'-WorkflowBaseRef',"refs/heads/$branch",'-PromptFile',$prompt,'-Output',$result,'-TimeoutSeconds','2')
+                [IO.File]::WriteAllText($argumentsJson, ($arguments | ConvertTo-Json -Compress))
+                Push-Location $project
+                try {
+                    $dispatchOutput = (& $powershellExe -NoProfile -ExecutionPolicy Bypass -File $contextLauncher $context $main $argumentsJson 2>&1) -join "`n"; $dispatchRc = $LASTEXITCODE
+                } finally { Pop-Location }
+                Assert-True ($dispatchRc -eq 0) "$main main $role $topology review completes"
+                $receipt = @(Get-ChildItem -LiteralPath $reviews -Filter '*.receipt' | Where-Object { (Get-ReceiptValue $_.FullName 'output_path') -ceq $result })
+                Assert-True ($receipt.Count -eq 1) "$main $role $topology has its own receipt"
+                $receiptPath = $receipt[0].FullName
+                Assert-True ((Get-ReceiptValue $receiptPath 'main_host') -ceq $main) "receipt binds $main main"
+                Assert-True ((Get-ReceiptValue $receiptPath 'role') -ceq $role) "receipt binds $role review mode"
+                Assert-True ((Get-ReceiptValue $receiptPath 'first_attempted_engine') -ceq $other) "$main main selects the other engine"
+                Assert-True ((Get-ReceiptValue $receiptPath 'fresh_process') -ceq 'true') "$main $role uses a fresh reviewer process"
+                Assert-True ((Get-ReceiptValue $receiptPath 'semantic_verdict') -ceq 'CLEAN') "$main $role result is validated"
+                if ($topology -eq 'healthy') {
+                    Assert-True ((Get-ReceiptValue $receiptPath 'actual_engine') -ceq $other) "$main $role healthy review uses $other"
+                    Assert-True ((Get-ReceiptValue $receiptPath 'fallback') -ceq 'false') 'healthy review does not degrade'
+                    Assert-True ($dispatchOutput -notlike '*visible fallback*') 'healthy review emits no fallback notice'
+                } else {
+                    Assert-True ((Get-ReceiptValue $receiptPath 'actual_engine') -ceq $main) "$main $role fallback uses the main engine"
+                    Assert-True ((Get-ReceiptValue $receiptPath 'fallback') -ceq 'true') 'failed other-engine review records degradation'
+                    Assert-True ((Get-ReceiptValue $receiptPath 'attempted_engines') -ceq "$other,$main") 'fallback records both independent attempts'
+                    Assert-True ($dispatchOutput -like '*visible fallback*') "$main $role fallback is visible"
+                }
+                Assert-True ((Get-Hash $state) -ceq $before) "$main $role $topology leaves canonical state unchanged"
+            }
+        }
+    }
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $testHome '.forge\host-contexts'))) 'installed PowerShell reviews need no host authority directory'
+
 }
 finally {
-    $env:PATH=$originalPath
-    Remove-Item Env:FORGE_ENGINE_IDENTITY_FIXTURE,Env:FORGE_DISPATCH_TEST_MODE,Env:FORGE_TEST_DISABLE_ENGINE -ErrorAction SilentlyContinue
+    $env:PATH=$originalPath; $env:HOME=$originalHome
+    Remove-Item Env:FORGE_ENGINE_IDENTITY_FIXTURE,Env:FORGE_DISPATCH_TEST_MODE,Env:FORGE_TEST_DISABLE_ENGINE,Env:FAKE_CLAUDE_BEHAVIOR,Env:FAKE_CODEX_BEHAVIOR -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
 }
-Write-Host 'PASS: PowerShell Task 11 integrated seam'
+Write-Host 'PASS: PowerShell two-main integrated seam (deterministic CLIs)'

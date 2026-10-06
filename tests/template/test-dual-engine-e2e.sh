@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Compact Task 11 integration contract. The acceptance rows map to their
-# owning suites; only the install -> declared-host -> fallback seam runs here.
+# owning suites; the installed seam covers each main host and reviewer direction.
 set -u
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 # shellcheck source=lib.sh
@@ -56,10 +56,11 @@ done < "$MAP"
 assert_file_exists "$REPO_ROOT/tests/template/test-dual-engine-e2e.ps1" "PowerShell integration mirror exists"
 assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-dual-engine-e2e.sh' "Bash runner registers the integration suite once"
 
-start_test "one installed seam reaches visible fresh same-engine fallback without state mutation"
+start_test "installed review/opinion routes both main hosts and visibly falls back in both directions"
 S=$(scratch_dir dual-engine-seam)
 P="$S/project"; H="$S/home"; B="$S/bin"
 mkdir -p "$P" "$H" "$B"
+P=$(cd "$P" && pwd -P)
 git -C "$P" init -q
 git -C "$P" config user.email forge@example.invalid
 git -C "$P" config user.name Forge
@@ -110,43 +111,65 @@ printf 'Review the installed seam.\n' > "$P/.forge/local/reviews/prompt.txt"
 dispatcher="$P/.forge/hooks/lib/agent-dispatch.sh"
 context="$P/.forge/hooks/lib/host-context.sh"
 before=$(hash_file "$P/.forge/local/state.md")
-(cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 FORGE_TEST_DISABLE_ENGINE=codex \
-    bash "$context" launch --host claude -- "$dispatcher" run --engine auto \
-    --fallback-policy automatic --role general --profile review --artifact git:working-tree \
-    --workflow-base-sha "$base" --workflow-base-ref "refs/heads/$branch" \
-    --prompt-file "$P/.forge/local/reviews/prompt.txt" \
-    --output "$P/.forge/local/reviews/result.txt" --timeout-seconds 2) > "$S/dispatch.log" 2>&1
-assert_equals "$?" "0" "installed dispatcher completes the same-engine fallback"
-assert_contains "$S/dispatch.log" 'visible fallback' "fallback is visible to the developer"
-receipt=$(find "$P/.forge/local/reviews" -type f -name '*.receipt' | LC_ALL=C sort | tail -1)
-assert_contains "$receipt" 'first_attempted_engine=codex' "receipt records the unavailable preferred engine"
-assert_contains "$receipt" 'actual_engine=claude' "receipt records the fresh same-engine reviewer"
-assert_contains "$receipt" 'fallback=true' "receipt records degraded topology"
-assert_hash_equals "$P/.forge/local/state.md" "$before" "reviewer does not mutate canonical workflow state"
-assert_file_missing "$H/.forge/host-contexts" "installed review needs no host authority directory"
+# Setup above still exercises honest one-engine materialization. Add the second
+# deterministic CLI before reviewing; these tests do not certify native login.
+ln -s "$REPO_ROOT/tests/template/fixtures/fake-engines/codex" "$B/codex"
+for main in claude codex; do
+    other=claude; [ "$main" != claude ] || other=codex
+    for role in general plan code-spec code-quality; do
+        for topology in healthy fallback; do
+            claude_behavior=clean; codex_behavior=clean
+            if [ "$topology" = fallback ]; then
+                if [ "$other" = claude ]; then claude_behavior=exit; else codex_behavior=exit; fi
+            fi
+            result="$P/.forge/local/reviews/$main-$role-$topology.txt"
+            log="$S/$main-$role-$topology.log"
+            (cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 \
+                FAKE_CLAUDE_BEHAVIOR="$claude_behavior" FAKE_CODEX_BEHAVIOR="$codex_behavior" \
+                bash "$context" launch --host "$main" -- "$dispatcher" run --engine auto \
+                --fallback-policy automatic --role "$role" --profile review --artifact git:working-tree \
+                --workflow-base-sha "$base" --workflow-base-ref "refs/heads/$branch" \
+                --prompt-file "$P/.forge/local/reviews/prompt.txt" --output "$result" --timeout-seconds 2) > "$log" 2>&1
+            assert_equals "$?" "0" "$main main $role $topology review completes"
+            receipt=$(grep -lFx "output_path=$result" "$P/.forge/local/reviews/"*.receipt)
+            assert_file_exists "$receipt" "$main $role $topology has its own receipt"
+            assert_contains "$receipt" "main_host=$main" "receipt binds $main main"
+            assert_contains "$receipt" "role=$role" "receipt binds $role review mode"
+            assert_contains "$receipt" "first_attempted_engine=$other" "$main main selects the other engine"
+            assert_contains "$receipt" 'fresh_process=true' "$main $role uses a fresh reviewer process"
+            assert_contains "$receipt" 'semantic_verdict=CLEAN' "$main $role result is validated"
+            if [ "$topology" = healthy ]; then
+                assert_contains "$receipt" "actual_engine=$other" "$main $role healthy review uses $other"
+                assert_contains "$receipt" 'fallback=false' "healthy review does not degrade"
+                assert_not_contains "$log" 'visible fallback' "healthy review emits no fallback notice"
+            else
+                assert_contains "$receipt" "actual_engine=$main" "$main $role fallback uses the main engine"
+                assert_contains "$receipt" 'fallback=true' "failed other-engine review records degradation"
+                assert_contains "$receipt" "attempted_engines=$other,$main" "fallback records both independent attempts"
+                assert_contains "$log" 'visible fallback' "$main $role fallback is visible"
+            fi
+            assert_hash_equals "$P/.forge/local/state.md" "$before" "$main $role $topology leaves workflow state unchanged"
+        done
+    done
+done
+assert_file_missing "$H/.forge/host-contexts" "installed reviews need no host authority directory"
 
-(cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 FORGE_TEST_DISABLE_ENGINE=codex \
-    bash "$context" launch --host codex -- "$dispatcher" run --engine auto \
-    --fallback-policy automatic --role general --profile review --artifact git:working-tree \
-    --workflow-base-sha "$base" --workflow-base-ref "refs/heads/$branch" \
-    --prompt-file "$P/.forge/local/reviews/prompt.txt" \
-    --output "$P/.forge/local/reviews/codex-main-result.txt" --timeout-seconds 2) >/dev/null 2>&1
-assert_equals "$?" "0" "a later Codex-declared session reaches the same installed project"
-if grep -l '^main_host=codex$' "$P/.forge/local/reviews/"*.receipt >/dev/null 2>&1; then
-    pass "later review records Codex as declared routing host"
-else
-    fail "later review omitted Codex declared routing metadata"
-fi
-
-(cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 FORGE_TEST_DISABLE_ENGINE=codex \
-    bash "$context" launch --host claude -- "$dispatcher" run --engine claude --fallback-policy none --role general --profile review --artifact git:working-tree \
+(cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 \
+    bash "$context" launch --host claude -- "$dispatcher" run --engine auto --fallback-policy automatic --role general --profile review --artifact git:working-tree \
     --workflow-base-sha "$base" --workflow-base-ref "refs/heads/$branch" --prompt-file "$P/.forge/local/reviews/prompt.txt" --output "$P/.forge/local/reviews/concurrent-claude.txt" --timeout-seconds 2 >"$S/concurrent-claude.log" 2>&1; echo $? > "$S/concurrent-claude.rc") & claude_pid=$!
-(cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 FORGE_TEST_DISABLE_ENGINE=codex \
-    bash "$context" launch --host codex -- "$dispatcher" run --engine claude --fallback-policy none --role general --profile review --artifact git:working-tree \
+(cd "$P" && PATH="$B:/usr/bin:/bin" HOME="$H" FORGE_DISPATCH_TEST_MODE=1 \
+    bash "$context" launch --host codex -- "$dispatcher" run --engine auto --fallback-policy automatic --role general --profile review --artifact git:working-tree \
     --workflow-base-sha "$base" --workflow-base-ref "refs/heads/$branch" --prompt-file "$P/.forge/local/reviews/prompt.txt" --output "$P/.forge/local/reviews/concurrent-codex.txt" --timeout-seconds 2 >"$S/concurrent-codex.log" 2>&1; echo $? > "$S/concurrent-codex.rc") & codex_pid=$!
 wait "$claude_pid"; wait "$codex_pid"
 assert_equals "$(cat "$S/concurrent-claude.rc")" "0" "concurrent Claude-declared review succeeds"
 assert_equals "$(cat "$S/concurrent-codex.rc")" "0" "concurrent Codex-declared review succeeds"
+for main in claude codex; do
+    other=claude; [ "$main" != claude ] || other=codex
+    receipt=$(grep -lFx "output_path=$P/.forge/local/reviews/concurrent-$main.txt" "$P/.forge/local/reviews/"*.receipt)
+    assert_contains "$receipt" "main_host=$main" "concurrent review binds $main main"
+    assert_contains "$receipt" "actual_engine=$other" "concurrent $main main selects $other reviewer"
+    assert_contains "$receipt" 'fallback=false' "concurrent $main review stays healthy"
+done
 assert_file_missing "$H/.forge/host-contexts" "concurrent reviews create no shared host authority"
 
 report "test-dual-engine-e2e.sh"

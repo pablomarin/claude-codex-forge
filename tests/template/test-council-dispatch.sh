@@ -10,7 +10,8 @@ init_counters
 DISPATCH="$REPO_ROOT/hooks/lib/council-dispatch.sh"
 
 make_fixture() {
-    local name="$1" include_other="$2" root repo lib fakebin
+    local name="$1" include_other="$2" main="${COUNCIL_MAIN:-claude}" other root repo lib fakebin
+    other=claude; [ "$main" != claude ] || other=codex
     root=$(mktemp -d "${TMPDIR:-/tmp}/council-$name.XXXXXX"); _SCRATCH_DIRS+=("$root")
     repo="$root/repo"; lib="$repo/.forge/hooks/lib"; fakebin="$root/bin"
     mkdir -p "$lib" "$repo/.forge" "$fakebin"
@@ -52,7 +53,7 @@ fi
 if [ "${FAKE_DELAY:-}" = yes ]; then sleep 0.1; fi
 match="$engine:$seat:$conversation"
 if [ "${FAKE_FAIL_MATCH:-}" = "$match" ] && [ ! -e "$FAKE_DIR/failure-used" ]; then : > "$FAKE_DIR/failure-used"; printf 'end|%s|%s|%s\n' "$attempt" "$conversation" "$seat" >> "$FAKE_DIR/events.log"; printf 'injected failure: %s\n' "$match" >&2; exit 17; fi
-if [ "${FAKE_MAIN_FAIL:-}" = yes ] && [ "$match" = claude:simplifier:new ]; then exit 17; fi
+if [ "${FAKE_MAIN_FAIL:-}" = yes ] && [ "$match" = "$FORGE_NATIVE_HOST:simplifier:new" ]; then exit 17; fi
 if [ "$conversation" = new ]; then printf 'sid-%s\n' "$seat" > "$session_out"; fi
 if [ "$conversation" = resume ] && [ "$session_id" != "sid-$seat" ]; then exit 18; fi
 if [ "$role" = council-chair ]; then
@@ -68,8 +69,8 @@ if [ "${FAKE_NO_FINAL_NEWLINE:-}" = yes ]; then printf 'recommendation=reply-%s'
 printf 'end|%s|%s|%s\n' "$attempt" "$conversation" "$seat" >> "$FAKE_DIR/events.log"
 FAKE
     chmod +x "$lib/"*.sh
-    printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$fakebin/claude"; chmod +x "$fakebin/claude"
-    if [ "$include_other" = yes ]; then cp "$fakebin/claude" "$fakebin/codex"; fi
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$fakebin/$main"; chmod +x "$fakebin/$main"
+    if [ "$include_other" = yes ]; then cp "$fakebin/$main" "$fakebin/$other"; fi
     (cd "$repo" && git init -q)
     printf 'Should Forge choose this design?\n' > "$repo/question.txt"; printf 'candidate\n' > "$repo/artifact.txt"
     FIXTURE_ROOT="$root"; FIXTURE_REPO="$repo"; FIXTURE_BIN="$fakebin"; FIXTURE_LOG="$root/calls.log"; : > "$FIXTURE_LOG"; : > "$root/events.log"
@@ -77,11 +78,13 @@ FAKE
 
 run_fixture() {
     local output="$FIXTURE_ROOT/run.out"
-    (cd "$FIXTURE_REPO" && env PATH="$FIXTURE_BIN:/usr/bin:/bin" FORGE_NATIVE_HOST=claude FAKE_LOG="$FIXTURE_LOG" FAKE_DIR="$FIXTURE_ROOT" FAKE_FAIL_MATCH="${FAKE_FAIL_MATCH:-}" FAKE_PARALLEL_PROBE="${FAKE_PARALLEL_PROBE:-}" FAKE_DELAY="${FAKE_DELAY:-}" FAKE_MAIN_FAIL="${FAKE_MAIN_FAIL:-}" FAKE_NO_FINAL_NEWLINE="${FAKE_NO_FINAL_NEWLINE:-}" \
+    (cd "$FIXTURE_REPO" && env PATH="$FIXTURE_BIN:/usr/bin:/bin" FORGE_NATIVE_HOST="${COUNCIL_MAIN:-claude}" FAKE_LOG="$FIXTURE_LOG" FAKE_DIR="$FIXTURE_ROOT" FAKE_FAIL_MATCH="${FAKE_FAIL_MATCH:-}" FAKE_PARALLEL_PROBE="${FAKE_PARALLEL_PROBE:-}" FAKE_DELAY="${FAKE_DELAY:-}" FAKE_MAIN_FAIL="${FAKE_MAIN_FAIL:-}" FAKE_NO_FINAL_NEWLINE="${FAKE_NO_FINAL_NEWLINE:-}" \
       bash .forge/hooks/lib/council-dispatch.sh --question-file question.txt --artifact artifact.txt --workflow-base-sha deadbeef --workflow-base-ref refs/heads/main "$@") > "$output" 2>&1
     RUN_RC=$?; RUN_OUTPUT="$output"; RECEIPT=$(sed -n 's/^Council receipt: //p' "$output" | tail -1)
 }
 
+for COUNCIL_MAIN in claude codex; do
+other=claude; [ "$COUNCIL_MAIN" != claude ] || other=codex
 start_test "healthy council uses six sessions and eleven bound turns"
 make_fixture healthy yes
 FAKE_FAIL_MATCH= run_fixture
@@ -91,9 +94,18 @@ assert_equals "$(awk -F'|' '$4=="new"{n++} END{print n+0}' "$FIXTURE_LOG")" 5 "f
 assert_equals "$(awk -F'|' '$4=="resume"{n++} END{print n+0}' "$FIXTURE_LOG")" 5 "five peer turns resume exact sessions"
 assert_equals "$(awk -F'|' '$4=="ephemeral"{n++} END{print n+0}' "$FIXTURE_LOG")" 1 "chairman is the sixth fresh session"
 assert_contains "$RECEIPT" "topology_mode=mixed" "receipt records mixed topology"
-assert_contains "$RECEIPT" "main_host=claude" "receipt records declared main host metadata"
+assert_contains "$RECEIPT" "main_host=$COUNCIL_MAIN" "receipt records declared main host metadata"
 assert_contains "$RECEIPT" "turn_results=11" "receipt binds all turn results"
 assert_contains "$RECEIPT" "session_id.simplifier=sid-simplifier" "receipt binds exact session ids"
+for seat in simplifier scalability_hawk pragmatist contrarian maintainer; do
+    expected=$COUNCIL_MAIN
+    case "$seat" in contrarian|maintainer) expected=$other ;; esac
+    assert_contains "$RECEIPT" "actual_engine.$seat.advice=$expected" "$COUNCIL_MAIN main routes $seat advice correctly"
+    assert_contains "$RECEIPT" "actual_engine.$seat.peer=$expected" "$seat peer stays on the advice engine"
+    assert_equals "$(awk -F'|' -v engine="$expected" -v seat="$seat" '$1==engine && $3==seat && $4=="resume" && $5=="sid-"seat {n++} END{print n+0}' "$FIXTURE_LOG")" 1 "$seat peer resumes its exact independent session"
+done
+assert_equals "$(awk -F'|' -v other="$other" '$1==other && $3=="chair" && $4=="ephemeral" {n++} END{print n+0}' "$FIXTURE_LOG")" 1 "$COUNCIL_MAIN main routes the fresh chair to $other"
+
 peer_bundle="$(dirname "$RECEIPT")/anonymous-peer-reviews.txt"
 assert_contains "$peer_bundle" "### Peer review A" "peer bundle uses opaque labels"
 assert_not_contains "$peer_bundle" "simplifier" "peer bundle does not reveal persona seat names"
@@ -126,40 +138,45 @@ make_fixture absent no
 FAKE_FAIL_MATCH= run_fixture
 assert_equals "$RUN_RC" 0 "known absence degrades without stopping"
 assert_equals "$(wc -l < "$FIXTURE_LOG" | tr -d ' ')" 11 "known absence launches no discarded mixed turns"
-assert_equals "$(awk -F'|' '$1!="claude"{n++} END{print n+0}' "$FIXTURE_LOG")" 0 "all known-absence seats use main"
+assert_equals "$(awk -F'|' -v main="$COUNCIL_MAIN" '$1!=main{n++} END{print n+0}' "$FIXTURE_LOG")" 0 "all known-absence seats use main"
 assert_contains "$RECEIPT" "trigger_reason=known-other-unavailable" "known absence is visible"
 
 start_test "runtime other failures discard the attempt and rerun all-main"
-for spec in 'codex:contrarian:new|' 'codex:contrarian:resume|' 'codex:chair:ephemeral|' 'codex:simplifier:new|custom'; do
+for spec in "$other:contrarian:new|" "$other:contrarian:resume|" "$other:chair:ephemeral|" "$other:simplifier:new|custom"; do
     match=${spec%%|*}; mode=${spec#*|}; make_fixture "fallback-${match//:/-}" yes; FAKE_FAIL_MATCH=$match
     if [ "$mode" = custom ]; then run_fixture --seat-engine simplifier=other; else run_fixture; fi
     assert_equals "$RUN_RC" 0 "other failure $match reaches all-main fallback"
     assert_contains "$RECEIPT" "trigger_reason=runtime-other-failure" "other failure $match is disclosed"
     assert_contains "$RUN_OUTPUT" "injected failure: $match" "failed dispatcher diagnostics survive attempt removal"
     assert_equals "$(find "$(dirname "$(dirname "$RECEIPT")")" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 1 "failed $match attempt artifacts are discarded"
-    assert_equals "$(tail -11 "$FIXTURE_LOG" | awk -F'|' '$1!="claude"{n++} END{print n+0}')" 0 "fallback after $match reruns every turn on main"
+    assert_equals "$(tail -11 "$FIXTURE_LOG" | awk -F'|' -v main="$COUNCIL_MAIN" '$1!=main{n++} END{print n+0}')" 0 "fallback after $match reruns every turn on main"
 done
 
 start_test "main-engine failures block instead of fabricating a verdict"
-make_fixture main-failure yes; FAKE_FAIL_MATCH=claude:simplifier:new; run_fixture
+make_fixture main-failure yes; FAKE_FAIL_MATCH="$COUNCIL_MAIN:simplifier:new"; run_fixture
 if [ "$RUN_RC" -ne 0 ]; then pass "main advisor failure blocks"; else fail "main advisor failure must block"; fi
 assert_equals "$(wc -l < "$FIXTURE_LOG" | tr -d ' ')" 5 "main failure drains the advice wave without starting peers or fallback"
-make_fixture main-chair yes; FAKE_FAIL_MATCH=claude:chair:ephemeral; run_fixture --seat-engine chair=main
+make_fixture main-chair yes; FAKE_FAIL_MATCH="$COUNCIL_MAIN:chair:ephemeral"; run_fixture --seat-engine chair=main
 if [ "$RUN_RC" -ne 0 ]; then pass "custom main chairman failure blocks"; else fail "custom main chairman failure must block"; fi
 assert_equals "$(wc -l < "$FIXTURE_LOG" | tr -d ' ')" 11 "custom main chairman failure does not rerun"
 
 start_test "fallback waits for the failed wave and main failure takes precedence"
 make_fixture drain yes
-FAKE_DELAY=yes FAKE_FAIL_MATCH=codex:contrarian:new run_fixture
+FAKE_DELAY=yes FAKE_FAIL_MATCH="$other:contrarian:new" run_fixture
 assert_equals "$RUN_RC" 0 "delayed failed wave reaches fallback"
 if awk -F'|' 'NR==1 {first=$2} $2==first {if($1=="start") active++; else active--} $2!=first && active!=0 {exit 1} END {if(active!=0) exit 1}' "$FIXTURE_ROOT/events.log"; then
   pass "fallback starts only after every failed-attempt worker exits"
 else fail "fallback overlapped a failed-attempt worker"; fi
 make_fixture simultaneous-failure yes
-FAKE_MAIN_FAIL=yes FAKE_FAIL_MATCH=codex:contrarian:new run_fixture
+FAKE_MAIN_FAIL=yes FAKE_FAIL_MATCH="$other:contrarian:new" run_fixture
 if [ "$RUN_RC" -ne 0 ]; then pass "simultaneous main and other failures block"; else fail "main failure must take precedence over fallback"; fi
 assert_equals "$(wc -l < "$FIXTURE_LOG" | tr -d ' ')" 5 "simultaneous failures do not launch fallback"
 
+done
+unset COUNCIL_MAIN
+
+for COUNCIL_MAIN in claude codex; do
+other=claude; [ "$COUNCIL_MAIN" != claude ] || other=codex
 start_test "parallel council integrates with real isolated session transport"
 integration=$(scratch_dir council-transport)
 integration=$(cd "$integration" && pwd -P)
@@ -171,9 +188,9 @@ git -C "$integration" add app.txt
 git -C "$integration" commit -qm base
 base=$(git -C "$integration" rev-parse HEAD)
 mkdir -p "$integration/.forge/local"
-printf '<!-- forge:state-schema v6 -->\n# Project State\n\n## Identity\n\n| Field | Value |\n| --- | --- |\n| Worktree root | %s |\n| Git common directory | %s/.git |\n| Last active host | claude |\n| Workflow base ref | main |\n| Workflow base SHA | %s |\n\n## Workflow\n' "$integration" "$integration" "$base" > "$integration/.forge/local/state.md"
+printf '<!-- forge:state-schema v6 -->\n# Project State\n\n## Identity\n\n| Field | Value |\n| --- | --- |\n| Worktree root | %s |\n| Git common directory | %s/.git |\n| Last active host | %s |\n| Workflow base ref | main |\n| Workflow base SHA | %s |\n\n## Workflow\n' "$integration" "$integration" "$COUNCIL_MAIN" "$base" > "$integration/.forge/local/state.md"
 printf 'Should Forge parallelize the council?\n' > "$integration/.forge/local/question.txt"
-(cd "$integration" && env PATH="$REPO_ROOT/tests/template/fixtures/fake-engines:$PATH" FORGE_NATIVE_HOST=claude FORGE_DISPATCH_TEST_MODE=1 \
+(cd "$integration" && env PATH="$REPO_ROOT/tests/template/fixtures/fake-engines:$PATH" FORGE_NATIVE_HOST="$COUNCIL_MAIN" FORGE_DISPATCH_TEST_MODE=1 \
   bash "$DISPATCH" --question-file .forge/local/question.txt --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref main --timeout-seconds 5) > "$integration/.forge/local/run.out" 2>&1
 integration_rc=$?
 assert_equals "$integration_rc" 0 "eleven parallel-orchestrated turns pass real candidate and exact-session checks"
@@ -204,12 +221,12 @@ assert_advisor_snapshots_removed
 mkdir -p "$integration/.forge/local/reviews/session-stores/unrelated"
 printf 'keep unrelated private input\n' > "$integration/.forge/local/reviews/session-stores/unrelated/sentinel"
 printf 'schema_version=1\ncompleted=false\nstore_id=unrelated\n' > "$integration/.forge/local/reviews/sessions/unrelated.meta"
-for failed_engine in codex claude; do
+for failed_engine in "$other" "$COUNCIL_MAIN"; do
   behavior_name=FAKE_CODEX_BEHAVIOR; [ "$failed_engine" != claude ] || behavior_name=FAKE_CLAUDE_BEHAVIOR
-  (cd "$integration" && env PATH="$REPO_ROOT/tests/template/fixtures/fake-engines:$PATH" FORGE_NATIVE_HOST=claude FORGE_DISPATCH_TEST_MODE=1 \
+  (cd "$integration" && env PATH="$REPO_ROOT/tests/template/fixtures/fake-engines:$PATH" FORGE_NATIVE_HOST="$COUNCIL_MAIN" FORGE_DISPATCH_TEST_MODE=1 \
     "$behavior_name=exit" bash "$DISPATCH" --question-file .forge/local/question.txt --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref main --timeout-seconds 5) > "$integration/.forge/local/failed-$failed_engine.out" 2>&1
   failed_rc=$?
-  if [ "$failed_engine" = codex ]; then assert_equals "$failed_rc" 0 "other-engine advice failure completes the all-main rerun"
+  if [ "$failed_engine" = "$other" ]; then assert_equals "$failed_rc" 0 "other-engine advice failure completes the all-main rerun"
   elif [ "$failed_rc" -ne 0 ]; then pass "main-engine advice failure blocks without rerun"; else fail "main-engine failure must block"; fi
   assert_equals "$(find "$integration/.forge/local/reviews/session-stores" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" 1 "$failed_engine failure leaves no attempt-owned private stores"
   assert_equals "$(grep -l '^completed=false$' "$integration/.forge/local/reviews/sessions/"*.meta | wc -l | tr -d ' ')" 1 "$failed_engine failure leaves no resumable abandoned sessions"
@@ -219,16 +236,20 @@ done
 
 start_test "failed real peer resume releases the failed seat store"
 peer_bin="$integration/.forge/local/peer-bin"; mkdir -p "$peer_bin"
-ln -s "$REPO_ROOT/tests/template/fixtures/fake-engines/claude" "$peer_bin/claude"
-# Exercise the production dispatcher; fail only Codex resume, not new advice.
-printf '#!/usr/bin/env bash\nfor arg in "$@"; do [ "$arg" != resume ] || export FAKE_CODEX_BEHAVIOR=exit; done\nexec "%s" "$@"\n' "$REPO_ROOT/tests/template/fixtures/fake-engines/codex" > "$peer_bin/codex"
-chmod +x "$peer_bin/codex"
-(cd "$integration" && env PATH="$peer_bin:$PATH" FORGE_NATIVE_HOST=claude FORGE_DISPATCH_TEST_MODE=1 \
+ln -s "$REPO_ROOT/tests/template/fixtures/fake-engines/$COUNCIL_MAIN" "$peer_bin/$COUNCIL_MAIN"
+# Exercise the production dispatcher; fail only the other engine's resume.
+behavior_name=FAKE_CODEX_BEHAVIOR; [ "$other" != claude ] || behavior_name=FAKE_CLAUDE_BEHAVIOR
+printf '#!/usr/bin/env bash\nfor arg in "$@"; do case "$arg" in resume|--resume) export %s=exit ;; esac; done\nexec "%s" "$@"\n' "$behavior_name" "$REPO_ROOT/tests/template/fixtures/fake-engines/$other" > "$peer_bin/$other"
+chmod +x "$peer_bin/$other"
+(cd "$integration" && env PATH="$peer_bin:$PATH" FORGE_NATIVE_HOST="$COUNCIL_MAIN" FORGE_DISPATCH_TEST_MODE=1 \
   bash "$DISPATCH" --question-file .forge/local/question.txt --artifact git:working-tree --workflow-base-sha "$base" --workflow-base-ref main --timeout-seconds 5) > "$integration/.forge/local/failed-peer.out" 2>&1
 assert_equals "$?" 0 "failed real peer resumes still permit a complete all-main rerun"
 assert_equals "$(find "$integration/.forge/local/reviews/session-stores" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" 1 "failed peers release their private stores while preserving unrelated sessions"
 assert_equals "$(grep -l '^completed=false$' "$integration/.forge/local/reviews/sessions/"*.meta | wc -l | tr -d ' ')" 1 "failed peer sessions are terminal, not resumable"
 assert_advisor_snapshots_removed
+
+done
+unset COUNCIL_MAIN
 
 start_test "council receipt root rejects a linked council ancestor"
 make_fixture linked-root yes
