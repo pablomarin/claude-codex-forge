@@ -2,6 +2,36 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.6 — 2026-10-06
+
+### Completed workflow hooks and symmetric main-engine verification
+
+Completed workflows no longer emit stale final-receipt advisories or force an extra checkpoint
+response on Stop. Previously a historical completed quick-fix in the chat's primary checkout could
+interrupt a new feature running in a linked worktree. Bash and PowerShell share the repair; active
+workflow reminders, state validation, native Goal accounting, changelog and shipping gates remain.
+Hook routing continues to use the event cwd and does not infer an omitted tool workdir.
+The PowerShell active-checkpoint path now uses its built-in SHA-256 command instead of an undefined
+helper and normalizes CRLF state before reading workflow reminders. PowerShell checkpoint and
+Goal sidechannel writes use absolute event-worktree paths after changing provider location.
+Codex Windows hook registrations explicitly preserve the router's exit code. PowerShell's
+`-Command` wrapper previously converted a hook's exit 2 to exit 1, affecting continuation and
+blocking semantics. Regression coverage invokes the registered command itself.
+PowerShell candidate capture also preserves an absolute Git common-directory path, allowing
+independent review and opinion from linked worktrees on each main engine.
+Quick-fix activation waits for Git identity commands to complete before reading their exit status;
+early first-output selection could leave a stale status and reject a valid activation. Native
+Windows CI fixture coverage preserves canonical Claude model/provider identity and failure logs.
+
+Focused installed-hook regression coverage exercises Claude and Codex main hosts, repeated
+completed Stops, active controls and linked-worktree routing. Deterministic dual-engine E2E and
+council acceptance now exercise both main-host directions, other-engine review/opinion routing,
+visible same-engine fallback, and independent council sessions. Contributor policy requires both
+main-host configurations for shared behavior and distinguishes fixtures from authenticated native
+host qualification. PowerShell runtime verification remains CI-owned when unavailable locally.
+The existing Goal-hook dependency control now stubs GitHub CLI to avoid live probes and CLI-created
+user state when `gh` is installed.
+
 ## 6.4.5 — 2026-10-05
 
 ### Canonical PR authorization parsing

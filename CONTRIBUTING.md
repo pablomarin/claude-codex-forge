@@ -74,6 +74,13 @@ suites.
 - Every runtime hook or installer behavior implemented in Bash must have an equivalent PowerShell
   implementation. If PowerShell is unavailable locally, rely on static parity and report Windows
   runtime verification as CI-owned.
+- For shared host behavior, tests and E2E acceptance must exercise both Claude-main/Codex-reviewer
+  and Codex-main/Claude-reviewer configurations. Review and opinion use the other engine when
+  healthy; council verifies mixed seat/chair routing and exact-session continuity with each host
+  as main. Test visible fresh same-engine fallback in both directions. Keep genuinely host-specific
+  cases scoped to their host and mirror supported platform behavior. Deterministic engine fixtures
+  prove routing and harness contracts; authenticated native-host claims require separate evidence
+  for each configuration, with unavailable hosts reported as unverified or blocked.
 - Keep the harness dependency-light and portable. Reuse existing helpers and formats before adding a
   new runtime, framework, or service.
 

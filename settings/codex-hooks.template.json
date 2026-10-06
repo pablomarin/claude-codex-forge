@@ -13,7 +13,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh\" session-start.sh",
-            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook session-start.ps1\""
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook session-start.ps1; exit $LASTEXITCODE\""
           }
         ]
       }
@@ -37,17 +37,17 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh\" check-bash-safety.sh",
-            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-bash-safety.ps1\""
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-bash-safety.ps1; exit $LASTEXITCODE\""
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh\" check-workflow-gates.sh",
-            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-workflow-gates.ps1\""
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-workflow-gates.ps1; exit $LASTEXITCODE\""
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh\" check-external-mutation-auth.sh",
-            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-external-mutation-auth.ps1\""
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-external-mutation-auth.ps1; exit $LASTEXITCODE\""
           }
         ]
       }
@@ -59,7 +59,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh\" post-tool-format.sh",
-            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook post-tool-format.ps1\""
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook post-tool-format.ps1; exit $LASTEXITCODE\""
           }
         ]
       }
@@ -71,7 +71,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh\" check-subagent-review.sh",
-            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-subagent-review.ps1\""
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-subagent-review.ps1; exit $LASTEXITCODE\""
           }
         ]
       }
@@ -83,7 +83,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh\" pre-compact-memory.sh",
-            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook pre-compact-memory.ps1\""
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook pre-compact-memory.ps1; exit $LASTEXITCODE\""
           }
         ]
       }
@@ -95,12 +95,12 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh\" build-evidence.sh",
-            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook build-evidence.ps1\""
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook build-evidence.ps1; exit $LASTEXITCODE\""
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.forge/hooks/lib/codex-worktree-dispatch.sh\" check-state-updated.sh",
-            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-state-updated.ps1\""
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$root = (& git rev-parse --show-toplevel).Trim(); & (Join-Path $root '.forge\\hooks\\lib\\codex-worktree-dispatch.ps1') -Hook check-state-updated.ps1; exit $LASTEXITCODE\""
           }
         ]
       }

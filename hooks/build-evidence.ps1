@@ -745,9 +745,12 @@ $ProgressFp = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
 # re-running build-evidence or parsing STDERR. One line — just the SHA256 value.
 # Best-effort: failure must not abort the evidence emission.
 if (-not [string]::IsNullOrEmpty($ProgressFp)) {
-    $sidechannel = Join-Path $StateLocalDir "forge-goal-last-fingerprint"
+    # .NET file writes use the process cwd, which can still be the primary
+    # checkout after Set-Location followed the event into a linked worktree.
+    $stateDirectory = if ($StateMd) { Split-Path -Parent $StateMd } else { Join-Path (Get-Location).Path $StateLocalDir }
+    $sidechannel = Join-Path $stateDirectory "forge-goal-last-fingerprint"
     try {
-        $null = New-Item -ItemType Directory -Path $StateLocalDir -Force -ErrorAction SilentlyContinue
+        $null = New-Item -ItemType Directory -Path $stateDirectory -Force -ErrorAction SilentlyContinue
         $tempSidechannel = "$sidechannel.tmp.$PID"
         [System.IO.File]::WriteAllText($tempSidechannel, $ProgressFp + "`n", (New-Object Text.UTF8Encoding($false)))
         Move-Item -LiteralPath $tempSidechannel -Destination $sidechannel -Force

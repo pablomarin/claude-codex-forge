@@ -2820,6 +2820,11 @@ start_test "Stop hook delegates active native Goal accounting to the repository 
 GB=$(scratch_dir goal-budget-hook)
 GB_HOME=$(scratch_dir goal-budget-home)
 mkdir -p "$GB/.forge/local" "$GB_HOME"
+# build-evidence probes gh. Keep CLI-created user state out of this ledger
+# dependency control and avoid live-service access when gh is installed.
+GB_BIN=$(scratch_dir goal-budget-bin)
+printf '#!/bin/sh\nexit 1\n' > "$GB_BIN/gh"
+chmod +x "$GB_BIN/gh"
 (cd "$GB" && git init -q --initial-branch=main && git -c user.email=t@t -c user.name=t \
     commit -q --allow-empty -m init)
 printf '6\n' > "$GB/.forge/version"
@@ -2852,9 +2857,9 @@ case "$GB_COMMON_RAW" in /*) ;; *) GB_COMMON_RAW="$GB/$GB_COMMON_RAW" ;; esac
 GB_COMMON=$(cd "$GB_COMMON_RAW" && pwd -P)
 GB_TURNS="$GB_COMMON/forge-goals/$GB_NONCE/turns"
 GB_PAYLOAD=$(printf '{"cwd":"%s","host":"claude","session_id":"s1","turn_id":"turn-1","stop_hook_active":true}' "$GB")
-printf '%s' "$GB_PAYLOAD" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/first.out" 2>&1
+printf '%s' "$GB_PAYLOAD" | PATH="$GB_BIN:$PATH" HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/first.out" 2>&1
 assert_equals "$?" "0" "Stop hook charges an activated native Goal"
-printf '%s' "$GB_PAYLOAD" | HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/duplicate.out" 2>&1
+printf '%s' "$GB_PAYLOAD" | PATH="$GB_BIN:$PATH" HOME="$GB_HOME" bash "$REPO_ROOT/hooks/check-state-updated.sh" > "$GB/duplicate.out" 2>&1
 assert_equals "$?" "0" "duplicate Stop delivery is idempotent through the hook"
 assert_equals "$(find "$GB_TURNS" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" "1" \
     "Stop hook passes the same event exactly once to the ledger"

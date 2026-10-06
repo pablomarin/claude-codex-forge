@@ -602,12 +602,13 @@ function Invoke-WorkflowStateActivate {
     }
 
     if ($workflow -ceq "quick-fix" -and $mode -ceq "new") {
-        $quickFixHead = (& git -C $root rev-parse --verify HEAD 2>$null | Select-Object -First 1)
-        $quickFixBranch = (& git -C $root symbolic-ref -q --short HEAD 2>$null | Select-Object -First 1)
+        # Finish native Git before First can stop it and leave a stale exit code.
+        $quickFixHead = (@(& git -C $root rev-parse --verify HEAD 2>$null) | Select-Object -First 1)
+        $quickFixBranch = (@(& git -C $root symbolic-ref -q --short HEAD 2>$null) | Select-Object -First 1)
         if ($LASTEXITCODE -ne 0 -or -not $quickFixBranch -or $quickFixBranch.Trim() -cne "quick-fix/$task") {
             Throw-WorkflowStateBlocked "new quick-fix activation requires branch quick-fix/$task"
         }
-        $quickFixBaseRef = (& git -C $root rev-parse --symbolic-full-name $baseRef 2>$null | Select-Object -First 1)
+        $quickFixBaseRef = (@(& git -C $root rev-parse --symbolic-full-name $baseRef 2>$null) | Select-Object -First 1)
         if ($LASTEXITCODE -ne 0 -or -not $quickFixBaseRef -or
             $quickFixBaseRef.Trim() -cnotmatch '^refs/(heads|remotes)/' -or
             $quickFixBaseRef.Trim() -ceq "refs/heads/$($quickFixBranch.Trim())") {

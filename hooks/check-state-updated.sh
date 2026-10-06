@@ -131,7 +131,20 @@ if [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ]; then
             }
         }
     ')
-    case "$_workflow_command" in ''|none|-|'—') ;;
+    _workflow_phase=$(tr -d '\r' < "$STATE_MD" | awk -F'|' '
+        /^## Workflow$/ { in_workflow=1; next }
+        in_workflow && /^## / { in_workflow=0 }
+        in_workflow {
+            key=$2; gsub(/^[ \t]+|[ \t]+$/, "", key)
+            if (key == "Phase") {
+                value=$3; gsub(/^[ \t]+|[ \t]+$/, "", value)
+                print value
+                exit
+            }
+        }
+    ')
+    # Completed receipts are historical; PreToolUse still enforces shipping.
+    case "$_workflow_phase:$_workflow_command" in complete:*|*:|*:none|*:-|*:'—') ;;
     *)
         if printf '%s\n' "$_workflow_command" | grep -qE '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'; then
             :
@@ -319,8 +332,8 @@ WORKFLOW_REMINDER=""
 if [ -f "$STATE_MD" ]; then
     WORKFLOW_BLOCK=$(tr -d '\r' < "$STATE_MD" | awk '/^## Workflow$/{flag=1;next} flag && /^## /{flag=0} flag' 2>/dev/null)
     WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -E '\|\s*Command\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
-    if [ -n "$WORKFLOW_CMD" ] && [ "$WORKFLOW_CMD" != "none" ] && [ "$WORKFLOW_CMD" != "—" ] && [ "$WORKFLOW_CMD" != "-" ]; then
-        WORKFLOW_PHASE=$(echo "$WORKFLOW_BLOCK" | grep -E '\|\s*Phase\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
+    WORKFLOW_PHASE=$(echo "$WORKFLOW_BLOCK" | grep -E '\|\s*Phase\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
+    if [ "$WORKFLOW_PHASE" != "complete" ] && [ -n "$WORKFLOW_CMD" ] && [ "$WORKFLOW_CMD" != "none" ] && [ "$WORKFLOW_CMD" != "—" ] && [ "$WORKFLOW_CMD" != "-" ]; then
         WORKFLOW_NEXT=$(echo "$WORKFLOW_BLOCK" | grep -E '\|\s*Next step\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
         WORKFLOW_REMINDER="WORKFLOW: $WORKFLOW_CMD | Phase: $WORKFLOW_PHASE | Next: $WORKFLOW_NEXT"
     fi

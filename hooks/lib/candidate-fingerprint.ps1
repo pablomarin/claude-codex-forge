@@ -364,8 +364,9 @@ if ($Mode -eq 'promote') {
 try {
     $root = (Resolve-Path (Invoke-GitText @('rev-parse', '--show-toplevel'))).Path
     $head = Invoke-GitText @('-C', $root, 'rev-parse', 'HEAD')
-    $commonRelative = Invoke-GitText @('-C', $root, 'rev-parse', '--git-common-dir')
-    $common = (Resolve-Path (Join-Path $root $commonRelative)).Path
+    $commonPath = Invoke-GitText @('-C', $root, 'rev-parse', '--git-common-dir')
+    if (-not [IO.Path]::IsPathRooted($commonPath)) { $commonPath = Join-Path $root $commonPath }
+    $common = (Resolve-Path -LiteralPath $commonPath).Path
     $state = Join-Path $root '.forge/local/state.md'
     if (-not (Test-Path -LiteralPath $state -PathType Leaf)) { throw 'BLOCKED[artifact]: canonical state is required' }
     $stateItem = Get-Item -LiteralPath $state -Force

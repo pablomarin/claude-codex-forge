@@ -97,6 +97,7 @@ if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd
 
     $receiptStateRaw = (Get-Content -LiteralPath $stateMd -Raw) -replace "`r", ""
     $workflowCommandRows = @()
+    $workflowPhaseRows = @()
     $inWorkflow = $false
     foreach ($line in @($receiptStateRaw -split "`n")) {
         if ($line -ceq '## Workflow') { $inWorkflow = $true; continue }
@@ -104,10 +105,13 @@ if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd
         if (-not $inWorkflow) { continue }
         $parts = $line -split '\|'
         if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Command') { $workflowCommandRows += $parts[2].Trim() }
+        if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'Phase') { $workflowPhaseRows += $parts[2].Trim() }
     }
     $workflowCommand = if ($workflowCommandRows.Count -eq 1) { [string]$workflowCommandRows[0] } else { "" }
+    $workflowPhase = if ($workflowPhaseRows.Count -eq 1) { [string]$workflowPhaseRows[0] } else { "" }
     $quickFixDirect = $workflowCommand -cmatch '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'
-    if ($workflowCommand -and $workflowCommand -notin @('none', '-', '—') -and -not $quickFixDirect) {
+    # Completed receipts are historical; PreToolUse still enforces shipping.
+    if ($workflowPhase -cne 'complete' -and $workflowCommand -and $workflowCommand -notin @('none', '-', '—') -and -not $quickFixDirect) {
         $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
         if (-not (Test-Path -LiteralPath $verificationReceipt)) { $verificationReceipt = Join-Path (Get-Location) 'hooks\lib\verification-receipt.ps1' }
         $receiptStatus = 2
@@ -170,12 +174,12 @@ if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd
 # PS 5.1 compatible: no ??, [Console]::Error.WriteLine for STDERR.
 # ---------------------------------------------------------------------------
 function Invoke-ForgeGoalStuckCheck {
-    $fpFile   = Join-Path $stateLocalDir "forge-goal-last-fingerprint"
-    $ctrFile  = Join-Path $stateLocalDir "forge-goal-stuck-count"
-
     # Only proceed if /forge-goal is active: state.md must have a non-empty
     # nonce in the ## /goal session table.
     if ([string]::IsNullOrEmpty($stateMd) -or -not (Test-Path -LiteralPath $stateMd)) { return }
+    $stateDirectory = Split-Path -Parent $stateMd
+    $fpFile = Join-Path $stateDirectory "forge-goal-last-fingerprint"
+    $ctrFile = Join-Path $stateDirectory "forge-goal-stuck-count"
 
     $raw = Get-Content $stateMd -Raw -ErrorAction SilentlyContinue
     if ([string]::IsNullOrEmpty($raw)) { return }
@@ -226,7 +230,7 @@ function Invoke-ForgeGoalStuckCheck {
 
     # Persist updated counter (WriteAllText to avoid BOM that Set-Content adds).
     try {
-        $null = New-Item -ItemType Directory -Path $stateLocalDir -Force -ErrorAction SilentlyContinue
+        $null = New-Item -ItemType Directory -Path $stateDirectory -Force -ErrorAction SilentlyContinue
         [System.IO.File]::WriteAllText($ctrFile, "$newCount|$currentFp`n")
     } catch {
         # Non-blocking: ignore write failures
@@ -325,7 +329,7 @@ if ((-not $stateMd -or -not (Test-Path $stateMd)) -and (Test-Path "CONTINUITY.md
 # it appears before the canonical scaffold. Scope first, then match.
 $workflowReminder = ""
 if ($stateMd -and (Test-Path $stateMd)) {
-    $stateContent = Get-Content $stateMd -Raw -ErrorAction SilentlyContinue
+    $stateContent = (Get-Content $stateMd -Raw -ErrorAction SilentlyContinue) -replace "`r", ""
     if (-not [string]::IsNullOrEmpty($stateContent)) {
         # Extract just the `## Workflow` block (between `## Workflow` and the next `## ` heading).
         $workflowBlockLines = @()
@@ -343,7 +347,7 @@ if ($stateMd -and (Test-Path $stateMd)) {
                 $nextLine = ($workflowBlockLines | Select-String '\|\s*Next step\s*\|' | Select-Object -First 1)
                 $phase = if ($phaseLine) { ($phaseLine -split '\|')[2].Trim() } else { "" }
                 $next = if ($nextLine) { ($nextLine -split '\|')[2].Trim() } else { "" }
-                $workflowReminder = "WORKFLOW: $cmd | Phase: $phase | Next: $next"
+                if ($phase -cne "complete") { $workflowReminder = "WORKFLOW: $cmd | Phase: $phase | Next: $next" }
             }
         }
     }
@@ -397,8 +401,16 @@ if ($workflowReminder) {
         [Console]::Error.WriteLine($workflowReminder)
         Exit-ForgeAllow
     }
-    $stateStopHash = Get-ForgeFileSha $stateMd
-    $stateStopFile = Join-Path $stateLocalDir "state-last-stop.sha256"
+    try {
+        $stateStopHash = (Get-FileHash -LiteralPath $stateMd -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    } catch {
+        [Console]::Error.WriteLine("FORGE_STATE_INVALID: could not hash canonical state checkpoint")
+        exit 2
+    }
+    # .NET relative writes retain the process cwd after Set-Location; bind
+    # checkpoint paths to the resolved event-worktree state directory.
+    $stateStopDirectory = Split-Path -Parent $stateMd
+    $stateStopFile = Join-Path $stateStopDirectory "state-last-stop.sha256"
     $stateStopItem = Get-Item -LiteralPath $stateStopFile -Force -ErrorAction SilentlyContinue
     if ($stateStopItem -and (($stateStopItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $stateStopItem.PSIsContainer)) {
         [Console]::Error.WriteLine("FORGE_STATE_INVALID: invalid state checkpoint sidecar")
@@ -407,7 +419,7 @@ if ($workflowReminder) {
     $stateStopPrevious = ""
     if ($stateStopItem) { $stateStopPrevious = ([IO.File]::ReadAllText($stateStopFile)).Trim() }
     if ($stateStopPrevious -ne $stateStopHash) {
-        $stateStopTemp = Join-Path $stateLocalDir (".state-last-stop." + [Guid]::NewGuid().ToString("N"))
+        $stateStopTemp = Join-Path $stateStopDirectory (".state-last-stop." + [Guid]::NewGuid().ToString("N"))
         try {
             [IO.File]::WriteAllText($stateStopTemp, "$stateStopHash`n", (New-Object Text.UTF8Encoding($false)))
             Move-Item -LiteralPath $stateStopTemp -Destination $stateStopFile -Force
