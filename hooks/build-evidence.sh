@@ -9,6 +9,8 @@
 # Always exits 0 — never blocks.
 
 set -u
+DIAGNOSTIC=false
+[ "${1:-}" = --diagnostic ] && DIAGNOSTIC=true
 
 NOW_UNIX=$(date +%s)
 
@@ -189,7 +191,7 @@ parse_goal_session() {
             | awk '/^## \/goal session$/{flag=1;next} flag && /^## /{flag=0} flag')
 
     local nonce cmd
-    nonce=$(echo "$block" | grep -E '\|[[:space:]]*nonce[[:space:]]*\|' \
+    nonce=$(echo "$block" | grep -iE '\|[[:space:]]*nonce[[:space:]]*\|' \
             | head -1 | awk -F'|' '{print $3}' | xargs)
     cmd=$(echo "$block" | grep -E '\|[[:space:]]*workflow_command[[:space:]]*\|' \
             | head -1 | awk -F'|' '{print $3}' | xargs)
@@ -665,7 +667,8 @@ PR_HEAD_REF_JSON=$(json_str_field "head_ref" "$PR_HEAD_REF")
 E2E_PATH_JSON=$(json_str_field "path" "$E2E_PATH")
 CANDIDATE_ID_JSON=$(json_str_field "candidate_id" "$CANDIDATE_ID")
 
-# Emit evidence JSON.
+# Emit for active Goal sessions or explicit diagnostic inspection.
+if [ -n "$GOAL_NONCE" ] || [ "$DIAGNOSTIC" = true ]; then
 {
     echo "FORGE_GOAL_EVIDENCE_BEGIN"
     printf '{'
@@ -712,6 +715,7 @@ CANDIDATE_ID_JSON=$(json_str_field "candidate_id" "$CANDIDATE_ID")
     printf '}\n'
     echo "FORGE_GOAL_EVIDENCE_END"
 } >&2
+fi
 
 printf '%s' "$INPUT" | grep -qE '"host"[[:space:]]*:[[:space:]]*"codex"' && printf '{}\n'
 exit 0

@@ -1010,14 +1010,17 @@ fi
 # now invokes build-evidence directly with stop_hook_active=true to assert
 # evidence still emits inside an active /goal loop.
 # ===========================================================================
-start_test "build-evidence emits FORGE_GOAL_EVIDENCE markers even when stop_hook_active=true"
+start_test "active Goal evidence emits even when stop_hook_active=true"
 
 HOOK_EVIDENCE_SH="$REPO_ROOT/hooks/build-evidence.sh"
 
 SN=$(scratch_dir checkstateupd-evidence)
-mkdir -p "$SN/.claude/local"
-cp "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/empty-state.md" \
-   "$SN/.claude/local/state.md"
+mkdir -p "$SN/.forge/local"
+{
+    printf '<!-- forge:state-schema v6 -->\n'
+    cat "$REPO_ROOT/tests/template/fixtures/state-md-build-evidence/with-goal-session.md"
+} > "$SN/.forge/local/state.md"
+printf '6\n' > "$SN/.forge/version"
 
 OUT_N="$SN/.out"
 (
@@ -2945,7 +2948,7 @@ printf 'changed\n' > "$QF/app.txt"
 QF_INPUT=$(printf '{"cwd":"%s","tool_input":{"command":"git commit -m quick-fix"}}' "$QF")
 printf '%s' "$QF_INPUT" | bash "$QF/.forge/hooks/check-workflow-gates.sh" > "$QF/gate.out" 2>&1
 assert_equals "$?" "0" "exact quick-fix bypasses final receipt roles"
-printf '{"cwd":"%s"}' "$QF" | bash "$QF/.forge/hooks/build-evidence.sh" > "$QF/evidence.out" 2>&1
+printf '{"cwd":"%s"}' "$QF" | bash "$QF/.forge/hooks/build-evidence.sh" --diagnostic > "$QF/evidence.out" 2>&1
 assert_contains "$QF/evidence.out" '"quick_fix_direct":true' \
     "quick-fix evidence reports the validated direct path"
 
@@ -3005,7 +3008,7 @@ if command -v pwsh >/dev/null 2>&1; then
         -File "$QF_PS/.forge/hooks/check-workflow-gates.ps1" > "$QF_PS/case-rename.ps.out" 2>&1
     assert_equals "$?" "2" "PowerShell counts both endpoints of a case-only rename"
     printf '{"cwd":"%s"}' "$QF_PS" | pwsh -NoLogo -NoProfile \
-        -File "$QF_PS/.forge/hooks/build-evidence.ps1" > "$QF_PS/case-rename-evidence.ps.out" 2>&1
+        -File "$QF_PS/.forge/hooks/build-evidence.ps1" -Diagnostic > "$QF_PS/case-rename-evidence.ps.out" 2>&1
     assert_contains "$QF_PS/case-rename-evidence.ps.out" '"quick_fix_direct":false' \
         "PowerShell evidence rejects a case-only rename overflow"
     git -C "$QF_PS" mv -f App.txt app.txt
@@ -3044,7 +3047,7 @@ printf '%s' "$QF_INPUT" | bash "$QF/.forge/hooks/check-workflow-gates.sh" > "$QF
 assert_equals "$?" "2" "four implementation paths fall through to full receipt enforcement"
 assert_contains "$QF/four-path.out" 'final receipt set is missing' \
     "scope overflow cannot use the quick-fix exemption"
-printf '{"cwd":"%s"}' "$QF" | bash "$QF/.forge/hooks/build-evidence.sh" > "$QF/four-path-evidence.out" 2>&1
+printf '{"cwd":"%s"}' "$QF" | bash "$QF/.forge/hooks/build-evidence.sh" --diagnostic > "$QF/four-path-evidence.out" 2>&1
 assert_contains "$QF/four-path-evidence.out" '"quick_fix_direct":false' \
     "scope overflow cannot claim direct quick-fix readiness"
 

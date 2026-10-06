@@ -10,6 +10,8 @@
 # PS 5.1 compatible. No ??. No ConvertTo-Json for emission (byte-stable
 # hand-built string instead). No Get-Date -UFormat %s (inconsistent across hosts).
 
+param([switch]$Diagnostic)
+
 $ErrorActionPreference = 'Continue'
 
 # ---------------------------------------------------------------------------
@@ -166,13 +168,15 @@ function Parse-GoalSession {
     if (-not $StateIsV6) { return $result }
     $lines = Read-StateMdLines
     $inSection = $false
+    $nonceSeen = $false
     foreach ($line in $lines) {
         if ($line -match '^## /goal session$') { $inSection = $true; continue }
         if ($inSection -and $line -match '^## ') { break }
         if (-not $inSection) { continue }
         # Markdown table row: | <field> | <value> |
-        if ($line -match '^\|\s*nonce\s*\|\s*(.+?)\s*\|') {
+        if (-not $nonceSeen -and $line -match '^\|\s*nonce\s*\|\s*([^|]*?)\s*\|') {
             $result.nonce = $matches[1].Trim()
+            $nonceSeen = $true
         }
         elseif ($line -match '^\|\s*workflow_command\s*\|\s*(.+?)\s*\|') {
             $result.workflow_command = $matches[1].Trim()
@@ -830,9 +834,11 @@ $json = '{' +
     '"errors":[]' +
     '}'
 
-[Console]::Error.WriteLine("FORGE_GOAL_EVIDENCE_BEGIN")
-[Console]::Error.WriteLine($json)
-[Console]::Error.WriteLine("FORGE_GOAL_EVIDENCE_END")
+if ($Diagnostic -or -not [string]::IsNullOrEmpty($GoalNonce)) {
+    [Console]::Error.WriteLine("FORGE_GOAL_EVIDENCE_BEGIN")
+    [Console]::Error.WriteLine($json)
+    [Console]::Error.WriteLine("FORGE_GOAL_EVIDENCE_END")
+}
 
 if ($parsed.host -eq "codex") { Write-Output "{}" }
 exit 0

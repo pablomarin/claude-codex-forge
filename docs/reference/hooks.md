@@ -43,6 +43,15 @@ task worktree when this limitation applies. Selecting only a tool working direct
 change the hook context. A Forge refresh repairs its parsers but does not repair this upstream
 payload loss. See [Codex issue #33986](https://github.com/openai/codex/issues/33986).
 
+## Goal Evidence Output
+
+`build-evidence.{sh,ps1}` prints Goal markers and JSON only when the canonical Goal nonce is
+active. A missing or empty nonce, or the exact template placeholder, keeps ordinary Stop output
+quiet. Evidence computation and worktree-local fingerprint updates still run, including when
+`check-state-updated` invokes the builder inline. Active Goal output and accounting are unchanged.
+For explicit inspection outside Goal, run `build-evidence.sh --diagnostic` or
+`build-evidence.ps1 -Diagnostic`; these options emit diagnostics without activating Goal.
+
 ## Workflow Gates
 
 `check-state-updated.{sh,ps1}` excludes workflows with `Phase: complete` from stale-receipt

@@ -2,6 +2,19 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.7 — 2026-10-06
+
+### Quiet Goal evidence outside Goal sessions
+
+Stop hooks no longer print `FORGE_GOAL_EVIDENCE` markers and JSON when the canonical Goal nonce
+is missing, empty, or the template placeholder. Both registered and inline evidence builders retain
+fingerprint updates, state validation, workflow reminders, changelog enforcement, and shipping gates.
+Active Goal sessions retain their evidence output and accounting. Explicit `--diagnostic` (Bash)
+or `-Diagnostic` (PowerShell) preserves manual inspection without activating Goal.
+Both builders read the first nonce row case-insensitively, matching existing Goal accounting.
+Regression coverage exercises Claude and Codex as main hosts in Bash and PowerShell, including
+linked-worktree event routing. Hook context still depends on the host-supplied event cwd.
+
 ## 6.4.6 — 2026-10-06
 
 ### Completed workflow hooks and symmetric main-engine verification

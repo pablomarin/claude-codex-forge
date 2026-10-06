@@ -136,19 +136,44 @@ function Invoke-RegisteredCodex([string]$Root, [string]$Event, [string]$Hook, [s
     # Pass the registration's inner code as one literal argv item; no shell expands it.
     return Invoke-FixtureScript -Root $Root -Script $Matches[1] -InputText $Payload -CommandMode
 }
-function Invoke-Stop([string]$RegisteredRoot, [string]$EventRoot, [string]$MainHost, [bool]$Active = $false, [string]$Turn = '') {
+function Invoke-Stop([string]$RegisteredRoot, [string]$EventRoot, [string]$MainHost, [bool]$Active = $false, [string]$Turn = '', [string]$Hook = 'check-state-updated.ps1') {
     $payload = @{ cwd = $EventRoot; host = $MainHost; hook_event_name = 'Stop'; stop_hook_active = $Active;
         session_id = 'stop-smoke'; turn_id = $Turn } | ConvertTo-Json -Compress
     if ($MainHost -eq 'codex') {
-        return Invoke-RegisteredCodex $RegisteredRoot 'Stop' 'check-state-updated.ps1' $payload
+        return Invoke-RegisteredCodex $RegisteredRoot 'Stop' $Hook $payload
     } else {
         $settings = Get-Content (Join-Path $RegisteredRoot '.claude\settings.json') -Raw | ConvertFrom-Json
-        $command = @($settings.hooks.Stop.hooks | Where-Object { $_.command -match 'check-state-updated.ps1' })
+        $command = @($settings.hooks.Stop.hooks | Where-Object { $_.command.Contains($Hook) })
         if ($command.Count -ne 1) { throw 'missing Claude Stop registration' }
-        $scriptPath = Join-Path $RegisteredRoot '.forge\hooks\check-state-updated.ps1'
+        $scriptPath = Join-Path $RegisteredRoot ".forge\hooks\$Hook"
         $scriptArguments = @()
     }
     return Invoke-FixtureScript $RegisteredRoot $scriptPath $scriptArguments $payload
+}
+function Set-InactiveGoal([string]$Root, [string]$Mode) {
+    $path = Join-Path $Root '.forge\local\state.md'
+    $raw = [IO.File]::ReadAllText($path) -replace "`r", ''
+    if ($Mode -eq 'missing') { $raw = [regex]::Replace($raw, '(?ms)^## /goal session\n.*?(?=^## |\z)', '') }
+    elseif ($Mode -eq 'empty') { $raw = ([regex]'<uuid-v4-lowercase>').Replace($raw, '', 1) }
+    [IO.File]::WriteAllText($path, $raw, $utf8)
+}
+function Assert-NoGoalOutput($Result, [string]$MainHost, [string]$Label) {
+    Assert-Check (-not $Result.Err.Contains('FORGE_GOAL_EVIDENCE')) "$Label emits no Goal markers"
+    Assert-Check (-not $Result.Err.Contains('"session_nonce"')) "$Label emits no inactive Goal JSON"
+    $expected = if ($MainHost -eq 'codex' -and $Result.Status -eq 0) { '{}' } else { '' }
+    Assert-Check ($Result.Out.Trim() -eq $expected) "$Label preserves host allow output"
+}
+function Assert-NonGoalBuilder([string]$RegisteredRoot, [string]$EventRoot, [string]$MainHost, [string]$Label) {
+    $result = Invoke-Stop $RegisteredRoot $EventRoot $MainHost $false '' 'build-evidence.ps1'
+    Assert-Check ($result.Status -eq 0) "$Label registered builder allows Stop"
+    Assert-NoGoalOutput $result $MainHost "$Label registered builder"
+}
+function Assert-GoalOutput($Result, [string]$Nonce, [string]$Label) {
+    $valid = $false
+    if ($Result.Err -match '(?s)FORGE_GOAL_EVIDENCE_BEGIN\s*(.*?)\s*FORGE_GOAL_EVIDENCE_END') {
+        try { $valid = (($Matches[1] | ConvertFrom-Json).session_nonce -ceq $Nonce) } catch {}
+    }
+    Assert-Check $valid "$Label retains active Goal JSON"
 }
 function Set-CrlfState([string]$Root) {
     $path = Join-Path $Root '.forge\local\state.md'
@@ -216,12 +241,26 @@ public static class ForgeDelayedBranchGit {
     }
     foreach ($mainHost in @('claude', 'codex')) {
         foreach ($workflow in @('quick-fix', 'new-feature', 'fix-bug')) {
-            $root = Join-Path $scratch "$mainHost-$workflow"
+          foreach ($nonceMode in @('missing', 'empty', 'template')) {
+            $root = Join-Path $scratch "$mainHost-$workflow-$nonceMode"
             New-Fixture $root $workflow $mainHost
+            Set-InactiveGoal $root $nonceMode
             $result = Invoke-Stop $root $root $mainHost
-            Assert-Check ($result.Status -eq 0) "$mainHost $workflow first active checkpoint"
+            $label = "$mainHost $workflow $nonceMode"
+            Assert-Check ($result.Status -eq 0) "$label first active checkpoint"
+            Assert-NoGoalOutput $result $mainHost "$label first active inline/check-state"
+            Assert-NonGoalBuilder $root $root $mainHost "$label first active"
+            Assert-Check (Test-Path (Join-Path $root '.forge\local\forge-goal-last-fingerprint')) "$label active fingerprint remains published"
             Complete-Fixture $root $mainHost
-            foreach ($delivery in 1..3) { Assert-Quiet (Invoke-Stop $root $root $mainHost) "$mainHost $workflow completed delivery $delivery" }
+            Remove-Item (Join-Path $root '.forge\local\forge-goal-last-fingerprint')
+            foreach ($delivery in 1..3) {
+                $result = Invoke-Stop $root $root $mainHost
+                Assert-Quiet $result "$label completed delivery $delivery"
+                Assert-NoGoalOutput $result $mainHost "$label completed delivery $delivery inline/check-state"
+                Assert-NonGoalBuilder $root $root $mainHost "$label completed delivery $delivery"
+                Assert-Check (Test-Path (Join-Path $root '.forge\local\forge-goal-last-fingerprint')) "$label completed fingerprint remains published"
+            }
+          }
         }
         $root = Join-Path $scratch "$mainHost-active"
         New-Fixture $root 'new-feature' $mainHost
@@ -229,15 +268,22 @@ public static class ForgeDelayedBranchGit {
         $result = Invoke-Stop $root $root $mainHost
         Assert-Check ($result.Status -eq 0) "$mainHost changed checkpoint allows Stop"
         Assert-Check ($result.Err.Contains('FORGE_FINAL_EVIDENCE_STALE')) "$mainHost active receipt warning"
+        Assert-NoGoalOutput $result $mainHost "$mainHost CRLF active inline/check-state"
+        Assert-NonGoalBuilder $root $root $mainHost "$mainHost CRLF active"
         $result = Invoke-Stop $root $root $mainHost
         Assert-Check ($result.Status -eq 2) "$mainHost unchanged active checkpoint continues"
         Assert-Check ($result.Err.Contains('/new-feature stop-smoke')) "$mainHost active workflow label"
+        Assert-NoGoalOutput $result $mainHost "$mainHost CRLF unchanged active check-state"
         $result = Invoke-Stop $root $root $mainHost $true
         Assert-Check ($result.Status -eq 0 -and -not $result.Err.Contains('WORKFLOW:')) "$mainHost continuation-loop guard"
         Complete-Fixture $root $mainHost
         Set-CrlfState $root
-        Assert-Quiet (Invoke-Stop $root $root $mainHost) "$mainHost CRLF completed first Stop"
-        Assert-Quiet (Invoke-Stop $root $root $mainHost) "$mainHost CRLF completed repeated Stop"
+        foreach ($delivery in 1..2) {
+            $result = Invoke-Stop $root $root $mainHost
+            Assert-Quiet $result "$mainHost CRLF completed Stop $delivery"
+            Assert-NoGoalOutput $result $mainHost "$mainHost CRLF completed Stop $delivery inline/check-state"
+            Assert-NonGoalBuilder $root $root $mainHost "$mainHost CRLF completed Stop $delivery"
+        }
         foreach ($file in @('one', 'two', 'three', 'four')) { [IO.File]::WriteAllText((Join-Path $root $file), "before`n", $utf8) }
         & git -C $root add one two three four
         & git -C $root commit -qm fixture
@@ -270,17 +316,26 @@ public static class ForgeDelayedBranchGit {
         $before = (Get-FileHash (Join-Path $primary '.forge\local\state.md')).Hash
         $result = Invoke-Stop $primary $nested $mainHost
         Assert-Check ($result.Status -eq 0) "$mainHost first linked checkpoint"
+        Assert-NoGoalOutput $result $mainHost "$mainHost linked first inline/check-state"
+        Assert-NonGoalBuilder $primary $nested $mainHost "$mainHost linked first"
         $result = Invoke-Stop $primary $nested $mainHost
         Assert-Check ($result.Status -eq 2 -and $result.Err.Contains('/new-feature linked-smoke')) "$mainHost linked active feature continuation"
         Assert-Check (-not $result.Err.Contains('/quick-fix')) "$mainHost primary label absent from linked feedback"
+        Assert-NoGoalOutput $result $mainHost "$mainHost linked active check-state"
         Assert-Check (Test-Path (Join-Path $linked '.forge\local\forge-goal-last-fingerprint')) "$mainHost feature fingerprint belongs to event worktree"
         $primaryFiles = @(Get-ChildItem (Join-Path $primary '.forge\local') -Force | Where-Object { $_.Name -like 'forge-goal-last-fingerprint*' -or $_.Name -like '.state-last-stop.*' })
         Assert-Check ($primaryFiles.Count -eq 0) "$mainHost linked native I/O leaves no primary fingerprint or temp file"
         Assert-Check ((Get-FileHash (Join-Path $primary '.forge\local\state.md')).Hash -eq $before) "$mainHost linked Stop preserves primary state"
-        Assert-Quiet (Invoke-Stop $primary $primary $mainHost) "$mainHost primary completed quick-fix"
+        $result = Invoke-Stop $primary $primary $mainHost
+        Assert-Quiet $result "$mainHost primary completed quick-fix"
+        Assert-NoGoalOutput $result $mainHost "$mainHost primary completed quick-fix inline/check-state"
+        Assert-NonGoalBuilder $primary $primary $mainHost "$mainHost primary completed quick-fix"
         Assert-Check (Test-Path (Join-Path $linked '.forge\local\state-last-stop.sha256')) "$mainHost checkpoint sidecar belongs to linked worktree"
         Complete-Fixture $linked $mainHost
-        Assert-Quiet (Invoke-Stop $primary $nested $mainHost) "$mainHost linked completion"
+        $result = Invoke-Stop $primary $nested $mainHost
+        Assert-Quiet $result "$mainHost linked completion"
+        Assert-NoGoalOutput $result $mainHost "$mainHost linked completed inline/check-state"
+        Assert-NonGoalBuilder $primary $nested $mainHost "$mainHost linked completed"
         $linkedState = Join-Path $linked '.forge\local\state.md'
         $raw = [IO.File]::ReadAllText($linkedState) -replace "`r", ''
         $raw = [regex]::Replace($raw, '(?ms)^## /goal session\n.*?(?=^## )', '')
@@ -305,8 +360,9 @@ public static class ForgeDelayedBranchGit {
         # Publish once from the feature process cwd to isolate the counter's
         # event-cwd contract from the separately asserted Stop publication.
         $goalPayload = @{ cwd = $nested; host = $mainHost; stop_hook_active = $true } | ConvertTo-Json -Compress
-        $result = Invoke-FixtureScript $linked (Join-Path $linked '.forge\hooks\build-evidence.ps1') @() $goalPayload
+        $result = Invoke-Stop $linked $nested $mainHost $true '' 'build-evidence.ps1'
         Assert-Check ($result.Status -eq 0) "$mainHost linked fingerprint seeds the counter control"
+        Assert-GoalOutput $result '66666666-6666-4666-8666-666666666666' "$mainHost linked registered builder"
         $primaryFingerprint = Join-Path $primary '.forge\local\forge-goal-last-fingerprint'
         $primaryFpHash = (Get-FileHash $primaryFingerprint).Hash
         foreach ($delivery in 1..2) {
@@ -351,12 +407,20 @@ public static class ForgeDelayedBranchGit {
         [IO.File]::WriteAllText($state, $raw, $utf8)
         $result = Invoke-FixtureScript $root (Join-Path $root '.forge\hooks\lib\goal-ledger.ps1') @('activate', '-Project', $root, '-State', $state)
         Assert-Check ($result.Status -eq 0) "$mainHost native Goal activation"
+        $result = Invoke-Stop $root $root $mainHost $false '' 'build-evidence.ps1'
+        Assert-Check ($result.Status -eq 0) "$mainHost active Goal registered builder allows Stop"
+        Assert-GoalOutput $result $nonce "$mainHost active Goal registered builder"
         Assert-Quiet (Invoke-Stop $root $root $mainHost $false 'goal-turn-1') "$mainHost completed workflow Goal Stop"
         Assert-Quiet (Invoke-Stop $root $root $mainHost $false 'goal-turn-1') "$mainHost duplicate Goal Stop"
         $turns = Join-Path $root ".git\forge-goals\$nonce\turns"
         Assert-Check (Test-Path (Join-Path $turns '00000001')) "$mainHost complete phase still charges Goal"
         Assert-Check (-not (Test-Path (Join-Path $turns '00000002'))) "$mainHost duplicate charge remains idempotent"
         Assert-Check ([IO.File]::ReadAllText((Join-Path $turns '00000001')).Contains("host=$mainHost")) "$mainHost ledger host attribution"
+        # Keep the builder's active decision on the first case-insensitive nonce row.
+        $raw = [IO.File]::ReadAllText($state).Replace("| nonce | $nonce |", "| Nonce | $nonce |`n| nonce | <uuid-v4-lowercase> |")
+        [IO.File]::WriteAllText($state, $raw, $utf8)
+        $result = Invoke-Stop $root $root $mainHost $false '' 'build-evidence.ps1'
+        Assert-GoalOutput $result $nonce "$mainHost uppercase first nonce with later placeholder"
     }
     Write-Host "Stop workflow PowerShell: $passes passed, $failures failed"
     if ($failures -ne 0) { exit 1 }
