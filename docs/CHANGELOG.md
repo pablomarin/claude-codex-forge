@@ -2,6 +2,18 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.8 — 2026-10-06
+
+### Easier installation and upgrade instructions
+
+README and Getting Started now lead with short, self-contained Claude Code/Codex install and
+upgrade prompts. Users start in their target project; the agent obtains or reuses the official
+Forge clone and runs the existing deterministic installer. Manual commands remain available.
+The agent-assisted guide separates user prompts from the detailed agent procedure, reuses existing
+approval, and makes checkout scope explicit. Worktree and multi-repository examples require
+per-checkout updates and results while preserving active work, project configuration, and state.
+No installer or runtime behavior changed.
+
 ## 6.4.7 — 2026-10-06
 
 ### Quiet Goal evidence outside Goal sessions
