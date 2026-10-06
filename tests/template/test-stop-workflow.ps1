@@ -1,4 +1,5 @@
 # Windows installed Stop contracts with each host and linked event-cwd routing.
+param([switch]$QuickFixOnly, [switch]$LegacyProcessArguments)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('forge-stop-workflow-' + [Guid]::NewGuid().ToString('N'))
@@ -22,7 +23,7 @@ function Invoke-FixtureScript([string]$Root, [string]$Script, [string[]]$Argumen
     } else {
         $nativeArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Script) + $Arguments
     }
-    if ($info.PSObject.Properties['ArgumentList']) {
+    if (-not $LegacyProcessArguments -and $info.PSObject.Properties['ArgumentList']) {
         foreach ($argument in $nativeArguments) { $info.ArgumentList.Add($argument) }
     } else {
         # Windows PowerShell 5.1's process API has only the command-line string.
@@ -68,7 +69,7 @@ function Install-Hooks([string]$Root) {
     Copy-Item (Join-Path $repo 'state.template.md') (Join-Path $Root '.forge\local\state.md')
     [IO.File]::WriteAllText((Join-Path $Root '.forge\version'), "6`n", $utf8)
 }
-function New-Fixture([string]$Root, [string]$Workflow, [string]$MainHost) {
+function New-Fixture([string]$Root, [string]$Workflow, [string]$MainHost, [switch]$DeferActivation) {
     [IO.Directory]::CreateDirectory((Join-Path $Root 'docs')) | Out-Null
     & git -C $Root init -q --initial-branch=main
     & git -C $Root config user.email forge-test@example.com
@@ -80,11 +81,44 @@ function New-Fixture([string]$Root, [string]$Workflow, [string]$MainHost) {
     & git -C $Root commit -qm init
     $prefix = switch ($Workflow) { quick-fix { 'quick-fix' }; new-feature { 'feat' }; fix-bug { 'fix' } }
     & git -C $Root switch -qc "$prefix/stop-smoke"
+    $switchStatus = $LASTEXITCODE
+    $branch = @(& git -C $Root symbolic-ref -q --short HEAD)
+    $branchStatus = $LASTEXITCODE
+    if ($switchStatus -ne 0 -or $branchStatus -ne 0 -or $branch.Count -ne 1 -or $branch[0] -cne "$prefix/stop-smoke") {
+        throw "fixture checkout failed: root=$Root switch_exit=$switchStatus branch_exit=$branchStatus branch=$branch"
+    }
     Install-Hooks $Root
+    if ($DeferActivation) { return }
+    $result = Activate-Fixture $Root $Workflow $MainHost
+    if ($result.Status -ne 0) { throw "fixture activation failed: root=$Root branch=$branch child_exit=$($result.Status): $($result.Err)" }
+}
+function Activate-Fixture([string]$Root, [string]$Workflow, [string]$MainHost) {
     $result = Invoke-FixtureScript $Root (Join-Path $Root '.forge\hooks\lib\workflow-state.ps1') @(
         'activate', '--host', $MainHost, '--workflow', $Workflow, '--task', 'stop-smoke',
         '--base-ref', 'main', '--phase', 'implementation', '--next-step', 'finish smoke')
-    if ($result.Status -ne 0) { throw "fixture activation failed: $($result.Err)" }
+    return $result
+}
+function Install-DelayedBranchGit([string]$Root, [string]$Branch, [int]$Status) {
+    [IO.File]::WriteAllText((Join-Path $Root 'bin\git-branch'), $Branch, $utf8)
+    [IO.File]::WriteAllText((Join-Path $Root 'bin\git-status'), [string]$Status, $utf8)
+    if ($unixRuntime) {
+        $quotedGit = "'" + $realGit.Replace("'", ("'" + [char]34 + "'" + [char]34 + "'")) + "'"
+        $wrapper = @'
+#!/bin/sh
+if [ "$3" = symbolic-ref ]; then
+  cat "$2/bin/git-branch"
+  printf '\n'
+  sleep 1
+  touch "$2/bin/git-branch-finished"
+  exit "$(cat "$2/bin/git-status")"
+fi
+exec REAL_GIT "$@"
+'@
+        [IO.File]::WriteAllText((Join-Path $Root 'bin/git'), $wrapper.Replace('REAL_GIT', $quotedGit) + "`n", $utf8)
+        & chmod +x (Join-Path $Root 'bin/git')
+    } else {
+        Copy-Item $nativeGitWrapper (Join-Path $Root 'bin\git.exe')
+    }
 }
 function Complete-Fixture([string]$Root, [string]$MainHost) {
     $result = Invoke-FixtureScript $Root (Join-Path $Root '.forge\hooks\lib\workflow-state.ps1') @(
@@ -129,6 +163,57 @@ function Assert-Quiet($Result, [string]$Label) {
 try {
     [IO.Directory]::CreateDirectory($scratch) | Out-Null
     if ($unixRuntime) { $scratch = (& bash -c 'cd "$1" && pwd -P' '--' $scratch).Trim() }
+    $realGit = (Get-Command git -CommandType Application | Select-Object -First 1).Source
+    if (-not $unixRuntime) {
+        $nativeGitWrapper = Join-Path $scratch 'native-git.exe'
+        $gitSource = @'
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+public static class ForgeDelayedBranchGit {
+    public static int Main(string[] args) {
+        if (args.Length > 2 && args[2] == "symbolic-ref") {
+            string bin = Path.Combine(args[1], "bin");
+            Console.WriteLine(File.ReadAllText(Path.Combine(bin, "git-branch")));
+            Console.Out.Flush();
+            Thread.Sleep(1000);
+            File.WriteAllText(Path.Combine(bin, "git-branch-finished"), "complete");
+            return Int32.Parse(File.ReadAllText(Path.Combine(bin, "git-status")));
+        }
+        var info = new ProcessStartInfo(@"REAL_GIT");
+        info.UseShellExecute = false;
+        info.Arguments = String.Join(" ", args.Select(a => "\"" + a.Replace("\"", "\\\"") + "\""));
+        using (var process = Process.Start(info)) { process.WaitForExit(); return process.ExitCode; }
+    }
+}
+'@
+        Add-Type -TypeDefinition $gitSource.Replace('REAL_GIT', $realGit.Replace('"', '""')) -OutputAssembly $nativeGitWrapper -OutputType ConsoleApplication
+    }
+    # Native output arrives before process exit, so First must not stop Git early.
+    foreach ($mainHost in @('claude', 'codex')) {
+        foreach ($probe in @(@('valid', 'quick-fix/stop-smoke', 0), @('failed', 'quick-fix/stop-smoke', 9), @('wrong', 'quick-fix/other', 0))) {
+            $root = Join-Path $scratch "$mainHost-branch-$($probe[0])"
+            New-Fixture $root 'quick-fix' $mainHost -DeferActivation
+            Install-DelayedBranchGit $root $probe[1] $probe[2]
+            $result = Activate-Fixture $root 'quick-fix' $mainHost
+            Assert-Check (Test-Path (Join-Path $root 'bin\git-branch-finished')) "$mainHost $($probe[0]) native branch process completes"
+            if ($probe[0] -eq 'valid') {
+                Assert-Check ($result.Status -eq 0) "$mainHost successful exact branch activates quick-fix"
+                Assert-Check ((Invoke-Stop $root $root $mainHost).Status -eq 0) "$mainHost native branch fixture first registered Stop"
+                $result = Invoke-Stop $root $root $mainHost
+                Assert-Check ($result.Status -eq 2 -and $result.Err.Contains('/quick-fix stop-smoke')) "$mainHost native branch fixture registered continuation preserves status 2"
+            } else {
+                Assert-Check ($result.Status -ne 0 -and $result.Err.Contains('requires branch quick-fix/stop-smoke')) "$mainHost $($probe[0]) native branch blocks activation"
+            }
+        }
+    }
+    if ($QuickFixOnly) {
+        Write-Host "Quick-fix native process PowerShell: $passes passed, $failures failed"
+        if ($failures -ne 0) { exit 1 }
+        exit 0
+    }
     foreach ($mainHost in @('claude', 'codex')) {
         foreach ($workflow in @('quick-fix', 'new-feature', 'fix-bug')) {
             $root = Join-Path $scratch "$mainHost-$workflow"

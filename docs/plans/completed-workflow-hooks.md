@@ -27,6 +27,11 @@ do not guess another worktree or change shipping authorization/evidence boundari
    PreToolUse controls, rather than calling the router directly with `-File`.
    PowerShell reviewer capture must resolve an already absolute Git common directory without
    appending it to the linked worktree; prove both primary and linked capture through the helper.
+   Native Windows CI closes platform qualification. Its failures require the compiled Claude
+   fixture to use the configured canonical model/provider envelope, plus diagnostic preservation.
+   Quick-fix activation must await Git Head/Branch/BaseRef completion before selecting its first
+   output and checking native status; prove successful, failed and wrong-branch controls with a
+   delayed native command. Preserve exact branch/base/clean-worktree guards.
 2. Expand deterministic dual-engine E2E and council fixtures to both main hosts, healthy
    other-engine review/opinion routing, and visible same-engine fallback. Mirror the acceptance
    coverage on PowerShell. Keep vendor CLI calls faked in deterministic suites.

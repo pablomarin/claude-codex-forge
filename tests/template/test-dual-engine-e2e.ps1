@@ -4,6 +4,7 @@ $temporary = Join-Path ([IO.Path]::GetTempPath()) ('forge-dual-e2e-' + [Guid]::N
 $originalPath = $env:PATH
 $originalHome = $env:HOME
 $powershellExe = (Get-Process -Id $PID).Path
+$completed = $false
 
 $coverage = @(
     'UC01|authoritative-legacy-refresh|test-full-refresh.ps1,test-setup.sh',
@@ -36,7 +37,26 @@ function Get-Hash([string]$Path) {
 }
 function Get-ReceiptValue([string]$Path, [string]$Key) {
     $line = Get-Content -LiteralPath $Path | Where-Object { $_ -like "$Key=*" } | Select-Object -First 1
+    if ($null -eq $line) { return '' }
     return $line.Substring($Key.Length + 1)
+}
+
+# Exercise the actual compiled Windows fixture's reply on every PS platform.
+# A library probe avoids claiming that Unix executed a Windows native binary.
+function Test-CompiledClaudeFixture([string]$Source) {
+    $probeSource=$Source.Replace('ForgeTask11Fake','ForgeTask11FixtureProbe')
+    Add-Type -TypeDefinition $probeSource -Language CSharp
+    $previousConsole=[Console]::Out
+    $captured=New-Object IO.StringWriter
+    try {
+        [Console]::SetOut($captured)
+        $probeRc=[ForgeTask11FixtureProbe]::Main([string[]]@())
+    } finally { [Console]::SetOut($previousConsole) }
+    $wrapper=$captured.ToString()|ConvertFrom-Json
+    $captured.Dispose()
+    Assert-True ($probeRc -eq 0) 'compiled Claude fixture emits a successful reply'
+    $identity=$wrapper.modelUsage.'claude-opus-5-5'
+    Assert-True ($identity.canonicalModel -ceq 'claude-opus-5-5' -and $identity.provider -ceq 'firstParty') 'compiled Claude fixture binds the configured model and provider'
 }
 
 # Unix exercises the same installed PowerShell dispatcher with portable fake CLIs.
@@ -92,11 +112,12 @@ public static class ForgeTask11Fake {
     if (args.Length > 0 && args[0] == "--help") { Console.WriteLine("-p --safe-mode --strict-mcp-config --mcp-config --settings --setting-sources --tools --permission-mode --add-dir --model --effort --output-format --no-session-persistence --session-id --resume"); return 0; }
     if (E("FAKE_CLAUDE_BEHAVIOR") == "exit") { return 23; }
     string body="schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nforge_canary_hash="+E("FORGE_DISPATCH_CANARY_HASH")+"\nforge_config_hash="+E("FORGE_DISPATCH_CONFIG_HASH")+"\nforge_qualification_revision="+E("FORGE_DISPATCH_QUALIFICATION_REVISION");
-    Console.WriteLine("{\"result\":\""+body.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\n","\\n")+"\",\"modelUsage\":{\"opus\":{}},\"provider\":\"anthropic\"}");
+    Console.WriteLine("{\"result\":\""+body.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\n","\\n")+"\",\"modelUsage\":{\"claude-haiku-4-5\":{\"canonicalModel\":\"claude-haiku-4-5\",\"provider\":\"firstParty\"},\"claude-opus-5-5\":{\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\"}}}");
     return 0;
   }
 }
 '@
+    Test-CompiledClaudeFixture $fake
     if($env:OS -eq 'Windows_NT') { Add-Type -TypeDefinition $fake -Language CSharp -OutputAssembly (Join-Path $bin 'claude.exe') -OutputType ConsoleApplication }
     else { Install-PortableEngine claude }
     $gitExecutable=(Get-Command git -CommandType Application | Select-Object -First 1).Source
@@ -160,7 +181,13 @@ exit $LASTEXITCODE
                 try {
                     $dispatchOutput = (& $powershellExe -NoProfile -ExecutionPolicy Bypass -File $contextLauncher $context $main $argumentsJson 2>&1) -join "`n"; $dispatchRc = $LASTEXITCODE
                 } finally { Pop-Location }
-                Assert-True ($dispatchRc -eq 0) "$main main $role $topology review completes"
+                [IO.File]::WriteAllText((Join-Path $reviews "$main-$role-$topology.dispatch.log"),$dispatchOutput)
+                if ($dispatchRc -ne 0) {
+                    Write-Host "Dispatcher failed (exit=$dispatchRc): $dispatchOutput"
+                    $failedReceipt=@(Get-ChildItem -LiteralPath $reviews -Filter '*.receipt'|Where-Object {(Get-ReceiptValue $_.FullName 'output_path') -ceq $result})
+                    foreach($file in $failedReceipt) { Write-Host "Failed dispatcher receipt: $($file.FullName)";Write-Host ([IO.File]::ReadAllText($file.FullName)) }
+                }
+                Assert-True ($dispatchRc -eq 0) "$main main $role $topology review completes (exit=$dispatchRc)"
                 $receipt = @(Get-ChildItem -LiteralPath $reviews -Filter '*.receipt' | Where-Object { (Get-ReceiptValue $_.FullName 'output_path') -ceq $result })
                 Assert-True ($receipt.Count -eq 1) "$main $role $topology has its own receipt"
                 $receiptPath = $receipt[0].FullName
@@ -184,11 +211,13 @@ exit $LASTEXITCODE
         }
     }
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $testHome '.forge\host-contexts'))) 'installed PowerShell reviews need no host authority directory'
+    $completed=$true
 
 }
 finally {
     $env:PATH=$originalPath; $env:HOME=$originalHome
     Remove-Item Env:FORGE_ENGINE_IDENTITY_FIXTURE,Env:FORGE_DISPATCH_TEST_MODE,Env:FORGE_TEST_DISABLE_ENGINE,Env:FAKE_CLAUDE_BEHAVIOR,Env:FAKE_CODEX_BEHAVIOR -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+    if($completed) { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue }
+    else { Write-Host "Failed deterministic fixture preserved: $temporary" }
 }
 Write-Host 'PASS: PowerShell two-main integrated seam (deterministic CLIs)'

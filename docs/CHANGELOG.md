@@ -19,6 +19,9 @@ Codex Windows hook registrations explicitly preserve the router's exit code. Pow
 blocking semantics. Regression coverage invokes the registered command itself.
 PowerShell candidate capture also preserves an absolute Git common-directory path, allowing
 independent review and opinion from linked worktrees on each main engine.
+Quick-fix activation waits for Git identity commands to complete before reading their exit status;
+early first-output selection could leave a stale status and reject a valid activation. Native
+Windows CI fixture coverage preserves canonical Claude model/provider identity and failure logs.
 
 Focused installed-hook regression coverage exercises Claude and Codex main hosts, repeated
 completed Stops, active controls and linked-worktree routing. Deterministic dual-engine E2E and
