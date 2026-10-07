@@ -81,3 +81,27 @@ and candidate-bound app/E2E receipts. Native host producer type is not exposed b
 surface; use available bounded agent with its actual runtime ID, following the producer contract,
 and report that limitation without claiming a registered native producer invocation. Final review
 and verifiers use canonical helpers. No push/PR/merge without current human authorization.
+
+## Native Windows CI completion repair
+
+The approved installer and stacked guidance PRs must both reach main after successful CI. Actual
+Windows5.1 runs37561525413 and37570838820 exhausted the 30-minute job budget before all17
+sequential suites completed. The second run passed all306 dispatcher assertions, including the
+earlier two reproduction failures; preserve those failures as intermittent observations rather
+than claiming an established runtime cause. Both runs stopped emitting output after the setup
+worktree suite's first fixture began; its child installer output is redirected to a temporary
+log, so current CI cannot distinguish slow progress from a stalled child.
+
+Keep installer/runtime behavior and every assertion unchanged. Bound the diagnostic repair to
+the CI/test harness: allow90 minutes for the broad native qualification job, print suite start,
+finish and elapsed time, and tee each focused worktree installer invocation's output into its
+existing log while keeping it visible. No suite is omitted; nonzero status still blocks Windows
+attestation and merge. Windows completion remains unverified until fresh native CI actually passes.
+
+Before changing the runner, reproduce missing suite boundaries with tiny disposable success and
+failure fixtures through the real PowerShell runner; verify all discovered fixtures still run
+after failure and the aggregate result remains nonzero. Cover setup log/exit preservation with
+the owning focused worktree suite on portable PS7; it does not certify Windows5.1. Run run-fast
+after final bytes settle. Obtain fresh exact-candidate paired reviews and app/E2E receipts before
+normal promotion. Include this same bounded CI repair in the stacked guidance candidate and
+revalidate its final receipts, keeping6.4.8 and6.4.9 release boundaries and monotonic counters.

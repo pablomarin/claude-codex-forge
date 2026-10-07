@@ -25,6 +25,11 @@ checkout-only option retains the previous Git 2.23+ requirement.
 Portable PowerShell candidate discovery now normalizes path separators before pruning private
 runtime directories, preventing parallel council cleanup from interrupting snapshot enumeration.
 
+Windows qualification CI has a bounded 90-minute diagnostic allowance. Its runner reports each
+suite's start, finish, exit status and elapsed time, and worktree setup tests retain child logs while
+streaming installer output visibly. Every suite and assertion remains required; these diagnostics
+do not establish native Windows completion, which still requires a successful fresh CI run.
+
 Bash and PowerShell setup include all discovered Git worktrees by default, with the primary
 checkout processed first. Existing per-checkout installers retain their original options and
 ownership/state checks. Automatic multi-worktree writes reuse the read-only migration planner;
