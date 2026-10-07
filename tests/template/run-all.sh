@@ -51,6 +51,7 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-full-refresh.sh"
     "$REPO_ROOT/tests/template/test-state-compatibility.sh"
     "$REPO_ROOT/tests/template/test-setup.sh"
+    "$REPO_ROOT/tests/template/test-setup-worktrees.sh"
 )
 
 TOTAL_FAIL=0

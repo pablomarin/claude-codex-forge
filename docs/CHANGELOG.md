@@ -2,6 +2,44 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.8 — 2026-10-06
+
+### Automatic worktree installation and simpler setup instructions
+
+Automatic worktree discovery requires Git 2.36+ for its NUL-delimited worktree list. The
+checkout-only option retains the previous Git 2.23+ requirement.
+
+Portable PowerShell candidate discovery now normalizes path separators before pruning private
+runtime directories, preventing parallel council cleanup from interrupting snapshot enumeration.
+
+Windows qualification CI has a bounded 90-minute diagnostic allowance. Its runner reports each
+suite's start, finish, exit status and elapsed time. A bounded test-only control captures worktree
+setup stdout and stderr in separate retained files, echoes their decoded contents, preserves scalar
+exit status, and fails the owning suite on a five-minute child timeout with scoped process evidence.
+Every original suite and assertion remains required. This control does not change installed runtime
+behavior or establish native Windows completion, which still requires a successful fresh CI run.
+
+Bash and PowerShell setup include all discovered Git worktrees by default, with the primary
+checkout processed first. Existing per-checkout installers retain their original options and
+ownership/state checks. Automatic multi-worktree writes reuse the read-only migration planner;
+blocked or unavailable checkouts are reported and make the overall command fail without claiming
+a rollback across successful checkouts. `--this-checkout-only` / `-ThisCheckoutOnly` limits setup,
+upgrade or preview to one checkout. Python 3 is required for multi-worktree ownership preflight.
+Branches, project configuration and local workflow state remain checkout-owned.
+
+The shared Python refresh planner explicitly decodes Git canonical-root output as UTF-8,
+preserving Unicode checkout identity under non-UTF-8 subprocess defaults. Controlled local
+regression coverage verifies valid and rejected roots; native Windows qualification remains pending.
+
+
+README and Getting Started now lead with short, self-contained Claude Code/Codex install and
+upgrade prompts. Users start in their target project; the agent obtains or reuses the official
+Forge clone and runs the existing deterministic installer. Manual commands remain available.
+The agent-assisted guide separates user prompts from the detailed agent procedure, reuses existing
+approval, and makes checkout scope explicit. Worktree and multi-repository examples require
+per-checkout updates and results while preserving active work, project configuration, and state.
+Runtime workflow and Goal behavior are unchanged.
+
 ## 6.4.7 — 2026-10-06
 
 ### Quiet Goal evidence outside Goal sessions

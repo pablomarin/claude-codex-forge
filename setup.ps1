@@ -21,6 +21,8 @@ param(
 
     [switch]$DryRun,
 
+    [switch]$ThisCheckoutOnly,
+
     [Alias("u")]
     [switch]$Upgrade,
 
@@ -40,6 +42,15 @@ param(
 
     [string]$PlaywrightDir
 )
+
+if ($args.Count -gt 0) {
+    [Console]::Error.WriteLine("ERROR: unknown option or unexpected argument: $($args[0])")
+    exit 1
+}
+
+# Preserve bound public options before normal setup derives its internal flags.
+$OriginalSetupParameters = @{}
+foreach ($key in $PSBoundParameters.Keys) { $OriginalSetupParameters[$key] = $PSBoundParameters[$key] }
 
 # Script directory (where templates live)
 $ScriptDir = $PSScriptRoot
@@ -120,6 +131,7 @@ function Show-Usage {
     Write-Host "  -u, -Upgrade        Update an existing v6 install; preserve project configuration"
     Write-Host "  -f, -Force          Authoritative transactional full installation/reconciliation"
     Write-Host "      -DryRun         Preview -Force without writing target files"
+    Write-Host "      -ThisCheckoutOnly  Limit setup to this checkout (default: all Git worktrees)"
     Write-Host "  -g, -Global         Retired; prints the project-only migration path"
     Write-Host "      -RetireGlobal   Preview removal of a legacy global Forge harness"
     Write-Host "      -Apply          Apply -RetireGlobal after a matching preview"
@@ -175,6 +187,144 @@ if ($RetireGlobal) {
     if ($Apply) { $retireArgs += @("--apply", "--digest", $Confirm) }
     & $python.Source @retireArgs
     exit $LASTEXITCODE
+}
+
+# Reject invalid public combinations before any sibling action.
+if ($WithPlaywright -and $Tech -ne 'fullstack' -and $Tech -ne 'typescript') {
+    [Console]::Error.WriteLine('ERROR: -WithPlaywright requires -Tech fullstack or -Tech typescript.')
+    exit 1
+}
+
+# Native line pipelines on Windows 5.1 can decode Unicode using the console
+# code page. Capture Git's UTF-8 metadata directly, including NUL list records.
+function Read-SetupGit {
+    param([string]$Arguments, [string]$Directory)
+    $gitProcess = $null
+    try {
+        $gitProcess = New-Object System.Diagnostics.Process
+        $gitProcess.StartInfo.FileName = (Get-Command git -ErrorAction Stop).Source
+        $gitProcess.StartInfo.Arguments = $Arguments
+        $gitProcess.StartInfo.WorkingDirectory = $Directory
+        $gitProcess.StartInfo.UseShellExecute = $false
+        $gitProcess.StartInfo.RedirectStandardOutput = $true
+        $gitProcess.StartInfo.RedirectStandardError = $true
+        $gitProcess.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+        $null = $gitProcess.Start()
+        $output = $gitProcess.StandardOutput.ReadToEnd()
+        $diagnostic = $gitProcess.StandardError.ReadToEnd()
+        $gitProcess.WaitForExit()
+        if ($gitProcess.ExitCode -ne 0) { throw $diagnostic }
+        return $output
+    } finally { if ($gitProcess) { $gitProcess.Dispose() } }
+}
+
+if (-not $ThisCheckoutOnly) {
+    $insideWorktree = (& git rev-parse --is-inside-work-tree 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $insideWorktree -eq 'true') {
+        try {
+            $worktreeRootText = (Read-SetupGit 'rev-parse --show-toplevel' (Get-Location).Path).TrimEnd([char[]]"`r`n")
+            $worktreeRoot = (Resolve-Path -LiteralPath $worktreeRootText -ErrorAction Stop).Path
+            if ((Resolve-Path -LiteralPath (Get-Location).Path).Path -ne $worktreeRoot) {
+                [Console]::Error.WriteLine("BLOCKED: run setup from the Git repository root: $worktreeRoot")
+                exit 1
+            }
+            $worktreeList = Read-SetupGit 'worktree list --porcelain -z' (Get-Location).Path
+        } catch {
+            [Console]::Error.WriteLine("BLOCKED: cannot discover Git worktrees; default discovery requires Git 2.36+. Upgrade Git or use -ThisCheckoutOnly; no checkouts changed. $_")
+            exit 1
+        }
+        $worktreeTargets = @()
+        $worktreePath = ''; $worktreeBare = $false
+        foreach ($field in $worktreeList.Split([char]0)) {
+            if ($field.StartsWith('worktree ')) { $worktreePath = $field.Substring(9) }
+            elseif ($field -eq 'bare') { $worktreeBare = $true }
+            elseif ($field -eq '') {
+                if ($worktreePath -and -not $worktreeBare) { $worktreeTargets += $worktreePath }
+                $worktreePath = ''; $worktreeBare = $false
+            }
+        }
+        if ($worktreeTargets.Count -eq 0) {
+            [Console]::Error.WriteLine('BLOCKED: Git returned no checkout worktrees; no checkouts changed.')
+            exit 1
+        }
+        if ($worktreeTargets.Count -gt 1) {
+            try {
+                $commonText = (Read-SetupGit 'rev-parse --git-common-dir' $worktreeRoot).TrimEnd([char[]]"`r`n")
+                if (-not [IO.Path]::IsPathRooted($commonText)) { $commonText = Join-Path $worktreeRoot $commonText }
+                $worktreeCommon = (Resolve-Path -LiteralPath $commonText -ErrorAction Stop).Path
+            } catch {
+                [Console]::Error.WriteLine("BLOCKED: cannot resolve the Git common directory; no checkouts changed. $_")
+                exit 1
+            }
+            # Use this caller's actual runtime, including native Windows 5.1.
+            # Encoded commands preserve string values and explicit false switches
+            # through Windows native quoting without changing the public mode.
+            $setupRuntime = (Get-Process -Id $PID).Path
+            function Invoke-WorktreeSetup {
+                param([hashtable]$Options)
+                $childCommand = "& '" + [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent((Join-Path $ScriptDir 'setup.ps1')) + "'"
+                foreach ($name in $Options.Keys) {
+                    if ($name -eq 'ThisCheckoutOnly') { continue }
+                    $value = $Options[$name]
+                    if ($value -is [switch] -or $value -is [bool]) {
+                        $childCommand += ' -' + $name + ':$' + ([bool]$value).ToString().ToLowerInvariant()
+                    } else {
+                        $childCommand += ' -' + $name + " '" + [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent([string]$value) + "'"
+                    }
+                }
+                $childCommand += ' -ThisCheckoutOnly; if (-not $?) { exit 1 }; exit $LASTEXITCODE'
+                $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childCommand))
+                & $setupRuntime -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand $encoded | Out-Host
+                return $LASTEXITCODE
+            }
+            $worktreeStatus = 0
+            foreach ($target in $worktreeTargets) {
+                if (-not (Test-Path -LiteralPath $target -PathType Container)) {
+                    Write-Host "WORKTREE_RESULT path=$target release=$ForgeVersion outcome=missing"
+                    $worktreeStatus = 1
+                    continue
+                }
+                $locationPushed = $false
+                try {
+                    # Refuse unavailable/prunable paths and unrelated replacement
+                    # repositories before normal setup could initialize them.
+                    $targetRootText = (Read-SetupGit 'rev-parse --show-toplevel' $target).TrimEnd([char[]]"`r`n")
+                    $targetRoot = (Resolve-Path -LiteralPath $targetRootText -ErrorAction Stop).Path
+                    $targetCommonText = (Read-SetupGit 'rev-parse --git-common-dir' $target).TrimEnd([char[]]"`r`n")
+                    if (-not [IO.Path]::IsPathRooted($targetCommonText)) { $targetCommonText = Join-Path $target $targetCommonText }
+                    $targetCommon = (Resolve-Path -LiteralPath $targetCommonText -ErrorAction Stop).Path
+                    if ($targetRoot -ne (Resolve-Path -LiteralPath $target).Path -or $targetCommon -ne $worktreeCommon) {
+                        throw "registered checkout has unrelated Git identity: $target"
+                    }
+                    Push-Location -LiteralPath $target -ErrorAction Stop
+                    $locationPushed = $true
+                    if (-not $DryRun) {
+                        # Output stays visible, including a BLOCKED planner.
+                        $plannerStatus = Invoke-WorktreeSetup @{Force=$true;DryRun=$true}
+                        if ($plannerStatus -ne 0) {
+                            Write-Host "WORKTREE_RESULT path=$target release=$ForgeVersion outcome=blocked"
+                            $worktreeStatus = 1
+                            continue
+                        }
+                    }
+                    $childStatus = Invoke-WorktreeSetup $OriginalSetupParameters
+                    if ($childStatus -eq 0) {
+                        $outcome = 'materialized'
+                        if ($DryRun) { $outcome = 'preview' }
+                        Write-Host "WORKTREE_RESULT path=$target release=$ForgeVersion outcome=$outcome"
+                    } else {
+                        Write-Host "WORKTREE_RESULT path=$target release=$ForgeVersion outcome=failed"
+                        $worktreeStatus = 1
+                    }
+                } catch {
+                    [Console]::Error.WriteLine("BLOCKED: registered checkout failed: $target; $_")
+                    Write-Host "WORKTREE_RESULT path=$target release=$ForgeVersion outcome=blocked"
+                    $worktreeStatus = 1
+                } finally { if ($locationPushed) { Pop-Location } }
+            }
+            exit $worktreeStatus
+        }
+    }
 }
 
 if ($FullRefresh) {
@@ -350,7 +500,12 @@ if (-not $isGitRepo) {
     git init
 }
 
-$setupRepoRootText = (& git rev-parse --show-toplevel 2>$null | Select-Object -First 1)
+try {
+    $setupRepoRootText = (Read-SetupGit 'rev-parse --show-toplevel' (Get-Location).Path).TrimEnd([char[]]"`r`n")
+} catch {
+    [Console]::Error.WriteLine("BLOCKED: cannot resolve the Git repository root. $_")
+    exit 1
+}
 if (-not $setupRepoRootText) {
     [Console]::Error.WriteLine("BLOCKED: cannot resolve the Git repository root.")
     exit 1

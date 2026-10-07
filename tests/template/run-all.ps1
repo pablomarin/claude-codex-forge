@@ -8,8 +8,14 @@ if ($suites.Count -eq 0) { throw "no PowerShell behavioral suites discovered" }
 $failedSuites = @()
 foreach ($suite in $suites) {
     if ($suite.FullName -eq $runner) { throw "runner discovered itself" }
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    Write-Host "SUITE_START name=$($suite.Name) utc=$([DateTime]::UtcNow.ToString('o'))"
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $suite.FullName
-    if ($LASTEXITCODE -ne 0) { $failedSuites += $suite.Name; Write-Host "FAIL: $($suite.Name)" }
+    $code = $LASTEXITCODE
+    $timer.Stop()
+    $elapsed = $timer.Elapsed.TotalSeconds.ToString('F3', [Globalization.CultureInfo]::InvariantCulture)
+    Write-Host "SUITE_END name=$($suite.Name) exit=$code elapsed_s=$elapsed utc=$([DateTime]::UtcNow.ToString('o'))"
+    if ($code -ne 0) { $failedSuites += $suite.Name; Write-Host "FAIL: $($suite.Name)" }
 }
 if ($failedSuites.Count -ne 0) { throw "PowerShell suites failed: $($failedSuites -join ', ')" }
 Write-Host "PASS: $($suites.Count) PowerShell suites"

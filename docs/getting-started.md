@@ -4,11 +4,36 @@ Install once, open either supported host, and work. Forge installs one canonical
 plus native Claude Code and Codex adapters; it does not ask you to choose a permanent main agent.
 The host you are using leads the current action.
 
-For people, the recommended path is [agent-assisted setup](guides/agent-assisted-setup.md): open
-Claude Code or Codex in the target repository and paste the canonical setup prompt. The agent
-chooses the correct command, but `setup.sh` or `setup.ps1` performs every installation and remains
-the source of truth. The commands below remain the direct path for CI, automation, offline use, and
-troubleshooting.
+## Recommended: let Claude Code or Codex handle setup
+
+Open **your target project repository** in either host and paste:
+
+```text
+Install Forge in this repository from https://github.com/pablomarin/claude-codex-forge.
+Follow docs/guides/agent-assisted-setup.md from that repository.
+Preserve my project files and settings.
+```
+
+For an existing Forge installation, paste:
+
+```text
+Upgrade Forge in this repository to the latest released version from
+https://github.com/pablomarin/claude-codex-forge.
+Follow docs/guides/agent-assisted-setup.md from that repository.
+Preserve my project files, settings, and workflow state.
+```
+
+You do not need to clone Forge manually or choose installer flags. The agent obtains or reuses the
+installer, preserves project content, and reports the installed version and any remaining setup
+steps. See [Agent-assisted setup](guides/agent-assisted-setup.md) for its full procedure.
+
+Git worktrees are included automatically. The installer checks each checkout and reports its result;
+branches, project configuration and local workflow state are preserved. To limit the operation,
+ask **“This checkout only”** or use `--this-checkout-only` (PowerShell: `-ThisCheckoutOnly`).
+See [worktree and multi-repo updates](guides/agent-assisted-setup.md#worktrees-and-multiple-repositories).
+
+Prefer running commands yourself? Follow the **manual setup** below. Both paths use `setup.sh` or
+`setup.ps1`; there is no separate agent installer.
 
 ## Compatibility
 
@@ -20,9 +45,10 @@ versions remain usable when they expose the required capabilities.
 | Claude Code | `2.1.237` | Project instructions/rules, commands, hooks, fresh non-persistent CLI runs, workspace sandbox, native `/goal` | Adapters are `MATERIALIZED`, but the affected role is not `RUNTIME_READY`; Forge prints the missing capability and uses a fresh Codex or Claude fallback when possible. |
 | Codex CLI | `0.144.1` | Project instructions/rules, skills, hooks, `exec --ephemeral`, sandbox and output capture, native `/goal` | Adapters are `MATERIALIZED`, but the affected role is not `RUNTIME_READY`; Forge prints the missing flag/trust requirement and falls back without stopping when another qualified path exists. |
 
-Also required: Git 2.23+ and one authenticated host. On macOS/Linux, Python 3 (`python3` on PATH)
+Also required: Git 2.36+ and one authenticated host. On macOS/Linux, Python 3 (`python3` on PATH)
 is required before first setup or any upgrade, including ordinary configuration merging and
-validation. Windows uses PowerShell 5.1+ and needs Python 3 for authoritative full refresh;
+validation. Windows uses PowerShell 5.1+ and needs Python 3 for authoritative full refresh and automatic
+multi-worktree preflight;
 WSL2 remains the recommended Codex environment.
 
 `MATERIALIZED` means files were installed. `RUNTIME_READY` means that host's discovery, trust, and
@@ -30,7 +56,7 @@ required runtime capabilities were actually qualified. Never treat the first sta
 
 ## 1. Clone Forge
 
-The Forge clone supplies the installer; your project is a **different directory**. The commands
+Manual setup starts here. The Forge clone supplies the installer; your project is a **different directory**. The commands
 below assume this clone location. If you already have the clone, do not clone over it: update it
 with `git -C ~/claude-codex-forge pull --ff-only` (PowerShell:
 `git -C $HOME\claude-codex-forge pull --ff-only`). Stop if Git reports an error.
@@ -76,8 +102,7 @@ Do not run project setup in the Forge clone. Run each command separately and sto
 ## 3. Each project is complete
 
 There is no machine-wide Forge prerequisite. A project installation includes the full policy,
-workflows, rules, agents, hooks, local state and memory, and native Goal support. It affects only
-that repository. Another repository may stay uninstalled or run a different Forge release.
+workflows, rules, agents, hooks, local state and memory, and native Goal support. It affects that repository and its discovered Git worktrees. Another repository may stay uninstalled or run a different Forge release.
 
 A native Goal request authorizes one 20-turn autonomous tranche. Forge keeps its objective, count,
 checkpoint, and evidence in repository-local, worktree-shared state. Push, PR, merge, deployment,
@@ -208,8 +233,10 @@ sentinel are observed, setup truthfully reports `RUNTIME_READY: BLOCKED`.
 - Commit the reviewed project harness changes on the setup/update branch. Never commit
   `.forge/local/`, credentials, or unrelated files. Teams use one upgrader and review the change as
   a dedicated PR; other developers pull it.
-- Project setup does not change unrelated repositories or sibling worktrees. For linked worktrees,
-  follow [the worktree instructions](guides/setup-scenarios.md#linked-worktree).
+- Project setup includes its Git worktrees, checks the primary checkout first, and leaves unrelated
+  repositories untouched. Check every checkout's result; a blocked checkout makes the overall
+  command fail. For a deliberately single-checkout operation use `--this-checkout-only` or
+  `-ThisCheckoutOnly`. See [the worktree instructions](guides/setup-scenarios.md#linked-worktree).
 
 ## Shared project instructions after setup
 

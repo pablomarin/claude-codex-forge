@@ -29,6 +29,7 @@ usage() {
     echo "  -u, --upgrade       Update an existing v6 install; preserve project configuration"
     echo "  -f, --force         Authoritative transactional full installation/reconciliation"
     echo "      --dry-run       Preview --force without writing target files"
+    echo "      --this-checkout-only  Limit setup to this checkout (default: all Git worktrees)"
     echo "  -g, --global        Retired; prints the project-only migration path"
     echo "      --retire-global Preview removal of a legacy global Forge harness"
     echo "      --apply         Apply --retire-global after a matching preview"
@@ -49,7 +50,9 @@ usage() {
     echo "  $0 -t fullstack --with-playwright  # Install Playwright framework templates"
 }
 
-# Parse arguments
+# Parse arguments. Retain the public mode and options for worktree children.
+ORIGINAL_SETUP_ARGS=("$@")
+THIS_CHECKOUT_ONLY=false
 PROJECT_NAME=""
 TECH_STACK="fullstack"
 FORCE=false
@@ -69,10 +72,12 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         -p|--project)
+            [ $# -ge 2 ] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
             PROJECT_NAME="$2"
             shift 2
             ;;
         -t|--tech)
+            [ $# -ge 2 ] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
             TECH_STACK="$2"
             shift 2
             ;;
@@ -88,6 +93,10 @@ while [[ $# -gt 0 ]]; do
         --full-refresh)
             FULL_REFRESH=true
             DEPRECATED_FULL_REFRESH="DEPRECATED: --full-refresh is an alias for --force; use --force."
+            shift
+            ;;
+        --this-checkout-only)
+            THIS_CHECKOUT_ONLY=true
             shift
             ;;
         --dry-run)
@@ -116,6 +125,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --confirm)
+            [ $# -ge 2 ] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
             RETIRE_CONFIRM="$2"
             shift 2
             ;;
@@ -124,6 +134,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --playwright-dir)
+            [ $# -ge 2 ] || { echo "ERROR: $1 requires a value" >&2; exit 1; }
             PLAYWRIGHT_DIR="$2"
             shift 2
             ;;
@@ -202,6 +213,94 @@ FORGE_VERSION="$(forge_version)"
     echo "BLOCKED: published Forge release is unavailable" >&2
     exit 2
 }
+
+# Validate public options before discovering or writing sibling checkouts.
+if [ "$WITH_PLAYWRIGHT" = true ] && [[ "$TECH_STACK" != fullstack && "$TECH_STACK" != typescript ]]; then
+    echo "ERROR: --with-playwright requires -t fullstack or -t typescript." >&2
+    exit 1
+fi
+
+# Git lists the primary checkout first, even when setup starts in a link.
+# NUL records preserve spaces, Unicode, and line breaks without shell evaluation.
+if [ "$THIS_CHECKOUT_ONLY" != true ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    worktree_root=$(git rev-parse --show-toplevel) || { echo "BLOCKED: cannot resolve the Git repository root." >&2; exit 1; }
+    worktree_root=$(cd "$worktree_root" && pwd -P) || exit 1
+    if [ "$(pwd -P)" != "$worktree_root" ]; then
+        echo "BLOCKED: run setup from the Git repository root: $worktree_root" >&2
+        exit 1
+    fi
+    worktree_list=$(mktemp) || exit 1
+    if ! git worktree list --porcelain -z > "$worktree_list"; then
+        rm -f "$worktree_list"
+        echo "BLOCKED: cannot discover Git worktrees; default discovery requires Git 2.36+. Upgrade Git or use --this-checkout-only; no checkouts changed." >&2
+        exit 1
+    fi
+    worktree_targets=()
+    worktree_path=""
+    worktree_bare=false
+    while IFS= read -r -d '' worktree_field; do
+        case "$worktree_field" in
+            'worktree '*) worktree_path=${worktree_field#worktree } ;;
+            bare) worktree_bare=true ;;
+            '')
+                if [ -n "$worktree_path" ] && [ "$worktree_bare" != true ]; then
+                    worktree_targets+=("$worktree_path")
+                fi
+                worktree_path=""; worktree_bare=false
+                ;;
+        esac
+    done < "$worktree_list"
+    rm -f "$worktree_list"
+    if [ ${#worktree_targets[@]} -eq 0 ]; then
+        echo "BLOCKED: Git returned no checkout worktrees; no checkouts changed." >&2
+        exit 1
+    fi
+    if [ ${#worktree_targets[@]} -gt 1 ]; then
+        worktree_common=$(git rev-parse --git-common-dir) || exit 1
+        worktree_common=$(cd "$worktree_common" && pwd -P) || exit 1
+        worktree_status=0
+        for worktree_target in "${worktree_targets[@]}"; do
+            if [ ! -d "$worktree_target" ]; then
+                printf 'WORKTREE_RESULT path=%s release=%s outcome=missing\n' "$worktree_target" "$FORGE_VERSION"
+                worktree_status=1
+                continue
+            fi
+            # A registered path can be prunable or replaced by another repo.
+            # Verify its Git identity before the installer can initialize it.
+            if worktree_target_root=$(git -C "$worktree_target" rev-parse --show-toplevel 2>/dev/null) &&
+                worktree_target_root=$(cd "$worktree_target_root" && pwd -P) &&
+                [ "$worktree_target_root" = "$(cd "$worktree_target" && pwd -P)" ] &&
+                worktree_target_common=$(cd "$worktree_target" && git rev-parse --git-common-dir) &&
+                worktree_target_common=$(cd "$worktree_target" && cd "$worktree_target_common" && pwd -P) &&
+                [ "$worktree_target_common" = "$worktree_common" ]; then
+                :
+            else
+                echo "BLOCKED: registered checkout has missing or unrelated Git identity: $worktree_target" >&2
+                printf 'WORKTREE_RESULT path=%s release=%s outcome=blocked\n' "$worktree_target" "$FORGE_VERSION"
+                worktree_status=1
+                continue
+            fi
+            # The existing planner is authoritative and read-only. Never replace
+            # the requested mode with its force mode for the actual installer.
+            if [ "$DRY_RUN" != true ]; then
+                if ! (cd "$worktree_target" && "$BASH" "$SCRIPT_DIR/setup.sh" --force --dry-run --this-checkout-only); then
+                    printf 'WORKTREE_RESULT path=%s release=%s outcome=blocked\n' "$worktree_target" "$FORGE_VERSION"
+                    worktree_status=1
+                    continue
+                fi
+            fi
+            if (cd "$worktree_target" && "$BASH" "$SCRIPT_DIR/setup.sh" "${ORIGINAL_SETUP_ARGS[@]}" --this-checkout-only); then
+                worktree_outcome=materialized
+                [ "$DRY_RUN" = true ] && worktree_outcome=preview
+                printf 'WORKTREE_RESULT path=%s release=%s outcome=%s\n' "$worktree_target" "$FORGE_VERSION" "$worktree_outcome"
+            else
+                printf 'WORKTREE_RESULT path=%s release=%s outcome=failed\n' "$worktree_target" "$FORGE_VERSION"
+                worktree_status=1
+            fi
+        done
+        exit "$worktree_status"
+    fi
+fi
 
 # Full refresh is a separate transaction. It exits before ordinary setup can
 # stamp, merge, or create any host surface.

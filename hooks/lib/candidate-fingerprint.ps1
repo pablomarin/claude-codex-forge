@@ -100,6 +100,7 @@ function Write-GitDiffWithIndex([string]$Root, [string]$Index, [string[]]$Argume
     }
 }
 function Test-InExcludedTree([string]$Relative) {
+    $Relative = $Relative.Replace('/', '\')
     return $Relative -eq '.git' -or $Relative.StartsWith('.git\') -or
         $Relative -eq '.forge\local' -or $Relative.StartsWith('.forge\local\')
 }

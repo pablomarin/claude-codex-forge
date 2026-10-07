@@ -10,14 +10,14 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
-  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-6.4.7-blue?style=flat-square"></a>
+  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-6.4.8-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
   <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-supported-orange?style=flat-square"></a>
 </p>
 
 <p align="center">
-  <a href="docs/getting-started.md">Quick Start</a>
+  <a href="#quick-start">Quick Start</a>
   ·
   <a href="docs/reference/commands.md">Commands</a>
   ·
@@ -184,9 +184,48 @@ explicit authorization.
 
 ## Quick start
 
-Prerequisites: Git 2.23+ and at least one authenticated supported host. On macOS/Linux, install
+**Agent-first for people; CLI-first for machines.**
+
+1. Open **the project repository you want to use Forge in** in Claude Code or Codex.
+2. Paste one of the prompts below.
+3. Let the agent run setup and check the result. Follow any reported authentication or project-trust steps.
+
+**First installation:**
+
+```text
+Install Forge in this repository from https://github.com/pablomarin/claude-codex-forge.
+Follow docs/guides/agent-assisted-setup.md from that repository.
+Preserve my project files and settings.
+```
+
+**Already using Forge? Upgrade:**
+
+```text
+Upgrade Forge in this repository to the latest released version from
+https://github.com/pablomarin/claude-codex-forge.
+Follow docs/guides/agent-assisted-setup.md from that repository.
+Preserve my project files, settings, and workflow state.
+```
+
+The agent obtains or reuses a separate Forge installer clone, chooses the correct installation
+mode, and checks the installed version and both hosts' diagnostics. You do not need to clone Forge
+manually or choose installer flags. Both paths use the existing `setup.sh` or `setup.ps1`.
+See [Agent-assisted setup](docs/guides/agent-assisted-setup.md) for the complete procedure.
+
+**Worktrees are automatic.** Installation and upgrade discover the repository's Git worktrees,
+check each checkout, and update them using the same Forge release. Branches, project configuration,
+and local workflow state are preserved. The result names any checkout that could not be updated.
+To change only the current checkout, ask **“Update this checkout only”** or use `--this-checkout-only`
+(PowerShell: `-ThisCheckoutOnly`). See
+[worktree and multi-repo updates](docs/guides/agent-assisted-setup.md#worktrees-and-multiple-repositories).
+
+Prerequisites: Git 2.36+ and at least one authenticated supported host. On macOS/Linux, install
 Python 3 (`python3` on PATH) before first setup or any upgrade. Windows requires PowerShell 5.1+,
-plus Python 3 for full reconciliation. Both adapters are installed even if only one CLI is available.
+plus Python 3 for full reconciliation and automatic multi-worktree preflight. Both adapters are
+installed even if only one CLI is available. Git 2.23+ remains supported with the checkout-only flag.
+
+<details>
+<summary>Manual setup: prerequisites, installation, upgrade, and verification commands</summary>
 
 ### Minimum CLI versions
 
@@ -218,17 +257,6 @@ update the first. See the [official Codex changelog](https://learn.chatgpt.com/d
 **Two different folders:** the **Forge clone** holds the installer; your **project repository**
 receives Forge. Run project setup from your project's Git root, calling the installer by its full
 path. Do not run project installation inside the Forge clone itself.
-
-### Recommended for people: install with Claude Code or Codex
-
-**Agent-first for people; CLI-first for machines.** Open either supported host in the target
-repository and ask it to install or upgrade Forge. The agent inspects the repository, runs the
-correct preview or setup command, explains blockers, and asks before changing files. The agent does
-not implement setup itself: `setup.sh` and `setup.ps1` remain the sole deterministic installers.
-
-Use the copy-paste prompt in [Agent-assisted setup](docs/guides/agent-assisted-setup.md). It covers
-fresh projects, existing Forge v6 refreshes, Forge v5 and mixed-harness migrations, approval
-boundaries, and final diff/readiness review.
 
 ### CLI and automation: choose the correct installation path
 
@@ -328,11 +356,13 @@ Do not combine `--upgrade` with `-f` or `--dry-run`.
   proof of a working runtime. Discovery alone does not test live hooks or authenticated reviewers.
 
 After verification, commit the reviewed harness changes in your project; `.forge/local/` stays
-gitignored. A project update does not update unrelated repositories or sibling worktrees.
+gitignored. A project update includes its Git worktrees by default; unrelated repositories remain untouched.
 
 The exact release is committed in `.forge/version`. This means different repositories may run different Forge versions,
 and each repository upgrades only when its team chooses to run its own
 installer update.
+
+</details>
 
 ## What setup installs
 
@@ -403,7 +433,7 @@ preferred engine ran.
 
 ## Setup, refresh, and team upgrades
 
-For interactive use, start with the [agent-assisted setup guide](docs/guides/agent-assisted-setup.md).
+For interactive use, start with the [install or upgrade prompts](#quick-start).
 The table below is the direct CLI reference for automation, offline use, and troubleshooting; both
 paths invoke the same installer.
 
@@ -430,8 +460,10 @@ content preserved. `MATERIALIZED` still does not imply that either host is `RUNT
 
 Full refresh is transactional. It proves released ownership, stages replacements, preserves user
 regions and custom configuration, translates state, writes `.forge/version` last, and rolls back on
-failure. It changes only the current worktree; sibling linked worktrees keep their own local state
-and must be refreshed after the migration commit reaches their branch. Do not manually synchronize
+failure. Setup discovers and processes the repository's worktrees separately; each keeps its own
+local state. A blocked checkout is reported and makes the overall command fail, even when other
+checkouts were updated. There is no rollback across checkouts. Use `--this-checkout-only` or
+`-ThisCheckoutOnly` for a single-checkout migration. Do not manually synchronize
 `CLAUDE.md` and `AGENTS.md`: their bounded Forge blocks point to the same canonical policy.
 
 Commit the harness as one versioned project change:
@@ -507,6 +539,7 @@ Recent releases:
 
 | Version | Date       | Highlights                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6.4.8 | 2026-10-06 | **One setup command for the repository and its worktrees.** Install and upgrade discover Git worktrees automatically, check ownership before multi-checkout writes, and report every checkout. Bash and PowerShell share the behavior; a checkout-only flag provides an opt-out. Short Claude/Codex prompts lead the setup docs. |
 | 6.4.4   | 2026-10-04 | **Finished worktrees fold into main state, even in parallel.** `/finish-branch` records the finished work, then folds it into the primary `state.md`: an exact replace when main is unchanged, otherwise a deterministic three-way merge that keeps sibling folds and edits on main. Retries are safe, unfinished worktree `### Now` work is never silently dropped, and the worktree is removed only after a successful fold. |
 | 6.4.3   | 2026-10-03 | **Human decisions, agent execution.** Approve consequential actions in conversation; the agent records approval and executes through host controls. Configured Claude/Codex reviews and investigations retain standing launch approval, including bounded private review snapshots. |
 | 6.4.0   | 2026-10-02 | **Lean quick fixes and exact SemVer releases.** Low-risk `/quick-fix` work uses a direct focused check without reviewer or Verify-app dispatch, while feature and bug-fix workflows retain full certification. Every merged Forge change set publishes an exact `MAJOR.MINOR.PATCH` release; legacy V6 stamps remain upgrade-compatible. |

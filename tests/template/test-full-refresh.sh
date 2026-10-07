@@ -1202,12 +1202,13 @@ git -C "$P1" worktree add -qb profile-sibling "$P1_SIBLING"
 write_active_v5_state "$P1_SIBLING" "SIBLING_STATE_BYTES"
 sibling_before=$(snapshot_project "$P1_SIBLING")
 p1_before=$(snapshot_project "$P1")
-run_refresh "$P1" "${P1}.preview.log" -F --dry-run
+# This profile isolates one-checkout migration; the worktree suite owns automatic scope.
+run_refresh "$P1" "${P1}.preview.log" -F --dry-run --this-checkout-only
 assert_equals "$?" "0" "profile 1 preview is ready"
 assert_equals "$(snapshot_project "$P1")" "$p1_before" "profile 1 preview is byte-identical"
 assert_contains "${P1}.preview.log" "claude RUNTIME_READY: BLOCKED" \
     "profile 1 separates plugin readiness from filesystem migration"
-run_refresh "$P1" "${P1}.refresh.log" -F
+run_refresh "$P1" "${P1}.refresh.log" -F --this-checkout-only
 assert_equals "$?" "0" "profile 1 executes successfully"
 assert_one_active_forge "$P1" "profile 1"
 assert_contains "$P1/.claude/settings.json" "superpowers@claude-plugins-official" \
@@ -1219,12 +1220,12 @@ assert_contains "$P1/docs/adr/0099-project.md" "PROFILE_ONE_ADR_BYTES" \
 assert_equals "$(snapshot_project "$P1_SIBLING")" "$sibling_before" \
     "profile 1 migration never changes the linked sibling worktree"
 manifest_before=$(hash_file "$P1/.forge/managed-files.tsv")
-run_refresh "$P1" "${P1}.upgrade.log" --upgrade
+run_refresh "$P1" "${P1}.upgrade.log" --upgrade --this-checkout-only
 assert_equals "$?" "0" "routine update remains valid after profile 1 reaches v6"
 assert_hash_equals "$P1/.forge/managed-files.tsv" "$manifest_before" \
     "routine v6 update keeps the managed manifest stable"
 p1_v6_before=$(snapshot_project "$P1")
-run_refresh "$P1" "${P1}.v6-preview.log" -F --dry-run
+run_refresh "$P1" "${P1}.v6-preview.log" -F --dry-run --this-checkout-only
 assert_equals "$?" "0" "v6 full-refresh preview reports ready without remigration"
 assert_contains "${P1}.v6-preview.log" "UPGRADE: READY" "v6 preview remains explicit"
 assert_equals "$(snapshot_project "$P1")" "$p1_v6_before" "v6 preview is byte-identical"

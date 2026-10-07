@@ -1,6 +1,8 @@
 # Setup Scenarios
 
-Forge always installs one `.forge/` harness and both native adapter surfaces. You choose the main
+Forge installs one `.forge/` harness and both native adapter surfaces in each checkout.
+Installation and upgrade include the repository's Git worktrees automatically; unrelated
+repositories remain untouched. You choose the main
 agent simply by opening Claude Code or Codex for the current task.
 
 ## Fresh Project, One Engine Installed
@@ -65,17 +67,21 @@ installation step.
 
 ## Linked Worktree
 
-Project files may be refreshed from the canonical repository root. Codex's hook registry is shared
-through the Git common directory and must be registered from the primary checkout. When setup sees
-a linked worktree it leaves that registry alone and prints:
+Run the normal setup or upgrade command from any checkout's Git root. Setup discovers the
+repository's worktrees and processes the primary checkout first, then the linked checkouts. Each
+checkout keeps its branch, project configuration and local workflow state. The same release is
+installed throughout, with a result for every checkout. Missing or blocked targets make the
+overall command fail; other checkouts may already have completed.
 
-```text
-CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration
-Run: cd '<primary-checkout>' && '<forge-clone>/setup.sh'
-```
+Codex's hook registry is shared through the Git common directory and remains primary-owned.
+Complete normal host authentication/trust after installation; materialization is not runtime
+certification. Each hook event routes to the event worktree's own `.forge/` state.
 
-Run that exact command, complete Codex's trust ceremony in the primary checkout, then reopen the
-linked worktree. Each hook event is still routed back to the event worktree's own `.forge/` state.
+To deliberately update only the current checkout, use `--this-checkout-only` (PowerShell:
+`-ThisCheckoutOnly`). A linked checkout in this mode cannot register the primary's shared hooks
+and prints the existing primary setup command. Run that command in the primary checkout (add the
+checkout-only flag if you want to keep the operation narrow), then complete Codex trust and reopen
+the linked worktree.
 
 ## Playwright Scaffold
 
