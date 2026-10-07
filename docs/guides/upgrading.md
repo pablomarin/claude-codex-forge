@@ -39,7 +39,8 @@ installation and reconciliation path from any state. The former `-F` / `--full-r
 
 After a routine update, read `cat .forge/version` on macOS/Linux or
 `Get-Content .forge\version` in PowerShell. That exact release is committed with the repository;
-other repositories remain untouched and may intentionally run another Forge version.
+its Git worktrees are included automatically. Other repositories remain untouched and may
+intentionally run another Forge version.
 
 If you do not know which harness or version is present, run the preview. It is the safe inventory
 command and writes no project files.
@@ -189,9 +190,17 @@ not modify a project repository.
 Do not combine full project reconciliation with routine update, legacy retirement, retired
 continuity migration, or Playwright scaffolding flags.
 
-Full refresh changes only the current worktree. It does not edit sibling worktrees or guess which
-sibling branch should receive the migration. Commit the successful harness migration, merge or
-rebase it normally, then refresh another worktree only when that branch contains the migration.
+Setup includes the repository's discovered Git worktrees by default, applying the existing
+ownership/state rules separately to each checkout without switching branches. A preview remains
+read-only in every checkout. Before an automatic multi-worktree write, each checkout receives a
+read-only ownership preflight. A blocked or unavailable checkout stays blocked and makes the
+overall command fail; other independent checkouts may have succeeded. There is no rollback across
+checkouts. Review the per-checkout output before committing the project upgrade.
+
+For a migration that should affect only one checkout, add `--this-checkout-only` on Bash or
+`-ThisCheckoutOnly` in PowerShell to both preview and execution. Commit and integrate that migration
+normally before updating other branches. A routine `--upgrade` / `-Upgrade` does not silently
+convert an older/custom sibling; follow that checkout's migration report.
 
 ## Recover a Blocked Full Refresh
 

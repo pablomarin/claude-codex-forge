@@ -4,7 +4,22 @@ All notable changes to claude-codex-forge.
 
 ## 6.4.8 — 2026-10-06
 
-### Easier installation and upgrade instructions
+### Automatic worktree installation and simpler setup instructions
+
+Automatic worktree discovery requires Git 2.36+ for its NUL-delimited worktree list. The
+checkout-only option retains the previous Git 2.23+ requirement.
+
+Portable PowerShell candidate discovery now normalizes path separators before pruning private
+runtime directories, preventing parallel council cleanup from interrupting snapshot enumeration.
+
+Bash and PowerShell setup include all discovered Git worktrees by default, with the primary
+checkout processed first. Existing per-checkout installers retain their original options and
+ownership/state checks. Automatic multi-worktree writes reuse the read-only migration planner;
+blocked or unavailable checkouts are reported and make the overall command fail without claiming
+a rollback across successful checkouts. `--this-checkout-only` / `-ThisCheckoutOnly` limits setup,
+upgrade or preview to one checkout. Python 3 is required for multi-worktree ownership preflight.
+Branches, project configuration and local workflow state remain checkout-owned.
+
 
 README and Getting Started now lead with short, self-contained Claude Code/Codex install and
 upgrade prompts. Users start in their target project; the agent obtains or reuses the official
@@ -12,7 +27,7 @@ Forge clone and runs the existing deterministic installer. Manual commands remai
 The agent-assisted guide separates user prompts from the detailed agent procedure, reuses existing
 approval, and makes checkout scope explicit. Worktree and multi-repository examples require
 per-checkout updates and results while preserving active work, project configuration, and state.
-No installer or runtime behavior changed.
+Runtime workflow and Goal behavior are unchanged.
 
 ## 6.4.7 — 2026-10-06
 

@@ -212,14 +212,17 @@ mode, and checks the installed version and both hosts' diagnostics. You do not n
 manually or choose installer flags. Both paths use the existing `setup.sh` or `setup.ps1`.
 See [Agent-assisted setup](docs/guides/agent-assisted-setup.md) for the complete procedure.
 
-**Using Git worktrees?** Setup changes one checkout at a time. The agent lists your worktrees and
-reports which were updated. To include them, add: **“Include all this repository's Git worktrees.”**
-[Worktree and multi-repo updates](docs/guides/agent-assisted-setup.md#worktrees-and-multiple-repositories)
-explain how to preserve active work and handle migrations.
+**Worktrees are automatic.** Installation and upgrade discover the repository's Git worktrees,
+check each checkout, and update them using the same Forge release. Branches, project configuration,
+and local workflow state are preserved. The result names any checkout that could not be updated.
+To change only the current checkout, ask **“Update this checkout only”** or use `--this-checkout-only`
+(PowerShell: `-ThisCheckoutOnly`). See
+[worktree and multi-repo updates](docs/guides/agent-assisted-setup.md#worktrees-and-multiple-repositories).
 
-Prerequisites: Git 2.23+ and at least one authenticated supported host. On macOS/Linux, install
+Prerequisites: Git 2.36+ and at least one authenticated supported host. On macOS/Linux, install
 Python 3 (`python3` on PATH) before first setup or any upgrade. Windows requires PowerShell 5.1+,
-plus Python 3 for full reconciliation. Both adapters are installed even if only one CLI is available.
+plus Python 3 for full reconciliation and automatic multi-worktree preflight. Both adapters are
+installed even if only one CLI is available. Git 2.23+ remains supported with the checkout-only flag.
 
 <details>
 <summary>Manual setup: prerequisites, installation, upgrade, and verification commands</summary>
@@ -353,7 +356,7 @@ Do not combine `--upgrade` with `-f` or `--dry-run`.
   proof of a working runtime. Discovery alone does not test live hooks or authenticated reviewers.
 
 After verification, commit the reviewed harness changes in your project; `.forge/local/` stays
-gitignored. A project update does not update unrelated repositories or sibling worktrees.
+gitignored. A project update includes its Git worktrees by default; unrelated repositories remain untouched.
 
 The exact release is committed in `.forge/version`. This means different repositories may run different Forge versions,
 and each repository upgrades only when its team chooses to run its own
@@ -457,8 +460,10 @@ content preserved. `MATERIALIZED` still does not imply that either host is `RUNT
 
 Full refresh is transactional. It proves released ownership, stages replacements, preserves user
 regions and custom configuration, translates state, writes `.forge/version` last, and rolls back on
-failure. It changes only the current worktree; sibling linked worktrees keep their own local state
-and must be refreshed after the migration commit reaches their branch. Do not manually synchronize
+failure. Setup discovers and processes the repository's worktrees separately; each keeps its own
+local state. A blocked checkout is reported and makes the overall command fail, even when other
+checkouts were updated. There is no rollback across checkouts. Use `--this-checkout-only` or
+`-ThisCheckoutOnly` for a single-checkout migration. Do not manually synchronize
 `CLAUDE.md` and `AGENTS.md`: their bounded Forge blocks point to the same canonical policy.
 
 Commit the harness as one versioned project change:
@@ -534,6 +539,7 @@ Recent releases:
 
 | Version | Date       | Highlights                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6.4.8 | 2026-10-06 | **One setup command for the repository and its worktrees.** Install and upgrade discover Git worktrees automatically, check ownership before multi-checkout writes, and report every checkout. Bash and PowerShell share the behavior; a checkout-only flag provides an opt-out. Short Claude/Codex prompts lead the setup docs. |
 | 6.4.4   | 2026-10-04 | **Finished worktrees fold into main state, even in parallel.** `/finish-branch` records the finished work, then folds it into the primary `state.md`: an exact replace when main is unchanged, otherwise a deterministic three-way merge that keeps sibling folds and edits on main. Retries are safe, unfinished worktree `### Now` work is never silently dropped, and the worktree is removed only after a successful fold. |
 | 6.4.3   | 2026-10-03 | **Human decisions, agent execution.** Approve consequential actions in conversation; the agent records approval and executes through host controls. Configured Claude/Codex reviews and investigations retain standing launch approval, including bounded private review snapshots. |
 | 6.4.0   | 2026-10-02 | **Lean quick fixes and exact SemVer releases.** Low-risk `/quick-fix` work uses a direct focused check without reviewer or Verify-app dispatch, while feature and bug-fix workflows retain full certification. Every merged Forge change set publishes an exact `MAJOR.MINOR.PATCH` release; legacy V6 stamps remain upgrade-compatible. |

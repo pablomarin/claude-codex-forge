@@ -82,6 +82,25 @@ try {
         }
         Check ($identities[0] -cne $identities[1]) "$main primary and linked candidate identities are distinct"
     }
+    if ($env:OS -ne 'Windows_NT') {
+        # Private session trees are excluded before traversal, even when they
+        # cannot be read or disappear during concurrent council cleanup.
+        $privateTree = Join-Path $linked '.forge/local/private-session'
+        New-Item -ItemType Directory -Path $privateTree | Out-Null
+        try {
+            & chmod 000 $privateTree
+            $unreadable = $false
+            try { Get-ChildItem -LiteralPath $privateTree -ErrorAction Stop | Out-Null }
+            catch { $unreadable = $true }
+            if ($unreadable) {
+                $privateIdentity = Invoke-Fingerprint $linked identity (Join-Path $linked '.forge/local/private.identity')
+                Check ($privateIdentity.Rc -eq 0) 'candidate identity never traverses excluded private session trees'
+            } else { Write-Host 'SKIP: privileged runtime can read chmod-000 permission fixture' }
+        } finally {
+            & chmod 700 $privateTree
+            Remove-Item -LiteralPath $privateTree -Recurse -Force
+        }
+    }
     $savedState=[IO.File]::ReadAllBytes($linkedState)
     try {
         Copy-Item -LiteralPath $primaryState -Destination $linkedState -Force

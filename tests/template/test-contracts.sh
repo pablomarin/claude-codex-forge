@@ -2780,10 +2780,12 @@ for report_doc in "$README" "$UPGRADING"; do
     assert_contains "$report_doc" '`--upgrade`' "$(basename "$report_doc") identifies routine v6 updates"
     assert_contains "$report_doc" '`-f`' "$(basename "$report_doc") identifies authoritative reconciliation"
 done
-assert_contains "$UPGRADING" 'current worktree' \
-    "upgrade guide scopes full refresh to the current worktree"
-assert_contains "$UPGRADING" 'sibling worktrees' \
-    "upgrade guide says sibling worktrees are not mutated"
+assert_contains "$UPGRADING" 'Git worktrees by default' \
+    "upgrade guide includes repository worktrees automatically"
+assert_contains "$UPGRADING" '`--this-checkout-only`' \
+    "upgrade guide provides an explicit single-checkout opt-out"
+assert_contains "$UPGRADING" 'There is no rollback across' \
+    "upgrade guide reports partial completion honestly"
 assert_contains "$UPGRADING" 'Do not manually synchronize `CLAUDE.md` and `AGENTS.md`' \
     "upgrade guide preserves one shared policy source"
 assert_contains "$UPGRADING" 'independently developed harness' \
@@ -2989,7 +2991,7 @@ else
     fail "top changelog release is exact MAJOR.MINOR.PATCH"
 fi
 EXPECTED_FORGE_VERSION="$FIRST_CHANGELOG_VERSION"
-EXPECTED_README_HISTORY_VERSION='6.4.4'
+EXPECTED_README_HISTORY_VERSION='6.4.8'
 README_BADGE_VERSION=$(sed -n 's/.*badge\/version-\([0-9][0-9.]*\)-blue.*/\1/p' "$README" | head -1)
 README_HISTORY_VERSION=$(sed -n '/^## Version history/,$p' "$README" \
     | sed -n 's/^| \([0-9][0-9.]*\)[[:space:]]*|.*/\1/p' | head -1)

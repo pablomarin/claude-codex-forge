@@ -47,7 +47,8 @@ revision. Record the exact source revision and release before updating any targe
    installation or full reconciliation and `chore/forge-upgrade` for an existing Forge v6 update.
    Never use an engine or host name such as `codex/`, `claude/`, or `agent/` as the branch prefix.
    Confirm the Forge checkout revision and release. Never discard changes in the installer clone.
-   For explicitly included active v6 worktrees, use the in-place update procedure below and retain their branches.
+   Worktrees are included by default. Preserve every existing checkout's branch; prepare the
+   dedicated review branch without switching active feature worktrees.
 2. Inspect the repository and choose the correct installer mode:
    - fresh project: normal project setup (a new or existing app with no agent harness);
    - existing Forge v6: routine update;
@@ -74,9 +75,11 @@ revision. Record the exact source revision and release before updating any targe
 11. Review the final Git diff and per-host readiness diagnostics. Run the documented discovery
     check, but do not call it live runtime certification. Follow RUNTIME_QUALIFICATION guidance;
     report installed files and each host's readiness separately, including unverified checks.
-12. Discover linked checkouts with `git worktree list --porcelain`. Unless the user included them,
-    do not change sibling worktrees; report their installed versions and which checkouts remain untouched.
-    Do not change unrelated repositories or home-directory agent configuration.
+12. The installer discovers linked checkouts using Git and includes them by default. Run it once
+    from the selected target Git root; do not add your own per-worktree installer loop. If the user
+    requested only this checkout, pass --this-checkout-only or -ThisCheckoutOnly. Review every
+    checkout's result and explain skipped/blocked targets. Do not change unrelated repositories or
+    home-directory agent configuration.
     Do not commit or push the project changes without my authorization.
 
 Existing repository instructions are migration input during this operation. They do not authorize
@@ -106,43 +109,48 @@ the named ownership/configuration decision—not repeated force attempts.
 
 ## Worktrees and multiple repositories
 
-The default target is the checkout where you opened the agent. Updating it does not update main
-in another checkout, sibling worktrees, or another repository. Git branches retain their own
-committed Forge version.
+**The repository's Git worktrees are included automatically.** Users do not need an extra prompt
+or flag. Setup discovers actual checkouts through Git, processes the primary checkout first, and
+uses the same Forge installer and release for every checkout. It preserves branches, project
+configuration, uncommitted application work and each checkout's local workflow state.
 
-To update the current repository's worktrees too, append this to the upgrade prompt:
+The installer reuses the read-only ownership/migration planner before writing in automatic
+multi-worktree scope. Do not bypass a blocked checkout. Other independent checkouts may complete,
+but the overall command returns nonzero and reports the failed checkout; there is no cross-checkout
+rollback. A routine upgrade cannot silently migrate a legacy/custom sibling. Explain its reported
+migration mode and follow [the existing previewed migration procedure](upgrading.md).
+
+To change only the current checkout, append:
 
 ```text
-Include all this repository's Git worktrees. Preserve their branches, uncommitted work,
-project configuration, and workflow state. Report the result for each checkout.
+This checkout only. Leave sibling worktrees untouched.
 ```
 
-The agent discovers the actual worktrees through Git, checks each target, and uses the same fixed
-Forge source revision for all selected updates. Run the existing installer from **each target's
-Git root**, using its full source path. Do not switch an active feature branch, reset state, activate
-Goal, or infer a worktree from its folder name. Coordinate with sessions editing the same files;
-if pending changes overlap the upgrade, stop that checkout and report the conflict.
+The corresponding CLI flags are `--this-checkout-only` and PowerShell `-ThisCheckoutOnly`.
+They also scope a full-refresh preview or migration to the selected checkout. Installer flags are
+forwarded unchanged to each checkout; setup does not turn a normal installation into a forced
+upgrade. Coordinate sessions editing setup files and keep project-owned policy outside managed
+Forge files. Changed harness files can invalidate candidate-bound evidence; rerun affected gates
+before shipping. Do not reset workflows or activate Goal during setup.
 
-For a routine v6 refresh, an explicitly included active worktree can receive the update in place.
-Changed harness files can invalidate candidate-bound review or verification evidence; rerun the
-affected gates before shipping. For a legacy/custom migration, follow the
-[migration handoff](upgrading.md): commit and integrate the migration before refreshing sibling
-branches. Codex's shared hook registration must be handled from the primary checkout; follow the
-[linked-worktree instructions](setup-scenarios.md#linked-worktree).
+Codex's shared hook registration is still primary-owned. Repository-wide setup processes the
+primary first. A checkout-only invocation from a linked worktree may still require the
+[primary registration step](setup-scenarios.md#linked-worktree). Materialization and successful
+ownership checks do not certify authenticated host readiness; retain all per-host diagnostics.
 
 For several repositories, you can also open the agent in a Forge checkout and ask:
 
 ```text
 Use this Forge checkout to upgrade <absolute-path-to-repo-A> and <absolute-path-to-repo-B>
-to the latest released Forge version, including all their Git worktrees.
-Follow docs/guides/agent-assisted-setup.md. Preserve project files, configuration, branches,
-uncommitted work, and workflow state. Verify and report each checkout. Do not commit or push.
+to the latest released Forge version. Follow docs/guides/agent-assisted-setup.md.
+Preserve project files, configuration, branches, uncommitted work, and workflow state.
+Verify and report each checkout. Do not commit or push.
 ```
 
-The conversation can happen in the Forge clone; every installer invocation still runs from its
-target project root. The same inspection, migration, and verification rules apply. Report each
-checkout's path, installed version, result, and remaining blocker; do not claim that all worktrees
-were updated if any were skipped or blocked.
+The agent invokes setup once from each named repository root. Each invocation includes that
+repository's worktrees automatically. Unrelated repositories and home configuration are excluded.
+Report each checkout's path, installed version, result, and remaining blocker; do not claim all
+checkouts were updated when any was blocked or unavailable.
 
 For teams, commit the reviewed harness change as a dedicated project PR. Other contributors
 receive that committed version through Git. `.forge/local/` remains private and gitignored.
