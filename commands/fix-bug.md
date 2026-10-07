@@ -32,13 +32,15 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
    Only in the Forge source checkout, when the installed path is absent, use the tracked
    `hooks/lib/worktree-lifecycle.sh` or `.ps1`. Native creation or adoption is optional only
    under the shared startup boundary; never create a second worktree for the same-directory handoff.
-4. Continue work in the linked worktree from the current or a later Claude Code or Codex session.
+4. Continue in the current session by default; switch only if the developer chooses to.
    A session opened in the primary checkout may continue the linked worktree by using it as the
-   working directory for local edits and checks. Shipping hooks use the host's event `cwd`.
-   When Codex reports the session directory and omits a tool call's `workdir`, open a session
-   whose workspace is the task worktree before commit, push, or PR creation; selecting only the
-   tool working directory does not change that hook context. The installed adapter declares the
-   current host for reviewer routing. No per-worktree Forge receipt, copied session identity,
+   working directory for local edits, reviews, verification, approval recording and
+   normal receipt-validating promotion. Before direct commit, push or PR creation, follow
+   [Shipping from the current session](../rules/workflow.md#shipping-from-the-current-session).
+   Shipping hooks use the host's event `cwd`; selecting only the
+   tool working directory does not change that hook context. The procedure verifies the exact
+   task locally while preserving native hooks and authorization. The installed adapter declares
+   the current host for reviewer routing. No per-worktree Forge receipt, copied session identity,
    or hook-trust bypass is required.
 5. The helper seeds only `## State` (with `### Now` cleared), `## Open Questions`, and `## Blockers`
    from the primary checkout and writes the exact baseline to

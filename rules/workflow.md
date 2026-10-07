@@ -189,6 +189,44 @@ Developer state, review receipts, verification receipts, and local memories live
 `.forge/local/`; project-owned durable memory lives under `.forge/memory/`. Use the active host's
 file capabilities for local evidence. Never infer a clean gate from a successful process exit.
 
+## Shipping from the Current Session
+
+Continue in the current session by default. A primary-checkout session may use the task worktree
+for local edits, reviews, verification, approval recording and normal receipt-validating promotion.
+Switch sessions only if the developer chooses to. Promotion validates task receipts; it does not
+prove that a later native shipping event used that task's context.
+
+Before direct `git commit`, `git push` or `gh pr create`, perform this explicit local preflight:
+
+1. Set the tool process working directory to the verified physical task-worktree root. Run that
+   worktree's `.forge/hooks/lib/workflow-state.sh show` (PowerShell: `workflow-state.ps1 show`).
+   Require the expected active task and workflow identity, and verify the worktree root and
+   Git common-directory identity against the intended task.
+   A matching recorded task remains valid at phase `complete`.
+   Completion does not waive shipping receipts or invalidate unchanged publication approval.
+   Inactive here means no matching recorded task workflow, rather than a completed phase.
+   Missing, inactive, mismatched or unreadable state
+   blocks shipping; an exit-0 gate result cannot substitute for this validation.
+2. Construct JSON input for the exact single shipping command, with an explicit `cwd` equal to
+   that verified root and `tool_input.command` equal to the planned command. Verify the `cwd`
+   equality directly; never infer it from command text. An absent or different input `cwd` fails
+   this preflight requirement.
+3. Invoke that worktree's existing `.forge/hooks/check-workflow-gates.sh` or
+   `.forge/hooks/check-workflow-gates.ps1` as a process, supplying the JSON on standard input with
+   both process cwd and input cwd at the same verified root. Require exit 0 after the state and
+   identity checks above. Any preflight failure blocks execution.
+4. Immediately before executing that exact command through the normal host tool, revalidate the
+   unchanged candidate, HEAD and approval. Any mutation invalidates the corresponding evidence;
+   follow the existing refreeze, review, verification and authorization rules before proceeding.
+
+This is local verification, not a native event. It does not grant shipping authority or certify
+native authentication. Keep normal native hooks enabled and preserve existing human authorization
+requirements. Report any native-session context mismatch: the host's event `cwd` may differ from
+the tool working directory. Stop on any real denial; never bypass a host or hook restriction.
+Existing standing review approval and still-current exact-scope shipping approval remain valid.
+Do not ask another workspace-choice question or repeat a valid approval solely because the current
+session opened in the primary checkout.
+
 ## Plan, Review, and Evidence
 
 ### Canonical V6 state transitions

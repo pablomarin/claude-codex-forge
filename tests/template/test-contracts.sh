@@ -2271,8 +2271,14 @@ for workflow in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
         "$(basename "$workflow") allows primary-checkout sessions to continue linked worktrees"
     assert_contains "$workflow" 'No per-worktree Forge receipt' \
         "$(basename "$workflow") requires no worktree receipt ceremony"
-    assert_contains "$workflow" 'whose workspace is the task worktree before commit, push, or PR creation' \
-        "$(basename "$workflow") requires correct session context when Codex omits workdir"
+    assert_not_contains "$workflow" 'whose workspace is the task worktree before commit, push, or PR creation' \
+        "$(basename "$workflow") does not require a workspace switch before shipping"
+    assert_contains "$workflow" 'Continue in the current session by default' \
+        "$(basename "$workflow") continues the current chat unless the developer chooses to switch"
+    assert_contains "$workflow" 'normal receipt-validating promotion' \
+        "$(basename "$workflow") permits normal promotion from the current chat"
+    assert_contains "$workflow" '../rules/workflow.md#shipping-from-the-current-session' \
+        "$(basename "$workflow") links the common direct-shipping preflight"
     assert_contains "$workflow" 'tool working directory does not change that hook context' \
         "$(basename "$workflow") distinguishes tool workdir from hook context"
     assert_contains "$workflow" 'concurrent sessions are allowed' \
@@ -2280,6 +2286,42 @@ for workflow in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
     assert_contains "$workflow" 'candidate-bound evidence becomes stale' \
         "$(basename "$workflow") explains evidence invalidation under concurrent mutation"
 done
+
+# ---------------------------------------------------------------------------
+# Contract: The installed workflow rule owns the exact task shipping preflight.
+# ---------------------------------------------------------------------------
+start_test "current-session shipping requires exact task preflight and native authority"
+SHIPPING_RULE="$REPO_ROOT/rules/workflow.md"
+for token in \
+    'Continue in the current session by default' \
+    'normal receipt-validating promotion' \
+    'verified physical task-worktree root' \
+    'workflow-state.sh show' \
+    'expected active task and workflow' \
+    'A matching recorded task remains valid at phase `complete`' \
+    'Completion does not waive shipping receipts or invalidate unchanged publication approval' \
+    'Git common-directory identity' \
+    'Missing, inactive, mismatched or unreadable state' \
+    'both process cwd and input cwd' \
+    'check-workflow-gates.sh' \
+    'check-workflow-gates.ps1' \
+    'Require exit 0' \
+    'unchanged candidate, HEAD and approval' \
+    'not a native event' \
+    'does not grant shipping authority' \
+    'Keep normal native hooks enabled' \
+    'Stop on any real denial' \
+    'Do not ask another workspace-choice question'; do
+    assert_contains "$SHIPPING_RULE" "$token" "installed shipping rule preserves: $token"
+done
+assert_not_contains "$REPO_ROOT/docs/guides/parallel-sessions.md" 'workspace is the task worktree before commit' \
+    "parallel guide has no blanket workspace switch prerequisite"
+assert_contains "$REPO_ROOT/docs/guides/parallel-sessions.md" '../../rules/workflow.md#shipping-from-the-current-session' \
+    "parallel guide links the installed canonical preflight procedure"
+assert_contains "$REPO_ROOT/docs/reference/hooks.md" '../../rules/workflow.md#shipping-from-the-current-session' \
+    "hook reference links the one explicit-preflight procedure"
+assert_contains "$REPO_ROOT/docs/reference/hooks.md" 'does not change native event routing' \
+    "hook reference does not claim manual preflight changes host routing"
 
 # ---------------------------------------------------------------------------
 # Contract: Task 5 host-neutral review replaces direct /codex launch policy.

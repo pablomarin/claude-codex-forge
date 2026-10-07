@@ -47,9 +47,8 @@ Copying clean evidence to another worktree does not satisfy its gates.
 ## Switch Hosts Mid-Feature
 
 Open either host in the repository and select the linked worktree as the tool working directory
-for local edits and checks. Before Codex commit, push, or PR creation, use a session whose workspace
-is the task worktree when the hook event `cwd` remains the session directory and the tool call's
-`workdir` is omitted.
+for local edits, reviews, verification, approval recording and normal receipt-validating promotion.
+Continue in the current session by default; switch only if the developer chooses to.
 
 For example, a session that starts in the primary checkout can select the worktree for its tools:
 
@@ -62,9 +61,14 @@ codex
 The new host reads `.forge/local/state.md`, continues at the next incomplete checkpoint, and keeps
 still-valid artifact-bound evidence. It does not repeat planning merely because the host changed.
 The current host is main for the next action; reviewer selection is recomputed for that action.
-Opening the client directly at the linked worktree remains optional for local edits and checks.
-When Codex reports the session directory and omits a tool call's `workdir`, use a session whose
-workspace is the task worktree before commit, push, or PR creation.
+Opening the client directly at the linked worktree remains optional. Before direct commit, push
+or PR creation, follow the installed
+[Shipping from the current session](../../rules/workflow.md#shipping-from-the-current-session)
+procedure. It requires verified task state and identity, matching process and input cwd, and a
+successful exact-command local gate preflight. Keep native hooks and human authorization; report
+native context mismatches and stop on real denials. Local verification does not certify a native
+event or grant shipping authority. Revalidate the candidate, HEAD and approval before execution;
+a still-current approval needs no new workspace-choice question.
 
 Forge creates no edit lock: concurrent sessions are allowed. Forge intentionally adds no ownership daemon, so the
 developer still coordinates overlapping edits. When any session changes the candidate,
@@ -89,10 +93,9 @@ missing/stale registration or wrong-common-directory event keeps Codex `RUNTIME_
 - In Claude Desktop, turn on **worktree** before the first new-feature or bug-fix prompt. In other
   supported hosts, start from the primary checkout and use native isolation or let the portable
   helper create the worktree.
-- A current or later Codex or Claude Code session may continue local edits and checks by setting
-  tool cwd to that worktree; no copied identity or per-worktree trust step is needed. Before Codex
-  commit, push, or PR creation, use a session whose workspace is the task worktree when the hook
-  event `cwd` remains the session directory and the tool call's `workdir` is omitted.
+- A current or later Codex or Claude Code session may continue task work by setting tool cwd to
+  that worktree; no copied identity or per-worktree trust step is needed. For direct shipping, use
+  the [canonical preflight](../../rules/workflow.md#shipping-from-the-current-session).
 - Do not create nested worktrees.
 - Use paths relative to the active worktree.
 - `quick-fix` uses the current branch and does not create a worktree.
