@@ -323,33 +323,21 @@ The server name (without `__*`) approves ALL tools from that MCP server.
 
 See: [GitHub Issue #3107](https://github.com/anthropics/claude-code/issues/3107)
 
-## Plugins not showing in /help?
+## Forge workflows missing or overlapping plugins enabled?
 
-1. **Verify plugin installed:**
+Forge v6 provides its own planning, TDD, debugging, review and UI-design policy. It does
+not require Superpowers, pr-review-toolkit or frontend-design. Use the installed Forge
+commands and matching Codex skills from the [commands map](reference/commands.md), then
+run the documented [discovery check](guides/agent-assisted-setup.md).
 
-   ```
-   /plugin list
-   ```
-
-2. **Verify plugin is ENABLED** in `~/.claude/settings.json`:
-
-   ```json
-   {
-     "enabledPlugins": {
-       "superpowers@claude-plugins-official": true,
-       "pr-review-toolkit@claude-plugins-official": true,
-       "frontend-design@claude-plugins-official": true
-     }
-   }
-   ```
-
-3. **Restart Claude Code** after enabling plugins
-
-4. **Try reinstalling:**
-   ```
-   /plugin uninstall superpowers@claude-plugins-official
-   /plugin install superpowers@claude-plugins-official
-   ```
+If these external plugins were enabled by an older installation, inspect the effective
+Claude project and user settings (`/plugin list` helps identify installed integrations).
+A full-refresh report preserves overlapping enabled plugins but reports compatibility
+blocking; routine upgrade preserves settings without that full-refresh diagnostic.
+Follow [overlap reconciliation](guides/upgrading.md#overlapping-workflow-plugins): review
+which setting enables the plugin, obtain approval for the scoped change, and verify the
+result. Do not reinstall or globally remove plugins merely to repair Forge discovery.
+An unrelated developer-owned plugin may be retained; check its actual role and settings.
 
 ## Codex CLI not working?
 

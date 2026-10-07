@@ -6,4 +6,6 @@
 
 **`/quick-fix` does NOT create worktrees** - it's for trivial changes only.
 
-When running Superpowers skills (`brainstorming`, `writing-plans`, `executing-plans`), these skills may attempt to create worktrees. **SKIP worktree creation** in these skills - you're already isolated.
+Planning and implementation continue in the workflow's existing isolated worktree.
+Do not create another worktree for the same task when a native tool or optional integration
+offers to do so. Forge owns these workflow phases; no Superpowers plugin is required.

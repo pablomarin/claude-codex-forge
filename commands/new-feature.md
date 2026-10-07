@@ -149,6 +149,10 @@ agent type. Supply the bounded acceptance criteria, immutable workflow base SHA,
 agent/task ID in every handoff. Every task follows RED → GREEN → refactor and produces the
 structured spec/quality task receipts required by the SubagentStop gate.
 
+Include owned paths, relevant task interfaces and a report path in each brief. Apply
+[meaningful RED and test expectations](../rules/testing.md#meaningful-red-and-test-expectations)
+and preserve the actual failing/passing commands and results in the task report.
+
 When a test fails unexpectedly, use the workflow's systematic-debugging phase: reproduce, identify
 root cause, add a failing regression test, make the smallest fix, and rerun the owning suite.
 

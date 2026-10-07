@@ -1,5 +1,32 @@
 # Testing
 
+## Meaningful RED and test expectations
+
+Before adding a test, name the supported behavior or realistic defect it protects. Derive
+expected results from the requirement or a hand-checked fixture, independently of the code
+under test. Reusing a production builder for both actual and expected output can hide the
+same defect on both sides. Factories are useful for input setup, not circular expectations.
+
+Observe RED through the real owning entry point and confirm why it failed. Broken fixture
+setup, syntax/import mistakes or unavailable infrastructure do not prove the intended
+regression unless that failure itself is the supported defect. Correct the test setup first;
+preserve the failing command and relevant output, then the passing command and output.
+Never delete user work to recreate test-first ordering. If implementation already exists,
+disclose the sequence and prove the regression safely against a disposable baseline.
+
+Assert outcomes, persisted state and boundary contracts. Keep owned logic real; replace
+genuinely external or slow dependencies. When an interaction is the contract, check its
+arguments, count or order rather than merely the presence of a mock. Exact text/schema
+checks remain appropriate for public wire formats, layout and discovery contracts; they
+do not establish runtime behavior or agent compliance. Identify a plausible production
+mistake the changed test would catch; formal mutation tooling is not mandatory.
+
+For asynchronous behavior, wait for a freshly observed condition or event with a finite
+deadline and useful failure diagnostics. Clean up processes and resources. Deliberate
+elapsed-time checks are appropriate when timing itself is the requirement. Increasing
+timeouts without evidence is not a root-cause repair. Use focused owning checks and the
+project's fast gate; these practices do not authorize exhaustive local suites.
+
 ## Structure
 
 ```
@@ -40,7 +67,7 @@ async def test_create_user_with_valid_data(session):
 
 ## Fixtures
 
-Use factories over hard-coded data:
+Use factories for varied input setup; keep expected results independently derived:
 
 ```python
 @pytest.fixture

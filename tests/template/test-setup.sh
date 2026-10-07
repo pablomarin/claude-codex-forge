@@ -62,6 +62,19 @@ LOG1="$S1/.setup.log"
 run_setup "$S1" "$LOG1" -p "FlatTest" -t fullstack --with-playwright
 assert_equals "$?" "0" "setup exits 0 on flat layout"
 
+python3 - "$S1/.claude/settings.json" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    plugins = json.load(stream).get("enabledPlugins", {})
+for name in ("superpowers", "pr-review-toolkit", "frontend-design"):
+    assert plugins.get(name + "@claude-plugins-official") is not True, name
+PY
+assert_equals "$?" "0" "fresh installer settings enable no overlapping workflow plugins"
+assert_not_contains "$LOG1" "Optional host integration enabled" \
+    "fresh installer does not claim an optional plugin was enabled"
+assert_contains "$LOG1" "External workflow plugins are not required." \
+    "fresh installer describes standalone Forge capabilities"
+
 assert_file_exists "$S1/playwright.config.ts" \
     "playwright.config.ts scaffolded at root"
 assert_file_exists "$S1/tests/e2e/fixtures/auth.ts" \

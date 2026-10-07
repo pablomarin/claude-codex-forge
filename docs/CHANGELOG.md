@@ -2,6 +2,32 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.10 — 2026-10-07
+
+### Standalone Forge defaults and clearer engineering practices
+
+Fresh Unix and Windows settings no longer enable frontend-design automatically; both
+installer banners describe Forge's canonical capabilities. Existing developer plugin
+choices remain preserved. Current workflow, setup and troubleshooting guidance identifies
+Forge v6's own planning, TDD, debugging, review and UI-design owners, and explains retained
+plugin overlap and the routine-upgrade/full-refresh diagnostic boundary.
+
+Canonical testing, debugging, producer and reviewer instructions now clarify meaningful
+RED failures, independently derived expectations, safe boundary tracing, bounded readiness
+waits and compact task evidence reports. Distinct final reviews, candidate-bound gates,
+focused local suites and human authority remain in force. Prompt wording and deterministic
+contracts alone do not certify authenticated host behavior.
+
+### Earlier PowerShell feedback and isolated native CI
+
+The local fast gate now includes focused real PowerShell transport/reproduction controls and
+portable runner/aggregate contracts. Native Windows CI discovers every suite and runs isolated
+jobs with six-way bounded parallelism; the existing aggregate requires all suites to succeed on
+the same clean candidate before attestation. Unique always-uploaded artifacts preserve per-suite
+results and safe reproduction failure timings/receipt fields. Existing native timeout budgets
+and assertions remain unchanged. Portable PS7 checks do not certify Windows 5.1, and the earlier
+native reproduction failure remains unverified until a fresh native run establishes its cause.
+
 ## 6.4.9 — 2026-10-06
 
 ### Current-session worktree shipping guidance

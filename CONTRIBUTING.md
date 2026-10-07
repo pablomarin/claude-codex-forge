@@ -102,6 +102,10 @@ bash tests/template/test-contracts.sh
 bash tests/template/test-platform-parity.sh
 bash tests/template/test-setup.sh
 git diff --check
+# Focused portable PS7 behavior and CI result contracts (included in run-fast):
+bash tests/template/test-powershell-local.sh
+bash tests/template/test-powershell-runner.sh
+bash tests/template/test-windows-ci-feedback.sh
 ```
 
 Use the narrowest relevant command while editing, then `run-fast.sh` for the ordinary local gate.
@@ -126,3 +130,26 @@ When changing installed layout or ownership:
 
 `CLAUDE.template.md` remains only for proven v5 reconciliation and migration. New v6 Claude root
 adapters come from `templates/adapters/CLAUDE.block.template.md`.
+
+## PowerShell feedback and Windows qualification
+
+The fast gate includes focused PS7 transport and actual dispatcher reproduction controls,
+including a deliberate timeout which must remain unverified. The disposable POSIX engine and
+process shims exercise Forge behavior; they do not qualify Windows PowerShell 5.1. These POSIX fixture checks
+report a skip when `pwsh` is absent or the host is Windows. Process-tree checks need the host's normal permission to
+inspect and terminate their own disposable children; a denied inspection is not a product PASS.
+
+Native CI discovers all `tests/template/test-*.ps1` suites, runs each in its own Windows checkout
+with at most six jobs in parallel, and retains every job's log/result/diagnostics even on failure.
+The `powershell-51` aggregate independently discovers its own checkout's suites and requires
+complete, unique, successful native 5.1 coverage bound to the same clean HEAD/tree before the
+existing Windows attestation. Missing, cancelled, skipped, dirty or mixed-revision results fail.
+The aggregate artifact is `windows-powershell-51`; per-suite artifacts are `windows-suite-<name>`.
+Reproduction failure diagnostics include selected receipt fields, runner timings and stream sizes;
+measurement-only startup probes run after failed assertions and do not change the 60-second cap.
+
+For a focused native suite, use `run-all.ps1 -ListSuites` to discover exact basenames, then
+`run-all.ps1 -SuiteName test-agent-dispatch.ps1 -ResultPath <absolute-outside-checkout-path>`.
+The result's existing physical parent must be outside the checkout without reparse aliases.
+Default `run-all.ps1` still runs every suite serially. Native broad coverage remains CI-owned;
+do not substitute portable PS7 results or synthetic validator fixtures for native attestation.

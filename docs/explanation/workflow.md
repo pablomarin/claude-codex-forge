@@ -1,231 +1,70 @@
 # The Complete Workflow
 
-How a feature goes from idea to merged PR.
+Forge v6 owns the engineering lifecycle for both Claude Code and Codex. Superpowers and
+other workflow plugins are not required. Claude command spellings below have matching
+Codex skills such as `$fix-bug`; see the [commands map](../reference/commands.md).
 
-The diagram uses Claude Code's slash-command spellings for readability. Codex exposes the same
-canonical workflows as skills such as `$fix-bug`; see the [commands map](../reference/commands.md).
+## Feature and bug-fix paths
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. START: Launch a Workflow Command                         │
-│    /new-feature {name} → creates isolated git worktree      │
-│    /fix-bug {name}     → creates isolated git worktree      │
-│    /quick-fix {name}   → creates a branch (small changes)   │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 2. PRD PHASE (Custom Commands)                              │
-│    /prd:discuss {feature}  → Refine user stories            │
-│    /prd:create {feature}   → Generate structured PRD        │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 3. RESEARCH — `research-first` agent (Phase 2 enforcement)  │
-│    → Context7 + official docs + changelogs per dependency   │
-│    → Produces structured brief in `docs/research/`          │
-│    → Design phase reads this before any planning starts     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 4. DESIGN + BOUNDED REVIEW                                  │
-│                                                             │
-│    ┌───────────────────────────────────────────┐            │
-│    │ a. /superpowers:brainstorming             │            │
-│    │    → Interactive design exploration       │            │
-│    │    → Compare approaches and run the       │            │
-│    │      cheapest safe falsifying check       │            │
-│    └──────────────────┬────────────────────────┘            │
-│                       ▼                                     │
-│    ┌───────────────────────────────────────────┐            │
-│    │ b. /superpowers:writing-plans             │            │
-│    │    → Write detailed TDD tasks             │            │
-│    └──────────────────┬────────────────────────┘            │
-│                       ▼                                     │
-│    ┌───────────────────────────────────────────┐            │
-│    │ c. Main host + fresh opinion review plan  │◄──┐        │
-│    │    → Two independent validations          │   │        │
-│    │    → Other engine, else fresh same-engine │   │        │
-│    └──────────────────┬────────────────────────┘   │        │
-│                       ▼                            │        │
-│              ┌────────────────┐                    │        │
-│              │ P0/P1/P2?      │── Yes ──► Edit ────┘        │
-│              └───────┬────────┘          plan               │
-│                      No                                     │
-│                      ▼                                      │
-│              No P0/P1/P2s → Plan approved ✓                 │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 5. EXECUTE (Superpowers Plugin)                             │
-│    /superpowers:subagent-driven-development                 │
-│    → TDD enforced (RED-GREEN-REFACTOR)                      │
-│    → Dispatch Plan (DAG) controls parallelism               │
-│    → Auto-format on save (ruff/prettier)                    │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 5b. DEBUG (if bugs encountered)                             │
-│    /superpowers:systematic-debugging                        │
-│    → 4-phase root cause analysis                            │
-│    → NO fixes without investigation first                   │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 6. PRELIMINARY REVIEW (fixes still allowed)                 │
-│                                                             │
-│    ┌──────────────────────┐ ┌────────────────────────────┐  │
-│    │ Fresh code-spec lens │ │ Fresh code-quality lens     │ │
-│    │ → Fresh requirements │ │ → Fresh quality lens        │ │
-│    │   conformance lens   │ │   on the same candidate     │ │
-│    └──────────┬───────────┘ └─────────────┬───────────────┘ │
-│               └──────────┬────────────────┘                 │
-│                          ▼                                  │
-│               ┌─────────────────────┐                       │
-│               │ P0/P1/P2 issues?    │── Yes ──► Fix ──┐     │
-│               └──────────┬──────────┘                 │     │
-│                          No (P3s acceptable)     ┌────┘     │
-│                          ▼                       │          │
-│               Reviews passed ✓       ◄───────────┘          │
-│                         (closure: named findings only)      │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 7. SIMPLIFY + FREEZE                                        │
-│    Forge-owned simplification phase                         │
-│    → Cleans up architecture, improves readability           │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 8. FINAL REVIEW + VERIFY                                    │
-│    → Fresh opinion receipts over the frozen candidate       │
-│    "Use the verify-app agent"                               │
-│    → Unit tests + migrations + lint + types                 │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 9. E2E USE CASE TESTS (if user-facing changes)              │
-│    "Use the verify-e2e agent"                               │
-│    → Feature mode: validate new user journeys               │
-│    → Regression mode: replay tests/e2e/use-cases/ suite     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 10. COMPOUND LEARNINGS                                      │
-│    docs/solutions/ + auto memory                            │
-│    → Bug root causes, patterns, solutions saved             │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 11. COMMIT & CREATE PR                                      │
-│    → Update .forge/local/state.md (Done/Now/Next)           │
-│    → Update docs/CHANGELOG.md (if 3+ files changed)         │
-│    → git add, commit, push to origin                        │
-│    → gh pr create                                           │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 12. WAIT FOR PR REVIEWS                                     │
-│    → Copilot, Claude, Codex auto-review on GitHub           │
-│    → Peer reviews from other developers                     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 13. PROCESS PR REVIEW COMMENTS                              │
-│    /review-pr-comments                                      │
-│    → Address comments from all reviewers                    │
-│    → Fix issues, push, wait for approval                    │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 14. FINISH                                                  │
-│    /finish-branch                                           │
-│    → Merge PR to main (if not already merged)               │
-│    → Delete remote branch                                   │
-│    → Delete local branch + worktree                         │
-│    → Restart servers from main                              │
-└─────────────────────────────────────────────────────────────┘
-```
+| Phase | Feature | Bug fix | Evidence or result |
+| --- | --- | --- | --- |
+| Start or resume | `/new-feature` | `/fix-bug` | Existing isolated worktree, immutable base and canonical local state |
+| Understand | PRD and current dependency research | Exact reproduction, working control and root-cause investigation | Observable acceptance criteria and supported failure |
+| Plan | Compare viable approaches and write bounded tasks | Write the minimal repair and regression plan | Fresh configured plan review; bounded repair and closure |
+| Implement | Tasks in dependency order | Smallest root-cause repair | Producer follows RED → GREEN → refactor, with actual task evidence |
+| User journey | Preliminary feature E2E while fixes are allowed | Preliminary regression journey while fixes are allowed | Actor, scenario, interface, steps, meaningful outcome and persistence |
+| Finalize | Solution/release material and simplification | Solution/release material and simplification | One staged-clean candidate fingerprint |
+| Certify | Distinct fresh spec and quality reviews, verify-app and E2E | Same candidate-bound gates | Real reports and receipts; mutation invalidates the final set |
+| Promote | Exact-tree promotion and commit | Same | Revalidated candidate and shipping gates |
+| Publish | Authorized push and PR creation | Same | Human approval for the exact current external action |
+| Finish | Process review comments, then `/finish-branch` | Same | Exact reviewed head and CI, authorized merge and safe cleanup |
 
-## Native `/goal` with Forge Composition (Layer 2)
+The canonical feature and bug-fix workflows define the detailed steps; the
+[commands map](../reference/commands.md) identifies both host entry points. Installed copies
+live under `.forge/workflows/`; the table is an explanation, not a second executable policy.
+Bug fixes include diagnosis and a reviewed plan. Do not skip planning by labeling a full
+bug-fix workflow "simple".
 
-When the workflow's gate checkpoint passes (PRD-complete for `/new-feature`; Plan-Approved for
-`/fix-bug`), Forge composes the current host's native `/goal` over the shared objective, nonce,
-durable budget, checklist, evidence, authorization, and exact next step in `.forge/local/state.md`.
-Claude Code and Codex sessions are not transferable: switching hosts starts a fresh native session
-from that checkpoint.
+The producer reports the intended RED failure, GREEN results and unresolved concerns.
+Tests must exercise the owned behavior with independent expectations; source text and
+schema assertions certify their actual contracts, not agent obedience. Debugging locates
+the first incorrect boundary using safe evidence and working controls, rather than a chain
+of guessed patches. These practices are owned by Forge's canonical rules and roles.
 
-### Checkpoint placement asymmetry
+## Quick fixes
 
-| Command              | Checkpoint    | Trigger                                                         |
-| -------------------- | ------------- | --------------------------------------------------------------- |
-| `/new-feature`       | PRD-Complete  | After Phase 1 PRD created, before Phase 2 Research              |
-| `/fix-bug` (complex) | Plan-Approved | After Phase 3.3 Plan Review Loop passes, before Phase 4 Execute |
-| `/fix-bug` (simple)  | None          | Simple fixes skip Phase 3 and have no plan file to drive from   |
-| `/quick-fix`         | None          | Trivial changes are not eligible for autonomous loop            |
+`/quick-fix` is the narrow alternative for trivial supported changes. The main agent runs
+one obvious focused check directly; ship hooks validate its clean recorded base and scope
+limit. It dispatches no code-review or verifier agents. User-facing effects, uncertainty,
+higher risk or scope growth move work to `/fix-bug` or `/new-feature`.
 
-Quick-fix also omits the full final-review lane: the main agent runs one obvious focused check
-directly, while ship hooks revalidate the clean recorded base and three-implementation-path limit.
-It dispatches no code-review or Verify agents. Any uncertainty, user-facing effect, higher risk, or
-scope growth moves the work to `/fix-bug` or `/new-feature`.
+## Review and verification
 
-### What the loop does
+Ordinary review prefers the other engine and visibly falls back to a fresh same-engine
+reviewer if necessary. Findings are a completed review, not a fallback trigger.
+Review defaults to one broad review, one repair and one closure limited to named findings
+and direct regressions. Concrete material P0/P1/P2 defects block certification; advisory
+P3 suggestions do not justify perpetual polish. Only the human adjudicates an exhausted
+canonical review limit.
 
-- Reads `.forge/local/state.md` each turn (the workflow checklist + objective nonce)
-- Surfaces candidate-bound evidence via `.forge/hooks/build-evidence.sh`
-- Uses the active host's qualified native `/goal`; a native exit alone is never completion proof
-- Stops for user input, PR creation, merge/deploy/publish, destructive or security-sensitive work,
-  and every new external mutation
-- Keeps ordinary uncertainty in the owning bounded workflow. During active native Goal, Council is
-  used when a genuine non-destructive product or engineering decision is required to continue and
-  the cheapest safe falsifying check does not produce a deterministic smallest answer. Explicit
-  requests and unresolved concrete high-impact architectural forks remain eligible too.
+Use focused owning checks and the project's fast local gate. Exhaustive local suites need
+an explicit request. Native Windows and authenticated host behavior require their own
+evidence; portable or synthetic checks cannot stand in for them. Process success or a
+confident producer report alone cannot certify an unchanged or changed candidate.
 
-### When NOT to use it
+The installed `.forge/rules/workflow.md` owns receipt validity, review budgets,
+resource discipline and current-session shipping. State remains in `.forge/local/state.md`;
+verified durable project knowledge belongs in `.forge/memory/` and solution documentation.
 
-- Trivial changes (`/quick-fix` flow) — autonomous loop is overkill
-- When you want to review each phase by hand
-- When the active host cannot prove all native-goal Must behaviors (`RUNTIME_READY=BLOCKED`)
+## Native `/goal` composition
 
-### Disabling it
+Forge composes over the active host's native `/goal` only after the developer invokes it
+or explicitly requests native Goal autonomy. It records the objective, nonce, persistent
+budget, checklist, evidence and exact next step. An offered checkpoint does not activate
+Goal or grant publication authority.
 
-Decline the autonomous loop offer at the checkpoint and the workflow falls back to the standard phase-by-phase flow.
-
-## Why This Workflow?
-
-Based on Boris Cherny's key insight:
-
-> "Probably the most important thing to get great results out of Claude Code — **give Claude a way to verify its work**. If Claude has that feedback loop, it will **2-3x the quality** of the final result."
-
-The harness operationalizes that insight across every phase for whichever host is main:
-
-- **Research** gives the main host current docs (not stale training data)
-- **Plan review** gives it a fresh second opinion _before_ writing code
-- **TDD** gives it executable tests as its verification loop
-- **Code review** gives it fresh spec and quality lenses on one frozen candidate
-- **Simplify + verify + E2E** add candidate-bound evidence before commit
-- **PR reviewers + `/review-pr-comments`** add review _after_ the PR is open
-- **`docs/solutions/` + Forge memory** preserve verified learning
-
-Review is deliberately bounded: one broad review, one repair pass, and one closure review limited to
-named findings and direct regressions. P3, cosmetic, and speculative concerns do not keep the loop
-open. A reachable P0/P1 security, correctness, or data-integrity defect still blocks; one surgical
-repair and verification is allowed before Forge surfaces any remaining blocker to the developer.
-
-The active host invokes the opinion workflow with its native name: Claude Code uses `/opinion` and
-Codex uses `$opinion`. Both hosts reserve `/review` for native behavior. Host switches preserve
-`.forge/local/state.md`, but simultaneous editing can overwrite work; Forge warns and does not add
-locks or leases.
+Switching hosts starts a fresh native session from shared state; native conversation
+history does not transfer. Ordinary review fallback remains automatic. User input,
+consequential external actions and exhausted budgets retain their human boundaries.
+When required native behavior is unverified, report the missing qualification rather
+than claiming runtime readiness. See [native Goal composition](autonomous-goal.md).

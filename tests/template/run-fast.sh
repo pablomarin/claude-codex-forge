@@ -20,6 +20,9 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-merge-settings.sh"
     "$REPO_ROOT/tests/template/test-bash-safety.sh"
     "$REPO_ROOT/tests/template/test-stop-workflow.sh"
+    "$REPO_ROOT/tests/template/test-powershell-runner.sh"
+    "$REPO_ROOT/tests/template/test-powershell-local.sh"
+    "$REPO_ROOT/tests/template/test-windows-ci-feedback.sh"
 )
 
 TOTAL_FAIL=0

@@ -99,6 +99,16 @@ commands are in [Getting Started](../getting-started.md). Do not combine `--upgr
 `--dry-run`. Legacy machine-wide Forge cleanup is a separate optional retirement operation, not a
 project installation mode.
 
+## Existing workflow plugins
+
+Forge v6 supplies planning, TDD, debugging, review and UI design itself. Fresh setup does
+not enable Superpowers, pr-review-toolkit or frontend-design. Existing plugin choices
+are preserved, including explicit enabled and disabled entries. If overlapping plugins
+are present, follow [overlap reconciliation](upgrading.md#overlapping-workflow-plugins)
+and obtain approval for any scoped settings change; do not silently remove them.
+Full refresh diagnoses retained enabled overlap, while routine upgrade does not emit
+that diagnostic. Installation and discovery remain separate from native host readiness.
+
 ## What a successful handoff tells you
 
 The agent should name the target project, Forge source revision, selected mode, files changed and
