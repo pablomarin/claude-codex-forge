@@ -13,9 +13,11 @@ Portable PowerShell candidate discovery now normalizes path separators before pr
 runtime directories, preventing parallel council cleanup from interrupting snapshot enumeration.
 
 Windows qualification CI has a bounded 90-minute diagnostic allowance. Its runner reports each
-suite's start, finish, exit status and elapsed time, and worktree setup tests retain child logs while
-streaming installer output visibly. Every suite and assertion remains required; these diagnostics
-do not establish native Windows completion, which still requires a successful fresh CI run.
+suite's start, finish, exit status and elapsed time. A bounded test-only control captures worktree
+setup stdout and stderr in separate retained files, echoes their decoded contents, preserves scalar
+exit status, and fails the owning suite on a five-minute child timeout with scoped process evidence.
+Every original suite and assertion remains required. This control does not change installed runtime
+behavior or establish native Windows completion, which still requires a successful fresh CI run.
 
 Bash and PowerShell setup include all discovered Git worktrees by default, with the primary
 checkout processed first. Existing per-checkout installers retain their original options and

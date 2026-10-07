@@ -105,3 +105,40 @@ the owning focused worktree suite on portable PS7; it does not certify Windows5.
 after final bytes settle. Obtain fresh exact-candidate paired reviews and app/E2E receipts before
 normal promotion. Include this same bounded CI repair in the stacked guidance candidate and
 revalidate its final receipts, keeping6.4.8 and6.4.9 release boundaries and monotonic counters.
+
+## Native Windows raw-stream control (diagnostic, not a proven runtime fix)
+
+Actual90minute runs37575968475 and37575987221 pass all13 earlier suites but stall in the first
+worktree setup at Checking prerequisites. The parent also reports ProcessStreamReader_CliXmlError.
+PortablePS7 passes143/143. Configured independent diagnosis remains UNVERIFIED: an undrained shared
+CLIXML stderr pipe fits the logs, but a product child stall is still possible. No timeout increase,
+assertion deletion or runtime repair is justified by that hypothesis alone.
+
+Use the existing native failed first invocation as primary evidence. Prepare a bounded control by
+changing only the owning fixture Invoke-Setup transport to the existing Start-Process redirected-file
+pattern from test-agent-dispatch.ps1: same runtime, encoded command, arguments, cwd and installer bytes.
+Capture separate stdout/stderr files, exit, elapsed and CLIXML header/byte observations. Store diagnostic
+files outside the deleted fixture directory: RUNNER_TEMP/forge-windows-powershell51/setup-transport in CI,
+and a separate retained temporary diagnostic directory locally. Echo captured text to host output;
+read assertion logs with the console output encoding while preserving the separate captured files.
+Bound each child to300seconds. On timeout capture only its descendant process-tree metadata and stop
+only that disposable child tree; throw a suite failure immediately, regardless of expected-negative
+assertions, so no23-timeout cascade occurs. OS-directed files retain partial output without unbounded
+ReadToEndAsync Result waits. The broad runner still runs its remaining suites and cannot attest after
+this failure. All17 original suites/assertions remain; a new focused test increases the discovered
+count rather than replacing coverage. Windows attestation still requires aggregate zero.
+Do not modify setup.ps1 or other installed runtime sources before native control evidence exists.
+
+This is a test-only diagnostic candidate, not a claim that the installer is repaired. First graduate
+small success/nonzero and stderr-volume fixtures through the raw helper (including log/Unicode and
+exit preservation), then the owning portablePS7 suite and fast gate. Obtain fresh exact-candidate
+reviews/app/E2E receipts and normal promotion before publishing the control to existing PR1102.
+Interpret the actual native result independently: control passes while old identical installer
+primary hangs supports the test-transport boundary as a whole, not a particular stdin/CLIXML cause.
+A finished control with failed assertions remains FAIL and requires diagnosis of those assertions;
+a timed-out control requires narrower native prerequisite diagnosis and forbids guessed production
+edits. The earlier native single-checkout dual-engine journey already passed via normal2>&1, which
+helps narrow a still-failing result toward nested setup. Only successful native full CI allows merge.
+Keep guidance PR1103 unchanged until the control gives useful native evidence; then carry any
+supported test-only change across with fresh exact-candidate certification. No new routing or state
+machinery, authenticated-agent claim or downstream installation.
