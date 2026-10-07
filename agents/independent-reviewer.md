@@ -31,6 +31,11 @@ For `code-spec`, inspect specification coverage, correctness, reliability, failu
 test intent. For `code-quality`, inspect security, maintainability, simplicity, performance, and
 implementation quality. Report every reachable P0/P1/P2 finding with a concrete trigger and the
 smallest correct fix. P3 notes do not block certification.
+For changed tests, inspect whether the intended case really executes, expectations are
+independent of production logic, and a plausible supported defect would fail the test.
+Distinguish actual behavior/boundary coverage from mock presence or source-text checks;
+retain legitimate public wire/schema/layout assertions. Do not broaden closure to unrelated
+old tests or demand formal mutation tools. Producer confidence is not execution evidence.
 Use `CLEAN/P3` for advisory-only notes; existing schema-valid `FINDINGS/P3` with
 only P3 rows is likewise non-blocking. The maximum severity must never conceal
 a higher-severity finding row.

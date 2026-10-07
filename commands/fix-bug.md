@@ -92,6 +92,14 @@ Follow four phases without editing production code early:
 3. Compare a working control and the failing case; test one hypothesis at a time.
 4. State the proven root cause and the production change that a regression test must catch.
 
+For failures crossing components, locate the last correct and first incorrect boundary.
+Compare expected and observed inputs, outputs and relevant configuration with a working
+control; inspect recent changes before proposing another fix. Record presence, type or
+redacted values when data is sensitive, never raw credentials or environment dumps.
+Repeated failed hypotheses require better evidence or a surfaced missing invariant,
+not another speculative patch, a timeout increase or an automatic architecture rewrite.
+Keep this investigation within the existing resource and review boundaries.
+
 If reproduction is impossible, record `BLOCKED` with the missing environment/input rather than
 guessing. When investigation needs network or write access, invoke the Forge opinion workflow's
 investigate profile (`/opinion investigate` in Claude Code; `$opinion investigate` in Codex) and
@@ -153,6 +161,10 @@ the current plan candidate.
 2. Implement the smallest production change that makes it GREEN.
 3. Run the owning tests and a direct control proving unrelated supported behavior remains intact.
 4. Refactor only after green.
+
+Apply [meaningful RED and test expectations](../rules/testing.md#meaningful-red-and-test-expectations):
+the failing run must expose the intended defect, and expectations must be independent of
+the implementation. Preserve evidence without deleting existing developer work.
 
 Invoke the active host's exact `forge-v6-producer` agent type for each bounded implementation task.
 Supply its acceptance criteria, immutable base SHA, and host runtime agent/task ID; the producer

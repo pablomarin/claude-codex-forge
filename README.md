@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
-  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-6.4.9-blue?style=flat-square"></a>
+  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-6.4.10-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
   <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-supported-orange?style=flat-square"></a>
@@ -90,6 +90,15 @@ engineering with either agent.
   evidence, resume, and human-authorization contract.
 - Git worktrees isolate simultaneous features while each worktree keeps its own local state.
 - Bash and Windows PowerShell implementations ship together.
+
+## Does Forge need Superpowers?
+
+Forge v6 owns planning, TDD, systematic debugging, code review and UI design through its
+canonical workflows, rules and roles. Superpowers, pr-review-toolkit and frontend-design
+were integrations in the v5 workflow; they are not required for v6. New installations do
+not enable them automatically. Existing plugin settings are developer-owned and preserved.
+See [upgrade guidance](docs/guides/upgrading.md#overlapping-workflow-plugins) before reconciling
+an existing installation.
 
 ## How the dual-engine harness works
 
@@ -539,6 +548,7 @@ Recent releases:
 
 | Version | Date       | Highlights                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6.4.10 | 2026-10-07 | **Standalone engineering practices.** Forge v6 owns planning, TDD, debugging, review and UI design. Fresh setup no longer enables overlapping plugins; existing choices are preserved. Testing and task handoffs clarify meaningful failures and independent evidence. |
 | 6.4.8 | 2026-10-06 | **One setup command for the repository and its worktrees.** Install and upgrade discover Git worktrees automatically, check ownership before multi-checkout writes, and report every checkout. Bash and PowerShell share the behavior; a checkout-only flag provides an opt-out. Short Claude/Codex prompts lead the setup docs. |
 | 6.4.4   | 2026-10-04 | **Finished worktrees fold into main state, even in parallel.** `/finish-branch` records the finished work, then folds it into the primary `state.md`: an exact replace when main is unchanged, otherwise a deterministic three-way merge that keeps sibling folds and edits on main. Retries are safe, unfinished worktree `### Now` work is never silently dropped, and the worktree is removed only after a successful fold. |
 | 6.4.3   | 2026-10-03 | **Human decisions, agent execution.** Approve consequential actions in conversation; the agent records approval and executes through host controls. Configured Claude/Codex reviews and investigations retain standing launch approval, including bounded private review snapshots. |

@@ -14,6 +14,17 @@ Implement exactly one bounded plan task. The caller supplies its acceptance crit
 workflow base SHA, and the runtime agent/task ID used by the active host. Follow RED → GREEN →
 refactor, run the focused owning checks, and do not broaden the task.
 
+The task brief names owned files, the observable outcome, relevant producer/consumer
+interfaces and a local report path. Ask for missing load-bearing context; do not reconstruct
+decisions from session history or modify another task's files. Apply the canonical testing
+rule: confirm that RED fails for the intended defect and use independent expected results.
+
+Write a concise task report containing the changed behavior, files, RED command/relevant
+failure and why it is expected, GREEN command/result, other focused checks, and unresolved
+concerns or missing context. Return its path with status `complete`, `complete with concerns`,
+`blocked` or `needs context`. Reports and self-review are evidence, not final certification;
+do not fabricate runtime identity or substitute them for independent candidate-bound gates.
+
 Before returning, review the result once for specification coverage and once for implementation
 quality. Only when both are clean, write these two regular files under
 `.forge/local/reviews/<runtime-agent-id>/`:

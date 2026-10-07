@@ -597,4 +597,51 @@ chmod +x "$S8/git-wire/git"
 PATH="$S8/git-wire:$PATH" REAL_ROOT_GIT="$REAL_ROOT_GIT" \
     run_root_preview malformed-root cp1252 "$S8/linked ascii" 1
 
+# The shipping templates must not opt users into overlapping workflow plugins.
+# Exercise the actual merge entrypoint, including absent and existing settings.
+start_test "shipping defaults are standalone and preserve developer plugin choices"
+S9=$(scratch_dir standalone-plugin-defaults)
+for platform in unix windows; do
+    template="$REPO_ROOT/settings/settings.template.json"
+    [ "$platform" = windows ] && template="$REPO_ROOT/settings/settings-windows.template.json"
+    for case_name in absent empty enabled disabled; do
+        target="$S9/$platform-$case_name.json"
+        python3 - "$MERGE" "$template" "$target" "$case_name" <<'PY'
+import json, pathlib, subprocess, sys
+merger, template, target_name, case = sys.argv[1:]
+target = pathlib.Path(target_name)
+overlapping = (
+    "superpowers@claude-plugins-official",
+    "pr-review-toolkit@claude-plugins-official",
+    "frontend-design@claude-plugins-official",
+)
+original = {}
+if case in ("enabled", "disabled"):
+    original = {
+        "enabledPlugins": {name: case == "enabled" for name in overlapping},
+        "customPreference": {"theme": "developer-owned", "nested": [1, False]},
+    }
+    original["enabledPlugins"]["developer-plugin@example"] = True
+if case != "absent":
+    target.write_text(json.dumps(original), encoding="utf-8")
+previous = None
+for attempt in range(2):
+    result = subprocess.run([sys.executable, merger, template, str(target)],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    actual = json.loads(target.read_text(encoding="utf-8"))
+    if case in ("absent", "empty"):
+        assert not any(actual.get("enabledPlugins", {}).get(name) is True
+                       for name in overlapping), "fresh settings enabled an overlapping plugin"
+    else:
+        assert actual["enabledPlugins"] == original["enabledPlugins"], actual["enabledPlugins"]
+        assert actual["customPreference"] == original["customPreference"]
+    if previous is not None:
+        assert actual == previous, "repeat merge changed settings"
+    previous = actual
+PY
+        assert_equals "$?" "0" "$platform $case_name settings preserve standalone defaults and user choices on repeat merge"
+    done
+done
+
 report "test-merge-settings.sh"

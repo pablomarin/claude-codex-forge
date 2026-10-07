@@ -2,6 +2,22 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.10 — 2026-10-07
+
+### Standalone Forge defaults and clearer engineering practices
+
+Fresh Unix and Windows settings no longer enable frontend-design automatically; both
+installer banners describe Forge's canonical capabilities. Existing developer plugin
+choices remain preserved. Current workflow, setup and troubleshooting guidance identifies
+Forge v6's own planning, TDD, debugging, review and UI-design owners, and explains retained
+plugin overlap and the routine-upgrade/full-refresh diagnostic boundary.
+
+Canonical testing, debugging, producer and reviewer instructions now clarify meaningful
+RED failures, independently derived expectations, safe boundary tracing, bounded readiness
+waits and compact task evidence reports. Distinct final reviews, candidate-bound gates,
+focused local suites and human authority remain in force. Prompt wording and deterministic
+contracts alone do not certify authenticated host behavior.
+
 ## 6.4.9 — 2026-10-06
 
 ### Current-session worktree shipping guidance

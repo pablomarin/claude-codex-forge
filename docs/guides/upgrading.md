@@ -45,6 +45,26 @@ intentionally run another Forge version.
 If you do not know which harness or version is present, run the preview. It is the safe inventory
 command and writes no project files.
 
+## Overlapping workflow plugins
+
+Forge v6 has canonical replacements for the v5 Superpowers, pr-review-toolkit and
+frontend-design integrations: planning/TDD/debugging workflows, independent review,
+and UI-design policy. These plugins are not v6 dependencies, and fresh setup does not
+enable them. Existing `enabledPlugins` entries remain developer-owned; neither routine
+upgrade nor full refresh silently disables them, including explicit `true` or `false` choices.
+
+Full-refresh preview/execution reports retained enabled overlap as
+`PRESERVED_COMPAT_BLOCKED` and blocks the affected host's readiness. Routine
+`--upgrade` / `-Upgrade` preserves configuration without emitting that full-refresh
+compatibility diagnostic. Absence of a diagnostic is not proof of live host readiness.
+
+For one Forge workflow owner, inspect the effective project and user plugin settings and
+agree which overlapping entries to disable for this project. Preserve custom skills and
+unrelated plugins. Make only the approved scoped settings change, repeat the preview when
+reconciling, and verify discovery and applicable host readiness. Do not uninstall plugins
+machine-wide or modify home settings without separate authorization. A project `false`
+entry is an explicit choice that subsequent Forge updates preserve.
+
 ## What the Transaction Does
 
 The checked-in manifests identify canonical v6 files, generated adapters, protected paths, and
