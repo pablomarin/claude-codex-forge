@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Portable PS7 runner check: tiny disposable suites, never the broad suites.
 set -u
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) printf 'SKIP: POSIX PowerShell runner fixture; native Windows coverage belongs to CI\n'; exit 0 ;;
+esac
 source_root=$(cd "$(dirname "$0")/../.." && pwd)
 runtime=$(command -v pwsh) || { printf 'SKIP: portable PowerShell runner check requires pwsh\n'; exit 0; }
 fixture=$(mktemp -d "${TMPDIR:-/tmp}/forge-runner-fixture.XXXXXX") || exit 2

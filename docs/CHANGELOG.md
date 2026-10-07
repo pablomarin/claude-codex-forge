@@ -18,6 +18,16 @@ waits and compact task evidence reports. Distinct final reviews, candidate-bound
 focused local suites and human authority remain in force. Prompt wording and deterministic
 contracts alone do not certify authenticated host behavior.
 
+### Earlier PowerShell feedback and isolated native CI
+
+The local fast gate now includes focused real PowerShell transport/reproduction controls and
+portable runner/aggregate contracts. Native Windows CI discovers every suite and runs isolated
+jobs with six-way bounded parallelism; the existing aggregate requires all suites to succeed on
+the same clean candidate before attestation. Unique always-uploaded artifacts preserve per-suite
+results and safe reproduction failure timings/receipt fields. Existing native timeout budgets
+and assertions remain unchanged. Portable PS7 checks do not certify Windows 5.1, and the earlier
+native reproduction failure remains unverified until a fresh native run establishes its cause.
+
 ## 6.4.9 — 2026-10-06
 
 ### Current-session worktree shipping guidance

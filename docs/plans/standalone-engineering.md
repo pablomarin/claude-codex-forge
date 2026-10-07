@@ -71,3 +71,80 @@ overlap. Guidance improvements must not turn routine work into perpetual reviews
 the whole local suite. A prompt containing desired words is not evidence that an agent
 obeys them. Parallel research may inform scope before final freeze; new mechanisms or
 large unrelated changes require a separate decision rather than expanding this repair.
+
+## Human-authorized local PowerShell and native CI improvement
+
+The developer explicitly requested stronger local feedback and faster native Windows CI
+after run37657898124 failed. This extends the same unmerged 6.4.10 change; immutable
+workflow base remains main6f98ea53c4f4f9391d08a8ba764d01cae2167c94. Current published
+parent is d14e4dd94ae3ee95c31c1c8979f20ccd12dc0f78. Prior certification is archived and
+cannot certify the changed source. No downstream upgrades or VM installation.
+
+Observed problem: the serial native runner spends about40 minutes on18 suites and
+reports a7-minute dispatch failure only after all remaining suites complete. Local
+fast checks omit the portable runner regression and actual PowerShell reproduction
+boundary. Existing native dispatch failure is unchanged from earlier main revisions;
+6/52 observed historical reproduction sections fail at64.9–67.3seconds. A root
+portable latency control reproduces exit2/UNVERIFIED with receipt timeout/124, while
+the positive control passes. The missing native receipt and actual Windows delay
+remain unverified. Do not increase the existing60-second fixture cap or claim a fix.
+
+Implementation task (one bounded CI/testing change):
+
+1. Extend tests/template/run-all.ps1 to list discovered suites as machine-readable
+   JSON and execute one exact discovered suite with a structured result. Preserve
+   default serial all-suite behavior and its existing exit/timing output. Reject
+   unknown/path-escaping selectors. Native results bind actual Git HEAD/tree, clean
+   candidate, runtime major/minor/OS, suite name, exit and elapsed time. Result files
+   must live outside the checkout so they do not dirty or certify a changed source.
+2. Replace the serial Windows workflow with discovery, an isolated per-suite matrix
+   (fail-fast:false, bounded max-parallel:6), and the existing powershell-51 aggregate.
+   Use unique per-suite artifacts uploaded even on failure. Aggregate runs always;
+   it fails on a failed/cancelled/skipped dependency, missing/duplicate/unknown suite,
+   nonzero exit, wrong Git identity/tree, nonnative5.1 or dirty-candidate result.
+   Only complete successful coverage permits the existing Windows attestation.
+   Discover all current18 suites dynamically so new suites cannot be omitted.
+   Keep90-minute job ceilings; parallelism is not permission to shorten tests.
+3. Add focused executable local PS7 checks to run-fast.sh: existing portable runner
+   fixture, existing real setup transport checks, and the real PowerShell dispatcher
+   qualified reproduction boundary with positive and deliberately timed-out controls.
+   Reuse the inspected disposable macOS harness with explicit POSIX engine/kill shims,
+   portable paths, real production files, independent literal MATCH/CONTROL hashes,
+   state/auth/outside preservation and actual timeout/124 reason assertions. Avoid
+   broad native run-all locally. If pwsh is absent, report portable coverage skipped;
+   do not claim Windows qualification. Helpers must not add unintended native suites.
+4. Preserve safe reproduction diagnostics before fixture deletion: actual dispatcher
+   receipt reason/exit/status, primary/control hashes, child stream sizes, and fake
+   runner start/end timing. Include focused inherited-versus-stripped Windows process
+   startup/UTF8Encoding probes using the already reviewed diagnostic preview, with
+   owned-child cleanup and finite probe deadlines. No secret environment dumps,
+   auth file contents, timeout relaxation or skipped existing assertions.
+5. Update contributor testing guidance and pending6.4.10 changelog for the new commands,
+   portable/native distinction, matrix artifacts and aggregate requirement. Retain
+   original standalone engineering change and all preserved failed evidence.
+
+Expected changed paths: .github/workflows/windows-parity.yml; tests/template/run-all.ps1;
+tests/template/test-powershell-runner.sh; tests/template/run-fast.sh;
+tests/template/test-agent-dispatch.ps1; small focused tests/helpers under tests/template
+or tests/support; a small aggregate validator under scripts; CONTRIBUTING.md;
+docs/CHANGELOG.md; this plan. No product dispatcher/authorization/ownership changes
+without independently proven cause and a reviewed plan amendment.
+
+Acceptance and verification: observe intended RED for unavailable selector/results,
+incomplete aggregate coverage and absent fast portable registration; GREEN through
+the real runner and validator with disposable suites. Exercise positive complete
+coverage plus missing, duplicate, failed, wrong identity, nonnative and dirty results
+against independently authored literal expectations. Run the actual portable boundary
+positive/control and timeout cases and setup transport; all existing failure assertions
+remain intact. Validate YAML and graph, PowerShell5.1-compatible syntax and git diff;
+run focused owning checks then updated fast gate. Fresh final paired reviews/app/E2E
+bind the complete new candidate. Preserve installed standalone acceptance on both
+recorded mains; CI-specific E2E demonstrates discovered-suite to result to aggregate
+with disposable suite programs, and invalid coverage never produces attestation.
+
+Publish only through actual current human shipping authority and normal host tools.
+The fresh Windows matrix is the first native measurement of this new arrangement;
+no speedup or platform repair is claimed before actual completion. Inspect actual
+new diagnostics if reproduction fails again and resolve the supported cause before
+merge. All current18 native suites plus exact reviewed-tree attestation remain
+required. Never reuse d14 certification or its failed run as success.

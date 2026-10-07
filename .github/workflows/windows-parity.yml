@@ -6,10 +6,41 @@ on:
     branches: [main]
 
 jobs:
-  powershell-51:
+  discover:
     runs-on: windows-latest
-    # Bounded diagnostic allowance; native completion still requires a passing run.
     timeout-minutes: 90
+    outputs:
+      suites: ${{ steps.suites.outputs.suites }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Discover exact native suites
+        id: suites
+        shell: powershell
+        run: |
+          $json = .\tests\template\run-all.ps1 -ListSuites
+          "suites=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $artifacts = Join-Path $env:RUNNER_TEMP 'forge-windows-discovery'
+          New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
+          [IO.File]::WriteAllText((Join-Path $artifacts 'suites.json'), $json, (New-Object Text.UTF8Encoding $false))
+      - name: Upload discovery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-suite-discovery
+          path: ${{ runner.temp }}/forge-windows-discovery/
+          if-no-files-found: error
+
+  native-suite:
+    needs: discover
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        suite: ${{ fromJSON(needs.discover.outputs.suites) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,23 +49,68 @@ jobs:
         shell: powershell
         run: |
           if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
-            throw "Windows PowerShell 5.1 is required; observed $($PSVersionTable.PSVersion)"
+            throw "Windows PowerShell 5.1 required; observed $($PSVersionTable.PSVersion)"
           }
-      - name: Run deterministic PowerShell 5.1 suites
+      - name: Run isolated native suite
         shell: powershell
+        env:
+          FORGE_SUITE: ${{ matrix.suite }}
         run: |
           $artifacts = Join-Path $env:RUNNER_TEMP 'forge-windows-powershell51'
           New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
-          $previousErrorActionPreference = $ErrorActionPreference
+          $previousPreference = $ErrorActionPreference
           $ErrorActionPreference = 'Continue'
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\template\run-all.ps1 2>&1 |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\template\run-all.ps1 `
+            -SuiteName $env:FORGE_SUITE -ResultPath (Join-Path $artifacts "$($env:FORGE_SUITE).result.json") 2>&1 |
+            Tee-Object -FilePath (Join-Path $artifacts "$($env:FORGE_SUITE).log")
+          $code = $LASTEXITCODE
+          $ErrorActionPreference = $previousPreference
+          exit $code
+      - name: Upload suite result and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-suite-${{ matrix.suite }}
+          path: ${{ runner.temp }}/forge-windows-powershell51/
+          if-no-files-found: error
+
+  powershell-51:
+    if: always()
+    needs: [discover, native-suite]
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download exact suite artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-suite-*
+          path: ${{ runner.temp }}/forge-windows-results/
+      - name: Require all discovered native suites and attest exact candidate
+        shell: powershell
+        env:
+          DISCOVERY_STATUS: ${{ needs.discover.result }}
+          SUITE_STATUS: ${{ needs.native-suite.result }}
+        run: |
+          $artifacts = Join-Path $env:RUNNER_TEMP 'forge-windows-powershell51'
+          New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
+          if ($env:DISCOVERY_STATUS -cne 'success') { throw "suite discovery did not succeed: $env:DISCOVERY_STATUS" }
+          $results = Join-Path $env:RUNNER_TEMP 'forge-windows-results'
+          $previousPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-windows-suite-results.ps1 `
+            -ProjectRoot . -ResultsDirectory $results `
+            -ExpectedSuitesPath (Join-Path $results 'windows-suite-discovery/suites.json') `
+            -DependencyStatus $env:SUITE_STATUS 2>&1 |
             Tee-Object -FilePath (Join-Path $artifacts 'windows-powershell-51.log')
-          $suiteExitCode = $LASTEXITCODE
-          $ErrorActionPreference = $previousErrorActionPreference
-          if ($suiteExitCode -ne 0) { exit $suiteExitCode }
+          $validationExit = $LASTEXITCODE
+          $ErrorActionPreference = $previousPreference
+          if ($validationExit -ne 0) { exit $validationExit }
           .\scripts\qualify-runtime-final.ps1 -WriteWindowsAttestation -ProjectRoot . `
             -Output (Join-Path $artifacts 'windows-powershell-51.receipt')
-      - name: Upload deterministic PowerShell result
+      - name: Upload aggregate attestation
         if: always()
         uses: actions/upload-artifact@v4
         with:

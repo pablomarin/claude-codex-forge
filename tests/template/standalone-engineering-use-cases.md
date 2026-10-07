@@ -39,6 +39,32 @@ the explicit enabled choice, unrelated plugin/preference and workflow state rema
 Persistence: A subsequent discovery invocation still finds one canonical rule set and
 retained settings still record the explicit enabled choice. Discovery is not readiness proof.
 
+## UC3: Early native suite result with complete qualification
+
+Actor: Forge maintainer validating a PowerShell change before merging its pull request.
+Scenario: A long serial native run previously hid an early failed suite until all other
+suites finished. The maintainer needs an isolated result promptly and a final answer
+which still requires every discovered suite.
+Interface: CLI and GitHub Actions.
+Intent: See which suite failed and retain evidence without accepting incomplete coverage.
+Setup: Disposable Git checkout containing independently authored passing/failing suite
+programs; the real runner and aggregate validator, with result directories outside it.
+Steps:
+1. Invoke run-all.ps1 -ListSuites, then invoke exact -SuiteName/-ResultPath selections
+   in isolated checkouts of the same commit. Read each persisted result and suite log.
+2. Invoke validate-windows-suite-results.ps1 with the discovery list and dependency
+   status, then repeat validation against the retained files.
+Verification: Stdout and persisted results identify the selected suite, actual exit,
+ elapsed time and candidate before/after state. The failed suite's exit is retained;
+ missing, duplicate, failed, wrong-candidate, nonnative or dirty results explain rejection.
+ Native GitHub jobs run independently with fail-fast disabled, and the final native
+ attestation is reached only after complete successful coverage of the exact checkout.
+Persistence: Reinvoke validation against the same artifacts; a prior failure cannot become
+ passing because another suite succeeded or its result disappeared.
+Qualification limit: Local PS7 runs prove CLI contracts and rejection of portable results.
+ Independently authored synthetic5.1 wire controls prove validator semantics; they never
+ establish Windows execution. Native job scheduling and attestation require actual CI.
+
 ## Surface coverage decision
 
 CLI: Both journeys exercise the real installers and installed CLIs.

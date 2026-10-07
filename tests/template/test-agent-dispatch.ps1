@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $dispatcher = Join-Path $root 'hooks/lib/agent-dispatch.ps1'
 $hostContext = Join-Path $root 'hooks/lib/host-context.ps1'
@@ -101,7 +101,10 @@ public static class ForgeFakeEngine {
   static int RunReproduction() {
     var runner=E("FORGE_REPRO_RUNNER"); if(runner=="") return 70;
     var start=new ProcessStartInfo("powershell.exe","-NoProfile -ExecutionPolicy Bypass -File \""+runner.Replace("\"","\\\"")+"\""){UseShellExecute=false,CreateNoWindow=true};
-    var process=Process.Start(start); process.WaitForExit(); return process.ExitCode;
+    var log=E("FAKE_CODEX_LOG"); if(log!="") File.AppendAllText(log,"DIAG_RUNNER_START utc="+DateTime.UtcNow.ToString("o")+Environment.NewLine);
+    var timer=Stopwatch.StartNew(); var process=Process.Start(start); process.WaitForExit(); timer.Stop();
+    if(log!="") File.AppendAllText(log,"DIAG_RUNNER_END elapsed_ms="+timer.ElapsedMilliseconds+" exit="+process.ExitCode+Environment.NewLine);
+    return process.ExitCode;
   }
   public static int Main(string[] args) {
     string engine=Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).ToLowerInvariant();
@@ -483,11 +486,75 @@ public static class ForgeFakeEngine {
         Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'investigation-repro' 'none' 'ephemeral' '' '' $reproPrompt) 0 'primary and control exclude proxy from the reproduction program'
     }
     finally { [Environment]::SetEnvironmentVariable('HTTPS_PROXY', $savedReproProxy) }
+    $reproObservation = [ordered]@{}
+    foreach ($diagKey in @('failure_reason','process_exit_status','reproduction_status','primary_check_hash','control_hash')) {
+        $reproObservation[$diagKey] = Get-ReceiptValue $repo $diagKey
+        Write-Host "DIAG_RECEIPT $diagKey=$($reproObservation[$diagKey])"
+    }
+    $reproObservation['stdout_bytes'] = [Text.Encoding]::UTF8.GetByteCount([string]$script:LastChildStdout)
+    $reproObservation['stderr_bytes'] = [Text.Encoding]::UTF8.GetByteCount([string]$script:LastChildStderr)
+    $reproObservation['runner_timings'] = @(Get-Content -LiteralPath $reproLog | Where-Object { $_ -like 'DIAG_RUNNER_*' })
+    Write-Host "DIAG_STREAMS stdout_bytes=$($reproObservation.stdout_bytes) stderr_bytes=$($reproObservation.stderr_bytes)"
+    foreach ($diagLine in $reproObservation.runner_timings) { Write-Host $diagLine }
+    if ($env:RUNNER_TEMP) {
+        $reproEvidence = Join-Path $env:RUNNER_TEMP 'forge-windows-powershell51/dispatch-reproduction'
+        [IO.Directory]::CreateDirectory($reproEvidence) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $reproEvidence 'observation.json'), ($reproObservation | ConvertTo-Json -Depth 3), (New-Object Text.UTF8Encoding $false))
+    }
     Assert-Equal (Get-ReceiptValue $repo 'reproduction_status') 'REPRODUCED' 'dispatcher computes a reproduced status'
     Assert-Equal (Get-ShaFileForTest $state) $stateHash 'reproduction leaves Forge state byte-identical'
     Assert-Equal (Get-ShaFileForTest $auth) $authHash 'reproduction leaves protected auth byte-identical'
     if (Test-Path -LiteralPath $outside) { Fail 'reproduction escaped the disposable candidate' } else { Pass 'reproduction cannot write outside the disposable candidate' }
     Assert-Contains $reproLog '--sandbox workspace-write' 'reproduction uses the qualified no-network workspace boundary'
+    # Measurement-only probes run after every original reproduction assertion and only on failure.
+    # No environment values, auth contents or arbitrary child output are logged.
+    if ($reproObservation.reproduction_status -cne 'REPRODUCED') {
+        foreach ($probeMode in @('inherited','stripped')) {
+            foreach ($probeKind in @('startup','new-object')) {
+                $probeCode = if ($probeKind -eq 'startup') { 'exit 0' } else { '$ErrorActionPreference="Stop"; New-Object Text.UTF8Encoding($false) | Out-Null; exit 0' }
+                $probeStart = New-Object Diagnostics.ProcessStartInfo
+                $probeStart.FileName = 'powershell.exe'
+                $probeStart.Arguments = '-NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probeCode))
+                $probeStart.WorkingDirectory = $repo; $probeStart.UseShellExecute = $false; $probeStart.CreateNoWindow = $true
+                $probeStart.RedirectStandardOutput = $true; $probeStart.RedirectStandardError = $true
+                if ($probeMode -eq 'stripped') {
+                    $probeStart.EnvironmentVariables.Clear()
+                    foreach ($probeKey in @('PATH','SystemRoot','ComSpec','TEMP','TMP')) {
+                        $probeValue = [Environment]::GetEnvironmentVariable($probeKey)
+                        if ($probeValue) { $probeStart.EnvironmentVariables[$probeKey] = $probeValue }
+                    }
+                    $probeStart.EnvironmentVariables['HOME'] = Join-Path $temporary 'probe-home'
+                    $probeStart.EnvironmentVariables['CODEX_HOME'] = Join-Path $temporary 'probe-codex-home'
+                }
+                $probeProcess = New-Object Diagnostics.Process; $probeProcess.StartInfo = $probeStart
+                $probeTimer = [Diagnostics.Stopwatch]::StartNew(); $probeStarted = $false
+                try {
+                    $probeStarted = $probeProcess.Start()
+                    if (-not $probeStarted) { throw 'diagnostic process did not start' }
+                    $probeHandle = $probeProcess.Handle
+                    $probeOut = $probeProcess.StandardOutput.ReadToEndAsync(); $probeErr = $probeProcess.StandardError.ReadToEndAsync()
+                    $probeTimedOut = -not $probeProcess.WaitForExit(60000)
+                    if ($probeTimedOut) {
+                        & taskkill.exe /PID $probeProcess.Id /T /F 2>$null | Out-Null
+                        if (-not $probeProcess.HasExited) { $probeProcess.Kill() }
+                        if (-not $probeProcess.WaitForExit(5000)) { throw 'diagnostic child did not terminate' }
+                    }
+                    $probeTimer.Stop()
+                    $probeExit = if ($probeTimedOut) { 124 } else { $probeProcess.ExitCode }
+                    $probeOutSize = [Text.Encoding]::UTF8.GetByteCount($probeOut.Result)
+                    $probeErrSize = [Text.Encoding]::UTF8.GetByteCount($probeErr.Result)
+                    Write-Host "DIAG_PROBE mode=$probeMode kind=$probeKind elapsed_ms=$($probeTimer.ElapsedMilliseconds) exit=$probeExit stdout_bytes=$probeOutSize stderr_bytes=$probeErrSize"
+                }
+                catch { Write-Host "DIAG_PROBE_ERROR mode=$probeMode kind=$probeKind type=$($_.Exception.GetType().Name)" }
+                finally {
+                    if ($probeStarted -and -not $probeProcess.HasExited) {
+                        try { $probeProcess.Kill(); $ignored = $probeProcess.WaitForExit(5000) } catch {}
+                    }
+                    $probeProcess.Dispose()
+                }
+            }
+        }
+    }
     Remove-Item Env:FORGE_CODEX_AUTH_FILE, Env:FAKE_CODEX_LOG -ErrorAction SilentlyContinue
 
     Write-Host 'PowerShell path and reparse safety'
