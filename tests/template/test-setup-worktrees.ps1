@@ -22,7 +22,7 @@ function Write-Text([string]$Path, [string]$Text) {
 }
 function Read-Text([string]$Path) { if ([IO.File]::Exists($Path)) { return [IO.File]::ReadAllText($Path) }; return '' }
 function Quote-PS([string]$Value) { return "'" + [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($Value) + "'" }
-function Invoke-Setup([string]$Target, [string]$Log, [hashtable]$Options) {
+function Invoke-Setup([string]$Target, [string]$Log, [hashtable]$Options, [ValidateRange(1,300)][int]$TimeoutSeconds = 300) {
     $command = 'Set-Location -LiteralPath ' + (Quote-PS $Target) + '; & ' + (Quote-PS $script:setup)
     foreach ($key in $Options.Keys) {
         if ($Options[$key] -is [bool]) { $command += ' -' + $key + ':$' + $Options[$key].ToString().ToLowerInvariant() }
@@ -30,20 +30,81 @@ function Invoke-Setup([string]$Target, [string]$Log, [hashtable]$Options) {
     }
     $command += '; exit $LASTEXITCODE'
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    $previousPreference = $ErrorActionPreference
+    if (-not (Get-Variable setupTransportRoot -Scope Script -ErrorAction SilentlyContinue)) {
+        $script:setupTransportRoot = if ($env:RUNNER_TEMP) {
+            Join-Path $env:RUNNER_TEMP 'forge-windows-powershell51/setup-transport'
+        } else { Join-Path ([IO.Path]::GetTempPath()) ('forge-setup-transport-' + [Guid]::NewGuid().ToString('N')) }
+    }
+    $capture = Join-Path $script:setupTransportRoot ([Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($capture) | Out-Null
+    $stdout = Join-Path $capture 'stdout.txt'; $stderr = Join-Path $capture 'stderr.txt'
+    $encoding = [Console]::OutputEncoding
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    Write-Host "SETUP_START path=$Target log=$Log utc=$([DateTime]::UtcNow.ToString('o'))"
+    $process = $null; $code = $null; $timedOut = $false; $failure = $null
+    Write-Host "SETUP_START path=$Target log=$Log capture=$capture utc=$([DateTime]::UtcNow.ToString('o'))"
     try {
-        # Windows5.1 turns redirected native stderr into errors. Expected
-        # failures must be assertions on the exit code, not suite termination.
-        $ErrorActionPreference = 'Continue'
-        & $script:runtime -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand $encoded *>&1 |
-            Tee-Object -FilePath $Log | Out-Host
-        $code = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previousPreference }
-    $timer.Stop()
-    $elapsed = $timer.Elapsed.TotalSeconds.ToString('F3', [Globalization.CultureInfo]::InvariantCulture)
-    Write-Host "SETUP_END path=$Target exit=$code elapsed_s=$elapsed utc=$([DateTime]::UtcNow.ToString('o'))"
+        $process = Start-Process -FilePath $script:runtime -ArgumentList @('-NoProfile','-NonInteractive','-OutputFormat','Text','-EncodedCommand',$encoded) -WorkingDirectory $Target -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr -ErrorAction Stop
+        # Cache immediately: native5.1 otherwise can expose a null ExitCode.
+        $processHandle = $process.Handle
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $timedOut = $true
+            $childId = $process.Id
+            $tree = @()
+            try {
+                if ($env:OS -eq 'Windows_NT') {
+                    $all = @(Get-CimInstance Win32_Process -OperationTimeoutSec 5 | Select-Object ProcessId, ParentProcessId, Name, CreationDate, CommandLine)
+                } else {
+                    $all = @(& ps -axo 'pid=,ppid=,command=' | ForEach-Object {
+                        if ($_ -match '^\s*(\d+)\s+(\d+)\s+(.*)$') {
+                            [pscustomobject]@{ProcessId=[int]$Matches[1];ParentProcessId=[int]$Matches[2];CommandLine=$Matches[3]}
+                        }
+                    })
+                }
+                $ids = @($childId)
+                do {
+                    $next = @($all | Where-Object { $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids })
+                    $ids += @($next | ForEach-Object { $_.ProcessId })
+                } while ($next.Count)
+                $tree = @($all | Where-Object { $_.ProcessId -in $ids })
+            } catch { [IO.File]::WriteAllText((Join-Path $capture 'process-tree-error.txt'), $_.Exception.Message) }
+            [IO.File]::WriteAllText((Join-Path $capture 'process-tree.json'), (ConvertTo-Json -InputObject $tree -Depth 4))
+            if (-not $process.HasExited) {
+                if ($env:OS -eq 'Windows_NT') {
+                    $previousPreference = $ErrorActionPreference
+                    try { $ErrorActionPreference = 'Continue'; & taskkill.exe /PID $childId /T /F 2>&1 | Out-Host }
+                    finally { $ErrorActionPreference = $previousPreference }
+                } else { $process.Kill($true) }
+            }
+            if (-not $process.WaitForExit(5000)) { throw "disposable setup child did not stop: $childId" }
+        } else {
+            $code = $process.ExitCode
+            if ($null -eq $code) { throw 'setup child exit code unavailable; refusing to treat null as zero' }
+        }
+    } catch { $failure = $_ }
+    finally {
+        $timer.Stop()
+        $elapsed = $timer.Elapsed.TotalSeconds.ToString('F3', [Globalization.CultureInfo]::InvariantCulture)
+        $observations = @("console_output_encoding=$($encoding.WebName)", "console_output_codepage=$($encoding.CodePage)")
+        $decoded = @()
+        foreach ($path in @($stdout, $stderr)) {
+            $bytes = if ([IO.File]::Exists($path)) { [IO.File]::ReadAllBytes($path) } else { [byte[]]@() }
+            # ReadAllText detects BOMs; without one, use the console encoding.
+            $text = if ($bytes.Length) { [IO.File]::ReadAllText($path, $encoding) } else { '' }
+            $prefix = (($bytes | Select-Object -First 16 | ForEach-Object { $_.ToString('x2') }) -join '')
+            $name = [IO.Path]::GetFileName($path)
+            $observations += "$name captured_file_bytes=$($bytes.Length) prefix_hex=$prefix clixml_headers=$([regex]::Matches($text, '#< CLIXML').Count) decode=bom-or-console"
+            $decoded += $text
+            if ($text) { Write-Host $text }
+        }
+        [IO.File]::WriteAllText($Log, ($decoded -join [Environment]::NewLine), (New-Object Text.UTF8Encoding $false))
+        $status = if ($timedOut) { 'timeout' } elseif ($null -eq $code) { 'unknown' } else { [string]$code }
+        $observations += "exit=$status elapsed_s=$elapsed timeout_s=$TimeoutSeconds"
+        [IO.File]::WriteAllLines((Join-Path $capture 'observation.txt'), $observations)
+        Write-Host "SETUP_END path=$Target exit=$status elapsed_s=$elapsed capture=$capture utc=$([DateTime]::UtcNow.ToString('o'))"
+        if ($process) { $process.Dispose() }
+    }
+    if ($timedOut) { throw "SETUP_TIMEOUT after $TimeoutSeconds seconds; retained evidence: $capture" }
+    if ($failure) { throw $failure }
     return $code
 }
 function Get-GitRoot([string]$Path) {

@@ -2065,7 +2065,8 @@ def full_refresh(
     if scope == "project":
         top = subprocess.run(
             ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
         )

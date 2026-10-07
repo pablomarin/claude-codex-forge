@@ -105,3 +105,83 @@ the owning focused worktree suite on portable PS7; it does not certify Windows5.
 after final bytes settle. Obtain fresh exact-candidate paired reviews and app/E2E receipts before
 normal promotion. Include this same bounded CI repair in the stacked guidance candidate and
 revalidate its final receipts, keeping6.4.8 and6.4.9 release boundaries and monotonic counters.
+
+## Native Windows raw-stream control (diagnostic, not a proven runtime fix)
+
+Actual90minute runs37575968475 and37575987221 pass all13 earlier suites but stall in the first
+worktree setup at Checking prerequisites. The parent also reports ProcessStreamReader_CliXmlError.
+PortablePS7 passes143/143. Configured independent diagnosis remains UNVERIFIED: an undrained shared
+CLIXML stderr pipe fits the logs, but a product child stall is still possible. No timeout increase,
+assertion deletion or runtime repair is justified by that hypothesis alone.
+
+Use the existing native failed first invocation as primary evidence. Prepare a bounded control by
+changing only the owning fixture Invoke-Setup transport to the existing Start-Process redirected-file
+pattern from test-agent-dispatch.ps1: same runtime, encoded command, arguments, cwd and installer bytes.
+Capture separate stdout/stderr files, exit, elapsed and CLIXML header/byte observations. Store diagnostic
+files outside the deleted fixture directory: RUNNER_TEMP/forge-windows-powershell51/setup-transport in CI,
+and a separate retained temporary diagnostic directory locally. Echo captured text to host output;
+read assertion logs with the console output encoding while preserving the separate captured files.
+Bound each child to300seconds. On timeout capture only its descendant process-tree metadata and stop
+only that disposable child tree; throw a suite failure immediately, regardless of expected-negative
+assertions, so no23-timeout cascade occurs. OS-directed files retain partial output without unbounded
+ReadToEndAsync Result waits. The broad runner still runs its remaining suites and cannot attest after
+this failure. All17 original suites/assertions remain; a new focused test increases the discovered
+count rather than replacing coverage. Windows attestation still requires aggregate zero.
+Do not modify setup.ps1 or other installed runtime sources before native control evidence exists.
+
+This is a test-only diagnostic candidate, not a claim that the installer is repaired. First graduate
+small success/nonzero and stderr-volume fixtures through the raw helper (including log/Unicode and
+exit preservation), then the owning portablePS7 suite and fast gate. Obtain fresh exact-candidate
+reviews/app/E2E receipts and normal promotion before publishing the control to existing PR1102.
+Interpret the actual native result independently: control passes while old identical installer
+primary hangs supports the test-transport boundary as a whole, not a particular stdin/CLIXML cause.
+A finished control with failed assertions remains FAIL and requires diagnosis of those assertions;
+a timed-out control requires narrower native prerequisite diagnosis and forbids guessed production
+edits. The earlier native single-checkout dual-engine journey already passed via normal2>&1, which
+helps narrow a still-failing result toward nested setup. Only successful native full CI allows merge.
+Keep guidance PR1103 unchanged until the control gives useful native evidence; then carry any
+supported test-only change across with fresh exact-candidate certification. No new routing or state
+machinery, authenticated-agent claim or downstream installation.
+
+## Native Unicode canonical-root repair (2026-10-07)
+
+Actual native run37589613812 on published900015e finished FAILURE: all18 suites ran,17 returned0,
+actual-helper transport15/15 passed, and the first installer child exited1 in23.630seconds without
+timeout. Primary and ASCII-space worktrees installed; linked café was rejected by the shared Python
+canonical-root preflight. Keep all raw artifacts and earlier failures; no native qualification claim.
+
+Independent configured Claude investigation20261007T083053Z-98485-24273 traced
+scripts/merge-settings.py:2066-2073 `text=True` without explicit decoding. Separate configured
+reproduction20261007T083739Z-30359-31325 is REPRODUCED through fresh Codex after visible Claude
+boundary failure. The actual immutable full-refresh entrypoint rejects café under macOS Latin1
+subprocess locale while UTF8 argv/filesystem paths stay correct; an ASCII linked control passes.
+Changing only the locale to UTF8 preserves Git bytes and lets café pass. This is controlled local
+reproduction of a reachable encoding bug, not observation of the native Python code page. Native
+setup's own explicit-UTF8 Git reads accepted the same café root; exact native locale remains unlogged.
+
+Minimal production change: replace that one `text=True` argument with `encoding="utf-8"` and
+`errors="replace"`, using the existing PowerShell Git-reader convention. Keep the same real Git
+command, target.resolve comparison, return-code guard and RefreshBlocked path. Bad output becomes
+a mismatched root and remains blocked; do not add routing/state or global locale changes. Shared
+Python engine serves both Bash and PowerShell; no installer/host twin is necessary. Do not change
+unrelated subprocess calls, original native assertions, timeout budgets or required suites.
+
+Bounded producer TDD: add a focused regression to the existing merge-settings fast suite. Exercise
+the actual full-refresh entrypoint with real Git Unicode primary/linked roots under an explicitly
+controlled non-UTF8 subprocess default, then ASCII, UTF8, subdirectory/nonrepo and malformed-output
+controls. A narrow test-only encoding boundary is a portable emulation, not native qualification.
+Observe RED before editing production. Implement only the two arguments, observe GREEN; run owning
+merge-settings/full-refresh checks and all ten fast suites, avoiding local exhaustive run-all.
+Preserve actual native owning failures as RED. Update solution/changelog truthfully. Producer emits
+actual self-review evidence and capability limitations; never invent a native producer UUID/type.
+
+After this concrete source repair, refreeze the exact staged candidate, fresh distinct configured
+specification/quality reviews plus app/installed both-main Bash/portablePS7 E2E receipts and normal
+promotion/push are required. Existing review6/firstcert3 remains monotonic: review7 crosses the
+convergence allowance and publication needs actual HUMAN adjudication of that concrete repaired
+tail; never reset/self-adjudicate or relabel old receipts. Same-task human instruction authorizes
+preparation/checks, not an invented explicit breaker release. Require exact-head native Windows
+owning Unicode assertions, all18 suites and attestation before merge. If native canonical-root
+failure persists, this repair has not established native cause; capture actual Git result/default
+encoding in a further bounded diagnostic, never blind retry/skip. Guidance remains unchanged until
+this supported repair is ready to integrate with its own fresh gates.
