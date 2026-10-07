@@ -31,13 +31,19 @@ function Invoke-Setup([string]$Target, [string]$Log, [hashtable]$Options) {
     $command += '; exit $LASTEXITCODE'
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $previousPreference = $ErrorActionPreference
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    Write-Host "SETUP_START path=$Target log=$Log utc=$([DateTime]::UtcNow.ToString('o'))"
     try {
         # Windows5.1 turns redirected native stderr into errors. Expected
         # failures must be assertions on the exit code, not suite termination.
         $ErrorActionPreference = 'Continue'
-        & $script:runtime -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand $encoded *> $Log
+        & $script:runtime -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand $encoded *>&1 |
+            Tee-Object -FilePath $Log | Out-Host
         $code = $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousPreference }
+    $timer.Stop()
+    $elapsed = $timer.Elapsed.TotalSeconds.ToString('F3', [Globalization.CultureInfo]::InvariantCulture)
+    Write-Host "SETUP_END path=$Target exit=$code elapsed_s=$elapsed utc=$([DateTime]::UtcNow.ToString('o'))"
     return $code
 }
 function Get-GitRoot([string]$Path) {
