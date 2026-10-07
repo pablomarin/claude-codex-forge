@@ -27,6 +27,10 @@ a rollback across successful checkouts. `--this-checkout-only` / `-ThisCheckoutO
 upgrade or preview to one checkout. Python 3 is required for multi-worktree ownership preflight.
 Branches, project configuration and local workflow state remain checkout-owned.
 
+The shared Python refresh planner explicitly decodes Git canonical-root output as UTF-8,
+preserving Unicode checkout identity under non-UTF-8 subprocess defaults. Controlled local
+regression coverage verifies valid and rejected roots; native Windows qualification remains pending.
+
 
 README and Getting Started now lead with short, self-contained Claude Code/Codex install and
 upgrade prompts. Users start in their target project; the agent obtains or reuses the official

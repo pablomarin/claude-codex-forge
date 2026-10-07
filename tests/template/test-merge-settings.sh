@@ -518,4 +518,83 @@ assert_contains "$S7/mcp-rendered.toml" '"TOKEN" = "${SAFE_TOKEN}"' "environment
 assert_not_contains "$S7/mcp-rendered.toml" 'literal-secret-value' "literal secret never enters Codex config"
 assert_contains "$S7/mcp.log" 'CODEX_MCP_PARITY: BLOCKED: literal_secret' "unsafe MCP server remains explicit readiness gap"
 
+start_test "full-refresh canonical roots use Git UTF-8 bytes independently of the Python default"
+S8=$(scratch_dir merge-unicode-root)
+python3 - "$S8" <<'PY'
+import pathlib, subprocess, sys
+base = pathlib.Path(sys.argv[1]).resolve()
+primary = base / "primary café"
+primary.mkdir()
+def git(*args):
+    subprocess.run(["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", *args], check=True, capture_output=True)
+git("-C", str(primary), "init", "-q")
+(primary / "app.txt").write_text("app\n", encoding="utf-8")
+git("-C", str(primary), "add", "app.txt")
+git("-C", str(primary), "commit", "-qm", "fixture")
+git("-C", str(primary), "worktree", "add", "-qb", "unicode", str(base / "linked café"))
+git("-C", str(primary), "worktree", "add", "-qb", "ascii", str(base / "linked ascii"))
+(primary / "subdir").mkdir()
+(base / "nonrepo").mkdir()
+PY
+assert_equals "$?" "0" "real Unicode primary and linked Git fixture created"
+cat > "$S8/entrypoint.py" <<'PY'
+import codecs, runpy, subprocess, sys
+encoding, script, *args = sys.argv[1:]
+# This portable boundary controls only implicit subprocess text decoding.
+# UTF-8 mode is explicitly disabled, and a real Popen verifies the effective default.
+assert sys.flags.utf8_mode == 0, "UTF-8 mode would invalidate the non-UTF-8 control"
+class DefaultEncodingPopen(subprocess.Popen):
+    def __init__(self, *args, **kwargs):
+        if kwargs.get("encoding") is None and (
+            kwargs.get("text") or kwargs.get("universal_newlines") or kwargs.get("errors")
+        ):
+            kwargs["encoding"] = encoding
+        super().__init__(*args, **kwargs)
+subprocess.Popen = DefaultEncodingPopen
+with subprocess.Popen(["git", "--version"], text=True, stdout=subprocess.PIPE) as probe:
+    observed = codecs.lookup(probe.stdout.encoding).name
+    probe.communicate()
+    assert probe.returncode == 0
+assert observed == codecs.lookup(encoding).name, (observed, encoding)
+print("ENCODING_BOUNDARY effective=" + observed + " utf8_mode=0", flush=True)
+sys.argv = [script, *args]
+runpy.run_path(script, run_name="__main__")
+PY
+run_root_preview() {
+    local name="$1" encoding="$2" target="$3" expected="$4"
+    PYTHONUTF8=0 PYTHONIOENCODING=utf-8 python3 -X utf8=0 "$S8/entrypoint.py" "$encoding" "$MERGE" \
+        full-refresh --repo-root "$REPO_ROOT" --target "$target" --scope project \
+        --platform unix --release-version 6.4.8 --dry-run > "$S8/$name.log" 2>&1
+    local rc=$?
+    cat "$S8/$name.log"
+    assert_contains "$S8/$name.log" "ENCODING_BOUNDARY effective=$encoding utf8_mode=0" "$name verifies the effective subprocess encoding"
+    assert_equals "$rc" "$expected" "$name full-refresh exit"
+    if [ "$expected" = 0 ]; then
+        assert_contains "$S8/$name.log" "UPGRADE: READY" "$name canonical root accepted by the actual planner"
+    else
+        assert_contains "$S8/$name.log" "BLOCKED: project full refresh must run at the canonical repository root" "$name preserves canonical-root rejection"
+    fi
+}
+run_root_preview unicode-primary cp1252 "$S8/primary café" 0
+run_root_preview unicode-linked cp1252 "$S8/linked café" 0
+run_root_preview ascii-linked cp1252 "$S8/linked ascii" 0
+run_root_preview utf8-primary utf-8 "$S8/primary café" 0
+run_root_preview utf8-linked utf-8 "$S8/linked café" 0
+run_root_preview subdirectory cp1252 "$S8/primary café/subdir" 1
+run_root_preview nonrepo cp1252 "$S8/nonrepo" 1
+# A malformed Git wire result must not weaken the exact-root guard.
+mkdir "$S8/git-wire"
+REAL_ROOT_GIT=$(command -v git)
+cat > "$S8/git-wire/git" <<'SH'
+#!/bin/sh
+if [ "${3:-}" = rev-parse ] && [ "${4:-}" = --show-toplevel ]; then
+    printf '/malformed\377root\n'
+    exit 0
+fi
+exec "$REAL_ROOT_GIT" "$@"
+SH
+chmod +x "$S8/git-wire/git"
+PATH="$S8/git-wire:$PATH" REAL_ROOT_GIT="$REAL_ROOT_GIT" \
+    run_root_preview malformed-root cp1252 "$S8/linked ascii" 1
+
 report "test-merge-settings.sh"

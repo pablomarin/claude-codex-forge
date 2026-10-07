@@ -142,3 +142,46 @@ helps narrow a still-failing result toward nested setup. Only successful native 
 Keep guidance PR1103 unchanged until the control gives useful native evidence; then carry any
 supported test-only change across with fresh exact-candidate certification. No new routing or state
 machinery, authenticated-agent claim or downstream installation.
+
+## Native Unicode canonical-root repair (2026-10-07)
+
+Actual native run37589613812 on published900015e finished FAILURE: all18 suites ran,17 returned0,
+actual-helper transport15/15 passed, and the first installer child exited1 in23.630seconds without
+timeout. Primary and ASCII-space worktrees installed; linked café was rejected by the shared Python
+canonical-root preflight. Keep all raw artifacts and earlier failures; no native qualification claim.
+
+Independent configured Claude investigation20261007T083053Z-98485-24273 traced
+scripts/merge-settings.py:2066-2073 `text=True` without explicit decoding. Separate configured
+reproduction20261007T083739Z-30359-31325 is REPRODUCED through fresh Codex after visible Claude
+boundary failure. The actual immutable full-refresh entrypoint rejects café under macOS Latin1
+subprocess locale while UTF8 argv/filesystem paths stay correct; an ASCII linked control passes.
+Changing only the locale to UTF8 preserves Git bytes and lets café pass. This is controlled local
+reproduction of a reachable encoding bug, not observation of the native Python code page. Native
+setup's own explicit-UTF8 Git reads accepted the same café root; exact native locale remains unlogged.
+
+Minimal production change: replace that one `text=True` argument with `encoding="utf-8"` and
+`errors="replace"`, using the existing PowerShell Git-reader convention. Keep the same real Git
+command, target.resolve comparison, return-code guard and RefreshBlocked path. Bad output becomes
+a mismatched root and remains blocked; do not add routing/state or global locale changes. Shared
+Python engine serves both Bash and PowerShell; no installer/host twin is necessary. Do not change
+unrelated subprocess calls, original native assertions, timeout budgets or required suites.
+
+Bounded producer TDD: add a focused regression to the existing merge-settings fast suite. Exercise
+the actual full-refresh entrypoint with real Git Unicode primary/linked roots under an explicitly
+controlled non-UTF8 subprocess default, then ASCII, UTF8, subdirectory/nonrepo and malformed-output
+controls. A narrow test-only encoding boundary is a portable emulation, not native qualification.
+Observe RED before editing production. Implement only the two arguments, observe GREEN; run owning
+merge-settings/full-refresh checks and all ten fast suites, avoiding local exhaustive run-all.
+Preserve actual native owning failures as RED. Update solution/changelog truthfully. Producer emits
+actual self-review evidence and capability limitations; never invent a native producer UUID/type.
+
+After this concrete source repair, refreeze the exact staged candidate, fresh distinct configured
+specification/quality reviews plus app/installed both-main Bash/portablePS7 E2E receipts and normal
+promotion/push are required. Existing review6/firstcert3 remains monotonic: review7 crosses the
+convergence allowance and publication needs actual HUMAN adjudication of that concrete repaired
+tail; never reset/self-adjudicate or relabel old receipts. Same-task human instruction authorizes
+preparation/checks, not an invented explicit breaker release. Require exact-head native Windows
+owning Unicode assertions, all18 suites and attestation before merge. If native canonical-root
+failure persists, this repair has not established native cause; capture actual Git result/default
+encoding in a further bounded diagnostic, never blind retry/skip. Guidance remains unchanged until
+this supported repair is ready to integrate with its own fresh gates.
