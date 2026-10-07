@@ -38,10 +38,14 @@ the correct worktree only when the host supplies that worktree in the event `cwd
 
 Codex hook `cwd` can remain the session directory while `exec_command` runs in a different
 `workdir`; its Bash hook payload omits that per-call directory. Forge cannot recover an omitted
-directory safely. Before commit, push, or PR creation, use a host session whose workspace is the
-task worktree when this limitation applies. Selecting only a tool working directory does not
-change the hook context. A Forge refresh repairs its parsers but does not repair this upstream
-payload loss. See [Codex issue #33986](https://github.com/openai/codex/issues/33986).
+directory safely. Selecting only a tool working directory does not change the hook context.
+Continue in the current session by default and follow
+[Shipping from the current session](../../rules/workflow.md#shipping-from-the-current-session)
+before direct commit, push or PR creation. That exact-task local preflight does not change native event routing,
+authenticate a native event or grant shipping authority. Keep normal native hooks and authorization,
+report a native context mismatch, and stop on any real denial. A Forge refresh repairs its parsers
+but does not repair this upstream payload loss. See
+[Codex issue #33986](https://github.com/openai/codex/issues/33986).
 
 ## Goal Evidence Output
 

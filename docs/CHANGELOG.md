@@ -2,6 +2,19 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.9 — 2026-10-06
+
+### Current-session worktree shipping guidance
+
+Canonical workflows now continue task work, reviews, verification, approval recording and normal
+receipt-validating promotion in the current session by default. The installed workflow rules own
+one direct-shipping preflight procedure: verify the physical task root, active state and Git common
+directory, then run the existing gate for the exact command with matching process and input cwd.
+Revalidate the candidate, HEAD and approval before execution. Native hooks, human authorization and
+real denials remain in force; local preflight grants no authority and changes no native event routing.
+The parallel-session guide and hook reference link the same procedure. This is a documentation and
+contract-test repair; hook/runtime behavior is unchanged.
+
 ## 6.4.8 — 2026-10-06
 
 ### Automatic worktree installation and simpler setup instructions
