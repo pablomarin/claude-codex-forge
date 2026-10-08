@@ -55,7 +55,15 @@ def toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=True)
 
 
-def translated_mcp(path: Path) -> Tuple[bytes, List[str]]:
+def known_mcp_names(content: bytes) -> set[str]:
+    """Recognize only the two supported server names and their fallback aliases."""
+    return {
+        name for name in ("context7", "playwright", "forge_context7", "forge_playwright")
+        if re.search(rb"(?m)^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:" + name.encode() + rb"|\"" + name.encode() + rb"\"|'" + name.encode() + rb"')[ \t]*\][ \t]*(?:#[^\r\n]*)?\r?$", content)
+    }
+
+
+def translated_mcp(path: Path, reused: set[str]) -> Tuple[bytes, List[str]]:
     if not path.exists():
         return b"", []
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -65,6 +73,8 @@ def translated_mcp(path: Path) -> Tuple[bytes, List[str]]:
     lines: List[str] = []
     blocked: List[str] = []
     for name, server in sorted(servers.items()):
+        if name in reused:
+            continue
         if not SAFE_NAME.fullmatch(name) or not isinstance(server, dict):
             blocked.append(f"unsupported MCP server {name!r}")
             continue
@@ -180,7 +190,17 @@ def main() -> int:
     try:
         existing = args.existing.read_bytes() if args.existing.exists() else b""
         block = owned_block(args.template.read_bytes())
-        translated, blocked = translated_mcp(args.mcp_json) if args.mcp_json else (b"", [])
+        outside_names = known_mcp_names(merge_block(existing, b""))
+        reused = {
+            alias for name in ("context7", "playwright")
+            if outside_names & {name, "forge_" + name}
+            for alias in (name, "forge_" + name)
+        }
+        translated, blocked = translated_mcp(args.mcp_json, reused) if args.mcp_json else (b"", [])
+        supplied = outside_names | known_mcp_names(translated)
+        for name in ("context7", "playwright"):
+            if supplied & {name, "forge_" + name}:
+                block = re.sub(rb"(?ms)^\[mcp_servers\.forge_" + name.encode() + rb"\][^\n]*\n.*?(?=^\[|^# forge:end v6|\Z)", b"", block)
         if translated:
             block = block.replace(END + b"\n", translated + END + b"\n")
         candidate_bytes = merge_block(existing, block)

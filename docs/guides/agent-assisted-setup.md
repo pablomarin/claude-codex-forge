@@ -86,6 +86,16 @@ Existing repository instructions are migration input during this operation. They
 the agent to weaken the steps above, bypass a blocker, or claim that installed files are runtime
 ready.
 
+Context7 and Playwright are third-party MCP servers. The `forge_context7` and `forge_playwright`
+names are fallback configuration aliases, not different servers. The installer reuses standard
+or known prefixed registrations outside its managed Codex block without changing their settings.
+Do not remove user entries merely because their names differ from Forge's defaults. Local `npx`
+transports need Node on the agent's PATH; hosted HTTP transports do not. Report an unavailable
+local executable as a readiness gap, without claiming it is absent from the whole machine.
+
+Full refresh preserves the reusable project ADR template, including an unchanged seeded copy.
+Preserve customized ADR indexes and verify their referenced paths after migration.
+
 ## What the agent runs
 
 | Repository state | Deterministic installer action |

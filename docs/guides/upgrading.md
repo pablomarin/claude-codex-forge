@@ -112,6 +112,17 @@ reported as `PRESERVED` and remain byte-identical. At a known cross-host alias p
 released whole-file hash is sufficient for safe replacement even when the advisory v5 stamp is
 older; any modified alias still blocks.
 
+The reusable `docs/adr/template.md` is project-owned scaffold after seeding and survives full
+refresh even when it still matches a released copy. Exact Forge-internal numbered ADRs retire;
+customized ADR templates and indexes remain byte-identical.
+
+Codex setup and upgrades reuse existing `context7` and `playwright` registrations (including
+the known `forge_` aliases) outside the Forge block. Existing arguments, authentication and
+transport choices stay intact. A safe customized `.mcp.json` translation also takes precedence
+over the corresponding fallback. Refreshing the owned block removes its redundant fallback;
+Forge never deletes outside registrations or detects arbitrary aliases. Local `npx` servers
+require Node on the agent's PATH; hosted HTTP MCP connections do not.
+
 Project-local Git hooks are user-owned and remain outside the full-refresh write set. The preview
 does inspect an active `post-checkout` hook for dependencies on retired v5 state paths such as
 `.claude/state.template.md` or the old host-local state location. It reports `LEGACY_GIT_HOOK` and

@@ -208,6 +208,10 @@ function Invoke-IsolatedPowerShell {
 }
 
 try {
+    $mcpPython = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $mcpPython) { $mcpPython = Get-Command python -ErrorAction Stop }
+    $mcpControlOutput = (& $mcpPython.Source (Join-Path $root "tests/template/check-codex-mcp-reuse.py") $root ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName) 2>&1) -join "`n"
+    Assert-True ($LASTEXITCODE -eq 0) "known MCP registrations reuse current PowerShell host and Python renderer: $mcpControlOutput"
     $transitionProject = New-Project "transitional-v6-materializer"
     $transitionState = Join-Path $transitionProject ".forge\local\state.md"
     [IO.Directory]::CreateDirectory((Split-Path -Parent $transitionState)) | Out-Null
@@ -542,6 +546,10 @@ try {
     $seededAdr = Join-Path $seededContent "docs\adr\README.md"
     Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:docs/adr/README.md" $seededAdr
     [IO.File]::AppendAllText($seededAdr, "`n| [0099](0099-project.md) | Project decision | Accepted |`n", $utf8NoBom)
+    $seededTemplate = Join-Path $seededContent "docs\adr\template.md"
+    Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:docs/adr/template.md" $seededTemplate
+    [IO.File]::AppendAllText($seededTemplate, "`nProject-specific template instructions.`n", $utf8NoBom)
+    $seededTemplateHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $seededTemplate).Hash
     $seededCi = Join-Path $seededContent "docs\ci-templates\e2e.yml"
     $seededCiSource = Join-Path $scratch "seeded-e2e-source.yml"
     Export-GitBlob "80dffe872cc0830243a617eacfecce1e5fc2a6f5:templates/ci-workflows/e2e.yml" $seededCiSource
@@ -553,6 +561,7 @@ try {
     Assert-True ($seededPreview.Code -eq 0 -and $seededPreview.Output.Contains("PRESERVED: docs/adr/README.md (modified seeded project content)") -and $seededPreview.Output.Contains("PRESERVED: docs/ci-templates/e2e.yml (modified seeded project content)")) "PowerShell preserves modified non-runtime Forge seeds during preview"
     $seededRun = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $seededContent
     Assert-True ($seededRun.Code -eq 0 -and (Get-FileHash -Algorithm SHA256 -LiteralPath $seededAdr).Hash -eq $seededAdrHash -and (Get-FileHash -Algorithm SHA256 -LiteralPath $seededCi).Hash -eq $seededCiHash) "PowerShell migration preserves seeded project content byte-for-byte"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $seededTemplate).Hash -eq $seededTemplateHash) "modified ADR template survives and README template link resolves"
 
     $activeRule = New-Project "active-rule-modified"
     Write-Text (Join-Path $activeRule ".claude\.forge-version") "5.60`n"
@@ -698,9 +707,15 @@ try {
     $projectOperatorSentinelHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $projectOperatorSentinel).Hash
     Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/README.md" `
         (Join-Path $project "docs\adr\README.md")
+    $exactAdrTemplate = Join-Path $project "docs\adr\template.md"
+    Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/template.md" $exactAdrTemplate
+    $exactAdrTemplateHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exactAdrTemplate).Hash
+    Export-GitBlob "cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/0001-volatile-state-not-auto-loaded.md" `
+        (Join-Path $project "docs\adr\0001-volatile-state-not-auto-loaded.md")
     $first = Invoke-IsolatedPowerShell -Script $setup -Arguments @("-R") -WorkingDirectory $project `
         -Environment @{ HOME = $projectOperatorHome; USERPROFILE = $projectOperatorHome }
     Assert-True ($first.Code -eq 0) "setup.ps1 -R translates a project under Windows PowerShell 5.1: $($first.Output.Trim())"
+    Assert-True ((Get-FileHash -Algorithm SHA256 -LiteralPath $exactAdrTemplate).Hash -eq $exactAdrTemplateHash -and -not (Test-Path (Join-Path $project "docs\adr\0001-volatile-state-not-auto-loaded.md"))) "exact reusable ADR template survives while exact numbered Forge ADR retires"
     $projectPhysical = (Resolve-Path -LiteralPath ([string](& git -C $project rev-parse --show-toplevel)).Trim()).Path
     Assert-True ($first.Output.Contains("CODEX_HOOKS: MATERIALIZED primary worktree registration") -and
         -not $first.Output.Contains("CODEX_HOOKS: BLOCKED linked worktree") -and
