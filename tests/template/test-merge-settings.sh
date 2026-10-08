@@ -415,6 +415,8 @@ PY
 assert_equals "$(cat "$S7/preserve.out")" "ok" "existing TOML bytes are a byte-identical prefix"
 
 start_test "Codex config renderer refuses malformed or duplicate Forge ownership"
+python3 "$REPO_ROOT/tests/template/check-codex-mcp-reuse.py" "$REPO_ROOT" > "$S7/reuse.log" 2>&1
+assert_equals "$?" "0" "known MCP registrations are reused by available real renderers: $(cat "$S7/reuse.log")"
 cat > "$S7/bad.toml" <<'EOF'
 # forge:begin v6
 [forge]

@@ -2,6 +2,19 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.11 — 2026-10-08
+
+### Preserve MCP choices and reusable ADR scaffold
+
+Unix and PowerShell Codex configuration refreshes now reuse existing Context7 and Playwright
+registrations under their standard or known Forge-prefixed names, preserving outside settings.
+Safe customized MCP translations replace the corresponding fallback too. Upgrades remove
+redundant defaults only from the Forge-owned block; fresh configurations retain the defaults.
+
+Full refresh preserves the reusable project ADR template even when its bytes still match a
+released seed, while continuing to retire exact Forge-internal numbered ADRs. Upgrade guidance
+clarifies these ownership boundaries and distinguishes local Node requirements from hosted HTTP.
+
 ## 6.4.10 — 2026-10-07
 
 ### Standalone Forge defaults and clearer engineering practices

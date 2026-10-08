@@ -320,6 +320,9 @@ git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:hooks/session-
 git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:commands/new-feature.md \
     > "$S4/.claude/commands/new-feature.md"
 mkdir -p "$S4/docs/adr"
+git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/template.md > "$S4/docs/adr/template.md"
+adr_template_hash=$(hash_file "$S4/docs/adr/template.md")
+git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/0001-volatile-state-not-auto-loaded.md > "$S4/docs/adr/0001-volatile-state-not-auto-loaded.md"
 git -C "$REPO_ROOT" show cc79afc29f03ec3b9610a0d4dc9ffcb0bd2475ff:docs/adr/README.md \
     > "$S4/docs/adr/README.md"
 write_active_v5_state "$S4" "V5_CHECKPOINT_TOKEN"
@@ -366,6 +369,8 @@ assert_not_contains "$S4/refresh.log" "GOAL_OVERLAY: BLOCKED" \
 assert_contains "$S4/refresh.log" "DELETED: docs/adr/README.md (exact released Forge seed)" \
     "exact retired seed deletion is distinguished from project content"
 assert_file_missing "$S4/docs/adr/README.md" "exact released ADR seed is retired"
+assert_hash_equals "$S4/docs/adr/template.md" "$adr_template_hash" "exact reusable ADR template survives full refresh"
+assert_file_missing "$S4/docs/adr/0001-volatile-state-not-auto-loaded.md" "exact Forge internal numbered ADR is retired"
 
 start_test "ambiguous legacy bytes and old/new state conflicts block before mutation"
 S5=$(scratch_dir full-refresh-blocked)
@@ -605,6 +610,9 @@ printf '5.60\n' > "$S5SEED/.claude/.forge-version"
 git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:docs/adr/README.md \
     > "$S5SEED/docs/adr/README.md"
 printf '\n| [0099](0099-project.md) | Project decision | Accepted |\n' >> "$S5SEED/docs/adr/README.md"
+git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:docs/adr/template.md > "$S5SEED/docs/adr/template.md"
+printf '\nProject-specific template instructions.\n' >> "$S5SEED/docs/adr/template.md"
+seeded_template_hash=$(hash_file "$S5SEED/docs/adr/template.md")
 git -C "$REPO_ROOT" show 80dffe872cc0830243a617eacfecce1e5fc2a6f5:templates/ci-workflows/e2e.yml \
     | sed 's/__PLAYWRIGHT_DIR__/frontend/g' > "$S5SEED/docs/ci-templates/e2e.yml"
 write_active_v5_state "$S5SEED" "SEEDED_CONTENT_STATE"
@@ -619,6 +627,7 @@ assert_contains "${S5SEED}.preview.log" "PRESERVED: docs/ci-templates/e2e.yml (m
 run_refresh "$S5SEED" "$S5SEED/refresh.log" -F
 assert_equals "$?" "0" "migration succeeds with modified seeded project content"
 assert_hash_equals "$S5SEED/docs/adr/README.md" "$seeded_adr_hash" "project ADR index remains byte-identical"
+assert_hash_equals "$S5SEED/docs/adr/template.md" "$seeded_template_hash" "modified ADR template remains byte-identical and README link resolves"
 assert_hash_equals "$S5SEED/docs/ci-templates/e2e.yml" "$seeded_ci_hash" "rendered CI reference remains byte-identical"
 
 S5ACTIVE=$(scratch_dir full-refresh-active-rule-modified)

@@ -656,7 +656,7 @@ function Merge-CodexHookEntries {
 }
 
 function Convert-McpJsonToCodexToml {
-    param([string]$Path)
+    param([string]$Path, [string[]]$Reused = @())
     $lines = @()
     $blocked = @()
     if (-not $Path -or -not (Test-Path $Path)) { return [pscustomobject]@{ Text=""; Blocked=@() } }
@@ -665,6 +665,7 @@ function Convert-McpJsonToCodexToml {
     foreach ($property in $payload.mcpServers.PSObject.Properties | Sort-Object Name) {
         $name = $property.Name
         $server = $property.Value
+        if ($Reused -ccontains $name) { continue }
         if ($name -notmatch '^[A-Za-z0-9_-]+$') { $blocked += "unsupported MCP server '$name'"; continue }
         if ($name -eq "playwright" -and $server.type -eq "stdio" -and $server.command -eq "npx" -and
             (($server.args | ConvertTo-Json -Compress) -eq '["-y","@playwright/mcp@latest"]') -and @($server.env.PSObject.Properties).Count -eq 0) { continue }
@@ -697,14 +698,30 @@ function Set-CodexTomlBlock {
     param([string]$Template, [string]$Destination, [string]$McpJson = "")
     $block = [IO.File]::ReadAllText($Template)
     $tb = "# forge:begin v6"; $te = "# forge:end v6"
-    $translation = Convert-McpJsonToCodexToml $McpJson
-    if ($translation.Text) { $block = $block.Replace("$te", $translation.Text + $te) }
-    if ($translation.Blocked.Count) { Write-Host "CODEX_MCP_PARITY: BLOCKED: $($translation.Blocked -join '; ')" }
     $parent = Split-Path -Parent $Destination
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $existing = if (Test-Path $Destination) { [IO.File]::ReadAllText($Destination) } else { "" }
     $begins = $existing.Split(@($tb), [StringSplitOptions]::None).Count - 1
     $ends = $existing.Split(@($te), [StringSplitOptions]::None).Count - 1
+    $outside = $existing
+    if ($begins -eq 1 -and $ends -eq 1 -and $existing.IndexOf($te) -gt $existing.IndexOf($tb)) {
+        $start=$existing.IndexOf($tb); $finish=$existing.IndexOf($te)+$te.Length
+        $outside=$existing.Substring(0,$start)+$existing.Substring($finish)
+    } elseif ($begins -ne 0 -or $ends -ne 0) { throw "malformed or duplicate Forge TOML marker" }
+    $reused = @()
+    foreach ($name in @("context7", "playwright")) {
+        # Read only these known table names; the rest of the TOML remains opaque.
+        $pattern = '(?m)^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:' + $name + '|forge_' + $name + '|"(?:forge_)?' + $name + '"|''(?:forge_)?' + $name + ''')[ \t]*\][ \t]*(?:#[^\r\n]*)?\r?$'
+        if ([regex]::IsMatch($outside, $pattern)) { $reused += $name; $reused += "forge_$name" }
+    }
+    $translation = Convert-McpJsonToCodexToml $McpJson $reused
+    foreach ($name in @("context7", "playwright")) {
+        if ($reused -ccontains $name -or $translation.Text -cmatch ('(?m)^\[mcp_servers\.(?:forge_)?' + $name + '\]')) {
+            $block = [regex]::Replace($block, '(?ms)^\[mcp_servers\.forge_' + $name + '\][^\n]*\n.*?(?=^\[|^# forge:end v6|\z)', '')
+        }
+    }
+    if ($translation.Text) { $block = $block.Replace("$te", $translation.Text + $te) }
+    if ($translation.Blocked.Count) { Write-Host "CODEX_MCP_PARITY: BLOCKED: $($translation.Blocked -join '; ')" }
     if ($begins -eq 0 -and $ends -eq 0) { $candidate = $existing + $(if (-not $existing -or $existing.EndsWith("`n")) { "" } else { "`n" }) + $block }
     elseif ($begins -eq 1 -and $ends -eq 1) {
         $start=$existing.IndexOf($tb); $finish=$existing.IndexOf($te,$start)+$te.Length

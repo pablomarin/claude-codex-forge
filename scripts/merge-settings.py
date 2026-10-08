@@ -565,7 +565,11 @@ def inventory_legacy(
                 for _selectors, _src, dest, fingerprint_scope, fp in fingerprints
             )
             recognized = recognized or verified
-        if verified:
+        # This reusable scaffold belongs to the project after seeding, even
+        # when its bytes still match a release. Numbered Forge ADRs retire.
+        if destination == "docs/adr/template.md" and ownership == "seeded-content":
+            preserved_legacy.add(destination)
+        elif verified:
             proven_legacy.add(destination)
             if ownership == "seeded-content":
                 proven_seeded_legacy.add(destination)
@@ -2098,7 +2102,8 @@ def full_refresh(
         retired_workflows = workflow_skill_renames(repo_root, target) if scope == "project" else {}
         inventory = inventory_legacy(repo_root, target, scope, platform)
         report["PRESERVED"].extend(
-            f"{relative} (modified seeded project content)"
+            f"{relative} (reusable project ADR template)" if relative == "docs/adr/template.md"
+            else f"{relative} (modified seeded project content)"
             for relative in sorted(inventory.preserved_legacy)
         )
         if inventory.findings:
@@ -2116,7 +2121,8 @@ def full_refresh(
             # preview that raced with another local process.
             inventory = inventory_legacy(repo_root, target, scope, platform)
             report["PRESERVED"].extend(
-                f"{relative} (modified seeded project content)"
+                f"{relative} (reusable project ADR template)" if relative == "docs/adr/template.md"
+                else f"{relative} (modified seeded project content)"
                 for relative in sorted(inventory.preserved_legacy)
             )
             if inventory.findings:
