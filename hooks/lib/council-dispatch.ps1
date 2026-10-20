@@ -59,7 +59,9 @@ foreach($name in @('sessions','session-stores')) {
 }
 $script:FailedEngine=''; $script:AttemptDir=''
 function Test-EnginePreflight([string]$Selected) {
-  if (-not (Get-Command $Selected -ErrorAction SilentlyContinue)) { return $false }
+  $command = Get-Command "$Selected.exe" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $command) { $command = Get-Command "$Selected.ps1" -CommandType ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1 }
+  if (-not $command) { return $false }
   foreach ($role in @('model-council-advisor','model-council-chair')) {
     if (-not (Select-String -LiteralPath $capabilities -SimpleMatch "$role`t$Selected")) { return $false }
   }

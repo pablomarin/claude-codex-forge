@@ -140,9 +140,51 @@ function ConvertTo-PowerShellLiteral([string]$Value) { return "'" + $Value.Repla
 function Invoke-BoundProcess([string]$Executable, [string[]]$Arguments, [string]$WorkingDirectory, [hashtable]$Environment, [int]$Timeout, [bool]$InheritEnvironment = $false) {
     $stdout = Join-Path ([IO.Path]::GetTempPath()) ('forge-stdout-' + [Guid]::NewGuid().ToString('N'))
     $stderr = Join-Path ([IO.Path]::GetTempPath()) ('forge-stderr-' + [Guid]::NewGuid().ToString('N'))
+    $scriptLauncher = [IO.Path]::GetExtension($Executable).Equals('.ps1', [StringComparison]::OrdinalIgnoreCase)
     $start = New-Object Diagnostics.ProcessStartInfo
-    $start.FileName = $Executable
-    $start.Arguments = (@($Arguments | ForEach-Object { Escape-ProcessArgument $_ }) -join ' ')
+    if ($scriptLauncher) {
+        $shell = Get-Command pwsh.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $shell) { $shell = Get-Command powershell.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 }
+        if (-not $shell) {
+            [IO.File]::WriteAllText($stdout, '', $Utf8)
+            [IO.File]::WriteAllText($stderr, 'PowerShell executable is unavailable', $Utf8)
+            return @{ Exit = 127; Stdout = $stdout; Stderr = $stderr }
+        }
+        # Pass argv over stdin: -File strips embedded quotes.
+        $launchScript = @'
+$ErrorActionPreference = 'Stop'
+try {
+    if ($env:FORGE_DISPATCH_TEST_MODE -eq '1' -and $env:FORGE_TEST_BLOCK_SCRIPT_HANDOFF) {
+        Start-Sleep -Seconds ([int]$env:FORGE_TEST_BLOCK_SCRIPT_HANDOFF)
+    }
+    $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadLine()))
+    $payload = $json | ConvertFrom-Json
+    $argv = [string[]]@($payload.arguments)
+    # PowerShell 7.3 switched to the argument-passing behavior that preserves
+    # empty values and embedded quotes for native children. Keep repairing argv
+    # for Windows PowerShell 5.1 and PowerShell 7.0 through 7.2.
+    if ($PSVersionTable.PSVersion -lt [Version]'7.3') {
+        for ($i = 0; $i -lt $argv.Length; $i++) {
+            if ($argv[$i].Length -eq 0) { $argv[$i] = ([string][char]34 + [char]34) }
+            else { $argv[$i] = [regex]::Replace($argv[$i], '(\\*)"', { param($m) (([string][char]92) * (2 * $m.Groups[1].Length + 1)) + [string][char]34 }) }
+        }
+    }
+    & ([string]$payload.executable) @argv
+    if ($null -ne $LASTEXITCODE) { exit ([int]$LASTEXITCODE) }
+    exit 0
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+'@
+        $start.FileName = $shell.Source
+        $start.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launchScript))
+        $start.RedirectStandardInput = $true
+    }
+    else {
+        $start.FileName = $Executable
+        $start.Arguments = (@($Arguments | ForEach-Object { Escape-ProcessArgument $_ }) -join ' ')
+    }
     $start.WorkingDirectory = $WorkingDirectory
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
@@ -155,14 +197,64 @@ function Invoke-BoundProcess([string]$Executable, [string[]]$Arguments, [string]
             if ($value) { $start.EnvironmentVariables[$key] = $value }
         }
     }
+    if ($scriptLauncher -and -not $InheritEnvironment) {
+        # PowerShell launchers need a rooted system drive and a bounded set of
+        # executable extensions to invoke their native CLI child.
+        $systemDrive = [Environment]::GetEnvironmentVariable('SystemDrive')
+        if ($systemDrive) { $start.EnvironmentVariables['SystemDrive'] = $systemDrive }
+        $start.EnvironmentVariables['PATHEXT'] = '.COM;.EXE;.BAT;.CMD;.PS1'
+    }
     foreach ($key in $Environment.Keys) { $start.EnvironmentVariables[$key] = [string]$Environment[$key] }
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $start
-    if (-not $process.Start()) { return @{ Exit = 127; Stdout = $stdout; Stderr = $stderr } }
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    try { $started = $process.Start() }
+    catch {
+        [IO.File]::WriteAllText($stdout, '', $Utf8)
+        [IO.File]::WriteAllText($stderr, $_.Exception.Message, $Utf8)
+        return @{ Exit = 127; Stdout = $stdout; Stderr = $stderr }
+    }
+    if (-not $started) {
+        [IO.File]::WriteAllText($stdout, '', $Utf8)
+        [IO.File]::WriteAllText($stderr, 'Process did not start', $Utf8)
+        return @{ Exit = 127; Stdout = $stdout; Stderr = $stderr }
+    }
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit($Timeout * 1000)) {
-        & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+    if ($scriptLauncher) {
+        try {
+            $payload = @{ executable = $Executable; arguments = @($Arguments) } | ConvertTo-Json -Compress -Depth 3
+            # AutoFlush makes WriteLineAsync's completion cover delivery to the
+            # bridge stdin pipe; do not let a non-reading bridge bypass Timeout.
+            $process.StandardInput.AutoFlush = $true
+            $handoff = $process.StandardInput.WriteLineAsync([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload)))
+            $remaining = [Math]::Max(0, ($Timeout * 1000) - [int]$timer.ElapsedMilliseconds)
+            if (-not $handoff.Wait($remaining)) {
+                # An incomplete line means the bridge cannot have parsed the
+                # payload or started its reviewer child. Kill only the bridge
+                # here; synchronous taskkill and an unbounded WaitForExit would
+                # let a blocked handoff exceed the caller's timeout again.
+                try { $process.Kill() } catch {}
+                $process.WaitForExit(1000) | Out-Null
+                $stdoutText = if ($stdoutTask.Wait(1000)) { $stdoutTask.Result } else { '' }
+                $stderrText = if ($stderrTask.Wait(1000)) { $stderrTask.Result } else { '' }
+                [IO.File]::WriteAllText($stdout, $stdoutText, $Utf8)
+                [IO.File]::WriteAllText($stderr, $stderrText, $Utf8)
+                return @{ Exit = 124; Stdout = $stdout; Stderr = $stderr }
+            }
+            $handoff.GetAwaiter().GetResult()
+            $process.StandardInput.Close()
+        }
+        catch {
+            try { & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null } catch {}
+            [IO.File]::WriteAllText($stdout, '', $Utf8)
+            [IO.File]::WriteAllText($stderr, $_.Exception.Message, $Utf8)
+            return @{ Exit = 127; Stdout = $stdout; Stderr = $stderr }
+        }
+    }
+    $remaining = [Math]::Max(0, ($Timeout * 1000) - [int]$timer.ElapsedMilliseconds)
+    if (-not $process.WaitForExit($remaining)) {
+        try { & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null } catch {}
         try { $process.Kill() } catch {}
         $process.WaitForExit()
         [IO.File]::WriteAllText($stdout, $stdoutTask.Result, $Utf8)
@@ -314,7 +406,8 @@ function Invoke-FullInvestigation([string]$Selected, [string]$Executable, [strin
 function Invoke-Engine([string]$Selected) {
     if ($env:FORGE_DISPATCH_TEST_MODE -and $env:FORGE_TEST_DISABLE_ENGINE -eq $Selected) { return @{ Rc = 1; Class = 'engine'; Reason = 'binary-unavailable'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
     if ($env:FORGE_DISPATCH_TEST_MODE -and $env:FORGE_TEST_DISABLE_CAPABILITY -eq $Selected) { return @{ Rc = 1; Class = 'capability'; Reason = 'missing-required-capability'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
-    $command = Get-Command $Selected -ErrorAction SilentlyContinue
+    $command = Get-Command "$Selected.exe" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $command) { $command = Get-Command "$Selected.ps1" -CommandType ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1 }
     if (-not $command) { return @{ Rc = 1; Class = 'engine'; Reason = 'binary-unavailable'; Engine = $Selected; Verdict = 'BLOCKED'; Severity = 'NONE'; Exit = 127 } }
     if (-not $env:FORGE_DISPATCH_TEST_MODE) {
         $help = (& $command.Source --help 2>&1) -join "`n"
@@ -423,7 +516,7 @@ function Invoke-Engine([string]$Selected) {
         $value = [Environment]::GetEnvironmentVariable($name)
         if ($null -ne $value) { $environment[$name] = $value }
     }
-    foreach ($name in @('FORGE_DISPATCH_TEST_MODE', 'FORGE_TEST_DISABLE_ENGINE', 'FAKE_CLAUDE_BEHAVIOR', 'FAKE_CODEX_BEHAVIOR', 'FAKE_CLAUDE_LOG', 'FAKE_CLAUDE_ARGV_LOG', 'FAKE_CODEX_LOG', 'FAKE_CHILD_PID_FILE')) {
+    foreach ($name in @('FORGE_DISPATCH_TEST_MODE', 'FORGE_TEST_DISABLE_ENGINE', 'FORGE_TEST_BLOCK_SCRIPT_HANDOFF', 'FAKE_CLAUDE_BEHAVIOR', 'FAKE_CODEX_BEHAVIOR', 'FAKE_CLAUDE_LOG', 'FAKE_CLAUDE_ARGV_LOG', 'FAKE_CODEX_LOG', 'FAKE_CODEX_ARGV_LOG', 'FAKE_CHILD_PID_FILE')) {
         $value = [Environment]::GetEnvironmentVariable($name)
         if ($value) { $environment[$name] = $value }
     }
@@ -451,6 +544,12 @@ function Invoke-Engine([string]$Selected) {
         $codexHome = if ($Conversation -eq 'ephemeral') { Join-Path $scratch 'codex-home' } else { Join-Path $SessionStore 'codex-home' }
         $environment.HOME = Join-Path $scratch 'home'
         $environment.CODEX_HOME = $codexHome
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            $systemDrive = [Environment]::GetEnvironmentVariable('SystemDrive')
+            if ($systemDrive) { $environment.SystemDrive = $systemDrive }
+            $environment.LOCALAPPDATA = Join-Path $scratch 'localappdata'
+            New-Item -ItemType Directory -Path $environment.LOCALAPPDATA -Force | Out-Null
+        }
         $authPath = if ($env:FORGE_CODEX_AUTH_FILE) { $env:FORGE_CODEX_AUTH_FILE } elseif ($env:CODEX_HOME) { Join-Path $env:CODEX_HOME 'auth.json' } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex/auth.json' }
         if ($env:FORGE_CODEX_AUTH_FILE -or (Test-Path -LiteralPath $authPath)) {
             $auth = Get-Item -LiteralPath $authPath -Force
@@ -460,10 +559,10 @@ function Invoke-Engine([string]$Selected) {
         }
         $disabled = @('--disable', 'hooks', '--disable', 'plugins', '--disable', 'plugin_sharing', '--disable', 'apps', '--disable', 'remote_plugin', '--disable', 'in_app_browser', '--disable', 'browser_use', '--disable', 'computer_use')
         if ($Conversation -eq 'resume') {
-            $arguments = @('-a', 'never', '--sandbox', $sandbox, 'exec', 'resume') + $disabled + @('--ignore-user-config', '--ignore-rules', '--json', '-m', $model, '-c', "model_reasoning_effort=$effort", '-c', 'service_tier=fast', '--output-last-message', $bound, $SessionId, $prompt)
+            $arguments = @('-a', 'never', '--sandbox', $sandbox, 'exec', 'resume') + $disabled + @('--ignore-user-config', '--ignore-rules', '--json', '-m', $model, '-c', "model_reasoning_effort=$effort", '-c', 'service_tier=fast', '-c', 'features.prefer_mxc=true', '-c', 'windows.sandbox="elevated"', '--output-last-message', $bound, $SessionId, $prompt)
         }
         else {
-            $arguments = @('-a', 'never', 'exec') + $disabled + @('-C', $primary, '--add-dir', $snapshot, '--ignore-user-config', '--ignore-rules', '--sandbox', $sandbox, '-m', $model, '-c', "model_reasoning_effort=$effort", '-c', 'service_tier=fast', '--output-last-message', $bound)
+            $arguments = @('-a', 'never', 'exec') + $disabled + @('-C', $primary, '--add-dir', $snapshot, '--ignore-user-config', '--ignore-rules', '--sandbox', $sandbox, '-m', $model, '-c', "model_reasoning_effort=$effort", '-c', 'service_tier=fast', '-c', 'features.prefer_mxc=true', '-c', 'windows.sandbox="elevated"', '--output-last-message', $bound)
             if ($ReadOnlyServer -eq 'context7') { $arguments += @('-c', 'mcp_servers.context7.url=https://mcp.context7.com/mcp', '-c', 'mcp_servers.context7.read_only=true') }
             if ($Conversation -eq 'ephemeral') { $arguments += '--ephemeral' } else { $arguments += '--json' }
             $arguments += $prompt

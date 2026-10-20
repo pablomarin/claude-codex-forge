@@ -30,6 +30,11 @@
 #   Windows is `powershell.exe` (5.1), not `pwsh` (7+), so consumers should
 #   prefer dot-sourcing to avoid spawning a 7+ subprocess that may not exist.
 
+function Complete-CodexPty([int]$Code) {
+    if ($script:CodexPtyScriptMode) { $script:CodexPtyExitCode = $Code }
+    else { return $Code }
+}
+
 function Invoke-CodexPty {
     [CmdletBinding()]
     param(
@@ -42,21 +47,35 @@ function Invoke-CodexPty {
         $first = if ($Args.Count -ge 1) { $Args[0] } else { '<empty>' }
         [Console]::Error.WriteLine("codex-pty: usage: Invoke-CodexPty exec [codex-exec-args...]")
         [Console]::Error.WriteLine("codex-pty: first argument must be 'exec' (the codex subcommand); got: $first")
-        return 2
+        return (Complete-CodexPty 2)
     }
 
     # codex availability check
-    $codex = Get-Command codex -ErrorAction SilentlyContinue
+    $codex = Get-Command codex.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $codex) { $codex = Get-Command codex.ps1 -CommandType ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1 }
     if (-not $codex) {
         [Console]::Error.WriteLine("codex-pty: codex not found on PATH")
         [Console]::Error.WriteLine("codex-pty: install with 'npm i -g @openai/codex' or 'scoop install codex'")
-        return 127
+        return (Complete-CodexPty 127)
     }
 
     # Bypass: skip shim logic entirely.
     if ($env:CLAUDE_FORGE_CODEX_PTY_BYPASS -eq '1') {
-        & codex @Args
-        return $LASTEXITCODE
+        # A PowerShell launcher can return after a nonterminating error without
+        # setting LASTEXITCODE. Seed failure so that cannot become false success.
+        if ($codex.CommandType -eq 'ExternalScript') { $global:LASTEXITCODE = 1 }
+        & $codex.Source @Args
+        return (Complete-CodexPty $LASTEXITCODE)
+    }
+
+    # winpty accepts native applications, while a PowerShell launcher must be
+    # invoked by PowerShell itself.
+    if ($codex.CommandType -eq 'ExternalScript') {
+        # See the bypass path: script launchers need a nonzero default because
+        # they are not required to finish with an explicit native exit status.
+        $global:LASTEXITCODE = 1
+        & $codex.Source @Args
+        return (Complete-CodexPty $LASTEXITCODE)
     }
 
     # If stdio is not redirected AND we're on PS 7+, the shell's console host
@@ -66,8 +85,8 @@ function Invoke-CodexPty {
     $inRedirected  = [Console]::IsInputRedirected
     if (-not $outRedirected -and -not $inRedirected -and
         $PSVersionTable.PSVersion.Major -ge 7) {
-        & codex @Args
-        return $LASTEXITCODE
+        & $codex.Source @Args
+        return (Complete-CodexPty $LASTEXITCODE)
     }
 
     # Stdio is redirected (or we're on PS 5.1). Probe for winpty.exe — bundled
@@ -87,8 +106,8 @@ function Invoke-CodexPty {
     }
 
     if ($winpty) {
-        & $winpty.Source codex @Args
-        return $LASTEXITCODE
+        & $winpty.Source $codex.Source @Args
+        return (Complete-CodexPty $LASTEXITCODE)
     }
 
     # WSL opt-in: shell out to WSL Linux + python3 + Linux codex. Only viable
@@ -123,7 +142,7 @@ function Invoke-CodexPty {
                     else {
                         # Forward helper's stderr (codex errors, exec failures)
                         if ($errText) { [Console]::Error.Write($errText) }
-                        return $rc
+                        return (Complete-CodexPty $rc)
                     }
                 }
                 finally {
@@ -139,14 +158,16 @@ function Invoke-CodexPty {
     # Last-resort fallback: direct invoke with a stderr warning.
     [Console]::Error.WriteLine("codex-pty: winpty.exe not found and stdio is redirected; falling back to direct invoke (may hit openai/codex#19945)")
     [Console]::Error.WriteLine("codex-pty: install via 'scoop install winpty' or Git for Windows; or set `$env:CLAUDE_FORGE_CODEX_PTY_BYPASS='1' to silence")
-    & codex @Args
-    return $LASTEXITCODE
+    & $codex.Source @Args
+    return (Complete-CodexPty $LASTEXITCODE)
 }
 
 # Dual-mode entry point — same pattern as default-branch.ps1.
 # When dot-sourced: $MyInvocation.InvocationName == '.' → just define the function.
-# When invoked as script: call the function with $args, exit with its return.
+# When invoked as script: stream stdout and retain the exit code separately.
 if ($MyInvocation.InvocationName -ne '.') {
-    $rc = Invoke-CodexPty @args
-    exit $rc
+    $script:CodexPtyScriptMode = $true
+    $script:CodexPtyExitCode = 1
+    Invoke-CodexPty @args
+    exit $script:CodexPtyExitCode
 }

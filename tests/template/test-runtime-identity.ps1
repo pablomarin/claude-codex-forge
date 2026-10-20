@@ -107,6 +107,10 @@ Write-Output "{`"type`":`"turn.completed`",`"thread_id`":`"$env:FORGE_DISPATCH_S
         $investigationArgv = @($argv -split "`n" | Where-Object { $_ -match 'FORGE_INVESTIGATION' }) -join "`n"
         if ($investigationArgv -notmatch [regex]::Escape("cwd=$project") -or $investigationArgv -match '--safe-mode|--setting-sources|--ignore-user-config|--ignore-rules|--add-dir') { throw "$engine investigation is not a normal full-agent worktree process" }
         if ($engine -eq 'codex' -and ($investigationArgv -notmatch '-a on-request --search exec' -or $investigationArgv -notmatch '--sandbox danger-full-access')) { throw 'Codex investigation is missing full-capability on-request mode' }
+        if ($engine -eq 'codex') {
+            $reviewArgv = @($argv -split "`n" | Where-Object { $_ -and $_ -notmatch 'FORGE_INVESTIGATION|--help' })
+            if ($reviewArgv.Count -ne 3 -or @($reviewArgv | Where-Object { $_ -notmatch '--sandbox read-only' -or $_ -notmatch 'features\.prefer_mxc=true' -or $_ -notmatch 'windows\.sandbox="elevated"' }).Count -ne 0) { throw 'Codex qualifier review turns must prefer MXC with the Windows read-only sandbox' }
+        }
         if ($engine -eq 'claude' -and ($investigationArgv -notmatch '--permission-mode auto' -or $investigationArgv -match '--sandbox')) { throw 'Claude investigation is missing safety-classified full-agent mode' }
     }
     foreach ($failure in @("cross-seat", "canary")) {

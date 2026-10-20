@@ -130,7 +130,7 @@ $parent=Split-Path -Parent $Output;if($parent){New-Item -ItemType Directory -Pat
 $candidate=Get-CandidateHash $ProjectRoot;$gitHead=(& git -C $ProjectRoot rev-parse HEAD|Select-Object -First 1);$treeSha=(& git -C $ProjectRoot rev-parse 'HEAD^{tree}'|Select-Object -First 1);$children=@{};$binaries=@{};$goalRuntime=@{}
 if($Live){$env:FORGE_LIVE_QUALIFICATION='1'}
 foreach($engine in @('claude','codex')){
-    $binary='';if($EngineDir){$binary=Join-Path $EngineDir "$engine.exe"}else{$command=Get-Command $engine -ErrorAction SilentlyContinue;if($command){$binary=$command.Source}};$binaries[$engine]=$binary
+    $binary='';if($EngineDir){$binary=Join-Path $EngineDir "$engine.exe";if(-not(Test-Path -LiteralPath $binary -PathType Leaf)){$binary=Join-Path $EngineDir "$engine.ps1"}}else{$command=Get-Command "$engine.exe" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1;if(-not $command){$command=Get-Command "$engine.ps1" -CommandType ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1};if($command){$binary=$command.Source}};$binaries[$engine]=$binary
     $dispatchOut=Join-Path $bundle "$engine-dispatch.json";$goalDir=Join-Path $bundle "$engine-goal-evidence";$goalOut=Join-Path $goalDir 'goal-qualification.json';New-Item -ItemType Directory -Path $goalDir -Force|Out-Null;$children["${engine}_dispatch"]=$dispatchOut;$children["${engine}_goal"]=$goalOut
     if($FixtureMode){
         $dispatchArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$dispatch,'-Engine',$engine,'-ProjectRoot',$ProjectRoot,'-Output',$dispatchOut,'-FixtureMode','-EnginePath',$binary)

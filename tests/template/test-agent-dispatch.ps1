@@ -52,7 +52,7 @@ function Invoke-Dispatch([string]$Repository, [string]$EngineHost, [string]$Sess
     elseif ($Role -like 'council-*') { $question = Get-ShaTextForTest 'stable council question'; [IO.File]::WriteAllText($prompt, "question_hash=$question`nreview`n") } else { [IO.File]::WriteAllText($prompt, "review`n") }
     $base = (& git -C $Repository rev-parse HEAD)
     if (-not $OutputPath) { $OutputPath = Join-Path $Repository ".forge/local/reviews/result-$($script:DispatchSequence).txt" }
-    $timeout = if ($Role -eq 'investigation-repro') { '60' } else { '2' }
+    $timeout = if ($Role -eq 'investigation-repro') { '60' } elseif ($env:FORGE_TEST_SCRIPT_TIMEOUT) { $env:FORGE_TEST_SCRIPT_TIMEOUT } else { '2' }
     $arguments = @('-Mode', 'run', '-Engine', $Requested, '-FallbackPolicy', $Fallback, '-Role', $Role, '-Profile', $(if ($Role -like 'investigation*') { 'investigate' } else { 'review' }), '-Artifact', $Artifact, '-WorkflowBaseSha', $base, '-WorkflowBaseRef', 'refs/heads/test-base', '-PromptFile', $prompt, '-Output', $OutputPath, '-Conversation', $Conversation, '-TimeoutSeconds', $timeout)
     if ($Role -like 'council-*') { $arguments += @('-SeatId', 'advisor-1') }
     if ($ExactSession) { $arguments += @('-SessionId', $ExactSession) }
@@ -118,6 +118,17 @@ public static class ForgeFakeEngine {
       if(E("FORGE_AMBIENT_SECRET")+E("NODE_OPTIONS")+E("ANTHROPIC_BASE_URL")!="") return 61;
       behavior="clean";
     }
+    if(behavior=="require-mxc-platform-env") {
+      string local=E("LOCALAPPDATA"), home=E("CODEX_HOME");
+      if(E("SystemDrive")=="" || local=="" || home=="" || E("APPDATA")!="") return 64;
+      string scratch=Path.GetDirectoryName(home)+Path.DirectorySeparatorChar;
+      if(!Path.GetFullPath(local).StartsWith(scratch,StringComparison.OrdinalIgnoreCase) || !Directory.Exists(local)) return 66;
+      behavior="clean";
+    }
+    if(behavior=="reject-mxc-platform-env") {
+      if(E("SystemDrive")!="" || E("LOCALAPPDATA")!="") return 65;
+      behavior="clean";
+    }
     if(behavior=="require-fast") {
       bool fast=engine=="codex" && joined.Contains("-c service_tier=fast");
       if(engine=="claude") for(int i=0;i+1<args.Length;i++) if(args[i]=="--settings") { string value=args[i+1]; fast=value.Contains("\"fastMode\":true") || (File.Exists(value) && File.ReadAllText(value).Contains("\"fastMode\": true")); }
@@ -162,7 +173,143 @@ public static class ForgeFakeEngine {
     Add-Type -TypeDefinition $source -Language CSharp -OutputAssembly (Join-Path $bin 'forge-fake.exe') -OutputType ConsoleApplication
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'claude.exe')
     Copy-Item -LiteralPath (Join-Path $bin 'forge-fake.exe') -Destination (Join-Path $bin 'codex.exe')
+    [IO.File]::WriteAllText((Join-Path $bin 'codex.ps1'), 'throw "PowerShell shim must not be selected"')
     $env:PATH = "$bin;$($env:PATH)"; $env:FORGE_DISPATCH_TEST_MODE = '1'
+
+    Write-Host 'PowerShell native Codex selection and Windows read-only sandbox'
+    $repo = New-Repository 'native codex'; $argvLog = Join-Path $repo '.forge/local/reviews/codex-argv.log'; $env:FAKE_CODEX_ARGV_LOG = $argvLog; $env:FAKE_CODEX_BEHAVIOR = 'clean'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan') 0 'Codex review launches the native executable ahead of the PowerShell shim'
+    if (Test-Path -LiteralPath $argvLog) {
+        $argv = @([IO.File]::ReadAllLines($argvLog))
+        Assert-True ($argv -contains '--sandbox' -and $argv -contains 'read-only') 'Codex reviewer remains read-only'
+        Assert-True ($argv -contains 'features.prefer_mxc=true') 'Codex reviewer prefers MXC on compatible Windows hosts'
+        Assert-True ($argv -contains 'windows.sandbox="elevated"') 'Codex reviewer explicitly selects the Windows sandbox backend'
+    } else { Fail 'native Codex executable did not record argv' }
+    Remove-Item Env:FAKE_CODEX_ARGV_LOG -ErrorAction SilentlyContinue
+
+    $repo = New-Repository 'mxc platform environment'; $env:FAKE_CODEX_BEHAVIOR = 'require-mxc-platform-env'
+    Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan') 0 'Codex review starts with the Windows platform environment MXC needs'
+    Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'codex' 'MXC platform environment keeps Codex as the actual reviewer'
+    Assert-Equal (Get-ReceiptValue $repo 'fallback') 'false' 'MXC platform environment avoids reviewer fallback'
+    Remove-Item Env:FAKE_CODEX_BEHAVIOR -ErrorAction SilentlyContinue
+
+    $repo = New-Repository 'claude environment stays minimal'; $env:FAKE_CLAUDE_BEHAVIOR = 'reject-mxc-platform-env'
+    Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' 'plan') 0 'Claude review keeps the existing minimal environment'
+    Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'claude' 'Claude does not require a fallback after Codex platform variables are added'
+    Remove-Item Env:FAKE_CLAUDE_BEHAVIOR -ErrorAction SilentlyContinue
+
+    $hidden = Join-Path $temporary 'hidden native'; New-Item -ItemType Directory -Path $hidden | Out-Null
+    $env:FORGE_TEST_SCRIPT_TIMEOUT = '30'
+    $hiddenCodex = Join-Path $hidden 'codex.exe'; Move-Item -LiteralPath (Join-Path $bin 'codex.exe') -Destination $hiddenCodex
+    $nativePath = $env:PATH
+    try {
+        [IO.File]::WriteAllText((Join-Path $bin 'codex.ps1'), "& '$hiddenCodex' @args`nexit `$LASTEXITCODE`n")
+        $env:PATH = (@($nativePath -split ';' | Where-Object { $_ -and -not (Test-Path -LiteralPath (Join-Path $_ 'codex.exe') -ErrorAction SilentlyContinue) }) -join ';')
+        $env:PATH = "$bin;$($env:PATH)"
+        Assert-True (-not (Get-Command codex.exe -CommandType Application -ErrorAction SilentlyContinue)) 'script-only fixture exposes no Codex executable on PATH'
+        $repo = New-Repository 'script only codex'; $argvLog = Join-Path $repo '.forge/local/reviews/codex-script-argv.log'; $env:FAKE_CODEX_ARGV_LOG = $argvLog
+        Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan') 0 'Codex plan review runs through a PowerShell-only launcher'
+        Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'codex' 'script-only review is certified by Codex rather than fallback'
+        if (Test-Path -LiteralPath $argvLog) {
+            $argv = @([IO.File]::ReadAllLines($argvLog))
+            Assert-True ($argv -contains 'windows.sandbox="elevated"') 'PowerShell launcher preserves the quoted sandbox configuration argument'
+        } else { Fail 'PowerShell launcher did not reach Codex' }
+        $dispatcherSource = [IO.File]::ReadAllText($dispatcher)
+        Assert-True ($dispatcherSource.Contains("`$PSVersionTable.PSVersion -lt [Version]'7.3'")) 'PowerShell native argv repair covers 7.0 through 7.2 as well as Windows PowerShell 5.1'
+        $withPwsh = $env:PATH
+        try {
+            $env:PATH = (@($withPwsh -split ';' | Where-Object { $_ -and -not (Test-Path -LiteralPath (Join-Path $_ 'pwsh.exe') -ErrorAction SilentlyContinue) }) -join ';')
+            Assert-True (-not (Get-Command pwsh.exe -CommandType Application -ErrorAction SilentlyContinue)) 'script-only fixture can use Windows PowerShell 5.1 without PowerShell 7'
+            $repo = New-Repository 'script only codex ps5'; $argvLog = Join-Path $repo '.forge/local/reviews/codex-script-ps5-argv.log'; $env:FAKE_CODEX_ARGV_LOG = $argvLog
+            $quotedPrompt = 'review \"quoted\" path C:\Temp\fixture'
+            Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan' 'automatic' 'ephemeral' '' '' $quotedPrompt) 0 'Codex script-only review runs under Windows PowerShell 5.1'
+            Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'codex' 'Windows PowerShell 5.1 Codex review needs no fallback'
+            Assert-True (([IO.File]::ReadAllLines($argvLog)) -contains 'windows.sandbox="elevated"') 'Windows PowerShell 5.1 preserves the quoted sandbox argument'
+            Assert-True (([IO.File]::ReadAllText($argvLog)).Contains($quotedPrompt)) 'Windows PowerShell 5.1 preserves quoted review instructions'
+        } finally { $env:PATH = $withPwsh }
+        $repo = New-Repository 'script handoff timeout'; $env:FORGE_TEST_SCRIPT_TIMEOUT = '2'; $env:FORGE_TEST_BLOCK_SCRIPT_HANDOFF = '45'
+        try {
+            $handoffTimer = [Diagnostics.Stopwatch]::StartNew()
+            Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan' 'automatic' 'ephemeral' '' '' ('x' * 16384)) 0 'blocked script handoff uses ordinary fallback'
+            $handoffTimer.Stop()
+            Assert-Equal (Get-ReceiptValue $repo 'fallback_reason') 'timeout' 'blocked script handoff records the timeout'
+            Assert-True ($handoffTimer.Elapsed.TotalSeconds -lt 30) 'script handoff delivery is bounded by the review timeout'
+        } finally {
+            Remove-Item Env:FORGE_TEST_BLOCK_SCRIPT_HANDOFF -ErrorAction SilentlyContinue
+            $env:FORGE_TEST_SCRIPT_TIMEOUT = '30'
+        }
+        $repo = New-Repository 'script only timeout'; $pidFile = Join-Path $repo '.forge/local/child.pid'
+        $env:FORGE_TEST_SCRIPT_TIMEOUT = '4'; $env:FAKE_CODEX_BEHAVIOR = 'timeout'; $env:FAKE_CHILD_PID_FILE = $pidFile
+        try {
+            Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan') 0 'script-only reviewer timeout uses ordinary fallback'
+            Assert-Equal (Get-ReceiptValue $repo 'fallback_reason') 'timeout' 'script-only timeout is recorded in the review receipt'
+            if (Test-Path -LiteralPath $pidFile) {
+                $childPid = [int](Get-Content -LiteralPath $pidFile -Raw); Start-Sleep -Milliseconds 200
+                Assert-True (-not (Get-Process -Id $childPid -ErrorAction SilentlyContinue)) 'script-only timeout terminates native descendants'
+            } else { Fail 'script-only timeout fixture did not reach native reviewer' }
+        } finally {
+            $env:FORGE_TEST_SCRIPT_TIMEOUT = '30'; $env:FAKE_CODEX_BEHAVIOR = 'clean'
+            Remove-Item Env:FAKE_CHILD_PID_FILE -ErrorAction SilentlyContinue
+        }
+        $pty = Join-Path $root 'hooks/lib/codex-pty.ps1'
+        [IO.File]::WriteAllText((Join-Path $bin 'codex.ps1'), 'Write-Error "fixture nonterminating failure"')
+        $env:CLAUDE_FORGE_CODEX_PTY_BYPASS = '1'
+        try {
+            Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$pty,'exec','--help')) 1 'script-only Codex bypass treats an unspecified exit status as failure'
+        } finally { Remove-Item Env:CLAUDE_FORGE_CODEX_PTY_BYPASS -ErrorAction SilentlyContinue }
+        Assert-Equal (Invoke-SilentPowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',$pty,'exec','--help')) 1 'script-only Codex direct launch treats an unspecified exit status as failure'
+    } finally {
+        $env:PATH = $nativePath
+        Remove-Item Env:FAKE_CODEX_ARGV_LOG -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $hiddenCodex -Destination (Join-Path $bin 'codex.exe')
+        [IO.File]::WriteAllText((Join-Path $bin 'codex.ps1'), 'throw "PowerShell shim must not be selected"')
+    }
+
+    $hiddenClaude = Join-Path $hidden 'claude.exe'; Move-Item -LiteralPath (Join-Path $bin 'claude.exe') -Destination $hiddenClaude
+    $nativePath = $env:PATH
+    try {
+        $claudeJs = Join-Path $bin 'claude-fixture.js'
+        [IO.File]::WriteAllText($claudeJs, @'
+const fs = require('fs');
+fs.writeFileSync(process.env.FAKE_CLAUDE_ARGV_LOG, process.argv.slice(2).map(value => value === '' ? '<EMPTY>' : value).join('\n'));
+const body = `schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\nforge_canary_hash=${process.env.FORGE_DISPATCH_CANARY_HASH}\nforge_config_hash=${process.env.FORGE_DISPATCH_CONFIG_HASH}\nforge_qualification_revision=${process.env.FORGE_DISPATCH_QUALIFICATION_REVISION}\n`;
+process.stdout.write(JSON.stringify({ result: body, modelUsage: { 'claude-haiku-4-5': { canonicalModel: 'claude-haiku-4-5', provider: 'firstParty' }, 'claude-opus-5-5': { canonicalModel: 'claude-opus-5-5', provider: 'firstParty' } } }) + '\n');
+'@)
+        [IO.File]::WriteAllText((Join-Path $bin 'claude.ps1'), "& node.exe '$claudeJs' @args`nexit `$LASTEXITCODE`n")
+        $env:PATH = (@($nativePath -split ';' | Where-Object { $_ -and -not (Test-Path -LiteralPath (Join-Path $_ 'claude.exe') -ErrorAction SilentlyContinue) }) -join ';')
+        $env:PATH = "$bin;$($env:PATH)"
+        Assert-True (-not (Get-Command claude.exe -CommandType Application -ErrorAction SilentlyContinue)) 'script-only fixture exposes no Claude executable on PATH'
+        $repo = New-Repository 'script only claude'; $argvLog = Join-Path $repo '.forge/local/reviews/claude-script-argv.log'; $env:FAKE_CLAUDE_ARGV_LOG = $argvLog
+        Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' 'plan') 0 'Claude plan review runs through a PowerShell-only launcher'
+        Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'claude' 'script-only review is certified by Claude rather than fallback'
+        if (Test-Path -LiteralPath $argvLog) {
+            $argv = @([IO.File]::ReadAllLines($argvLog))
+            Assert-True ($argv -contains '--setting-sources' -and $argv -contains '<EMPTY>') 'PowerShell launcher preserves Claude empty arguments'
+        } else { Fail 'PowerShell launcher did not reach Claude' }
+        $withPwsh = $env:PATH
+        try {
+            $env:PATH = (@($withPwsh -split ';' | Where-Object { $_ -and -not (Test-Path -LiteralPath (Join-Path $_ 'pwsh.exe') -ErrorAction SilentlyContinue) }) -join ';')
+            $repo = New-Repository 'script only claude ps5'; $argvLog = Join-Path $repo '.forge/local/reviews/claude-script-ps5-argv.log'; $env:FAKE_CLAUDE_ARGV_LOG = $argvLog
+            Assert-Equal (Invoke-Dispatch $repo 'codex' 'sid' 'claude' 'plan') 0 'Claude script-only review runs under Windows PowerShell 5.1'
+            Assert-Equal (Get-ReceiptValue $repo 'actual_engine') 'claude' 'Windows PowerShell 5.1 Claude review needs no fallback'
+            Assert-True (([IO.File]::ReadAllLines($argvLog)) -contains '<EMPTY>') 'Windows PowerShell 5.1 preserves Claude empty arguments'
+        } finally { $env:PATH = $withPwsh }
+    } finally {
+        $env:PATH = $nativePath
+        Remove-Item Env:FAKE_CLAUDE_ARGV_LOG -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $hiddenClaude -Destination (Join-Path $bin 'claude.exe')
+        Remove-Item -LiteralPath (Join-Path $bin 'claude.ps1'), $claudeJs -Force
+        Remove-Item Env:FORGE_TEST_SCRIPT_TIMEOUT -ErrorAction SilentlyContinue
+    }
+
+    $brokenBin = Join-Path $temporary 'broken native'; New-Item -ItemType Directory -Path $brokenBin | Out-Null
+    [IO.File]::WriteAllText((Join-Path $brokenBin 'codex.exe'), 'not a Windows executable')
+    $normalPath = $env:PATH; $env:PATH = "$brokenBin;$normalPath"
+    try {
+        $repo = New-Repository 'broken native'; $env:FAKE_CLAUDE_BEHAVIOR = 'clean'
+        Assert-Equal (Invoke-Dispatch $repo 'claude' 'sid' 'codex' 'plan') 0 'failed native process start uses the ordinary Claude fallback'
+        Assert-Equal (Get-ReceiptValue $repo 'fallback_reason') 'process-exit-127' 'failed native process start records a durable fallback reason'
+    } finally { $env:PATH = $normalPath }
 
     Write-Host 'PowerShell permission failures and timeouts preserve ordinary review access'
     foreach ($engineHost in @('claude', 'codex')) {

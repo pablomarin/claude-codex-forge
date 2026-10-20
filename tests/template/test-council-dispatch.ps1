@@ -65,7 +65,7 @@ exit 0
 '@ | Set-Content (Join-Path $lib 'agent-dispatch.ps1')
   $engines=if($IncludeOther){@('claude','codex')}else{@($script:CouncilMain)}
   foreach($name in $engines) {
-    if($env:OS -eq 'Windows_NT') {'@exit /b 0'|Set-Content (Join-Path $bin "$name.cmd")}
+    if($env:OS -eq 'Windows_NT') {'exit 0'|Set-Content (Join-Path $bin "$name.ps1")}
     else {[IO.File]::WriteAllText((Join-Path $bin $name),"#!/bin/sh`nexit 0`n");& chmod +x (Join-Path $bin $name)}
   }
   Push-Location $repo;try{& git init -q;Set-Content question.txt 'Should Forge choose this design?';Set-Content artifact.txt 'candidate'}finally{Pop-Location}

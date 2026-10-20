@@ -2,6 +2,36 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.14 — 2026-10-20
+
+### Harden Windows script-only reviewer launchers
+
+The Windows script bridge now bounds stdin handoff within the reviewer timeout and preserves
+fallback when a bridge does not read its payload. Its native argument repair also covers
+PowerShell 7.0 through 7.2. The Codex PTY helper now fails closed when a script-only launcher
+returns without an explicit native exit status.
+
+## 6.4.13 — 2026-10-19
+
+### Support Windows script-only reviewer launchers
+
+Windows review dispatch, council preflight, qualification, setup readiness, and the Codex PTY
+launcher now use a `.ps1` launcher when no native executable is available. The dispatcher runs it
+through PowerShell while preserving the original review arguments, exit status, bounded environment,
+timeout cleanup, isolation canary, and ordinary fallback receipt path. Codex reviews prefer MXC on
+compatible Windows hosts and place its required local profile under the isolated scratch directory.
+
+## 6.4.12 — 2026-10-15
+
+### Restore Windows independent reviews
+
+PowerShell review dispatch, isolation qualification, setup capability checks, council preflight,
+and the Codex PTY launcher select native executables instead of npm PowerShell shims. A failed
+process start now reaches the ordinary fallback and receipt path. Codex review turns explicitly
+select the Windows elevated sandbox backend while retaining `read-only` access and isolated user
+configuration, so the reviewer can observe Forge's
+isolation canary on Windows. The same setting applies to ephemeral and council qualification turns.
+
 ## 6.4.11 — 2026-10-08
 
 ### Preserve MCP choices and reusable ADR scaffold

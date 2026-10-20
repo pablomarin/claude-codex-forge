@@ -728,7 +728,8 @@ function Set-CodexTomlBlock {
         $candidate=$existing.Substring(0,$start)+$block.TrimEnd()+$existing.Substring($finish)
     } else { throw "malformed or duplicate Forge TOML marker" }
     $readiness = "PENDING: version-qualified Codex doctor validation unavailable"
-    $codex = Get-Command codex -ErrorAction SilentlyContinue
+    $codex = Get-Command codex.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $codex) { $codex = Get-Command codex.ps1 -CommandType ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1 }
     if ($codex) {
         $doctorHelp = (& $codex.Source doctor --help 2>&1) -join "`n"
         if ($doctorHelp -match [regex]::Escape("--json")) {
@@ -767,7 +768,8 @@ function Set-CodexTomlBlock {
 
 function Get-EngineAvailability {
     foreach ($engine in @("claude", "codex")) {
-        $command = Get-Command $engine -ErrorAction SilentlyContinue
+        $command = Get-Command "$engine.exe" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $command) { $command = Get-Command "$engine.ps1" -CommandType ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1 }
         if (-not $command) { [pscustomobject]@{ Engine=$engine; Availability="ABSENT"; Path=""; Version="" }; continue }
         $version = (& $command.Source --version 2>$null | Select-Object -First 1)
         if ($engine -eq "claude") {
