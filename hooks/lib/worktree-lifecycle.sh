@@ -145,7 +145,6 @@ forge_lifecycle_seed() {
     target=${pair%%$'\t'*}; primary=${pair#*$'\t'}
     [ "$target" != "$primary" ] \
         || { forge_lifecycle_fail "SEED_BLOCKED: target must be a linked worktree"; return 1; }
-    forge_lifecycle_bootstrap "$primary" "$target" || return 1
     source_state="$primary/.forge/local/state.md"
     template="$target/.forge/state.template.md"
     if [ ! -f "$template" ] || [ -L "$template" ]; then
@@ -157,6 +156,7 @@ forge_lifecycle_seed() {
         || { forge_lifecycle_fail "SEED_BLOCKED: target state already exists"; return 1; }
     [ ! -e "$snapshot" ] && [ ! -L "$snapshot" ] \
         || { forge_lifecycle_fail "SEED_BLOCKED: target seed snapshot already exists"; return 1; }
+    forge_lifecycle_bootstrap "$primary" "$target" || return 1
     [ -f "$template" ] && [ ! -L "$template" ] \
         || { forge_lifecycle_fail "SEED_BLOCKED: target state template is unavailable"; return 1; }
     mkdir -p "$local_dir" || return 1
@@ -171,6 +171,16 @@ forge_lifecycle_seed() {
         rm -f "$narrative" "$merged"
         forge_lifecycle_fail "SEED_BLOCKED: target state template is missing required sections"
         return 1
+    fi
+    if [ -e "$primary/.forge/local/connected-development.json" ] || [ -L "$primary/.forge/local/connected-development.json" ]; then
+        local access_helper
+        access_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/development-access.sh"
+        [ -f "$access_helper" ] && [ ! -L "$access_helper" ] \
+            || { forge_lifecycle_fail "SEED_BLOCKED: development-access helper is unavailable; rerun Forge setup"; rm -f "$narrative" "$merged"; return 1; }
+        if ! bash "$access_helper" inherit --source-root "$primary" --project-root "$target"; then
+            rm -f "$narrative" "$merged"
+            return 1
+        fi
     fi
     forge_lifecycle_publish "$narrative" "$snapshot" \
         && forge_lifecycle_publish "$merged" "$local_dir/state.md"

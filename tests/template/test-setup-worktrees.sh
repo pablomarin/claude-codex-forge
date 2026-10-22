@@ -91,7 +91,7 @@ for main in claude codex; do
     assert_equals "$(git -C "$PRIMARY" for-each-ref --format='%(refname) %(objectname)' refs/heads)" "$branches_before" "branches and HEADs preserved"
     assert_equals "$(git -C "$PRIMARY" rev-parse HEAD)" "$head_before" "primary HEAD preserved"
     for root in "${roots[@]}"; do
-        printf '{"userEntry": "keep"}\n' > "$root/.claude/settings.json"
+        printf '{"userEntry":"keep","sandbox":{"enabled":true,"allowUnsandboxedCommands":false}}\n' > "$root/.claude/settings.json"
         printf '[profiles.fixture]\nmodel = "gpt-6-astra"\n' > "$root/.codex/config.toml"
     done
     # Canonical materialization refreshes default mode without treating it as upgrade.
@@ -117,6 +117,26 @@ for main in claude codex; do
         assert_contains "$root/.codex/config.toml" 'model = "gpt-6-astra"' "Codex user config preserved"
     done
     assert_equals "$(git -C "$PRIMARY" for-each-ref --format='%(refname) %(objectname)' refs/heads)" "$branches_before" "upgrade preserves all branches/HEADs"
+    assert_contains "$TMP/$main-upgrade.log" 'CLAUDE_SANDBOX: PRESERVED' "upgrade explains preserved sandbox choice"
+    for root in "${roots[@]}"; do
+        printf '{"sandbox":{"enabled":true},"permissions":{"deny":["Bash(project-protected *)"]}}\n' > "$root/.claude/settings.local.json"
+    done
+    setup_at "$LINK" "$TMP/$main-connected.log" --upgrade --connected-development
+    assert_equals "$?" 0 "explicit connected-development selection propagates from linked checkout"
+    for root in "${roots[@]}"; do
+        python3 - "$root" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+shared = json.loads((root / '.claude/settings.json').read_text())
+local = json.loads((root / '.claude/settings.local.json').read_text())
+assert shared['sandbox'] == {'enabled': True, 'allowUnsandboxedCommands': False}
+assert local['sandbox'] == {'enabled': False}
+assert local['permissions'] == {'deny': ['Bash(project-protected *)']}
+PY
+        assert_equals "$?" 0 "only explicit local sandbox toggle changes: $root"
+        git -C "$root" check-ignore -q .claude/settings.local.json
+        assert_equals "$?" 0 "connected selection stays gitignored: $root"
+    done
     assert_file_exists "$PRIMARY/.codex/hooks.json" "primary has Codex hook registration"
     assert_contains "$TMP/$main-install.log" 'CODEX_HOOKS: MATERIALIZED primary worktree registration' "primary registration materialized first"
     assert_contains "$TMP/$main-install.log" 'CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration' "linked setup respects primary registration"

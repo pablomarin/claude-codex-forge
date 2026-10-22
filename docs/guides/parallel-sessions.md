@@ -72,8 +72,10 @@ a still-current approval needs no new workspace-choice question.
 
 Forge creates no edit lock: concurrent sessions are allowed. Forge intentionally adds no ownership daemon, so the
 developer still coordinates overlapping edits. When any session changes the candidate,
-candidate-bound evidence becomes stale automatically; rerun the affected review and verification
-against the new candidate before certification. Ordinary Git recovery remains the escape hatch for
+candidate-bound evidence becomes stale automatically. Functional changes require the affected
+review and verification against the new candidate. Eligible declared prose corrections may instead
+use the [documentation closure](../../rules/workflow.md#documentation-only-corrections) without
+rerunning unaffected evidence. Ordinary Git recovery remains the escape hatch for
 an actual edit conflict.
 
 ## Codex Hooks in Linked Worktrees

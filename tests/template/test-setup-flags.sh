@@ -24,6 +24,7 @@ S1=$(scratch_dir setup-flags-help)
 "$REPO_ROOT/setup.sh" --help > "$S1/help.log" 2>&1
 assert_contains "$S1/help.log" "-u, --upgrade" "help exposes routine upgrade"
 assert_contains "$S1/help.log" "-f, --force" "help exposes authoritative force reconciliation"
+assert_contains "$S1/help.log" "--connected-development" "help exposes explicit trusted local connectivity selection"
 assert_contains "$S1/help.log" "transactional full installation/reconciliation" \
     "force is described as the full reconciliation mode"
 assert_not_contains "$S1/help.log" "-F, --full-refresh" \
@@ -280,6 +281,8 @@ assert_contains "$REPO_ROOT/setup.ps1" 'Write-Host "  -u, -Upgrade' \
     "PowerShell help exposes routine upgrade"
 assert_contains "$REPO_ROOT/setup.ps1" 'Write-Host "  -f, -Force' \
     "PowerShell help exposes authoritative force reconciliation"
+assert_contains "$REPO_ROOT/setup.ps1" '-ConnectedDevelopment' \
+    "PowerShell exposes explicit trusted local connectivity selection"
 assert_not_contains "$REPO_ROOT/setup.ps1" 'Write-Host "  -R, -FullRefresh' \
     "PowerShell no longer advertises the legacy full-refresh mode"
 assert_contains "$REPO_ROOT/setup.ps1" 'DEPRECATED: -FullRefresh/-R is an alias for -Force' \

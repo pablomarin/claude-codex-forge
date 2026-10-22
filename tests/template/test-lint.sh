@@ -31,6 +31,8 @@ BASH_FILES=(
     "$REPO_ROOT/hooks/lib/default-branch.sh"
     "$REPO_ROOT/hooks/lib/review-breaker.sh"
     "$REPO_ROOT/hooks/lib/workflow-state.sh"
+    "$REPO_ROOT/hooks/lib/development-access.sh"
+    "$REPO_ROOT/hooks/lib/verification-receipt.sh"
     "$REPO_ROOT/scripts/materialize-adapters.sh"
     "$REPO_ROOT/tests/template/test-review-breaker.sh"
     "$REPO_ROOT/tests/template/lib.sh"
@@ -81,6 +83,8 @@ if command -v pwsh >/dev/null 2>&1; then
         "$REPO_ROOT/hooks/lib/default-branch.ps1"
         "$REPO_ROOT/hooks/lib/review-breaker.ps1"
         "$REPO_ROOT/hooks/lib/workflow-state.ps1"
+        "$REPO_ROOT/hooks/lib/development-access.ps1"
+        "$REPO_ROOT/hooks/lib/verification-receipt.ps1"
     )
     for f in "${PS_FILES[@]}"; do
         if [[ ! -f "$f" ]]; then

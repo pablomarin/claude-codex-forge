@@ -569,6 +569,9 @@ materialize_project_config() {
         echo "CODEX_CONFIG_READINESS: BLOCKED: python3 unavailable to preserve and merge existing TOML"
         return 1
     fi
+    if [ "$MATERIALIZE_CONNECTED_DEVELOPMENT" = true ]; then
+        python3 "$MATERIALIZE_REPO/scripts/merge-settings.py" connected-development --project-root "$MATERIALIZE_TARGET"
+    fi
 }
 
 materialize_scope() {
@@ -625,6 +628,7 @@ MATERIALIZE_TARGET=""
 MATERIALIZE_SCOPE=project
 MATERIALIZE_PLATFORM=unix
 MATERIALIZE_RELEASE_VERSION=""
+MATERIALIZE_CONNECTED_DEVELOPMENT=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --repo-root) MATERIALIZE_REPO="$2"; shift 2 ;;
@@ -632,6 +636,7 @@ while [ "$#" -gt 0 ]; do
         --scope) MATERIALIZE_SCOPE="$2"; shift 2 ;;
         --platform) MATERIALIZE_PLATFORM="$2"; shift 2 ;;
         --release-version) MATERIALIZE_RELEASE_VERSION="$2"; shift 2 ;;
+        --connected-development) MATERIALIZE_CONNECTED_DEVELOPMENT=true; shift ;;
         *) echo "Unknown materializer option: $1" >&2; exit 2 ;;
     esac
 done
@@ -664,6 +669,9 @@ MATERIALIZE_REPO=$(cd "$MATERIALIZE_REPO" && pwd -P)
 MATERIALIZE_TARGET=$(cd "$MATERIALIZE_TARGET" && pwd -P)
 MATERIALIZE_DIAGNOSTIC_TARGET=${FORGE_DIAGNOSTIC_TARGET:-$MATERIALIZE_TARGET}
 MATERIALIZE_DIAGNOSTIC_TARGET=$(cd "$MATERIALIZE_DIAGNOSTIC_TARGET" && pwd -P)
+if [ "$MATERIALIZE_CONNECTED_DEVELOPMENT" = true ]; then
+    python3 "$MATERIALIZE_REPO/scripts/merge-settings.py" connected-development --project-root "$MATERIALIZE_TARGET" --check || exit $?
+fi
 MATERIALIZE_MANIFEST="$MATERIALIZE_REPO/manifests/managed-v6.tsv"
 load_managed_manifest "$MATERIALIZE_MANIFEST"
 legacy_alias_cleanup check

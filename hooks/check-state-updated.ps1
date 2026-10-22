@@ -110,8 +110,10 @@ if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd
     $workflowCommand = if ($workflowCommandRows.Count -eq 1) { [string]$workflowCommandRows[0] } else { "" }
     $workflowPhase = if ($workflowPhaseRows.Count -eq 1) { [string]$workflowPhaseRows[0] } else { "" }
     $quickFixDirect = $workflowCommand -cmatch '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'
-    # Completed receipts are historical; PreToolUse still enforces shipping.
-    if ($workflowPhase -cne 'complete' -and $workflowCommand -and $workflowCommand -notin @('none', '-', '—') -and -not $quickFixDirect) {
+    # Final receipts belong to finalization, not ordinary development stops.
+    # PreToolUse continues enforcing shipping regardless of the recorded phase.
+    $finalEvidencePhase = $workflowPhase -cin @('review', 'verify', 'verification', 'finalize', 'finalization', 'promote', 'promotion', 'ship', 'shipping')
+    if ($finalEvidencePhase -and $workflowCommand -and $workflowCommand -notin @('none', '-', '—') -and -not $quickFixDirect) {
         $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
         if (-not (Test-Path -LiteralPath $verificationReceipt)) { $verificationReceipt = Join-Path (Get-Location) 'hooks\lib\verification-receipt.ps1' }
         $receiptStatus = 2

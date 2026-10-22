@@ -109,6 +109,38 @@ quiet_stop() {
     assert_file_exists "$root/.forge/local/forge-goal-last-fingerprint" "$label keeps fingerprint publication"
 }
 for host in claude codex; do
+    start_test "$host main: final receipt advisory runs only during finalization"
+    root="$SCRATCH/$host-evidence-phases"
+    make_repo "$root" new-feature "$host"
+    # Keep the evidence side channel current so this spy measures only the
+    # Stop advisory, independently of build-evidence's separate registration.
+    cat > "$root/.forge/hooks/lib/verification-receipt.sh" <<'EOF_RECEIPT_PROBE'
+#!/usr/bin/env bash
+printf 'checked\n' >> .forge/local/stop-receipt-checks
+exit 2
+EOF_RECEIPT_PROBE
+    for phase in diagnosis requirements planning implementation repair preliminary-e2e custom-review complete; do
+        (cd "$root" && bash .forge/hooks/lib/workflow-state.sh checkpoint --host "$host" \
+            --phase "$phase" --next-step 'continue focused work') >/dev/null
+        crlf_state "$root"
+        printf 'current\n' > "$root/.forge/local/forge-goal-last-fingerprint"
+        rm -f "$root/.forge/local/stop-receipt-checks"
+        run_stop "$root" "$root" "$host"
+        assert_equals "$?" 0 "$phase checkpoint stops normally"
+        assert_not_contains "$root/stop.err" FORGE_FINAL_EVIDENCE_STALE "$phase does not demand final evidence"
+        assert_file_missing "$root/.forge/local/stop-receipt-checks" "$phase does not run the final receipt advisory check"
+    done
+    for phase in review verify verification shipping promotion finalize finalization promote ship; do
+        (cd "$root" && bash .forge/hooks/lib/workflow-state.sh checkpoint --host "$host" \
+            --phase "$phase" --next-step 'finish final certification') >/dev/null
+        crlf_state "$root"
+        printf 'current\n' > "$root/.forge/local/forge-goal-last-fingerprint"
+        rm -f "$root/.forge/local/stop-receipt-checks"
+        run_stop "$root" "$root" "$host"
+        assert_equals "$?" 0 "$phase warning remains advisory"
+        assert_contains "$root/stop.err" FORGE_FINAL_EVIDENCE_STALE "$phase reports missing final evidence"
+        assert_file_exists "$root/.forge/local/stop-receipt-checks" "$phase runs the final receipt advisory check"
+    done
     for workflow in quick-fix new-feature fix-bug; do
       for nonce_mode in missing empty template; do
         start_test "$host main: $workflow with $nonce_mode Goal nonce repeats Stop quietly"
@@ -132,7 +164,7 @@ for host in claude codex; do
     crlf_state "$root"
     run_stop "$root" "$root" "$host"
     assert_equals "$?" 0 'changed active checkpoint allows Stop'
-    assert_contains "$root/stop.err" FORGE_FINAL_EVIDENCE_STALE 'active missing receipts still warn'
+    assert_not_contains "$root/stop.err" FORGE_FINAL_EVIDENCE_STALE 'implementation does not demand final receipts'
     assert_no_goal_output "$root" "$host" 'CRLF active inline/check-state'
     non_goal_builder "$root" "$root" "$host" 'CRLF active'
     run_stop "$root" "$root" "$host"

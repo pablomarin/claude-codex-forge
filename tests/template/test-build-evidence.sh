@@ -918,9 +918,10 @@ refresh_v2_final_receipts() {
         --output .forge/local/evidence/e2e.receipt >/dev/null) || return 1
 }
 
-start_test "receipt-v2: active placeholder state warns before final receipts exist"
+start_test "receipt-v2: final review placeholder state warns before final receipts exist"
 make_v2_candidate_repo
 sed -i.bak \
+    -e 's/| Phase | 5 — Quality |/| Phase | review |/' \
     -e 's/receipt-v2/<task-id>/g' \
     -e 's#| Candidate receipt | .*#| Candidate receipt | .forge/local/evidence/<task-id>/candidate.receipt |#' \
     -e 's#| Spec review receipt | .*#| Spec review receipt | .forge/local/reviews/<task-id>/spec.receipt |#' \
@@ -933,7 +934,7 @@ printf '{"cwd":"%s","host":"codex","stop_hook_active":false}' "$V2" \
     | (cd "$V2" && bash "$REPO_ROOT/hooks/check-state-updated.sh") \
     > "$V2/.forge/local/evidence/stop-placeholder.out" 2>&1
 assert_contains "$V2/.forge/local/evidence/stop-placeholder.out" 'FORGE_FINAL_EVIDENCE_STALE' \
-    "Stop advisory exposes missing candidate-bound evidence for an active V6 workflow"
+    "Stop advisory exposes missing candidate-bound evidence during final review"
 
 start_test "receipt-native code review preserves legacy E2E freshness diagnostics"
 git -C "$V2" switch -q -c feature/e2e-diagnostic
@@ -1107,6 +1108,9 @@ assert_equals "$?" "2" "unstaged mutation invalidates all final receipts"
 printf '{"cwd":"%s","host":"codex","tool_name":"Bash","tool_input":{"command":"git push"}}' "$V2" \
     | (cd "$V2" && bash "$REPO_ROOT/hooks/check-workflow-gates.sh") > "$V2/.forge/local/evidence/gate-mutated.out" 2>&1
 assert_equals "$?" "2" "ship hook blocks after candidate mutation"
+(cd "$V2" && bash "$REPO_ROOT/hooks/lib/workflow-state.sh" checkpoint \
+    --host codex --phase verification --next-step 'inspect stale final evidence') >/dev/null
+assert_equals "$?" "0" "stale receipt advisory control explicitly enters final verification"
 printf '{"cwd":"%s","host":"codex","stop_hook_active":false}' "$V2" \
     | (cd "$V2" && bash "$REPO_ROOT/hooks/check-state-updated.sh") > "$V2/.forge/local/evidence/stop-mutated.out" 2>&1
 assert_contains "$V2/.forge/local/evidence/stop-mutated.out" 'FORGE_FINAL_EVIDENCE_STALE' \

@@ -2129,8 +2129,13 @@ assert_contains "$REPO_ROOT/FORGE.template.md" 'For `/fix-bug` and' \
     "root policy scopes strict receipts to full workflows"
 assert_contains "$REPO_ROOT/FORGE.template.md" "Legacy prose" \
     "root policy rejects legacy prose certification"
-assert_contains "$REPO_ROOT/FORGE.template.md" 'Exact bounded `/quick-fix` work instead requires one direct focused check' \
-    "root policy defines the direct quick-fix boundary"
+# Markdown wrapping does not change the policy words this contract protects.
+root_policy_prose=$(tr '\r\n\t' '   ' < "$REPO_ROOT/FORGE.template.md" | tr -s ' ')
+if [[ "$root_policy_prose" == *'Exact bounded `/quick-fix` work instead requires one direct focused check'* ]]; then
+    pass "root policy defines the direct quick-fix boundary"
+else
+    fail "root policy defines the direct quick-fix boundary (policy phrase missing)"
+fi
 for active_source in "$REPO_ROOT/hooks/check-workflow-gates.sh" \
     "$REPO_ROOT/hooks/check-workflow-gates.ps1" "$REPO_ROOT/hooks/build-evidence.sh" \
     "$REPO_ROOT/hooks/build-evidence.ps1" "$REPO_ROOT/hooks/lib/review-breaker.sh" \
@@ -3033,7 +3038,7 @@ else
     fail "top changelog release is exact MAJOR.MINOR.PATCH"
 fi
 EXPECTED_FORGE_VERSION="$FIRST_CHANGELOG_VERSION"
-EXPECTED_README_HISTORY_VERSION='6.4.10'
+EXPECTED_README_HISTORY_VERSION='6.4.12'
 README_BADGE_VERSION=$(sed -n 's/.*badge\/version-\([0-9][0-9.]*\)-blue.*/\1/p' "$README" | head -1)
 README_HISTORY_VERSION=$(sed -n '/^## Version history/,$p' "$README" \
     | sed -n 's/^| \([0-9][0-9.]*\)[[:space:]]*|.*/\1/p' | head -1)

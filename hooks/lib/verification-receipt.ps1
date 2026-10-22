@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('write', 'check')][string]$Mode,
+    [ValidateSet('write', 'check', 'close-docs')][string]$Mode,
     [string]$Kind,
     [string]$Candidate,
     [string]$Command,
@@ -10,7 +10,8 @@ param(
     [string]$Output,
     [string]$StartedAt,
     [string]$EndedAt,
-    [string]$State
+    [string]$State,
+    [string]$PreviousCandidate
 )
 
 # PowerShell 5.1 mirror of verification-receipt.sh. Receipts are line-oriented
@@ -185,13 +186,179 @@ function Test-Verifier([string]$Root, [string]$Receipt, [string]$ReceiptKind, [s
     catch { return $false }
 }
 
+
+# Original receipts keep their original candidate and age; a separate bounded
+# closure proves only the opt-in non-runtime prose delta to the final candidate.
+function Test-DocsBundle([string]$Root, [string]$Source, [string]$Spec, [string]$Quality, [string]$App, [string]$E2e, [string]$Iteration) {
+    return (Test-Review $Root $Spec 'code-spec' $Source $Iteration) -and
+        (Test-Review $Root $Quality 'code-quality' $Source $Iteration) -and
+        (Get-Kv $Spec 'invocation_id') -cne (Get-Kv $Quality 'invocation_id') -and
+        (Test-Verifier $Root $App 'verify-app' $Source) -and (Test-Verifier $Root $E2e 'e2e' $Source)
+}
+function Invoke-DocsGit([string]$Root, [string[]]$Arguments) {
+    $lines = @(& git -C $Root @Arguments 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'documentation delta Git check failed' }
+    return $lines -join "`n"
+}
+function Test-DocsObject([string]$Root, [string]$Object) {
+    # Windows PowerShell turns redirected native stderr into terminating errors
+    # under Stop. This existence probe must use Git's exit status for absence.
+    $ErrorActionPreference = 'Continue'
+    & git -C $Root cat-file -e $Object 2>$null
+    return $LASTEXITCODE -eq 0
+}
+function Assert-DocsIdentity([string]$Root, [string]$Source, [string]$Target) {
+    if ((Get-Kv $Source 'schema_version') -cne '2' -or (Get-Kv $Source 'candidate_state') -cne 'staged-clean') { throw 'original staged-clean schema-v2 candidate required' }
+    foreach ($key in @('workflow_base_ref','workflow_base_sha','worktree_identity')) {
+        if ((Get-Kv $Source $key) -cne (Get-Kv $Target $key)) { throw 'original candidate base or worktree differs' }
+    }
+    $base = Get-Kv $Source 'workflow_base_sha'; $head = Get-Kv $Source 'git_head'; $tree = Get-Kv $Source 'index_tree'; $worktree = Get-Kv $Source 'worktree_identity'
+    foreach ($oid in @($base,$head,$tree)) { if ($oid -cnotmatch '^[0-9a-f]+$') { throw 'invalid original Git identity' } }
+    if ((Get-Kv $Source 'candidate_id') -cne (Get-ShaText "$base`n$head`n$tree`n$worktree`n") -or
+        -not (Test-DocsObject $Root "$head^{commit}") -or -not (Test-DocsObject $Root "$tree^{tree}")) { throw 'original candidate identity is invalid' }
+}
+function Assert-DocsParent([string]$Root, [string]$Source, [string]$Target, [string]$Promotion) {
+    $head = Get-Kv $Source 'git_head'; $commit = Get-Kv $Target 'git_head'
+    if ($head -ceq $commit) { if ($Promotion -cne 'none') { throw 'unexpected original promotion' }; return }
+    if ($Promotion -ceq 'none') { throw 'original exact promotion provenance is missing' }
+    if ((Get-Kv $Promotion 'schema_version') -cne '2' -or
+        (Get-Kv $Promotion 'old_candidate_id') -cne (Get-Kv $Source 'candidate_id') -or
+        (Get-Kv $Promotion 'old_head') -cne $head -or
+        (Get-Kv $Promotion 'worktree_identity') -cne (Get-Kv $Source 'worktree_identity') -or
+        (Get-Kv $Promotion 'temporary_commit') -cne $commit -or (Get-Kv $Promotion 'new_branch_commit') -cne $commit -or
+        (Get-Kv $Promotion 'new_branch_tree') -cne (Get-Kv $Source 'index_tree') -or
+        (Get-Kv $Promotion 'post_commit_dirty') -cne 'false' -or @('pass','not-run') -cnotcontains (Get-Kv $Promotion 'post_commit_status')) { throw 'original exact promotion provenance is invalid' }
+    if ((Invoke-DocsGit $Root @('rev-parse', "$commit^{tree}")) -cne (Get-Kv $Source 'index_tree') -or
+        (Invoke-DocsGit $Root @('rev-list','--parents','-n','1',$commit)) -cne "$commit $head") { throw 'candidate parent changed outside original exact Forge promotion' }
+}
+function Test-DocsPath([string]$Path) {
+    if ($Path.StartsWith('/') -or $Path.Contains('..') -or $Path.Contains('\') -or $Path -match '[*?\[\]\x00-\x1f]') { return $false }
+    $lower = $Path.ToLowerInvariant(); $baseName = ($lower -split '/')[-1]
+    if ($lower -notmatch '^(docs/|changelog\.md$)' -or $lower -match '/(plans|requirements|\.forge|\.claude|\.codex|\.agents|commands|rules|skills|agents|hooks|scripts|settings|templates|manifests|tests)/') { return $false }
+    if ($baseName -match '^(agents\..*|claude\..*|forge\.template\..*|contributing.*|agent-context\..*|policy.*|instructions.*|requirements.*|prd\..*|design\..*|config.*|plan\..*)$') { return $false }
+    return $baseName -match '\.(md|markdown)$'
+}
+function Get-DocsTreeBlob([string]$Root, [string]$Tree, [string]$Path) {
+    $entry = Invoke-DocsGit $Root @('ls-tree',$Tree,'--',$Path)
+    if ($entry -cnotmatch '^100644 blob ([0-9a-f]+)\t') { throw 'documentation policy and source markers must be tracked regular 100644 files' }
+    return $matches[1]
+}
+function Get-DocsDelta([string]$Root, [string]$Source, [string]$Target) {
+    $oldTree = Get-Kv $Source 'index_tree'; $newTree = Get-Kv $Target 'index_tree'
+    $policy = '.forge/verification-scope.tsv'
+    if (-not (Test-DocsObject $Root "${oldTree}:$policy") -and -not (Test-DocsObject $Root "${newTree}:$policy")) {
+        foreach ($marker in @('FORGE.template.md','state.template.md','manifests/managed-v6.tsv')) {
+            $null = Get-DocsTreeBlob $Root $oldTree $marker; $null = Get-DocsTreeBlob $Root $newTree $marker
+        }
+        $policy = 'manifests/verification-scope.tsv'
+    }
+    $blob = Get-DocsTreeBlob $Root $oldTree $policy
+    if ($blob -cne (Get-DocsTreeBlob $Root $newTree $policy)) { throw 'documentation scope policy changed' }
+    $policyLines = (Invoke-DocsGit $Root @('show',"${oldTree}:$policy")) -split "`n"
+    if ($policyLines[0].TrimEnd("`r") -cne '# forge:non-runtime-prose v1') { throw 'invalid documentation scope policy header' }
+    $declared = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    for ($i = 1; $i -lt $policyLines.Count; $i++) {
+        $line = $policyLines[$i].TrimEnd("`r")
+        if (-not $line -or $line.StartsWith('#')) { continue }
+        $fields = $line.Split("`t")
+        if ($fields.Count -ne 2 -or $fields[0] -cne 'prose' -or -not $fields[1] -or $fields[1].StartsWith('/') -or $fields[1].Contains('..') -or $fields[1] -match '[*?\[\]\x00-\x1f]' -or -not $declared.Add($fields[1])) { throw 'invalid or duplicate prose declaration' }
+    }
+    $raw = Invoke-DocsGit $Root @('-c','core.quotePath=true','diff','--raw','--no-abbrev','--no-renames','--no-ext-diff','--no-textconv',$oldTree,$newTree,'--')
+    if (-not $raw) { throw 'documentation closure requires a changed tree' }
+    foreach ($line in ($raw -split "`n")) {
+        $parts = $line.Split("`t")
+        if ($parts.Count -ne 2) { throw 'ambiguous documentation delta path' }
+        $fields = $parts[0] -split ' '; $path = $parts[1]
+        if ($fields.Count -ne 5 -or $fields[0] -cne ':100644' -or $fields[1] -cne '100644' -or $fields[4] -cne 'M' -or
+            -not (Test-DocsPath $path) -or -not $declared.Contains($path)) { throw 'delta is outside the declared non-runtime prose contract' }
+        $oldText = Invoke-DocsGit $Root @('show',"${oldTree}:$path"); $newText = Invoke-DocsGit $Root @('show',"${newTree}:$path")
+        if ($oldText.Contains([char]0) -or $newText.Contains([char]0)) { throw 'binary prose is ineligible' }
+        if (($path -split '/')[-1].ToLowerInvariant() -match '^changelog\.(md|markdown)$') {
+            $oldHeading = @($oldText -split "`n" | Where-Object { $_ -cmatch '^##\s' } | Select-Object -First 1)
+            $newHeading = @($newText -split "`n" | Where-Object { $_ -cmatch '^##\s' } | Select-Object -First 1)
+            if ($oldHeading.Count -ne 1 -or $newHeading.Count -ne 1 -or $oldHeading[0] -cne $newHeading[0]) { throw 'machine-consumed release heading changed' }
+        }
+    }
+    $null = Invoke-DocsGit $Root @('diff','--no-ext-diff','--no-textconv','--check',$oldTree,$newTree,'--')
+    return [pscustomobject]@{ PolicyPath = $policy; PolicyBlob = $blob; DeltaHash = (Get-ShaText ($raw + "`n")) }
+}
+function Copy-DocsArchive([string]$Root, [string]$Source, [string]$Destination) {
+    $path = Get-OwnedPath $Root $Destination $false
+    if (Test-Path -LiteralPath $path) {
+        if ((Get-ShaFile $path) -cne (Get-ShaFile $Source)) { throw 'original documentation evidence archive was changed' }
+    }
+    else {
+        $temporary = Get-OwnedPath $Root "$path.tmp.$PID" $false
+        [IO.File]::WriteAllBytes($temporary, [IO.File]::ReadAllBytes($Source))
+        Move-Item -LiteralPath $temporary -Destination $path -Force
+    }
+    return $path
+}
+function Test-DocsClosure([string]$Root, [string]$CandidateFile, [string]$SpecFile, [string]$QualityFile, [string]$AppFile, [string]$E2eFile, [string]$Iteration) {
+    try {
+        $closure = Get-OwnedPath $Root "$CandidateFile.docs-closure" $true
+        if ((Get-Kv $closure 'schema_version') -cne '1' -or (Get-Kv $closure 'receipt_kind') -cne 'docs-closure' -or
+            (Get-Kv $closure 'docs_check') -cne 'PASS' -or (Get-Kv $closure 'review_iteration') -cne $Iteration -or
+            -not (Test-Fresh (Get-Kv $closure 'closed_at')) -or (Get-Kv $closure 'new_candidate_hash') -cne (Get-ShaFile $CandidateFile) -or
+            (Get-Kv $closure 'new_candidate_id') -cne (Get-Kv $CandidateFile 'candidate_id')) { return $false }
+        $source = Get-OwnedPath $Root (Get-Kv $closure 'original_candidate_path') $true
+        if ((Get-ShaFile $source) -cne (Get-Kv $closure 'original_candidate_hash')) { return $false }
+        Assert-DocsIdentity $Root $source $CandidateFile
+        $promotion = Get-Kv $closure 'source_promotion_path'
+        if ($promotion -cne 'none') {
+            $promotion = Get-OwnedPath $Root $promotion $true
+            if ((Get-ShaFile $promotion) -cne (Get-Kv $closure 'source_promotion_hash')) { return $false }
+        }
+        elseif ((Get-Kv $closure 'source_promotion_hash') -cne 'none') { return $false }
+        Assert-DocsParent $Root $source $CandidateFile $promotion
+        foreach ($entry in @(@('spec',$SpecFile),@('quality',$QualityFile),@('verify_app',$AppFile),@('e2e',$E2eFile))) {
+            if ((Get-Kv $closure ($entry[0] + '_receipt_hash')) -cne (Get-ShaFile $entry[1])) { return $false }
+        }
+        if (-not (Test-DocsBundle $Root $source $SpecFile $QualityFile $AppFile $E2eFile $Iteration)) { return $false }
+        $delta = Get-DocsDelta $Root $source $CandidateFile
+        return (Get-Kv $closure 'policy_path') -ceq $delta.PolicyPath -and (Get-Kv $closure 'policy_blob') -ceq $delta.PolicyBlob -and (Get-Kv $closure 'delta_hash') -ceq $delta.DeltaHash
+    }
+    catch { return $false }
+}
+function Write-DocsClosure([string]$Root, [string]$StateFile, [string]$CandidateFile, [string]$Previous, [string]$SpecFile, [string]$QualityFile, [string]$AppFile, [string]$E2eFile, [string]$Iteration) {
+    if (-not (Test-CurrentCandidate $Root $CandidateFile)) { throw 'docs closure needs the current staged-clean final candidate' }
+    $source = Get-OwnedPath $Root $Previous $true
+    Assert-DocsIdentity $Root $source $CandidateFile
+    if (-not (Test-DocsBundle $Root $source $SpecFile $QualityFile $AppFile $E2eFile $Iteration)) { throw 'original candidate lacks a complete fresh passing receipt set' }
+    $promotion = 'none'; $promotionHash = 'none'
+    if ((Get-Kv $source 'git_head') -cne (Get-Kv $CandidateFile 'git_head')) {
+        $promotion = Get-OwnedPath $Root (Get-StateValue $StateFile 'Promotion receipt') $true
+    }
+    Assert-DocsParent $Root $source $CandidateFile $promotion
+    $delta = Get-DocsDelta $Root $source $CandidateFile
+    $archived = Copy-DocsArchive $Root $source "$CandidateFile.docs-original-$(Get-Kv $source 'candidate_id').receipt"
+    if ($promotion -cne 'none') {
+        $promotionHash = Get-ShaFile $promotion
+        $promotion = Copy-DocsArchive $Root $promotion "$CandidateFile.docs-promotion-$promotionHash.receipt"
+    }
+    if (-not (Test-CurrentCandidate $Root $CandidateFile) -or -not (Test-DocsBundle $Root $archived $SpecFile $QualityFile $AppFile $E2eFile $Iteration)) { throw 'candidate or original evidence changed during docs closure' }
+    Assert-DocsParent $Root $archived $CandidateFile $promotion
+    $rechecked = Get-DocsDelta $Root $archived $CandidateFile
+    if ($delta.PolicyPath -cne $rechecked.PolicyPath -or $delta.PolicyBlob -cne $rechecked.PolicyBlob -or $delta.DeltaHash -cne $rechecked.DeltaHash) { throw 'documentation delta changed during closure' }
+    $closure = Get-OwnedPath $Root "$CandidateFile.docs-closure" $false
+    $temporary = Get-OwnedPath $Root "$closure.tmp.$PID" $false
+    $body = @('schema_version=1','receipt_kind=docs-closure',"closed_at=$([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))",
+        "original_candidate_path=$archived", "original_candidate_hash=$(Get-ShaFile $archived)", "new_candidate_id=$(Get-Kv $CandidateFile 'candidate_id')", "new_candidate_hash=$(Get-ShaFile $CandidateFile)",
+        "source_promotion_path=$promotion", "source_promotion_hash=$promotionHash", "review_iteration=$Iteration")
+    foreach ($entry in @(@('spec',$SpecFile),@('quality',$QualityFile),@('verify_app',$AppFile),@('e2e',$E2eFile))) { $body += "$($entry[0])_receipt_hash=$(Get-ShaFile $entry[1])" }
+    $body += @("policy_path=$($delta.PolicyPath)","policy_blob=$($delta.PolicyBlob)","delta_hash=$($delta.DeltaHash)",'docs_check=PASS')
+    [IO.File]::WriteAllText($temporary, (($body -join "`n") + "`n"), $Utf8)
+    Move-Item -LiteralPath $temporary -Destination $closure -Force
+    return $closure
+}
+
 function Invoke-VerificationReceipt {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('write', 'check')][string]$ReceiptMode,
+        [Parameter(Mandatory = $true)][ValidateSet('write', 'check', 'close-docs')][string]$ReceiptMode,
         [string]$ReceiptKind, [string]$CandidatePath, [string]$CommandText,
         [string]$ProfileName, [string]$ReportPath, [string]$ReceiptResult,
         [int]$ReceiptExitStatus = -1, [string]$OutputPath,
-        [string]$ReceiptStartedAt, [string]$ReceiptEndedAt, [string]$StatePath
+        [string]$ReceiptStartedAt, [string]$ReceiptEndedAt, [string]$StatePath, [string]$PreviousCandidatePath
     )
     $response = [ordered]@{ Status = 2; Lines = @(); Error = '' }
     $root = (& git rev-parse --show-toplevel 2>$null | Select-Object -First 1)
@@ -237,6 +404,11 @@ function Invoke-VerificationReceipt {
         $appFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Verify app receipt') $true
         $e2eFile = Get-OwnedPath $root (Get-StateValue $stateFile 'E2E receipt') $true
         $iteration = Get-StateValue $stateFile 'Review iteration'; if ($iteration -notmatch '^[0-9]+$') { throw 'Review iteration must be numeric' }
+        if ($ReceiptMode -eq 'close-docs') {
+            $closure = Write-DocsClosure $root $stateFile $candidateFile $PreviousCandidatePath $specFile $qualityFile $appFile $e2eFile $iteration
+            $response.Status = 0; $response.Lines = @("DOCS_CLOSURE:$closure")
+            return [pscustomobject]$response
+        }
         $candidateOk = Test-CurrentCandidate $root $candidateFile
         if (-not $candidateOk) {
             $promotionFile = $null
@@ -249,6 +421,9 @@ function Invoke-VerificationReceipt {
             $reviewsOk = (Get-Kv $specFile 'invocation_id') -cne (Get-Kv $qualityFile 'invocation_id')
         }
         if ($candidateOk) { $appOk = Test-Verifier $root $appFile 'verify-app' $candidateFile; $e2eOk = Test-Verifier $root $e2eFile 'e2e' $candidateFile }
+        if ($candidateOk -and -not ($reviewsOk -and $appOk -and $e2eOk) -and (Test-DocsClosure $root $candidateFile $specFile $qualityFile $appFile $e2eFile $iteration)) {
+            $reviewsOk = $true; $appOk = $true; $e2eOk = $true
+        }
         $ship = $candidateOk -and $reviewsOk -and $appOk -and $e2eOk
         $response.Lines = @(
             "CANDIDATE_VALID:$($candidateOk.ToString().ToLowerInvariant())",
@@ -268,7 +443,7 @@ function Invoke-VerificationReceipt {
 # Dot-source consumers call Invoke-VerificationReceipt directly. Only the
 # standalone entrypoint writes streams or exits the host process.
 if ($MyInvocation.InvocationName -ne '.') {
-    $receiptResponse = Invoke-VerificationReceipt -ReceiptMode $Mode -ReceiptKind $Kind -CandidatePath $Candidate -CommandText $Command -ProfileName $Profile -ReportPath $Report -ReceiptResult $Result -ReceiptExitStatus $ExitStatus -OutputPath $Output -ReceiptStartedAt $StartedAt -ReceiptEndedAt $EndedAt -StatePath $State
+    $receiptResponse = Invoke-VerificationReceipt -ReceiptMode $Mode -ReceiptKind $Kind -CandidatePath $Candidate -CommandText $Command -ProfileName $Profile -ReportPath $Report -ReceiptResult $Result -ReceiptExitStatus $ExitStatus -OutputPath $Output -ReceiptStartedAt $StartedAt -ReceiptEndedAt $EndedAt -StatePath $State -PreviousCandidatePath $PreviousCandidate
     foreach ($line in $receiptResponse.Lines) { Write-Output $line }
     if ($receiptResponse.Error) { [Console]::Error.WriteLine($receiptResponse.Error) }
     exit $receiptResponse.Status

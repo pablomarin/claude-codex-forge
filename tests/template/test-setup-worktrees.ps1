@@ -201,7 +201,7 @@ try {
         }
         Assert-True (((& git -C $primary for-each-ref '--format=%(refname) %(objectname)' refs/heads) -join "`n") -eq $branches) 'all branches and HEADs preserved'
         foreach ($target in $roots) {
-            Write-Text (Join-Path $target '.claude/settings.json') '{"userEntry":"keep"}'
+            Write-Text (Join-Path $target '.claude/settings.json') '{"userEntry":"keep","sandbox":{"enabled":true,"allowUnsandboxedCommands":false}}'
             Write-Text (Join-Path $target '.codex/config.toml') "[profiles.fixture]`nmodel = `"gpt-6-astra`"`n"
         }
         Write-Text (Join-Path $sibling 'playwright.config.ts') '// customized sibling scaffold'
@@ -224,6 +224,20 @@ try {
             Assert-True ((Read-Text (Join-Path $target '.codex/config.toml')).Contains('model = "gpt-6-astra"')) 'Codex config preserved'
         }
         Assert-True (((& git -C $primary for-each-ref '--format=%(refname) %(objectname)' refs/heads) -join "`n") -eq $branches) 'upgrade preserves branches/HEADs'
+        Assert-True ((Read-Text (Join-Path $tmp "$main-upgrade.log")).Contains('CLAUDE_SANDBOX: PRESERVED')) 'upgrade explains preserved sandbox choice'
+        foreach ($target in $roots) {
+            Write-Text (Join-Path $target '.claude/settings.local.json') '{"sandbox":{"enabled":true},"permissions":{"deny":["Bash(project-protected *)"]}}'
+        }
+        Assert-True ((Invoke-Setup $link (Join-Path $tmp "$main-connected.log") @{Upgrade=$true;ConnectedDevelopment=$true}) -eq 0) 'explicit connected selection propagates from linked checkout'
+        foreach ($target in $roots) {
+            $shared = Read-Text (Join-Path $target '.claude/settings.json') | ConvertFrom-Json
+            $local = Read-Text (Join-Path $target '.claude/settings.local.json') | ConvertFrom-Json
+            Assert-True ($shared.sandbox.enabled -eq $true -and $shared.sandbox.allowUnsandboxedCommands -eq $false) 'shared sandbox policy preserved'
+            Assert-True ($local.sandbox.enabled -eq $false) 'explicit local sandbox toggle applied'
+            Assert-True ($local.permissions.deny[0] -ceq 'Bash(project-protected *)') 'local permissions preserved'
+            & git -C $target check-ignore -q .claude/settings.local.json
+            Assert-True ($LASTEXITCODE -eq 0) 'local settings stay gitignored'
+        }
         Assert-True (Test-Path -LiteralPath (Join-Path $primary '.codex/hooks.json')) 'primary Codex hooks registered'
         Assert-True ((Read-Text $log).Contains('CODEX_HOOKS: MATERIALIZED primary worktree registration')) 'primary shared registration materialized first'
         Assert-True ((Read-Text $log).Contains('CODEX_HOOKS: BLOCKED linked worktree cannot mutate primary registration')) 'linked setup respects primary registration'

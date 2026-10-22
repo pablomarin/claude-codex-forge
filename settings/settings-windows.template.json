@@ -48,15 +48,6 @@
       "Bash(Remove-Item -Recurse:*)"
     ]
   },
-  "sandbox": {
-    "enabled": true,
-    "failIfUnavailable": true,
-    "allowUnsandboxedCommands": false,
-    "filesystem": {
-      "denyRead": [],
-      "denyWrite": []
-    }
-  },
   "hooks": {
     "SessionStart": [
       {

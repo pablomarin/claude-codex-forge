@@ -2,6 +2,32 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.12 — 2026-10-22
+
+### Connected local Claude development
+
+Fresh Claude project templates defer main-shell sandbox policy to the native host, developer and
+organization. The explicit `--connected-development` / `-ConnectedDevelopment` setup option
+configures local main-shell access for trusted projects and their selected worktrees, preserving
+other local settings, command permissions and workflow state. Ordinary upgrades preserve existing
+sandbox choices instead of inferring ownership from boolean values. Independent reviewers retain
+their isolated configuration. Docker, database drivers and Desktop environment differences are
+documented separately from HTTP network-domain permissions.
+
+### Development feedback and documentation evidence
+
+Stop emits final-receipt advisories only during finalization phases, retaining state, Goal,
+continuation and shipping enforcement. Eligible non-runtime prose corrections after complete
+certification can use a machine-checked documentation closure rather than rerunning code reviews,
+app verification and E2E. An unchanged tracked scope declares exact prose paths; original receipts,
+reports and timestamps remain unchanged. The shared validator recomputes the exact tree delta and
+protected release metadata, rejecting mixed functional changes or stale/tampered evidence. This
+bounded path supports the same parent or the original candidate's proven exact Forge promotion;
+it does not infer arbitrary dependencies or upstream merge/rebase equivalence.
+
+The new closure contracts run in the local fast gate and native Windows suite discovery. Portable
+PowerShell and fixture evidence do not qualify authenticated Desktop sessions or native Windows.
+
 ## 6.4.11 — 2026-10-08
 
 ### Preserve MCP choices and reusable ADR scaffold

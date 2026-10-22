@@ -113,11 +113,9 @@ if [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ]; then
     fi
 fi
 
-# Receipt-v2 Stop advisory: every active V6 workflow needs a complete current
-# receipt set. Warn even while task-scoped paths are still placeholders so a
-# fresh engine cannot mistake an unreviewed checkpoint for final evidence.
-# Shipping remains enforced by the PreToolUse gate; Stop does not turn this
-# reminder into a second policy engine.
+# Receipt-v2 Stop advisory belongs to finalization. Development checkpoints do
+# not need final receipts; avoid repeated checks and stale warnings while the
+# candidate is still being built. Shipping remains enforced by PreToolUse.
 if [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ]; then
     _workflow_command=$(tr -d '\r' < "$STATE_MD" | awk -F'|' '
         /^## Workflow$/ { in_workflow=1; next }
@@ -143,18 +141,19 @@ if [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ]; then
             }
         }
     ')
-    # Completed receipts are historical; PreToolUse still enforces shipping.
-    case "$_workflow_phase:$_workflow_command" in complete:*|*:|*:none|*:-|*:'—') ;;
-    *)
-        if printf '%s\n' "$_workflow_command" | grep -qE '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'; then
-            :
-        else
-        _vr="$HOOK_DIR/lib/verification-receipt.sh"
-        [ -f "$_vr" ] || _vr="hooks/lib/verification-receipt.sh"
-        if [ ! -f "$_vr" ] || ! bash "$_vr" check --state "$STATE_MD" >/dev/null 2>&1; then
-            echo "FORGE_FINAL_EVIDENCE_STALE: candidate-bound review, verify-app, and E2E receipts no longer certify the current staged-clean candidate." >&2
-        fi
-        fi
+    case "$_workflow_phase" in
+    review|verify|verification|finalize|finalization|promote|promotion|ship|shipping)
+        case "$_workflow_command" in ''|none|-|'—') ;;
+        *)
+            if ! printf '%s\n' "$_workflow_command" | grep -qE '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'; then
+                _vr="$HOOK_DIR/lib/verification-receipt.sh"
+                [ -f "$_vr" ] || _vr="hooks/lib/verification-receipt.sh"
+                if [ ! -f "$_vr" ] || ! bash "$_vr" check --state "$STATE_MD" >/dev/null 2>&1; then
+                    echo "FORGE_FINAL_EVIDENCE_STALE: candidate-bound review, verify-app, and E2E receipts no longer certify the current staged-clean candidate." >&2
+                fi
+            fi
+            ;;
+        esac
         ;;
     esac
 fi

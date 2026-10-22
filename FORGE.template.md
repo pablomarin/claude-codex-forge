@@ -73,6 +73,13 @@ use the other qualified engine when available and visibly fall back to a fresh s
 Persisted project state and evidence enable continuation; private conversation context does not
 transfer between hosts.
 
+Main-session sandbox and connectivity policy belongs to the native host, developer, and organization.
+Forge does not force Claude's main shell into a strict sandbox. For an explicitly approved trusted
+local project needing reviewers, Docker, or database connections, setup's `--connected-development`
+option (PowerShell: `-ConnectedDevelopment`) configures project-local Claude shell access while
+preserving native command permissions and consequential-action guards. Existing sandbox choices
+are preserved by ordinary upgrades. Ordinary reviewer isolation remains independent and unchanged.
+
 Ordinary reviews request Claude Opus 5.5 (`claude-opus-5-5`) or GPT-6-Astra (`gpt-6-astra`),
 extra-high (`xhigh`) effort, and vendor fast mode through the dispatcher's configured profile.
 Every production `review` attempt has exactly a 1,200-second (20-minute) timeout ceiling,
@@ -198,9 +205,13 @@ evidence is missing, report the result as unverified or blocked rather than succ
 
 State what you verified, not what you assume. Read files before making claims about them, run the
 owning check before claiming behavior works, and distinguish fact from inference. For `/fix-bug` and
-`/new-feature`, bind review and verification receipts to the final candidate fingerprint; mutation
-invalidates earlier evidence, and missing, placeholder, stale, mixed-candidate, or non-clean receipts
-block shipping. Exact bounded `/quick-fix` work instead requires one direct focused check and the
+`/new-feature`, bind review and verification receipts to the final candidate fingerprint. Functional
+mutation invalidates earlier evidence. An eligible correction to explicitly declared non-runtime
+prose may retain original evidence only through the recomputed documentation closure in
+`.forge/rules/workflow.md#documentation-only-corrections`; never relabel old receipts or renew their
+age. Missing, placeholder, stale, mixed-candidate, or non-clean receipts block shipping. During
+development use focused checks; final receipt advisories belong to finalization phases. Exact
+bounded `/quick-fix` work instead requires one direct focused check and the
 hook-validated base/scope contract; it never dispatches reviewer or verifier agents. Legacy prose
 cannot certify a migrated gate. A direct documentation-only full-workflow commit retains its narrow
 carve-out, but push and PR creation still enforce the applicable workflow boundary.

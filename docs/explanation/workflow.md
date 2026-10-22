@@ -14,7 +14,7 @@ Codex skills such as `$fix-bug`; see the [commands map](../reference/commands.md
 | Implement | Tasks in dependency order | Smallest root-cause repair | Producer follows RED → GREEN → refactor, with actual task evidence |
 | User journey | Preliminary feature E2E while fixes are allowed | Preliminary regression journey while fixes are allowed | Actor, scenario, interface, steps, meaningful outcome and persistence |
 | Finalize | Solution/release material and simplification | Solution/release material and simplification | One staged-clean candidate fingerprint |
-| Certify | Distinct fresh spec and quality reviews, verify-app and E2E | Same candidate-bound gates | Real reports and receipts; mutation invalidates the final set |
+| Certify | Distinct fresh spec and quality reviews, verify-app and E2E | Same candidate-bound gates | Real reports and receipts; functional mutation invalidates affected evidence |
 | Promote | Exact-tree promotion and commit | Same | Revalidated candidate and shipping gates |
 | Publish | Authorized push and PR creation | Same | Human approval for the exact current external action |
 | Finish | Process review comments, then `/finish-branch` | Same | Exact reviewed head and CI, authorized merge and safe cleanup |
@@ -51,6 +51,15 @@ Use focused owning checks and the project's fast local gate. Exhaustive local su
 an explicit request. Native Windows and authenticated host behavior require their own
 evidence; portable or synthetic checks cannot stand in for them. Process success or a
 confident producer report alone cannot certify an unchanged or changed candidate.
+
+During development, Stop preserves progress without demanding final evidence on each turn.
+Final receipt advisories apply in finalization phases; shipping still enforces certification.
+After full certification, an explicitly enrolled non-runtime prose correction may use the shared
+[documentation closure](../../rules/workflow.md#documentation-only-corrections) procedure: compare
+the original certified tree to the final tree and run the focused prose check, retaining original
+review/test evidence and its timestamps. Functional Markdown, code, configuration and protected
+release metadata cannot use that exception. It does not infer application dependencies or claim
+that the runtime environment has remained unchanged.
 
 The installed `.forge/rules/workflow.md` owns receipt validity, review budgets,
 resource discipline and current-session shipping. State remains in `.forge/local/state.md`;

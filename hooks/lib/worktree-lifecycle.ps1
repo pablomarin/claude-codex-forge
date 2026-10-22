@@ -285,10 +285,10 @@ function Publish-State([string]$Content, [string]$Destination) {
 function Seed-ForgeWorktree([string]$Requested) {
     $pair = Resolve-LinkedWorktree $Requested; $target = $pair[0]; $primary = $pair[1]
     if ($target -eq $primary) { Fail-ForgeLifecycle "SEED_BLOCKED: target must be a linked worktree" }
-    Copy-PrivateHarness $primary $target
     $state = Join-Path $target '.forge\local\state.md'
     $snapshot = Join-Path $target '.forge\local\.state-seed-snapshot.md'
-    if ((Test-Path -LiteralPath $state) -or (Test-Path -LiteralPath $snapshot)) { Fail-ForgeLifecycle "SEED_BLOCKED: target state or snapshot already exists" }
+    if ((Test-Path -LiteralPath $state) -or (Test-Path -LiteralPath $snapshot) -or (Test-Reparse $state) -or (Test-Reparse $snapshot)) { Fail-ForgeLifecycle "SEED_BLOCKED: target state or snapshot already exists" }
+    Copy-PrivateHarness $primary $target
     $narrative = Get-FoldableNarrative (Join-Path $primary '.forge\local\state.md')
     $template = Join-Path $target '.forge\state.template.md'
     if (-not (Test-Path -LiteralPath $template -PathType Leaf) -or (Test-Reparse $template)) {
@@ -297,8 +297,18 @@ function Seed-ForgeWorktree([string]$Requested) {
     if (-not (Test-Path -LiteralPath $template -PathType Leaf) -or (Test-Reparse $template)) {
         Fail-ForgeLifecycle "SEED_BLOCKED: target state template is unavailable"
     }
+    $merged = Merge-FoldableNarrative $template $narrative
+    $connectionSelection = Join-Path $primary '.forge/local/connected-development.json'
+    if ((Test-Path -LiteralPath $connectionSelection) -or (Test-Reparse $connectionSelection)) {
+        $accessHelper = Join-Path $PSScriptRoot 'development-access.ps1'
+        if (-not (Test-Path -LiteralPath $accessHelper -PathType Leaf) -or (Test-Reparse $accessHelper)) {
+            Fail-ForgeLifecycle 'SEED_BLOCKED: development-access helper is unavailable; rerun Forge setup'
+        }
+        & $accessHelper -Action Inherit -SourceRoot $primary -ProjectRoot $target
+        if ($LASTEXITCODE -ne 0) { Fail-ForgeLifecycle 'SEED_BLOCKED: connected-development inheritance failed' }
+    }
     Publish-State $narrative $snapshot
-    Publish-State (Merge-FoldableNarrative $template $narrative) $state
+    Publish-State $merged $state
     Write-Output "SEED_OK: worktree=$target snapshot=.forge/local/.state-seed-snapshot.md"
 }
 
