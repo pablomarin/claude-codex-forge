@@ -47,13 +47,12 @@ command and writes no project files.
 
 ## Main-session connectivity
 
-Fresh Claude templates no longer force a strict main-agent shell sandbox. Routine updates preserve
-existing sandbox settings because identical booleans do not establish Forge ownership. To enable
-normal reviewer, Docker and database access in an approved trusted local project, select
-`setup.sh --upgrade --connected-development` or `setup.ps1 -Upgrade -ConnectedDevelopment`.
-The existing worktree fanout applies the selected local choice while preserving permissions and
-unrelated settings. See [connected development](connected-development.md) for the scope, Desktop
-environment differences and real-session verification. Organization policy remains authoritative.
+Connected development is automatic on normal upgrade and full refresh. Setup changes Claude's
+local `sandbox.enabled` to `false` and enables Codex workspace networking, including existing
+worktrees. Unrelated settings and native command permissions are preserved. Full-refresh preview
+and rollback cover the local setting transactionally. No additional connectivity flag is needed.
+See [connected development](connected-development.md) for Desktop and cloud-host boundaries and
+actual-session verification. Organization policy remains authoritative.
 
 ## Overlapping workflow plugins
 

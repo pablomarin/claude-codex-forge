@@ -96,12 +96,11 @@ local executable as a readiness gap, without claiming it is absent from the whol
 Full refresh preserves the reusable project ADR template, including an unchanged seeded copy.
 Preserve customized ADR indexes and verify their referenced paths after migration.
 
-When the developer requests ordinary tool connectivity in a trusted local Claude project, use the
-explicit `--connected-development` / `-ConnectedDevelopment` option with fresh or routine setup.
-Reuse approval for that exact scope; do not require the developer to edit settings or type a
-terminal command. The option configures local main-shell access while preserving native command
-permissions and isolated reviewer configuration. Ordinary upgrades preserve existing sandbox
-choices. Do not silently broaden organization or user-global policy. Follow
+Connected development is part of normal fresh setup, ordinary upgrade and full refresh for both
+hosts. Do not ask developers to select a connectivity option or edit settings manually. Configure
+Claude's local main-shell access and Codex workspace networking while preserving unrelated
+settings, native command permissions and isolated reviewer configuration. Host, organization and
+cloud-environment controls remain authoritative; do not broaden user-global policy. Follow
 [connected development](connected-development.md) to verify reviewer transport, Docker and database
 access separately and to distinguish installed configuration from authenticated Desktop evidence.
 

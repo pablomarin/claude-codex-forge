@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
-# Configure or inherit the explicit local Claude development-access choice.
+# Configure the connected Claude development default, preserving unrelated local values.
 # Python 3 is required, as it is for Forge installation.
 set -eu
 command -v python3 >/dev/null 2>&1 || { echo "BLOCKED: Python 3 is required for local development-access configuration" >&2; exit 1; }
 exec python3 - "$@" <<'FORGE_DEVELOPMENT_ACCESS_PY'
-import argparse, contextlib, json, os, shutil, stat, subprocess, sys, tempfile
+import argparse, contextlib, json, os, re, shutil, stat, subprocess, sys, tempfile
 from pathlib import Path
 
 class DevelopmentAccessBlocked(RuntimeError):
     pass
-
-SELECTION = {"schema_version": 1, "claude_sandbox_enabled": False}
 
 def reject_link_ancestors(root, relative):
     current = root
@@ -27,7 +25,7 @@ def git(root, *arguments):
 def require_untracked(root, relative):
     tracked = git(root, "ls-files", "--error-unmatch", "--", relative)
     if tracked.returncode == 0:
-        raise DevelopmentAccessBlocked(f"{relative} is tracked; reconcile it before selecting local development")
+        raise DevelopmentAccessBlocked(f"{relative} is tracked; reconcile it before configuring local development")
     if tracked.returncode != 1:
         raise DevelopmentAccessBlocked(f"cannot verify developer-local input is untracked: {relative}")
 
@@ -91,95 +89,93 @@ def ensure_local_ignores(root, in_repository):
             if git(root, "check-ignore", "--no-index", "-q", "--", relative).returncode:
                 raise DevelopmentAccessBlocked(f"connected development requires an ignored local path: {relative}")
 
+def connected_codex(root):
+    """Update only the known network entry inside an existing Forge marker."""
+    reject_link_ancestors(root, Path(".codex/config.toml"))
+    path = root / ".codex/config.toml"
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise DevelopmentAccessBlocked("Codex config must be a regular file")
+    text = path.read_bytes().decode("utf-8")
+    begin, end = "# forge:begin v6", "# forge:end v6"
+    if begin not in text and end not in text:
+        return None  # User-owned configuration outside Forge remains opaque.
+    if text.count(begin) != 1 or text.count(end) != 1 or text.index(end) < text.index(begin):
+        raise DevelopmentAccessBlocked("malformed or duplicate Forge TOML marker")
+    start, finish = text.index(begin), text.index(end)
+    block = text[start:finish]
+    tables = list(re.finditer(r"(?ms)^\[sandbox_workspace_write\][ \t]*\r?$.*?(?=^\[|\Z)", block))
+    if len(tables) != 1:
+        raise DevelopmentAccessBlocked("managed Codex workspace settings require Forge setup")
+    table = tables[0]
+    pattern = r"(?m)(^[ \t]*network_access[ \t]*=[ \t]*)(true|false)([ \t]*(?:#[^\r\n]*)?\r?$)"
+    updated, count = re.subn(pattern, r"\g<1>true\g<3>", table.group())
+    if count != 1:
+        raise DevelopmentAccessBlocked("managed Codex network setting requires Forge setup")
+    content = text[:start] + block[:table.start()] + updated + block[table.end():] + text[finish:]
+    return (path, content) if content != text else None
+
 def development_access_cli(argv: list[str]) -> int:
-    """Apply an explicit local choice without taking ownership of sandbox policy."""
+    """Manage only local sandbox.enabled; preserve permissions and unrelated settings."""
     parser = argparse.ArgumentParser(prog="development-access.sh")
-    parser.add_argument("action", choices=("configure", "inherit"))
+    parser.add_argument("action", choices=("configure",))
     parser.add_argument("--project-root", required=True)
-    parser.add_argument("--source-root")
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
     temporary = None
     try:
-        if args.action == "inherit":
-            if not args.source_root:
-                raise DevelopmentAccessBlocked("inherit requires --source-root")
-            source = Path(args.source_root).resolve(strict=True)
-            selection = source / ".forge/local/connected-development.json"
-            reject_link_ancestors(source, Path(".forge/local/connected-development.json"))
-            if not selection.exists():
-                return 0
-            require_untracked(source, ".forge/local/connected-development.json")
-            if not selection.is_file() or json.loads(selection.read_text(encoding="utf-8-sig")) != SELECTION:
-                raise DevelopmentAccessBlocked("unrecognized connected-development selection; preserve and reconcile it")
-            reject_link_ancestors(source, Path(".claude/settings.local.json"))
-            source_local = source / ".claude/settings.local.json"
-            if not source_local.is_file():
-                return 0
-            require_untracked(source, ".claude/settings.local.json")
-            current = json.loads(source_local.read_text(encoding="utf-8-sig"))
-            if not isinstance(current, dict) or not isinstance(current.get("sandbox"), dict) or current["sandbox"].get("enabled") is not False:
-                return 0
         root = Path(args.project_root).resolve(strict=True)
         if not root.is_dir():
             raise DevelopmentAccessBlocked("connected development requires a project directory")
         local = root / ".claude/settings.local.json"
         scratch = root / ".forge/local"
-        selection = scratch / "connected-development.json"
-        for relative in (Path(".claude/settings.local.json"), Path(".forge/local/connected-development.json")):
+        for relative in (Path(".claude/settings.local.json"), Path(".forge/local")):
             reject_link_ancestors(root, relative)
-        for path in (local, selection):
+        for path in (local,):
             if path.exists() and not path.is_file():
                 raise DevelopmentAccessBlocked(f"connected development requires a regular file: {path}")
         if scratch.exists() and not scratch.is_dir():
             raise DevelopmentAccessBlocked("connected development requires a regular .forge/local directory")
-        if selection.exists() and json.loads(selection.read_text(encoding="utf-8-sig")) != SELECTION:
-            raise DevelopmentAccessBlocked("unrecognized connected-development selection; preserve and reconcile it")
         settings = json.loads(local.read_text(encoding="utf-8-sig")) if local.exists() else {}
         if not isinstance(settings, dict):
             raise DevelopmentAccessBlocked("local Claude settings must be a JSON object")
         if "sandbox" in settings and not isinstance(settings["sandbox"], dict):
             raise DevelopmentAccessBlocked("local Claude sandbox settings must be a JSON object")
-        if args.action == "inherit" and "enabled" in settings.get("sandbox", {}):
-            print("CLAUDE_SANDBOX: PRESERVED existing worktree-local sandbox choice")
-            return 0
+        codex = connected_codex(root)
         in_repository = False
         if shutil.which("git"):
             repository = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
                                         capture_output=True, check=False)
-            if repository.returncode == 0:
+            # Transaction staging may live inside a real repository. It must not
+            # edit that outer checkout's private excludes or inspect its settings.
+            if repository.returncode == 0 and Path(os.fsdecode(repository.stdout).strip()).resolve(strict=True) == root:
                 in_repository = True
-                for relative in (".claude/settings.local.json", ".forge/local/connected-development.json"):
-                    require_untracked(root, relative)
+                require_untracked(root, ".claude/settings.local.json")
         if args.check:
             return 0
 
         # Ignore the local settings and secret-bearing staging directory before
         # writing any local JSON. Never create adjacent backups or temporary files.
         ensure_local_ignores(root, in_repository)
+        updates = []
         if settings.get("sandbox", {}).get("enabled") is not False:
-            local.parent.mkdir(parents=True, exist_ok=True)
+            settings.setdefault("sandbox", {})["enabled"] = False
+            updates.append((local, json.dumps(settings, indent=2) + "\n"))
+        if codex is not None:
+            updates.append(codex)
+        for path, content in updates:
+            path.parent.mkdir(parents=True, exist_ok=True)
             scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
             descriptor, name = tempfile.mkstemp(prefix="connected-settings-", dir=scratch)
             temporary = Path(name)
-            mode = stat.S_IMODE(local.stat().st_mode) if local.exists() else 0o600
-            settings.setdefault("sandbox", {})["enabled"] = False
+            mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
             with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
                 os.chmod(temporary, mode)
-                json.dump(settings, handle, indent=2)
-                handle.write("\n")
+                handle.write(content)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temporary, local)
-            temporary = None
-        if not selection.exists():
-            scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
-            descriptor, name = tempfile.mkstemp(prefix="connected-selection-", dir=scratch)
-            temporary = Path(name)
-            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump(SELECTION, handle, indent=2)
-                handle.write("\n")
-            os.replace(temporary, selection)
+            os.replace(temporary, path)
             temporary = None
         print("CLAUDE_SANDBOX: CONNECTED_LOCAL sandbox.enabled=false; native permissions and managed policy still apply; restart the Claude session")
         return 0

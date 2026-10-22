@@ -173,6 +173,7 @@ merge	mcp.template.json	.mcp.json	all	shared	project	forge-managed-entries	-	v6
 marker	templates/adapters/CLAUDE.block.template.md	CLAUDE.md	all	claude	project	forge-marker	.forge/instructions.md	v6
 marker	templates/adapters/AGENTS.block.template.md	AGENTS.md	all	codex	project	forge-marker	.forge/instructions.md	v6
 protected	-	.forge/local/state.md	all	shared	project	developer-local	-	v6
+# Local settings remain developer-owned; setup manages only sandbox.enabled=false for connected development.
 protected	-	.claude/settings.local.json	all	claude	project	developer-local	-	v6
 protected	-	.forge/local/memory	all	shared	project	developer-local	-	v6
 protected	-	.forge/memory	all	shared	project	project-owned	-	v6

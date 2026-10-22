@@ -117,12 +117,11 @@ for main in claude codex; do
         assert_contains "$root/.codex/config.toml" 'model = "gpt-6-astra"' "Codex user config preserved"
     done
     assert_equals "$(git -C "$PRIMARY" for-each-ref --format='%(refname) %(objectname)' refs/heads)" "$branches_before" "upgrade preserves all branches/HEADs"
-    assert_contains "$TMP/$main-upgrade.log" 'CLAUDE_SANDBOX: PRESERVED' "upgrade explains preserved sandbox choice"
     for root in "${roots[@]}"; do
         printf '{"sandbox":{"enabled":true},"permissions":{"deny":["Bash(project-protected *)"]}}\n' > "$root/.claude/settings.local.json"
     done
-    setup_at "$LINK" "$TMP/$main-connected.log" --upgrade --connected-development
-    assert_equals "$?" 0 "explicit connected-development selection propagates from linked checkout"
+    setup_at "$LINK" "$TMP/$main-connected.log" --upgrade
+    assert_equals "$?" 0 "ordinary upgrade configures connected development in every checkout"
     for root in "${roots[@]}"; do
         python3 - "$root" <<'PY'
 import json, pathlib, sys
@@ -132,8 +131,10 @@ local = json.loads((root / '.claude/settings.local.json').read_text())
 assert shared['sandbox'] == {'enabled': True, 'allowUnsandboxedCommands': False}
 assert local['sandbox'] == {'enabled': False}
 assert local['permissions'] == {'deny': ['Bash(project-protected *)']}
+assert 'network_access = true' in (root / '.codex/config.toml').read_text()
+assert not (root / '.forge/local/connected-development.json').exists()
 PY
-        assert_equals "$?" 0 "only explicit local sandbox toggle changes: $root"
+        assert_equals "$?" 0 "ordinary upgrade enables connections and preserves unrelated local values: $root"
         git -C "$root" check-ignore -q .claude/settings.local.json
         assert_equals "$?" 0 "connected selection stays gitignored: $root"
     done
@@ -226,4 +227,7 @@ setup_at "$TMP/bare-linked" "$TMP/bare.log" --upgrade
 assert_equals "$?" 0 "bare metadata entry skipped"
 assert_file_exists "$TMP/bare-linked/.forge/version" "actual checkout installed"
 assert_file_missing "$TMP/bare.git/.forge" "bare metadata never installed"
+start_test 'connected defaults include transactional full refresh and local setting preservation'
+python3 "$REPO_ROOT/tests/support/connected-default-use-cases.py" --source-root "$REPO_ROOT" --engine bash
+assert_equals "$?" 0 'fresh setup, ordinary upgrade, preview, execution and rollback use connected defaults'
 report 'test-setup-worktrees.sh'

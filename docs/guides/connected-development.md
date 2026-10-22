@@ -1,52 +1,55 @@
-# Connected local development
+# Connected development
 
 For a trusted local project, Claude should be able to call its configured Codex reviewer and run
-application, Docker and database commands through its normal tools. Forge leaves the main
-session's sandbox policy to the native host, developer and organization. Ordinary independent
-reviewers still use their isolated, immutable candidate configuration.
+application, Docker and database commands through its normal tools. Forge configures connected
+development automatically on fresh setup, ordinary upgrades, full refresh and worktree
+creation/adoption. Ordinary independent reviewers retain isolated immutable candidate configuration.
 
 Ask your agent:
 
 ```text
-Enable connected development for this trusted local project. Preserve my existing permissions,
-MCP settings and workflow state. Use Forge's connected-development setup option and verify
-reviewer, Docker and development-database access separately.
+Upgrade Forge normally and verify reviewer, Docker and development-database access through
+your normal command tools. Preserve unrelated settings, permissions and workflow state.
 ```
 
-This authorizes the scoped local configuration change. The agent uses the normal installer from
-the target project root; the developer does not need to edit settings or run a manual terminal.
+The agent uses the normal installer from the target project root; the developer does not need
+to choose a connectivity option, edit settings or run a manual terminal.
 For an existing v6 installation the manual equivalents are:
 
 ```bash
-/absolute/path/to/claude-codex-forge/setup.sh --upgrade --connected-development
+/absolute/path/to/claude-codex-forge/setup.sh --upgrade
 ```
 
 ```powershell
-& C:\path\to\claude-codex-forge\setup.ps1 -Upgrade -ConnectedDevelopment
+& C:\path\to\claude-codex-forge\setup.ps1 -Upgrade
 ```
 
-Fresh setup accepts the same option without `--upgrade` / `-Upgrade`. Repository worktrees are
-included by the installer's existing discovery; it preserves their branches and workflow state.
-The option changes only local `sandbox.enabled` to `false` in Claude's `settings.local.json`.
-Existing local entries and command permissions are preserved; the local file must remain ignored.
-Forge records this explicit choice in the ignored `.forge/local/connected-development.json`.
-New worktrees created through Forge inherit only that choice when the primary checkout still
-selects `sandbox.enabled=false`. Their existing local sandbox choice takes precedence. Forge
-does not copy the primary checkout's local settings, environment variables or secrets. Selecting
-a stricter sandbox in the primary checkout stops connected inheritance for future worktrees.
-Do not combine this option with full-refresh/preview or global-retirement modes. Complete the
-ordinary approved full refresh first, then select connected development in a routine update.
+Repository worktrees are included automatically; setup preserves their branches and workflow
+state. Claude templates set `sandbox.enabled=false`, and setup manages that one key in ignored
+`settings.local.json`, replacing old strict values. Unrelated local entries, native command
+permissions and file permissions are preserved. New worktrees receive the default directly
+without copying the primary checkout's local settings, environment variables or secrets.
+Old ignored selection markers are no longer read or generated. Full refresh includes the local
+setting transactionally: preview leaves live files unchanged and rollback restores prior bytes.
+
+Codex's managed `[sandbox_workspace_write]` block sets `network_access=true`, retaining its
+workspace filesystem boundary and preserving configuration outside Forge's marker. See the
+[Codex configuration reference](https://developers.openai.com/codex/config-reference/).
+Worktree creation/adoption also refreshes that exact managed network entry when an older base
+still contains `false`; any resulting tracked configuration change is visible in the worktree diff.
 
 This gives the main shell normal host access. Native command permissions, organization policy,
 and Forge's authorization for consequential actions remain in effect. An organization-enforced
-sandbox may still restrict the session; report that boundary instead of bypassing it. Routine
-upgrades preserve existing sandbox choices, including old strict settings whose ownership cannot
-be established. Removing a default from a template alone does not change an installed choice.
+sandbox may still restrict the session; report that boundary accurately. Forge does not enable
+bypass-permissions mode or change user-global policy. A cloud host must also permit internet
+access and provide tools, credentials and services: repository settings cannot enable an
+externally disabled network or expose a developer machine's Docker daemon. Codex documents its
+separate [cloud internet setting](https://developers.openai.com/codex/cloud/internet-access/).
 
 ## Verify each capability
 
 Start a fresh local Claude session or restart the existing one after configuration so it loads the
-selected shell policy. Keep other running sessions and their current work intact.
+default shell policy. Keep other running sessions and their current work intact.
 
 Run checks through the agent's ordinary command tool in the selected local Claude UI session:
 
@@ -57,7 +60,8 @@ Run checks through the agent's ordinary command tool in the selected local Claud
 4. Run a read-only query against the intended development database, including the connection
    path used by the application or integration tests.
 
-A manually typed terminal command does not prove the agent's command tool has the same access.
+Repeat reciprocal reviewer access from a Codex-main session. A manually typed terminal command
+does not prove the agent's command tool has the same access.
 Installer output and synthetic reviewer fixtures do not qualify authenticated Desktop behavior.
 Report unavailable tools, authentication and services separately; do not print connection secrets.
 

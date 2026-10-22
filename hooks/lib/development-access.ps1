@@ -1,8 +1,7 @@
-# Explicit local Claude development-access configuration. Windows PowerShell 5.1 compatible.
+# Connected Claude development defaults. Windows PowerShell 5.1 compatible.
 param(
-    [ValidateSet('Configure','Inherit')][string]$Action = 'Configure',
+    [ValidateSet('Configure')][string]$Action = 'Configure',
     [Parameter(Mandatory=$true)][string]$ProjectRoot,
-    [string]$SourceRoot,
     [switch]$Check
 )
 $ErrorActionPreference = 'Stop'
@@ -20,25 +19,37 @@ function Assert-DevelopmentPath {
     }
 }
 
-function Test-ConnectedSelection([string]$Path) {
-    try { $value = [IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop }
-    catch { throw 'unrecognized connected-development selection; preserve and reconcile it' }
-    return ($value -is [System.Management.Automation.PSCustomObject] -and
-        @($value.PSObject.Properties).Count -eq 2 -and $value.schema_version -eq 1 -and
-        $value.claude_sandbox_enabled -is [bool] -and -not $value.claude_sandbox_enabled)
-}
-
 function Assert-UntrackedDevelopmentInput([string]$Project, [string]$Relative) {
     $tracked = @(& git -C $Project ls-files -- $Relative 2>$null)
     if ($LASTEXITCODE -ne 0) { throw "cannot verify developer-local input is untracked: $Relative" }
     if ($tracked.Count -gt 0) { throw "$Relative is tracked; reconcile it before selecting local development" }
 }
 
+function Read-DevelopmentGit([string]$Project, [string]$Arguments) {
+    # Windows PowerShell 5.1's native pipeline can misdecode Unicode metadata.
+    $process = New-Object System.Diagnostics.Process
+    try {
+        $process.StartInfo.FileName = (Get-Command git -ErrorAction Stop).Source
+        $process.StartInfo.Arguments = $Arguments
+        $process.StartInfo.WorkingDirectory = $Project
+        $process.StartInfo.UseShellExecute = $false
+        $process.StartInfo.RedirectStandardOutput = $true
+        $process.StartInfo.RedirectStandardError = $true
+        $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+        $null = $process.Start()
+        $output = $process.StandardOutput.ReadToEnd()
+        $null = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        return [pscustomobject]@{ Status=$process.ExitCode; Output=$output }
+    } finally { $process.Dispose() }
+}
+
 function Get-PrivateDevelopmentIgnore([string]$Project) {
-    $common = & git -C $Project rev-parse --git-common-dir 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'cannot locate repository-private ignores' }
-    $exclude = & git -C $Project rev-parse --git-path info/exclude 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'cannot locate repository-private ignores' }
+    $commonResult = Read-DevelopmentGit $Project 'rev-parse --git-common-dir'
+    $excludeResult = Read-DevelopmentGit $Project 'rev-parse --git-path info/exclude'
+    if ($commonResult.Status -ne 0 -or $excludeResult.Status -ne 0) { throw 'cannot locate repository-private ignores' }
+    $common = $commonResult.Output.TrimEnd([char[]]"`r`n")
+    $exclude = $excludeResult.Output.TrimEnd([char[]]"`r`n")
     if (-not [IO.Path]::IsPathRooted($common)) { $common = Join-Path $Project $common }
     $common = (Resolve-Path -LiteralPath $common).Path
     if (-not [IO.Path]::IsPathRooted($exclude)) { $exclude = Join-Path $Project $exclude }
@@ -98,24 +109,45 @@ function Set-DevelopmentIgnores([string]$Project, [bool]$InRepository) {
     }
 }
 
+function Get-ConnectedCodex([string]$Project) {
+    Assert-DevelopmentPath $Project '.codex/config.toml'
+    $path = Join-Path $Project '.codex/config.toml'
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Codex config must be a regular file' }
+    $text = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($path))
+    $begin = '# forge:begin v6'; $end = '# forge:end v6'
+    if (-not $text.Contains($begin) -and -not $text.Contains($end)) { return $null }
+    if ([regex]::Matches($text, [regex]::Escape($begin)).Count -ne 1 -or
+        [regex]::Matches($text, [regex]::Escape($end)).Count -ne 1 -or $text.IndexOf($end) -lt $text.IndexOf($begin)) {
+        throw 'malformed or duplicate Forge TOML marker'
+    }
+    $start = $text.IndexOf($begin); $finish = $text.IndexOf($end)
+    $block = $text.Substring($start, $finish - $start)
+    $tables = [regex]::Matches($block, '(?ms)^\[sandbox_workspace_write\][ \t]*\r?$.*?(?=^\[|\z)')
+    if ($tables.Count -ne 1) { throw 'managed Codex workspace settings require Forge setup' }
+    $table = $tables[0]
+    $pattern = '(?m)(^[ \t]*network_access[ \t]*=[ \t]*)(true|false)([ \t]*(?:#[^\r\n]*)?\r?$)'
+    if ([regex]::Matches($table.Value, $pattern).Count -ne 1) { throw 'managed Codex network setting requires Forge setup' }
+    $updated = [regex]::Replace($table.Value, $pattern, '${1}true${3}')
+    $content = $text.Substring(0, $start) + $block.Substring(0, $table.Index) + $updated + $block.Substring($table.Index + $table.Length) + $text.Substring($finish)
+    if ($content -ceq $text) { return $null }
+    return [pscustomobject]@{ Path=$path; Content=$content }
+}
+
 function Set-ConnectedDevelopment {
     param([string]$Project, [switch]$Check)
-    foreach ($relative in @('.claude/settings.local.json', '.forge/local/connected-development.json')) {
+    foreach ($relative in @('.claude/settings.local.json', '.forge/local')) {
         Assert-DevelopmentPath $Project $relative
     }
     $local = Join-Path $Project '.claude/settings.local.json'
     $scratch = Join-Path $Project '.forge/local'
-    $selection = Join-Path $scratch 'connected-development.json'
-    foreach ($path in @($local, $selection)) {
+    foreach ($path in @($local)) {
         if ((Test-Path -LiteralPath $path) -and -not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "connected development requires a regular file: $path"
         }
     }
     if ((Test-Path -LiteralPath $scratch) -and -not (Test-Path -LiteralPath $scratch -PathType Container)) {
         throw 'connected development requires a regular .forge/local directory'
-    }
-    if ((Test-Path -LiteralPath $selection) -and -not (Test-ConnectedSelection $selection)) {
-        throw 'unrecognized connected-development selection; preserve and reconcile it'
     }
     try {
         $settings = if (Test-Path -LiteralPath $local) { [IO.File]::ReadAllText($local) | ConvertFrom-Json -ErrorAction Stop } else { [pscustomobject]@{} }
@@ -124,28 +156,31 @@ function Set-ConnectedDevelopment {
     if ($settings.PSObject.Properties['sandbox'] -and $settings.sandbox -isnot [System.Management.Automation.PSCustomObject]) {
         throw 'local Claude sandbox settings must be a JSON object'
     }
-    if ($Action -eq 'Inherit' -and $settings.PSObject.Properties['sandbox'] -and $settings.sandbox.PSObject.Properties['enabled']) {
-        Write-Host 'CLAUDE_SANDBOX: PRESERVED existing worktree-local sandbox choice'
-        return
-    }
+    $codex = Get-ConnectedCodex $Project
     $inRepository = $false
     if (Get-Command git -ErrorAction SilentlyContinue) {
-        $null = & git -C $Project rev-parse --show-toplevel 2>$null
-        if ($LASTEXITCODE -eq 0) {
+        # Git's empty prefix identifies the root through aliases and Unicode
+        # paths without comparing differently normalized/decoded path strings.
+        $prefix = Read-DevelopmentGit $Project 'rev-parse --show-prefix'
+        if ($prefix.Status -eq 0 -and $prefix.Output.TrimEnd([char[]]"`r`n").Length -eq 0) {
             $inRepository = $true
-            foreach ($relative in @('.claude/settings.local.json', '.forge/local/connected-development.json')) {
-                Assert-UntrackedDevelopmentInput $Project $relative
-            }
+            Assert-UntrackedDevelopmentInput $Project '.claude/settings.local.json'
         }
     }
     if ($Check) { return }
     # Stage secret-bearing JSON only inside the ignored local directory. Never
     # create an adjacent temporary file or a backup beside settings.local.json.
     Set-DevelopmentIgnores $Project $inRepository
+    $updates = @()
     if (-not $settings.PSObject.Properties['sandbox']) { $settings | Add-Member -NotePropertyName sandbox -NotePropertyValue ([pscustomobject]@{}) }
     if (-not $settings.sandbox.PSObject.Properties['enabled'] -or $settings.sandbox.enabled -isnot [bool] -or $settings.sandbox.enabled) {
         if ($settings.sandbox.PSObject.Properties['enabled']) { $settings.sandbox.enabled = $false }
         else { $settings.sandbox | Add-Member -NotePropertyName enabled -NotePropertyValue $false }
+        $updates += [pscustomobject]@{ Path=$local; Content=($settings | ConvertTo-Json -Depth 100) + "`n" }
+    }
+    if ($codex) { $updates += $codex }
+    foreach ($update in $updates) {
+        $local = $update.Path
         [IO.Directory]::CreateDirectory((Split-Path -Parent $local)) | Out-Null
         [IO.Directory]::CreateDirectory($scratch) | Out-Null
         $temporary = Join-Path $scratch ('connected-settings-' + [Guid]::NewGuid().ToString('N'))
@@ -163,41 +198,17 @@ function Set-ConnectedDevelopment {
                 $mode = if (Test-Path -LiteralPath $local) { [IO.File]::GetUnixFileMode($local) } else { [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite }
                 [IO.File]::SetUnixFileMode($temporary, $mode)
             }
-            [IO.File]::WriteAllText($temporary, ($settings | ConvertTo-Json -Depth 100) + "`n", $Utf8NoBom)
+            [IO.File]::WriteAllText($temporary, $update.Content, $Utf8NoBom)
             if (Test-Path -LiteralPath $local) { [IO.File]::Replace($temporary, $local, [System.Management.Automation.Language.NullString]::Value) }
             else { [IO.File]::Move($temporary, $local) }
         } finally {
             if (Test-Path -LiteralPath $temporary) { [IO.File]::Delete($temporary) }
         }
     }
-    if (-not (Test-Path -LiteralPath $selection)) {
-        [IO.Directory]::CreateDirectory($scratch) | Out-Null
-        $temporary = Join-Path $scratch ('connected-selection-' + [Guid]::NewGuid().ToString('N'))
-        try {
-            [IO.File]::WriteAllText($temporary, "{`"schema_version`":1,`"claude_sandbox_enabled`":false}`n", $Utf8NoBom)
-            [IO.File]::Move($temporary, $selection)
-        } finally { if (Test-Path -LiteralPath $temporary) { [IO.File]::Delete($temporary) } }
-    }
     Write-Host 'CLAUDE_SANDBOX: CONNECTED_LOCAL sandbox.enabled=false; native permissions and managed policy still apply; restart the Claude session'
 }
 
 try {
-    if ($Action -eq 'Inherit') {
-        if (-not $SourceRoot) { throw 'inherit requires SourceRoot' }
-        Assert-DevelopmentPath $SourceRoot '.forge/local/connected-development.json'
-        $sourceSelection = Join-Path $SourceRoot '.forge/local/connected-development.json'
-        if (-not (Test-Path -LiteralPath $sourceSelection)) { exit 0 }
-        Assert-UntrackedDevelopmentInput $SourceRoot '.forge/local/connected-development.json'
-        if (-not (Test-Path -LiteralPath $sourceSelection -PathType Leaf)) { throw 'unrecognized connected-development selection; preserve and reconcile it' }
-        if (-not (Test-ConnectedSelection $sourceSelection)) { throw 'unrecognized connected-development selection; preserve and reconcile it' }
-        Assert-DevelopmentPath $SourceRoot '.claude/settings.local.json'
-        $sourceLocal = Join-Path $SourceRoot '.claude/settings.local.json'
-        if (-not (Test-Path -LiteralPath $sourceLocal -PathType Leaf)) { exit 0 }
-        Assert-UntrackedDevelopmentInput $SourceRoot '.claude/settings.local.json'
-        try { $current = [IO.File]::ReadAllText($sourceLocal) | ConvertFrom-Json -ErrorAction Stop }
-        catch { throw 'primary local Claude settings are malformed JSON; preserve and repair the file' }
-        if ($current.sandbox.enabled -isnot [bool] -or $current.sandbox.enabled) { exit 0 }
-    }
     Set-ConnectedDevelopment $ProjectRoot -Check:$Check
     exit 0
 } catch {

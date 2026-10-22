@@ -107,8 +107,8 @@ assert_contains "$REPO_ROOT/agents/independent-reviewer.md" "main session obtain
     "native reviewer receives user-originated authorization provenance"
 assert_contains "$REPO_ROOT/agents/independent-reviewer.md" "solely because the candidate is private, sensitive, or contains unchanged tracked files" \
     "native reviewer cannot reclassify complete private candidate transport as an authorization blocker"
-assert_contains "$REPO_ROOT/settings/codex-config.template.toml" "network_access = false" \
-    "standing reviewer transport does not grant blanket workspace network access"
+assert_contains "$REPO_ROOT/settings/codex-config.template.toml" "network_access = true" \
+    "main workspace supports connected development independently of hermetic reviewer isolation"
 assert_contains "$REPO_ROOT/templates/review-result.template.txt" "review_mode=broad|closure" \
     "result schema records the declared review mode"
 

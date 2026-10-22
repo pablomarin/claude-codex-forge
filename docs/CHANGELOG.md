@@ -2,6 +2,22 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.4.13 — 2026-10-22
+
+### Connected development is the normal behavior
+
+Remove the optional connectivity setup flag. Fresh installation, ordinary upgrades, full refresh
+and worktree creation/adoption now configure connected development automatically. Claude uses
+native main-shell access through local `sandbox.enabled=false`; Codex's managed workspace-write
+block enables networking. Existing strict local values are migrated while unrelated settings,
+permissions and workflow state are preserved. Worktrees no longer depend on a selection marker
+or copy primary local secrets. Full-refresh preview and rollback include the local settings
+change and preserve existing project ignore rules. Native host, organization and cloud network
+controls remain authoritative; isolated reviewer configuration is unchanged.
+Older-base worktrees refresh the exact managed Codex network entry while retaining outside TOML
+bytes. PowerShell preserves shared sandbox policy and reads Git metadata as UTF-8; aliased roots
+still refuse tracked local settings. Windows live and backup local settings retain their access rules.
+
 ## 6.4.12 — 2026-10-22
 
 ### Connected local Claude development

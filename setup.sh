@@ -30,7 +30,6 @@ usage() {
     echo "  -f, --force         Authoritative transactional full installation/reconciliation"
     echo "      --dry-run       Preview --force without writing target files"
     echo "      --this-checkout-only  Limit setup to this checkout (default: all Git worktrees)"
-    echo "      --connected-development  Use native shell access for a trusted local Claude project"
     echo "  -g, --global        Retired; prints the project-only migration path"
     echo "      --retire-global Preview removal of a legacy global Forge harness"
     echo "      --apply         Apply --retire-global after a matching preview"
@@ -54,7 +53,6 @@ usage() {
 # Parse arguments. Retain the public mode and options for worktree children.
 ORIGINAL_SETUP_ARGS=("$@")
 THIS_CHECKOUT_ONLY=false
-CONNECTED_DEVELOPMENT=false
 PROJECT_NAME=""
 TECH_STACK="fullstack"
 FORCE=false
@@ -99,10 +97,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --this-checkout-only)
             THIS_CHECKOUT_ONLY=true
-            shift
-            ;;
-        --connected-development)
-            CONNECTED_DEVELOPMENT=true
             shift
             ;;
         --dry-run)
@@ -158,10 +152,6 @@ if [ "$RETIRE_APPLY" = true ] && [ "$RETIRE_GLOBAL" != true ]; then
 fi
 if [ -n "$RETIRE_CONFIRM" ] && [ "$RETIRE_GLOBAL" != true ]; then
     echo -e "${RED}ERROR: --confirm is valid only with --retire-global.${NC}" >&2
-    exit 1
-fi
-if [ "$CONNECTED_DEVELOPMENT" = true ] && { [ "$FULL_REFRESH" = true ] || [ "$RETIRE_GLOBAL" = true ]; }; then
-    echo "ERROR: --connected-development is a separate local choice; use ordinary setup or --upgrade, without --force or --retire-global." >&2
     exit 1
 fi
 if [ "$RETIRE_GLOBAL" = true ]; then
@@ -703,11 +693,9 @@ fi
 if [[ "$had_claude_md" == true ]]; then
     echo -e "  ${BLUE}○${NC} CLAUDE.md user text will be preserved outside the Forge block"
 fi
-connected_args=()
-[ "$CONNECTED_DEVELOPMENT" != true ] || connected_args+=(--connected-development)
 bash "$SCRIPT_DIR/scripts/materialize-adapters.sh" \
     --repo-root "$SCRIPT_DIR" --target "$(pwd)" --scope project --platform unix \
-    --release-version "$FORGE_VERSION" ${connected_args[@]+"${connected_args[@]}"}
+    --release-version "$FORGE_VERSION"
 if [[ -n "$prev_forge_version" && "$prev_forge_version" != "$FORGE_VERSION" ]]; then
     echo "FORGE_VERSION_CHANGE: $prev_forge_version -> $FORGE_VERSION"
 fi

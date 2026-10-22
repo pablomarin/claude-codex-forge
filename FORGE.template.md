@@ -73,12 +73,14 @@ use the other qualified engine when available and visibly fall back to a fresh s
 Persisted project state and evidence enable continuation; private conversation context does not
 transfer between hosts.
 
-Main-session sandbox and connectivity policy belongs to the native host, developer, and organization.
-Forge does not force Claude's main shell into a strict sandbox. For an explicitly approved trusted
-local project needing reviewers, Docker, or database connections, setup's `--connected-development`
-option (PowerShell: `-ConnectedDevelopment`) configures project-local Claude shell access while
-preserving native command permissions and consequential-action guards. Existing sandbox choices
-are preserved by ordinary upgrades. Ordinary reviewer isolation remains independent and unchanged.
+Connected development is the default for installation, ordinary upgrades, full refresh and
+Forge-created or adopted worktrees. Setup manages Claude's local `sandbox.enabled=false` and
+enables networking in Codex's managed workspace-write configuration so normal command tools can
+reach reviewers and development services. No extra connectivity option or selection marker is
+required. Preserve unrelated settings, native command permissions and consequential-action guards.
+Native host and organization controls remain authoritative; cloud-environment networking is a
+host setting and cannot be enabled by repository files alone. Ordinary reviewer isolation remains
+independent and unchanged.
 
 Ordinary reviews request Claude Opus 5.5 (`claude-opus-5-5`) or GPT-6-Astra (`gpt-6-astra`),
 extra-high (`xhigh`) effort, and vendor fast mode through the dispatcher's configured profile.

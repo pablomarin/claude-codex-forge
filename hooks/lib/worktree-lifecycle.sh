@@ -172,15 +172,13 @@ forge_lifecycle_seed() {
         forge_lifecycle_fail "SEED_BLOCKED: target state template is missing required sections"
         return 1
     fi
-    if [ -e "$primary/.forge/local/connected-development.json" ] || [ -L "$primary/.forge/local/connected-development.json" ]; then
-        local access_helper
-        access_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/development-access.sh"
-        [ -f "$access_helper" ] && [ ! -L "$access_helper" ] \
-            || { forge_lifecycle_fail "SEED_BLOCKED: development-access helper is unavailable; rerun Forge setup"; rm -f "$narrative" "$merged"; return 1; }
-        if ! bash "$access_helper" inherit --source-root "$primary" --project-root "$target"; then
-            rm -f "$narrative" "$merged"
-            return 1
-        fi
+    local access_helper
+    access_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/development-access.sh"
+    [ -f "$access_helper" ] && [ ! -L "$access_helper" ] \
+        || { forge_lifecycle_fail "SEED_BLOCKED: development-access helper is unavailable; rerun Forge setup"; rm -f "$narrative" "$merged"; return 1; }
+    if ! bash "$access_helper" configure --project-root "$target"; then
+        rm -f "$narrative" "$merged"
+        return 1
     fi
     forge_lifecycle_publish "$narrative" "$snapshot" \
         && forge_lifecycle_publish "$merged" "$local_dir/state.md"
@@ -497,6 +495,18 @@ forge_lifecycle_adopt() {
             if [ "$renamed" -eq 1 ]; then
                 forge_lifecycle_restore_branch "$target" "$primary" "$branch" "$current" "$resolved" || true
             fi
+            return 1
+        fi
+    else
+        # Preserving continuity does not skip the current connectivity defaults.
+        local access_helper
+        access_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/development-access.sh"
+        if [ ! -f "$access_helper" ] || [ -L "$access_helper" ] \
+            || ! bash "$access_helper" configure --project-root "$target"; then
+            if [ "$renamed" -eq 1 ]; then
+                forge_lifecycle_restore_branch "$target" "$primary" "$branch" "$current" "$resolved" || true
+            fi
+            forge_lifecycle_fail "ADOPT_BLOCKED: development-access configuration failed"
             return 1
         fi
     fi

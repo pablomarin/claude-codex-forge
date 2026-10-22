@@ -32,11 +32,10 @@ branches, project configuration and local workflow state are preserved. To limit
 ask **“This checkout only”** or use `--this-checkout-only` (PowerShell: `-ThisCheckoutOnly`).
 See [worktree and multi-repo updates](guides/agent-assisted-setup.md#worktrees-and-multiple-repositories).
 
-For a trusted local Claude project that needs Codex reviewers, Docker or database connections,
-request [connected development](guides/connected-development.md). The explicit
-`--connected-development` / `-ConnectedDevelopment` setup option preserves command permissions
-while configuring the main shell's project-local access. Normal setup leaves sandbox policy to
-the host and preserves existing choices; reviewer isolation stays independent.
+[Connected development](guides/connected-development.md) is automatic for Claude and Codex:
+normal setup and upgrades configure access to reviewers, Docker and database tools, preserving
+unrelated settings and native command permissions. Forge worktrees receive the same default.
+Host and organization controls still apply; reviewer isolation stays independent.
 
 Prefer running commands yourself? Follow the **manual setup** below. Both paths use `setup.sh` or
 `setup.ps1`; there is no separate agent installer.

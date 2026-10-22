@@ -1,4 +1,5 @@
 {
+  "sandbox": { "enabled": false },
   "permissions": {
     "allow": [
       "Read",

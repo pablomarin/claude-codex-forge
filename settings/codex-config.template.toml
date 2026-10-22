@@ -11,7 +11,7 @@ args = ["@playwright/mcp@latest"]
 
 [sandbox_workspace_write]
 writable_roots = [".forge/local"]
-network_access = false
+network_access = true
 
 # The immutable Goal ledger stays under Git's common directory, outside this writable root.
 # forge:end v6

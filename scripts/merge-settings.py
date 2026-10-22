@@ -1170,6 +1170,19 @@ def copy_preserved(source: Path, destination: Path) -> None:
         shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=False)
     elif source.is_file():
         destination.parent.mkdir(parents=True, exist_ok=True)
+        if source.name == "settings.local.json" and source.parent.name == ".claude":
+            destination.touch(mode=0o600, exist_ok=True)
+        if os.name == "nt" and source.name == "settings.local.json" and source.parent.name == ".claude":
+            # copy2 does not preserve Windows ACLs. The staged local settings
+            # become the live file at commit, so keep their original access rules.
+            environment = dict(os.environ, FORGE_ACL_SOURCE=str(source), FORGE_ACL_TARGET=str(destination))
+            copied = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                 "$ErrorActionPreference = 'Stop'; Set-Acl -LiteralPath $env:FORGE_ACL_TARGET -AclObject (Get-Acl -LiteralPath $env:FORGE_ACL_SOURCE)"],
+                env=environment, capture_output=True, text=True, check=False,
+            )
+            if copied.returncode:
+                raise RefreshBlocked("cannot preserve local Claude settings access rules")
         shutil.copy2(source, destination)
 
 
@@ -1661,6 +1674,10 @@ def prepare_project_gitignore(
             raise RefreshBlocked("project .gitignore is not a regular file")
         original = source.read_bytes()
         if b".forge/local/" in original.splitlines():
+            # Materialization also manages local settings in this stage. Always
+            # seed the real ignore bytes so its non-repository helper can only
+            # append missing local entries, never create a replacement file.
+            copy_preserved(source, stage / relative)
             return
         newline = b"\r\n" if b"\r\n" in original else b"\n"
         updated = original
@@ -2076,6 +2093,8 @@ def full_refresh(
         )
         if top.returncode or Path(top.stdout.strip()).resolve() != target:
             raise RefreshBlocked("project full refresh must run at the canonical repository root")
+        if connected_development_cli(["--project-root", str(target), "--check"]):
+            raise RefreshBlocked("local development settings preflight failed")
 
     validate_no_incomplete_journal(target)
     txid = f"{int(time.time())}-{uuid.uuid4().hex}"
@@ -2149,7 +2168,7 @@ def full_refresh(
         if scope == "project":
             translated_state_sources = prepare_state(target, stage, repo_root, report)
             prepare_project_gitignore(target, stage, report)
-            for relative in ("AGENTS.md", ".codex/config.toml"):
+            for relative in ("AGENTS.md", ".codex/config.toml", ".claude/settings.local.json"):
                 source = target / relative
                 if source.exists():
                     reject_link_ancestors(target, relative_path(relative))
@@ -2219,7 +2238,7 @@ def full_refresh(
             source = Path(operation["destination"])
             destination = backup_root / relative_path(operation["relative"])
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
+            copy_preserved(source, destination)
 
         report_path = stage / ".forge/local/migration-reports" / f"{txid}.tsv"
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2827,9 +2846,6 @@ def main():
         if os.environ.get("FORGE_TRANSACTION_STAGE") != "1":
             print(f"  Backup: {backup}")
         sys.exit(0)
-
-    if is_forge_project_settings_template(template) and isinstance(user.get("sandbox"), dict):
-        print("CLAUDE_SANDBOX: PRESERVED existing project sandbox policy; for a trusted local project the agent can run setup.sh --connected-development (PowerShell: setup.ps1 -ConnectedDevelopment)")
 
     # Detect file type by content
     if "mcpServers" in template:

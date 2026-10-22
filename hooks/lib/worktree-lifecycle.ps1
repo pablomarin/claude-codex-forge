@@ -298,15 +298,12 @@ function Seed-ForgeWorktree([string]$Requested) {
         Fail-ForgeLifecycle "SEED_BLOCKED: target state template is unavailable"
     }
     $merged = Merge-FoldableNarrative $template $narrative
-    $connectionSelection = Join-Path $primary '.forge/local/connected-development.json'
-    if ((Test-Path -LiteralPath $connectionSelection) -or (Test-Reparse $connectionSelection)) {
-        $accessHelper = Join-Path $PSScriptRoot 'development-access.ps1'
-        if (-not (Test-Path -LiteralPath $accessHelper -PathType Leaf) -or (Test-Reparse $accessHelper)) {
-            Fail-ForgeLifecycle 'SEED_BLOCKED: development-access helper is unavailable; rerun Forge setup'
-        }
-        & $accessHelper -Action Inherit -SourceRoot $primary -ProjectRoot $target
-        if ($LASTEXITCODE -ne 0) { Fail-ForgeLifecycle 'SEED_BLOCKED: connected-development inheritance failed' }
+    $accessHelper = Join-Path $PSScriptRoot 'development-access.ps1'
+    if (-not (Test-Path -LiteralPath $accessHelper -PathType Leaf) -or (Test-Reparse $accessHelper)) {
+        Fail-ForgeLifecycle 'SEED_BLOCKED: development-access helper is unavailable; rerun Forge setup'
     }
+    & $accessHelper -Action Configure -ProjectRoot $target
+    if ($LASTEXITCODE -ne 0) { Fail-ForgeLifecycle 'SEED_BLOCKED: connected-development configuration failed' }
     Publish-State $narrative $snapshot
     Publish-State $merged $state
     Write-Output "SEED_OK: worktree=$target snapshot=.forge/local/.state-seed-snapshot.md"
@@ -445,6 +442,15 @@ function Adopt-ForgeWorktree([string]$Requested, [string]$WorkKind, [string]$Wor
             $renamed = $true
         }
         if ($initiallyUnseeded) { Seed-ForgeWorktree $target }
+        else {
+            # Retain continuity while applying the current connectivity defaults.
+            $accessHelper = Join-Path $PSScriptRoot 'development-access.ps1'
+            if (-not (Test-Path -LiteralPath $accessHelper -PathType Leaf) -or (Test-Reparse $accessHelper)) {
+                Fail-ForgeLifecycle 'ADOPT_BLOCKED: development-access helper is unavailable'
+            }
+            & $accessHelper -Action Configure -ProjectRoot $target
+            if ($LASTEXITCODE -ne 0) { Fail-ForgeLifecycle 'ADOPT_BLOCKED: development-access configuration failed' }
+        }
         Set-ForgeWorktreeIdentity $target $BaseRef $resolved
     } catch {
         if ($initiallyUnseeded) {
