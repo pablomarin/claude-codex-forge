@@ -134,14 +134,13 @@ assert_contains "$TARGET/.forge/local/state.md" "| Worktree root | $TARGET_PHYSI
 assert_contains "$TARGET/.forge/local/state.md" "| Workflow base SHA | $BASE_SHA |" \
     "create freezes the resolved base SHA in state"
 
-start_test "new worktrees retain an explicitly selected connected environment without copying secrets"
+start_test "new worktrees default to connected access without copying secrets"
 printf '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false}}\n' > "$PRIMARY/.claude/settings.json"
 printf '{"env":{"PRIMARY_SECRET":"must-not-copy"},"permissions":{"deny":["Bash(primary-only *)"]}}\n' > "$PRIMARY/.claude/settings.local.json"
-python3 "$REPO_ROOT/scripts/merge-settings.py" connected-development --project-root "$PRIMARY" > "$BASE/connected.out" 2>&1
-assert_equals "$?" 0 "primary selects connected development explicitly"
+target_local_before=$(hash_file "$TARGET/.claude/settings.local.json")
 "$HELPER" seed --worktree "$TARGET" > "$BASE/connected-reseed.out" 2>&1
 [ "$?" -ne 0 ] && pass "already initialized target refuses reseeding" || fail "already initialized target must refuse reseeding"
-assert_file_missing "$TARGET/.claude/settings.local.json" "refused reseed does not change local sandbox policy"
+assert_hash_equals "$TARGET/.claude/settings.local.json" "$target_local_before" "refused reseed does not change local sandbox policy"
 assert_file_missing "$TARGET/.forge/local/connected-development.json" "refused reseed does not add a connection marker"
 assert_file_missing "$TARGET/.gitignore" "refused reseed does not change ignore policy"
 (cd "$PRIMARY" && "$HELPER" create --kind fix --name future-connected --base HEAD) > "$BASE/connected-create.out" 2> "$BASE/connected-create.err"
@@ -150,13 +149,13 @@ python3 - "$PRIMARY/.worktrees/future-connected" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 local = root / '.claude/settings.local.json'
-assert local.is_file(), 'new worktree lost the explicitly selected connected setting'
+assert local.is_file(), 'new worktree lost default connected access'
 assert json.loads(local.read_text()) == {'sandbox': {'enabled': False}}, 'worktree copied secrets or unrelated local policy'
 assert json.loads((root / '.claude/settings.json').read_text())['sandbox']['enabled'] is True
 PY
 assert_equals "$?" 0 "only the connected toggle carries into a future CLI/helper worktree"
 
-start_test "connection inheritance preserves target choices and never imports primary environment"
+start_test "connected defaults preserve unrelated target values and never import primary environment"
 for choice in explicit environment; do
     own_target="$PRIMARY/.worktrees/own-$choice"
     git -C "$PRIMARY" -c core.hooksPath=/dev/null worktree add -qb "fixture-own-$choice" "$own_target" HEAD
@@ -172,23 +171,22 @@ for choice in explicit environment; do
 import json, pathlib, sys
 value = json.loads(pathlib.Path(sys.argv[1]).read_text())
 assert value['env'] == {'TARGET_VALUE': 'keep'}, 'primary environment leaked or target environment changed'
-assert value['sandbox']['enabled'] is (sys.argv[2] == 'explicit')
+assert value['sandbox']['enabled'] is False
 if sys.argv[2] == 'environment':
     assert value['permissions'] == {'deny': ['Bash(target-only *)']}
 PY
     assert_equals "$?" 0 "$choice target keeps its own local environment and permission choices"
 done
 
-start_test "a later primary sandbox choice stops connection inheritance"
+start_test "connected worktree defaults do not depend on a primary selection"
 printf '{"sandbox":{"enabled":true}}\n' > "$PRIMARY/.claude/settings.local.json"
 (cd "$PRIMARY" && "$HELPER" create --kind fix --name future-restricted --base HEAD) > "$BASE/restricted-create.out" 2>&1
 assert_equals "$?" 0 "new worktree creation respects a later restricted primary choice"
-assert_file_missing "$PRIMARY/.worktrees/future-restricted/.claude/settings.local.json" "an old marker cannot override the primary's current choice"
-rm "$PRIMARY/.forge/local/connected-development.json"
+assert_contains "$PRIMARY/.worktrees/future-restricted/.claude/settings.local.json" 'false' "new worktree uses connected access regardless of primary local choice"
 printf '{"sandbox":{"enabled":false}}\n' > "$PRIMARY/.claude/settings.local.json"
 (cd "$PRIMARY" && "$HELPER" create --kind fix --name future-unselected --base HEAD) > "$BASE/unselected-create.out" 2>&1
 assert_equals "$?" 0 "new worktree creation succeeds without explicit connection-selection provenance"
-assert_file_missing "$PRIMARY/.worktrees/future-unselected/.claude/settings.local.json" "an unmarked local false is not copied as an explicit Forge selection"
+assert_contains "$PRIMARY/.worktrees/future-unselected/.claude/settings.local.json" 'false' "new worktree needs no selection marker"
 
 start_test "v6 helper adopts a clean host-native worktree onto the exact feature branch"
 NATIVE_BASE=$(scratch_dir lifecycle-native)

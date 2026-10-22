@@ -646,15 +646,15 @@ PY
     done
 done
 
-start_test "Claude defaults defer sandbox selection to the developer"
+start_test "Claude defaults support connected development"
 python3 - "$REPO_ROOT" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 for name in ("settings.template.json", "settings-windows.template.json"):
     settings = json.loads((root / "settings" / name).read_text())
-    assert "sandbox" not in settings, f"{name} still forces a main-agent sandbox"
+    assert settings.get("sandbox", {}).get("enabled") is False, f"{name} does not default to connected shell access"
 PY
-assert_equals "$?" "0" "fresh Unix and Windows Claude settings leave sandbox policy to the host"
+assert_equals "$?" "0" "fresh Unix and Windows Claude settings enable connected shell access"
 
 start_test "ordinary upgrades preserve existing developer sandbox policy"
 S10=$(scratch_dir preserve-claude-sandbox)
@@ -674,9 +674,8 @@ assert result.returncode == 0, result.stderr
 actual = json.loads(target.read_text())
 assert actual["sandbox"] == policy, "upgrade changed developer sandbox policy"
 assert actual["developerPreference"] == "keep"
-assert "CLAUDE_SANDBOX: PRESERVED" in result.stdout, "existing sandbox needs an actionable diagnostic"
 PY
-    assert_equals "$?" "0" "$platform upgrade preserves sandbox settings and explains the connected option"
+    assert_equals "$?" "0" "$platform shared merge preserves unrelated sandbox settings; installer manages the local override"
 done
 
 start_test "connected-development selection changes only the local sandbox toggle"
@@ -766,4 +765,11 @@ if command -v pwsh >/dev/null 2>&1; then
     assert_equals "$?" 0 "PS7 refuses tracked selections and keeps new/adopted worktrees clean with private or global ignores"
 fi
 
+start_test "older-base lifecycle applies Codex networking without changing outside TOML"
+python3 "$REPO_ROOT/tests/support/codex-worktree-default-use-cases.py" --source-root "$REPO_ROOT" --engine bash
+assert_equals "$?" 0 "Bash create/adopt fixes old managed network false and preserves BOM/CRLF/user TOML"
+if command -v pwsh >/dev/null 2>&1; then
+    python3 "$REPO_ROOT/tests/support/codex-worktree-default-use-cases.py" --source-root "$REPO_ROOT" --engine powershell
+    assert_equals "$?" 0 "PS7 create/adopt fixes old managed network false and preserves BOM/CRLF/user TOML"
+fi
 report "test-merge-settings.sh"

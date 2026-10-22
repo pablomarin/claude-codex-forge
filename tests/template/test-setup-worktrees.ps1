@@ -224,17 +224,18 @@ try {
             Assert-True ((Read-Text (Join-Path $target '.codex/config.toml')).Contains('model = "gpt-6-astra"')) 'Codex config preserved'
         }
         Assert-True (((& git -C $primary for-each-ref '--format=%(refname) %(objectname)' refs/heads) -join "`n") -eq $branches) 'upgrade preserves branches/HEADs'
-        Assert-True ((Read-Text (Join-Path $tmp "$main-upgrade.log")).Contains('CLAUDE_SANDBOX: PRESERVED')) 'upgrade explains preserved sandbox choice'
         foreach ($target in $roots) {
             Write-Text (Join-Path $target '.claude/settings.local.json') '{"sandbox":{"enabled":true},"permissions":{"deny":["Bash(project-protected *)"]}}'
         }
-        Assert-True ((Invoke-Setup $link (Join-Path $tmp "$main-connected.log") @{Upgrade=$true;ConnectedDevelopment=$true}) -eq 0) 'explicit connected selection propagates from linked checkout'
+        Assert-True ((Invoke-Setup $link (Join-Path $tmp "$main-connected.log") @{Upgrade=$true}) -eq 0) 'ordinary upgrade enables connected access in every checkout'
         foreach ($target in $roots) {
             $shared = Read-Text (Join-Path $target '.claude/settings.json') | ConvertFrom-Json
             $local = Read-Text (Join-Path $target '.claude/settings.local.json') | ConvertFrom-Json
             Assert-True ($shared.sandbox.enabled -eq $true -and $shared.sandbox.allowUnsandboxedCommands -eq $false) 'shared sandbox policy preserved'
             Assert-True ($local.sandbox.enabled -eq $false) 'explicit local sandbox toggle applied'
             Assert-True ($local.permissions.deny[0] -ceq 'Bash(project-protected *)') 'local permissions preserved'
+            Assert-True ((Read-Text (Join-Path $target '.codex/config.toml')).Contains('network_access = true')) 'Codex workspace networking enabled'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $target '.forge/local/connected-development.json'))) 'no selection marker created'
             & git -C $target check-ignore -q .claude/settings.local.json
             Assert-True ($LASTEXITCODE -eq 0) 'local settings stay gitignored'
         }
@@ -313,6 +314,8 @@ try {
     Assert-True ((Invoke-Setup $bareLink (Join-Path $tmp 'bare.log') @{Upgrade=$true}) -eq 0) 'bare metadata entry skipped'
     Assert-True (Test-Path (Join-Path $bareLink '.forge/version')) 'actual linked checkout installed'
     Assert-True (-not (Test-Path (Join-Path $bare '.forge'))) 'bare metadata not installed'
+    & $python.Source (Join-Path $root 'tests/support/connected-default-use-cases.py') --source-root $root --engine powershell
+    Assert-True ($LASTEXITCODE -eq 0) 'connected defaults include ordinary upgrade and transactional preview/execution/rollback'
     Write-Host "test-setup-worktrees.ps1: $passes passed, $failures failed; runtime $($PSVersionTable.PSVersion)"
 } finally {
     $env:PATH = $initialPath

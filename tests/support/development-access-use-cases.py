@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable local-selection provenance and Git-clean worktree controls."""
+"""Executable connected-default and Git-clean worktree controls."""
 import argparse
 import json
 import os
@@ -24,16 +24,12 @@ def run(command, *, cwd=None, env=None, success=True):
     return result
 
 
-def access(action, root, primary=None, **kwargs):
+def access(action, root, **kwargs):
     if args.engine == "bash":
         command = [shell, str(source / "hooks/lib/development-access.sh"), action, "--project-root", str(root)]
-        if primary is not None:
-            command += ["--source-root", str(primary)]
     else:
         command = [shell, "-NoProfile", "-File", str(source / "hooks/lib/development-access.ps1"),
                    "-Action", action, "-ProjectRoot", str(root)]
-        if primary is not None:
-            command += ["-SourceRoot", str(primary)]
     return run(command, **kwargs)
 
 
@@ -84,6 +80,9 @@ with tempfile.TemporaryDirectory(prefix="forge-development-access-") as temporar
         local = root / ".claude/settings.local.json"
         local.write_text('{"env":{"PRIMARY_ONLY":"must-not-copy"}}')
         access("configure", root, env=env)
+        assert not (root / '.forge/local/connected-development.json').exists(), 'default configuration must not create a selection marker'
+        # An old marker has no authority and must not affect new worktree defaults.
+        (root / '.forge/local/connected-development.json').write_text('legacy inert user bytes')
         for relative in (".forge/local/connected-development.json", ".forge/local/connected-settings-real-staging"):
             run(["git", "-C", str(root), "check-ignore", "-q", "--", relative], env=env)
         ignore_after = (root / ".gitignore").read_bytes() if (root / ".gitignore").exists() else None
@@ -97,27 +96,19 @@ with tempfile.TemporaryDirectory(prefix="forge-development-access-") as temporar
         assert run(["git", "-C", str(created), "status", "--porcelain"], env=env).stdout == "", "inherit dirtied new worktree"
         adopted = base / (variant + "-native-adopt")
         run(["git", "-C", str(root), "worktree", "add", "-qb", "native-adopt", str(adopted), "HEAD"], env=env)
-        (adopted / ".claude/settings.local.json").write_text('{"env":{"TARGET_ONLY":"keep"},"permissions":{"deny":["Bash(target-only *)"]}}')
+        (adopted / ".claude/settings.local.json").write_text('{"sandbox":{"enabled":true},"env":{"TARGET_ONLY":"keep"},"permissions":{"deny":["Bash(target-only *)"]}}')
         lifecycle("adopt", root, target=adopted, name="adopted-connected", env=env)
         value = json.loads((adopted / ".claude/settings.local.json").read_text())
         assert value == {"env": {"TARGET_ONLY": "keep"}, "permissions": {"deny": ["Bash(target-only *)"]}, "sandbox": {"enabled": False}}
         assert run(["git", "-C", str(adopted), "status", "--porcelain"], env=env).stdout == "", "inherit dirtied adopted worktree"
-        for relative in (".forge/local/connected-development.json", ".claude/settings.local.json"):
-            run(["git", "-C", str(root), "add", "-f", "--", relative], env=env)
-            refused = base / (variant + "-refused-" + Path(relative).name)
-            refused.mkdir()
-            result = access("inherit", refused, primary=root, env=env, success=False)
-            assert "tracked" in result.stderr.lower(), result.stderr
-            assert list(refused.iterdir()) == [], "tracked source changed target configuration"
-            run(["git", "-C", str(root), "reset", "-q", "HEAD", "--", relative], env=env)
         target_local = created / ".claude/settings.local.json"
         target_local.write_text('{"sandbox":{"enabled":true},"env":{"TARGET_ONLY":"keep"}}')
-        run(["git", "-C", str(created), "add", "-f", ".forge/local/connected-development.json"], env=env)
+        run(["git", "-C", str(created), "add", "-f", ".claude/settings.local.json"], env=env)
         before = target_local.read_bytes(), private_ignore.read_bytes()
         result = access("configure", created, env=env, success=False)
         assert "tracked" in result.stderr.lower(), result.stderr
         assert (target_local.read_bytes(), private_ignore.read_bytes()) == before
-        print(f"PASS {args.engine}: {variant}, clean create/adopt, source/target tracked-input refusal", flush=True)
+        print(f"PASS {args.engine}: {variant}, marker-free clean create/adopt, tracked target refused", flush=True)
 
     # A private exclude is repository-local metadata, but it still must not be
     # followed through a link when the helper needs to add ignore entries.
@@ -139,3 +130,23 @@ with tempfile.TemporaryDirectory(prefix="forge-development-access-") as temporar
         assert not (root / ".claude/settings.local.json").exists()
         assert not (root / ".gitignore").exists()
         print(f"PASS {args.engine}: aliased private exclude refused before local writes", flush=True)
+
+    # Root aliases must not turn a tracked-input refusal into a non-repo write.
+    root = base / 'real-root'
+    (root / '.claude').mkdir(parents=True)
+    tracked = root / '.claude/settings.local.json'
+    tracked.write_text('{"sandbox":{"enabled":true}}')
+    run(['git', '-C', str(root), 'init', '-q'])
+    run(['git', '-C', str(root), 'add', '-f', '.claude/settings.local.json'])
+    alias = base / 'root-alias'
+    try:
+        alias.symlink_to(root, target_is_directory=True)
+    except OSError:
+        print(f'SKIP {args.engine}: host cannot create root alias', flush=True)
+    else:
+        before = tracked.read_bytes()
+        result = access('configure', alias, success=False)
+        assert 'tracked' in result.stderr.lower(), result.stderr
+        assert tracked.read_bytes() == before
+        assert not (root / '.gitignore').exists()
+        print(f'PASS {args.engine}: aliased root still refuses tracked local settings', flush=True)
