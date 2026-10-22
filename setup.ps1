@@ -23,6 +23,8 @@ param(
 
     [switch]$ThisCheckoutOnly,
 
+    [switch]$ConnectedDevelopment,
+
     [Alias("u")]
     [switch]$Upgrade,
 
@@ -88,6 +90,10 @@ if ($AuthoritativeRefresh -and ($Upgrade -or $WithPlaywright)) {
     [Console]::Error.WriteLine("ERROR: Force cannot be combined with Upgrade or WithPlaywright.")
     exit 1
 }
+if ($ConnectedDevelopment -and ($AuthoritativeRefresh -or $RetireGlobal)) {
+    [Console]::Error.WriteLine('ERROR: -ConnectedDevelopment is a separate local choice; use ordinary setup or -Upgrade, without -Force or -RetireGlobal.')
+    exit 1
+}
 
 if ($DeprecatedFullRefresh) {
     [Console]::Error.WriteLine("DEPRECATED: -FullRefresh/-R is an alias for -Force; use -Force.")
@@ -132,6 +138,7 @@ function Show-Usage {
     Write-Host "  -f, -Force          Authoritative transactional full installation/reconciliation"
     Write-Host "      -DryRun         Preview -Force without writing target files"
     Write-Host "      -ThisCheckoutOnly  Limit setup to this checkout (default: all Git worktrees)"
+    Write-Host "      -ConnectedDevelopment  Use native shell access for a trusted local Claude project"
     Write-Host "  -g, -Global         Retired; prints the project-only migration path"
     Write-Host "      -RetireGlobal   Preview removal of a legacy global Forge harness"
     Write-Host "      -Apply          Apply -RetireGlobal after a matching preview"
@@ -762,7 +769,7 @@ try {
     }
 } catch {}
 
-& (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows -ReleaseVersion $ForgeVersion
+& (Join-Path (Join-Path $ScriptDir "scripts") "materialize-adapters.ps1") -RepoRoot $ScriptDir -Target (Get-Location).Path -Scope project -Platform windows -ReleaseVersion $ForgeVersion -ConnectedDevelopment:$ConnectedDevelopment
 Write-NativeGoalCollisions (Get-Location).Path
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($prevForgeVersion -and $prevForgeVersion -ne $ForgeVersion) {

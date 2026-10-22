@@ -240,6 +240,32 @@ public static class ForgeDelayedBranchGit {
         exit 0
     }
     foreach ($mainHost in @('claude', 'codex')) {
+        $root = Join-Path $scratch "$mainHost-evidence-phases"
+        New-Fixture $root 'new-feature' $mainHost
+        # Keep the evidence side channel current so the probe isolates the Stop
+        # advisory from build-evidence's separately registered publication.
+        $receiptProbe = @'
+function Invoke-VerificationReceipt {
+    param([string]$ReceiptMode, [string]$StatePath)
+    [IO.File]::AppendAllText((Join-Path (Get-Location) '.forge/local/stop-receipt-checks'), "checked`n")
+    return @{ Status = 2; Output = '' }
+}
+'@
+        [IO.File]::WriteAllText((Join-Path $root '.forge\hooks\lib\verification-receipt.ps1'), $receiptProbe, $utf8)
+        foreach ($phase in @('diagnosis', 'requirements', 'planning', 'implementation', 'repair', 'preliminary-e2e', 'custom-review', 'complete', 'review', 'verify', 'verification', 'shipping', 'promotion', 'finalize', 'finalization', 'promote', 'ship')) {
+            $result = Invoke-FixtureScript $root (Join-Path $root '.forge\hooks\lib\workflow-state.ps1') @(
+                'checkpoint', '--host', $mainHost, '--phase', $phase, '--next-step', 'continue scoped work')
+            Assert-Check ($result.Status -eq 0) "$mainHost $phase checkpoint succeeds"
+            Set-CrlfState $root
+            [IO.File]::WriteAllText((Join-Path $root '.forge\local\forge-goal-last-fingerprint'), "current`n", $utf8)
+            $probePath = Join-Path $root '.forge\local\stop-receipt-checks'
+            if (Test-Path $probePath) { Remove-Item $probePath }
+            $result = Invoke-Stop $root $root $mainHost
+            Assert-Check ($result.Status -eq 0) "$mainHost $phase receipt warning remains advisory"
+            $finalPhase = $phase -cin @('review', 'verify', 'verification', 'shipping', 'promotion', 'finalize', 'finalization', 'promote', 'ship')
+            Assert-Check ($result.Err.Contains('FORGE_FINAL_EVIDENCE_STALE') -eq $finalPhase) "$mainHost $phase final receipt warning matches stage"
+            Assert-Check ((Test-Path $probePath) -eq $finalPhase) "$mainHost $phase final receipt advisory check matches stage"
+        }
         foreach ($workflow in @('quick-fix', 'new-feature', 'fix-bug')) {
           foreach ($nonceMode in @('missing', 'empty', 'template')) {
             $root = Join-Path $scratch "$mainHost-$workflow-$nonceMode"
@@ -267,7 +293,7 @@ public static class ForgeDelayedBranchGit {
         Set-CrlfState $root
         $result = Invoke-Stop $root $root $mainHost
         Assert-Check ($result.Status -eq 0) "$mainHost changed checkpoint allows Stop"
-        Assert-Check ($result.Err.Contains('FORGE_FINAL_EVIDENCE_STALE')) "$mainHost active receipt warning"
+        Assert-Check (-not $result.Err.Contains('FORGE_FINAL_EVIDENCE_STALE')) "$mainHost implementation does not demand final receipts"
         Assert-NoGoalOutput $result $mainHost "$mainHost CRLF active inline/check-state"
         Assert-NonGoalBuilder $root $root $mainHost "$mainHost CRLF active"
         $result = Invoke-Stop $root $root $mainHost

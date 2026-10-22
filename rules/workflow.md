@@ -140,7 +140,11 @@ CI/release coverage, not automatic local gates. A workflow invocation, candidate
 release, or integration boundary is not permission to launch them locally. Report unexecuted coverage
 honestly; required feature-specific acceptance and user-journey checks remain applicable.
 Do not mechanically restart unrelated verification. A mutation invalidates only evidence whose
-boundary it can affect, while exact-candidate receipts still require the same final fingerprint.
+boundary it can affect. Exact-candidate receipts require the same final fingerprint or the explicit
+recomputed documentation closure below. During diagnosis, planning, implementation, repair and
+preliminary E2E, missing final receipts are expected: preserve progress and run focused checks.
+Stop's final-evidence advisory belongs to finalization phases and never requests new reviews or
+verifier runs by itself. Actual shipping always enforces the complete applicable certification.
 Environment-only Windows, authenticated, and manual gates remain honest final gates; they do not
 trigger implementation loops or authorize fake evidence.
 
@@ -254,9 +258,9 @@ records progress and never activates a mode:
    `code-spec` and `code-quality` lenses against the same candidate and iteration.
 7. **Verify:** run `verify-app` and E2E against that same candidate and write their structured
    receipts. E2E N/A requires its candidate-bound report and reason.
-8. **Invalidate on change:** Any candidate mutation invalidates the final review and verifier
-   receipts. Restage, freeze a new candidate, increment the iteration before review, and rerun the
-   affected final gates.
+8. **Invalidate on functional change:** Restage, freeze a new candidate, increment the iteration
+   before fresh paired review, and rerun the affected final gates. An eligible non-runtime prose
+   correction may instead use the documentation closure below without another paired-review round.
 9. **Promote:** revalidate the complete receipt set and promote only the exact certified tree.
 
 Quick-fix is deliberately separate. It requires a clean exact-base activation, a clearly understood
@@ -361,4 +365,57 @@ Then restage/refreeze and rerun the affected final gates; never relabel old rece
 8. Commit only through candidate promotion. PR creation remains a separate human pause.
 
 Human-readable reports and receipts remain local under `.forge/local/`; do not mutate tracked source
-after the final gates. A mutation returns to step 5 and repeats all affected final gates.
+after the final gates without following the applicable invalidation or documentation closure path.
+
+### Documentation-only corrections
+
+Use this bounded path only after a complete passing certification, for corrections to explicitly
+declared non-runtime prose. It does not reclassify feature work as quick-fix. The final candidate
+still has its own exact fingerprint; original reviews, app verification and E2E remain truthful
+evidence about the original candidate. A separate closure proves their applicability to the final
+tree. Known changes to the runtime environment or services require the relevant verification.
+
+Before the original certification, the project may commit `.forge/verification-scope.tsv`:
+
+```text
+# forge:non-runtime-prose v1
+prose	docs/CHANGELOG.md
+```
+
+Each row uses a literal tab and one exact existing `.md`/`.markdown` path under `docs/`, or root
+`CHANGELOG.md`, without globs. Reserved instruction/configuration paths remain excluded even if
+enrolled; `README.md` is outside this bounded path contract. Enroll a path only when it is prose,
+not an application/build input, generated documentation, requirements,
+or agent policy. Missing policy disables reuse; changing it requires normal certification before
+it can authorize anything. Forge source dogfood uses `manifests/verification-scope.tsv` instead of
+adding a generated installation. That fallback requires the canonical source markers and no
+installed scope policy. The initial source scope includes only changelog narrative.
+
+1. Before changing the certified candidate, preserve its candidate receipt under a distinct
+   `.forge/local/evidence/<task>/original-candidate.receipt` path. Keep the original review/verifier
+   receipts and reports unchanged. Checkpoint while the original evidence is current so the helper
+   preserves first certification. Do not increment the paired-review iteration for prose closure.
+2. Correct only eligible prose, stage it, and freeze the new staged-clean candidate at the active
+   `Candidate receipt` path, using the same frozen workflow base. Do not change receipt-table rows
+   manually. Reuse permits the same HEAD or the original candidate's existing proven exact Forge
+   promotion. Arbitrary commits, merge/rebase and changed workflow/worktree identity require normal
+   certification. Preserve original promotion evidence until closure archives its provenance.
+3. Run `.forge/hooks/lib/verification-receipt.sh close-docs --state .forge/local/state.md
+   --previous-candidate .forge/local/evidence/<task>/original-candidate.receipt` (one shell call).
+   PowerShell uses `verification-receipt.ps1 -Mode close-docs -State .forge/local/state.md
+   -PreviousCandidate <original-path>`.
+   The helper checks the exact Git delta for whitespace and protected release metadata, then emits
+   a `.docs-closure` sidecar only if the policy and all original evidence validate.
+4. Run the ordinary `verification-receipt check` and exact candidate promotion. The shared gate
+   recomputes closure applicability at shipping boundaries. For a second correction before
+   promotion, always compare the original certified candidate to the newest candidate; do not
+   create an inheritance chain, refresh evidence timestamps, or reset the convergence anchor.
+
+Instruction, workflow, skill, plan, requirements, config and unknown paths remain functional even
+when Markdown or explicitly enrolled. Adds/deletes, renames, binary, symlink and mode changes do
+not qualify. A change to the first machine-consumed changelog `##` heading also requires normal
+certification. Historical narrative headings are prose under the same scope contract. Scope policy
+and original report/receipt hashes must remain unchanged; expired evidence cannot be renewed by
+editing prose. Generated documentation, link/rendering requirements and other functional inputs
+need their own relevant checks; the built-in prose check does not claim to validate those tools.
+Never turn a refused closure into a fabricated PASS, an N/A checkbox, or an authorization record.

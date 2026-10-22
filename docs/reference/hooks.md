@@ -16,6 +16,10 @@ their native events into the same policy.
 | `SubagentStop` | Reviewer/producer finishes | Validates structured, candidate-bound review output |
 | `ConfigChange` | Claude Code configuration changes | Audits changes and may block managed deny-rule removal in strict mode |
 
+Stop's final-receipt advisory runs only in explicit finalization phases. Diagnosis, planning,
+implementation, repair and preliminary E2E keep their state/Goal/continuation behavior without
+premature stale-final-evidence warnings. The advisory itself never dispatches reviews or tests.
+
 ## Host Routing
 
 Claude Code hooks are registered in `.claude/settings.json`; Codex hooks are registered in
@@ -79,6 +83,12 @@ inactive. Only checked authorization lines inside `## PR authorization` count; d
 that section use the last line and emit a warning. Checklist and narrative summaries cannot
 authorize publication or invalidate the canonical approval.
 Artifact-bound review prompts, outputs, and receipts live under `.forge/local/reviews/`.
+
+The same validator also accepts an eligible recomputed documentation closure. Original reviews,
+verifier reports, hashes and timestamps remain bound to the original candidate; the `.docs-closure`
+sidecar proves the explicitly enrolled prose delta to the exact final candidate. Promotion and
+shipping recheck that proof. See the canonical
+[documentation-only corrections](../../rules/workflow.md#documentation-only-corrections) procedure.
 
 For an exact `/quick-fix <valid-slug>`, the same hook keeps configuration and Goal authorization
 checks, then validates one recorded ancestral base and a maximum of three implementation paths.

@@ -206,8 +206,9 @@ A code-review finding is not a council trigger; keep findings in this bounded re
 loop, then surface a remaining blocker to the developer.
 
 Human-readable reports and receipts remain local under `.forge/local/`; they are not post-verification
-source commits. Any candidate mutation invalidates final review and verifier receipts. A mutation in
-the exact-candidate boundary returns to step 5 and requires fresh candidate-bound final receipts.
+source commits. Functional candidate mutation returns to step 5 and requires fresh candidate-bound
+final receipts. An eligible non-runtime prose correction after certification instead follows the
+shared [documentation-only correction](../rules/workflow.md#documentation-only-corrections) procedure.
 Do not restart unrelated focused verification mechanically. Intermediate reviews never satisfy the
 ship gate.
 

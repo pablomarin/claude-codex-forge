@@ -206,10 +206,11 @@ exhaustive local regression suites require an explicit developer request for tha
 A code-review finding is not a council trigger; keep findings in this bounded repair and closure
 loop, then surface a remaining blocker to the developer.
 
-A mutation invalidates only evidence whose boundary it can affect. Any candidate mutation
-invalidates final review and verifier receipts; any mutation in the exact-
-candidate boundary requires a new freeze and fresh candidate-bound final receipts. Do not restart
-unrelated focused verification mechanically. Intermediate reviews never satisfy the ship gate.
+A mutation invalidates only evidence whose boundary it can affect. Functional candidate mutation
+requires a new freeze and fresh candidate-bound final receipts. For an eligible non-runtime prose
+correction after certification, follow the shared
+[documentation-only correction](../rules/workflow.md#documentation-only-corrections) procedure.
+Do not restart unrelated focused verification mechanically. Intermediate reviews never satisfy the ship gate.
 Human-readable reports and receipts remain local evidence, not tracked post-verification source.
 
 For a Developer Demo, every claimed-current diagram edge needs a `file:line` Evidence row; an

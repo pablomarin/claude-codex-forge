@@ -86,5 +86,5 @@ function ConvertFrom-Json {
     fast=(ROOT/"tests/template/run-fast.sh").read_text()
     for name in ("test-powershell-runner.sh","test-powershell-local.sh","test-windows-ci-feedback.sh"):
         assert name in fast, "fast gate must register "+name
-    assert len(list((ROOT/"tests/template").glob("test-*.ps1")))==18
-    print("PASS: portable fast registration; native discovery remains 18 suites; no attestation")
+    assert len(list((ROOT/"tests/template").glob("test-*.ps1")))==19
+    print("PASS: portable fast registration; native discovery includes 19 suites; no attestation")

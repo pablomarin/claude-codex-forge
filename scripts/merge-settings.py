@@ -2757,7 +2757,28 @@ def merge_mcp(template, user):
     return changes
 
 
+def connected_development_cli(argv: list[str]) -> int:
+    """Source-setup compatibility entrypoint over the canonical runtime helper."""
+    parser = argparse.ArgumentParser(prog="merge-settings.py connected-development")
+    parser.add_argument("--project-root", required=True)
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args(argv)
+    helper = Path(__file__).resolve().parent.parent / "hooks/lib/development-access"
+    if os.name == "nt":
+        command = ["powershell.exe", "-NoProfile", "-File", str(helper.with_suffix(".ps1")),
+                   "-Action", "Configure", "-ProjectRoot", args.project_root]
+        if args.check:
+            command.append("-Check")
+    else:
+        command = ["bash", str(helper.with_suffix(".sh")), "configure", "--project-root", args.project_root]
+        if args.check:
+            command.append("--check")
+    return subprocess.call(command)
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "connected-development":
+        sys.exit(connected_development_cli(sys.argv[2:]))
     if len(sys.argv) >= 2 and sys.argv[1] == "cleanup-workflow-skills":
         sys.exit(cleanup_workflow_skills_cli(sys.argv[2:]))
     if len(sys.argv) >= 2 and sys.argv[1] == "full-refresh":
@@ -2806,6 +2827,9 @@ def main():
         if os.environ.get("FORGE_TRANSACTION_STAGE") != "1":
             print(f"  Backup: {backup}")
         sys.exit(0)
+
+    if is_forge_project_settings_template(template) and isinstance(user.get("sandbox"), dict):
+        print("CLAUDE_SANDBOX: PRESERVED existing project sandbox policy; for a trusted local project the agent can run setup.sh --connected-development (PowerShell: setup.ps1 -ConnectedDevelopment)")
 
     # Detect file type by content
     if "mcpServers" in template:

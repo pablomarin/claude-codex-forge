@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory=$true)][string]$Target,
     [Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$ReleaseVersion,
     [ValidateSet("project")][string]$Scope = "project",
-    [ValidateSet("windows")][string]$Platform = "windows"
+    [ValidateSet("windows")][string]$Platform = "windows",
+    [switch]$ConnectedDevelopment
 )
 
 $ErrorActionPreference = "Stop"
@@ -622,6 +623,7 @@ function Merge-ManagedJsonObject {
     }
 }
 
+
 function Merge-JsonManagedEntries {
     param([string]$Template, [string]$Destination)
     $parent = Split-Path -Parent $Destination
@@ -629,6 +631,9 @@ function Merge-JsonManagedEntries {
     if (-not (Test-Path $Destination)) { Copy-Item $Template $Destination; return }
     $user = Get-Content -Raw $Destination | ConvertFrom-Json
     $owned = Get-Content -Raw $Template | ConvertFrom-Json
+    if ((Split-Path -Leaf $Template) -in @('settings.template.json', 'settings-windows.template.json') -and $user.PSObject.Properties['sandbox']) {
+        Write-Host 'CLAUDE_SANDBOX: PRESERVED existing project sandbox policy; for a trusted local project the agent can run setup.sh --connected-development (PowerShell: setup.ps1 -ConnectedDevelopment)'
+    }
     $beforeCanonical = $user | ConvertTo-Json -Depth 30 -Compress
     if ([string]$owned.description -ceq 'Forge v6 project hooks') {
         if ($user.PSObject.Properties['forgeManagedVersion'] -and [int]$user.forgeManagedVersion -eq 6) {
@@ -854,6 +859,10 @@ function Write-InstallManifest {
     else { [IO.File]::Move($temporary, $out) }
 }
 
+if ($ConnectedDevelopment) {
+    & (Join-Path $RepoRoot 'hooks/lib/development-access.ps1') -Action Configure -ProjectRoot $Target -Check
+    if ($LASTEXITCODE -ne 0) { throw 'connected-development preflight failed' }
+}
 Invoke-LegacyAliasCleanup "check"
 $rows = Read-ManagedManifest $Manifest
 $retiredWorkflowSkills = Get-RetiredWorkflowSkills $rows
@@ -894,6 +903,10 @@ Merge-JsonManagedEntries (Join-Path $RepoRoot "settings\settings-windows.templat
 Merge-JsonManagedEntries (Join-Path $RepoRoot "mcp.template.json") (Join-Path $Target ".mcp.json")
 Merge-CodexHookEntries (Join-Path $RepoRoot "settings\codex-hooks.template.json") (Join-Path $Target ".codex\hooks.json")
 Set-CodexTomlBlock (Join-Path $RepoRoot "settings\codex-config.template.toml") (Join-Path $Target ".codex\config.toml") (Join-Path $Target ".mcp.json")
+if ($ConnectedDevelopment) {
+    & (Join-Path $RepoRoot 'hooks/lib/development-access.ps1') -Action Configure -ProjectRoot $Target
+    if ($LASTEXITCODE -ne 0) { throw 'connected-development configuration failed' }
+}
 Invoke-LegacyAliasCleanup "apply"
 foreach ($relative in $retiredWorkflowSkills.Keys) {
     Assert-NoLinkAncestor $Target $relative

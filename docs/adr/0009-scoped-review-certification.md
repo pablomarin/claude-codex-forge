@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-06-06)
+Accepted (2026-06-06); documentation-revalidation cost amended by [0012](0012-bounded-prose-certification.md).
 
 ## Context
 

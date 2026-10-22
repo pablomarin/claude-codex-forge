@@ -67,6 +67,59 @@ try {
     Check ((Get-Content (Join-Path $Target '.forge\local\state.md') -Raw) -match [regex]::Escape("| Worktree root | $Target |")) 'worktree identity bound'
     Check ((Get-Content (Join-Path $Target '.forge\local\state.md') -Raw) -match [regex]::Escape("| Workflow base SHA | $baseSha |")) 'base SHA frozen'
 
+    [IO.File]::WriteAllText((Join-Path $Primary '.claude/settings.json'), '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false}}')
+    [IO.File]::WriteAllText((Join-Path $Primary '.claude/settings.local.json'), '{"env":{"PRIMARY_SECRET":"must-not-copy"},"permissions":{"deny":["Bash(primary-only *)"]}}')
+    & powershell.exe -NoProfile -File (Join-Path $RepoRoot 'hooks/lib/development-access.ps1') -Action Configure -ProjectRoot $Primary | Out-Null
+    Check ($LASTEXITCODE -eq 0) 'primary selects connected development explicitly'
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & powershell.exe -NoProfile -File $Helper -Action Seed -Worktree $Target *>&1 | Out-Null
+        $reseedRc = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousPreference }
+    Check ($reseedRc -ne 0) 'already initialized target refuses reseeding'
+    Check (-not (Test-Path -LiteralPath (Join-Path $Target '.claude/settings.local.json'))) 'refused reseed does not change local sandbox policy'
+    Check (-not (Test-Path -LiteralPath (Join-Path $Target '.forge/local/connected-development.json'))) 'refused reseed does not add a connection marker'
+    Check (-not (Test-Path -LiteralPath (Join-Path $Target '.gitignore'))) 'refused reseed does not change ignore policy'
+    Push-Location $Primary
+    & powershell.exe -NoProfile -File $Helper -Action Create -Kind fix -Name future-connected -Base HEAD | Out-Null
+    Pop-Location
+    Check ($LASTEXITCODE -eq 0) 'actual lifecycle create succeeds after connected setup'
+    $future = Join-Path $Primary '.worktrees/future-connected/.claude/settings.local.json'
+    Check (Test-Path -LiteralPath $future) 'future worktree retains connected local setting'
+    if (Test-Path -LiteralPath $future) {
+        $futureSettings = [IO.File]::ReadAllText($future) | ConvertFrom-Json
+        Check ($futureSettings.sandbox.enabled -eq $false) 'future worktree main-agent sandbox disabled by explicit selection'
+        Check (-not $futureSettings.PSObject.Properties['env'] -and -not $futureSettings.PSObject.Properties['permissions']) 'primary secrets and unrelated local permissions are never copied'
+    }
+    foreach ($choice in @('explicit', 'environment')) {
+        $ownTarget = Join-Path $Primary ".worktrees/own-$choice"
+        & git -C $Primary -c core.hooksPath=/dev/null worktree add -qb "fixture-own-$choice" $ownTarget HEAD
+        [IO.Directory]::CreateDirectory((Join-Path $ownTarget '.claude')) | Out-Null
+        $ownLocal = Join-Path $ownTarget '.claude/settings.local.json'
+        $ownJson = if ($choice -eq 'explicit') { '{"sandbox":{"enabled":true},"env":{"TARGET_VALUE":"keep"}}' } else { '{"env":{"TARGET_VALUE":"keep"},"permissions":{"deny":["Bash(target-only *)"]}}' }
+        [IO.File]::WriteAllText($ownLocal, $ownJson)
+        & powershell.exe -NoProfile -File $Helper -Action Seed -Worktree $ownTarget | Out-Null
+        Check ($LASTEXITCODE -eq 0) "$choice target seeds successfully"
+        $value = [IO.File]::ReadAllText($ownLocal) | ConvertFrom-Json
+        Check ($value.env.TARGET_VALUE -ceq 'keep' -and -not $value.env.PSObject.Properties['PRIMARY_SECRET']) "$choice target retains only its own environment"
+        Check ($value.sandbox.enabled -eq ($choice -eq 'explicit')) "$choice target preserves explicit sandbox preference"
+        if ($choice -eq 'environment') { Check ($value.permissions.deny[0] -ceq 'Bash(target-only *)') 'target deny permission survives connection inheritance' }
+    }
+    [IO.File]::WriteAllText((Join-Path $Primary '.claude/settings.local.json'), '{"sandbox":{"enabled":true}}')
+    Push-Location $Primary
+    & powershell.exe -NoProfile -File $Helper -Action Create -Kind fix -Name future-restricted -Base HEAD | Out-Null
+    Pop-Location
+    Check ($LASTEXITCODE -eq 0) 'new worktree respects a later restricted primary choice'
+    Check (-not (Test-Path -LiteralPath (Join-Path $Primary '.worktrees/future-restricted/.claude/settings.local.json'))) 'old marker cannot override the current primary choice'
+    [IO.File]::Delete((Join-Path $Primary '.forge/local/connected-development.json'))
+    [IO.File]::WriteAllText((Join-Path $Primary '.claude/settings.local.json'), '{"sandbox":{"enabled":false}}')
+    Push-Location $Primary
+    & powershell.exe -NoProfile -File $Helper -Action Create -Kind fix -Name future-unselected -Base HEAD | Out-Null
+    Pop-Location
+    Check ($LASTEXITCODE -eq 0) 'unmarked primary false does not block worktree creation'
+    Check (-not (Test-Path -LiteralPath (Join-Path $Primary '.worktrees/future-unselected/.claude/settings.local.json'))) 'only explicit Forge connection selection is inherited'
+
     $nativeTarget = Join-Path $Primary '.claude\worktrees\native-feature'
     & git -C $Primary worktree add -q -b claude/native-feature $nativeTarget $baseSha
     & git -C $Primary config branch.claude/native-feature.description 'host-native metadata'
@@ -258,5 +311,7 @@ try {
     }
     Remove-Item -LiteralPath $Scratch -Recurse -Force -ErrorAction SilentlyContinue
 }
+& python (Join-Path $RepoRoot 'tests/support/development-access-use-cases.py') --source-root $RepoRoot --engine powershell --shell (Get-Process -Id $PID).Path
+Check ($LASTEXITCODE -eq 0) 'native development selection provenance and clean create/adopt with private/global ignores'
 Write-Host "test-worktree-lifecycle.ps1: $Pass passed, $Fail failed"
 if ($Fail -gt 0) { exit 1 }

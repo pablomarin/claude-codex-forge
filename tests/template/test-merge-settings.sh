@@ -646,4 +646,124 @@ PY
     done
 done
 
+start_test "Claude defaults defer sandbox selection to the developer"
+python3 - "$REPO_ROOT" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+for name in ("settings.template.json", "settings-windows.template.json"):
+    settings = json.loads((root / "settings" / name).read_text())
+    assert "sandbox" not in settings, f"{name} still forces a main-agent sandbox"
+PY
+assert_equals "$?" "0" "fresh Unix and Windows Claude settings leave sandbox policy to the host"
+
+start_test "ordinary upgrades preserve existing developer sandbox policy"
+S10=$(scratch_dir preserve-claude-sandbox)
+for platform in unix windows; do
+    template="$REPO_ROOT/settings/settings.template.json"
+    [ "$platform" = windows ] && template="$REPO_ROOT/settings/settings-windows.template.json"
+    python3 - "$MERGE" "$template" "$S10/$platform.json" <<'PY'
+import json, pathlib, subprocess, sys
+merger, template, name = sys.argv[1:]
+target = pathlib.Path(name)
+policy = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+          "network": {"allowedDomains": ["development.example.invalid"]},
+          "filesystem": {"denyRead": ["~/private"]}}
+target.write_text(json.dumps({"sandbox": policy, "developerPreference": "keep"}))
+result = subprocess.run([sys.executable, merger, template, str(target)], capture_output=True, text=True)
+assert result.returncode == 0, result.stderr
+actual = json.loads(target.read_text())
+assert actual["sandbox"] == policy, "upgrade changed developer sandbox policy"
+assert actual["developerPreference"] == "keep"
+assert "CLAUDE_SANDBOX: PRESERVED" in result.stdout, "existing sandbox needs an actionable diagnostic"
+PY
+    assert_equals "$?" "0" "$platform upgrade preserves sandbox settings and explains the connected option"
+done
+
+start_test "connected-development selection changes only the local sandbox toggle"
+S11=$(scratch_dir connected-development)
+mkdir -p "$S11/project/.claude"
+cat > "$S11/project/.claude/settings.local.json" <<'JSON'
+{"sandbox":{"enabled":true,"network":{"allowedDomains":["project.example.invalid"]}},"permissions":{"deny":["Bash(sudo *)"]},"env":{"PROJECT_SETTING":"preserved"}}
+JSON
+chmod 600 "$S11/project/.claude/settings.local.json"
+python3 "$MERGE" connected-development --project-root "$S11/project" > "$S11/connected.log" 2>&1
+assert_equals "$?" "0" "explicit connected-development selection succeeds"
+python3 - "$S11/project" <<'PY'
+import json, pathlib, stat, sys
+root = pathlib.Path(sys.argv[1])
+actual = json.loads((root / ".claude/settings.local.json").read_text())
+assert actual["sandbox"] == {"enabled": False, "network": {"allowedDomains": ["project.example.invalid"]}}
+assert actual["permissions"] == {"deny": ["Bash(sudo *)"]}
+assert actual["env"] == {"PROJECT_SETTING": "preserved"}
+assert stat.S_IMODE((root / ".claude/settings.local.json").stat().st_mode) == 0o600
+assert ".claude/settings.local.json" in (root / ".gitignore").read_text().splitlines()
+PY
+assert_equals "$?" "0" "selection preserves local permissions, environment and domain choices and ignores the local file"
+connected_hash=$(hash_file "$S11/project/.claude/settings.local.json")
+python3 "$MERGE" connected-development --project-root "$S11/project" > "$S11/repeat.log" 2>&1
+assert_equals "$?" "0" "repeated connected selection succeeds"
+assert_hash_equals "$S11/project/.claude/settings.local.json" "$connected_hash" "repeated selection leaves local settings byte-identical"
+mkdir "$S11/fresh"
+python3 "$MERGE" connected-development --project-root "$S11/fresh" > "$S11/fresh.log" 2>&1
+assert_equals "$?" "0" "explicit selection creates a fresh local settings file"
+python3 - "$S11/fresh/.claude/settings.local.json" <<'PY'
+import json, pathlib, sys
+assert json.loads(pathlib.Path(sys.argv[1]).read_text()) == {"sandbox": {"enabled": False}}
+PY
+assert_equals "$?" "0" "fresh local selection adds no command permission bypasses"
+
+start_test "connected-development refuses malformed and aliased user settings"
+for invalid in malformed nonobject sandbox-nonobject symlink tracked; do
+    project="$S11/$invalid"
+    mkdir -p "$project/.claude"
+    case "$invalid" in
+        malformed) printf '{broken\n' > "$project/.claude/settings.local.json" ;;
+        nonobject) printf '[]\n' > "$project/.claude/settings.local.json" ;;
+        sandbox-nonobject) printf '{"sandbox":[]}\n' > "$project/.claude/settings.local.json" ;;
+        tracked)
+            printf '{"sandbox":{"enabled":true}}\n' > "$project/.claude/settings.local.json"
+            git -C "$project" init -q
+            git -C "$project" add -f .claude/settings.local.json ;;
+        symlink)
+            printf '{"sandbox":{"enabled":true}}\n' > "$S11/outside.json"
+            ln -s "$S11/outside.json" "$project/.claude/settings.local.json" ;;
+    esac
+    before=$(hash_file "$project/.claude/settings.local.json")
+    python3 "$MERGE" connected-development --project-root "$project" > "$S11/$invalid.log" 2>&1
+    [ "$?" -ne 0 ] && pass "$invalid settings are rejected" || fail "$invalid settings must be rejected"
+    assert_hash_equals "$project/.claude/settings.local.json" "$before" "$invalid user settings remain byte-identical"
+done
+
+if command -v pwsh >/dev/null 2>&1; then
+    start_test "portable PowerShell preserves private local settings permissions"
+    python3 - "$REPO_ROOT" "$S11" <<'PY'
+import json, pathlib, stat, subprocess, sys
+source, scratch = map(pathlib.Path, sys.argv[1:])
+root = scratch / 'powershell-private'
+(root / '.claude').mkdir(parents=True)
+local = root / '.claude/settings.local.json'
+local.write_text('{"env":{"PRIVATE_SETTING":"preserve"},"permissions":{"deny":["Bash(sudo *)"]}}')
+local.chmod(0o600)
+result = subprocess.run(['pwsh', '-NoLogo', '-NoProfile', '-File',
+                         str(source / 'hooks/lib/development-access.ps1'), '-ProjectRoot', str(root)],
+                        capture_output=True, text=True)
+assert result.returncode == 0, result.stderr
+assert stat.S_IMODE(local.stat().st_mode) == 0o600, 'PowerShell broadened local settings file permissions'
+value = json.loads(local.read_text())
+assert value['sandbox']['enabled'] is False
+assert value['env'] == {'PRIVATE_SETTING': 'preserve'}
+assert value['permissions'] == {'deny': ['Bash(sudo *)']}
+assert not list((root / '.forge/local').glob('connected-settings-*')), 'secret-bearing staging file was not cleaned'
+PY
+    assert_equals "$?" 0 "PS7 selection preserves mode0600, environment and deny permissions"
+fi
+
+start_test "development selection stays local and Git-clean through create and adopt"
+python3 "$REPO_ROOT/tests/support/development-access-use-cases.py" --source-root "$REPO_ROOT" --engine bash
+assert_equals "$?" 0 "Bash refuses tracked selections and keeps new/adopted worktrees clean with private or global ignores"
+if command -v pwsh >/dev/null 2>&1; then
+    python3 "$REPO_ROOT/tests/support/development-access-use-cases.py" --source-root "$REPO_ROOT" --engine powershell
+    assert_equals "$?" 0 "PS7 refuses tracked selections and keeps new/adopted worktrees clean with private or global ignores"
+fi
+
 report "test-merge-settings.sh"

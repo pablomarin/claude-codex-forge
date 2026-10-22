@@ -96,6 +96,15 @@ local executable as a readiness gap, without claiming it is absent from the whol
 Full refresh preserves the reusable project ADR template, including an unchanged seeded copy.
 Preserve customized ADR indexes and verify their referenced paths after migration.
 
+When the developer requests ordinary tool connectivity in a trusted local Claude project, use the
+explicit `--connected-development` / `-ConnectedDevelopment` option with fresh or routine setup.
+Reuse approval for that exact scope; do not require the developer to edit settings or type a
+terminal command. The option configures local main-shell access while preserving native command
+permissions and isolated reviewer configuration. Ordinary upgrades preserve existing sandbox
+choices. Do not silently broaden organization or user-global policy. Follow
+[connected development](connected-development.md) to verify reviewer transport, Docker and database
+access separately and to distinguish installed configuration from authenticated Desktop evidence.
+
 ## What the agent runs
 
 | Repository state | Deterministic installer action |
