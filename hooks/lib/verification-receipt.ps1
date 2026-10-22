@@ -201,6 +201,9 @@ function Invoke-DocsGit([string]$Root, [string[]]$Arguments) {
     return $lines -join "`n"
 }
 function Test-DocsObject([string]$Root, [string]$Object) {
+    # Windows PowerShell turns redirected native stderr into terminating errors
+    # under Stop. This existence probe must use Git's exit status for absence.
+    $ErrorActionPreference = 'Continue'
     & git -C $Root cat-file -e $Object 2>$null
     return $LASTEXITCODE -eq 0
 }

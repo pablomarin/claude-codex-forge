@@ -123,6 +123,16 @@ function Edit-ClosureProse {
     Freeze-Fixture
 }
 try {
+    # Model Windows PowerShell's native-stderr error record on portable PS7 too.
+    function git { $global:LASTEXITCODE = 128; Write-Error 'fatal: object does not exist' }
+    try {
+        $present = $true; $probeThrew = $false
+        try { $present = Test-DocsObject $repo 'missing-object' }
+        catch { $probeThrew = $true }
+        Assert-Closure (-not $probeThrew -and -not $present) 'missing Git object stderr is an absent object rather than an exception'
+        Assert-Closure ($ErrorActionPreference -ceq 'Stop') 'object probe preserves caller error policy'
+    }
+    finally { Remove-Item Function:git }
     foreach ($mainHost in @('claude','codex')) {
         foreach ($fallback in @($false,$true)) {
             New-ClosureFixture "$mainHost-$fallback" $mainHost $fallback
