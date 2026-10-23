@@ -33,6 +33,14 @@ For Forge source development, the local gate is `tests/template/run-fast.sh`, no
 
 ## Working Contract
 
+- For every user-facing UI task (website, app, component, styling, interaction or
+  UI copy), read `.forge/skills/ui-design/SKILL.template.md` and
+  `.forge/rules/frontend-design.md` before UI implementation. The skill applies
+  implicitly even without a manual invocation. Premium visual quality and concise
+  copy are supported acceptance criteria, including Product UI and Trust-First.
+  Dispatch independent `forge-ui-qa` for rendered browser acceptance and include
+  its outcome in the existing E2E evidence as specified by the skill.
+
 - The agent running in the developer's current host is the main agent for that session. There is
   no permanent main-engine preference and no workflow lease.
 - Run `.forge/hooks/lib/workflow-state.sh show` before resuming work (PowerShell:

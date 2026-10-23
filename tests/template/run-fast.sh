@@ -13,6 +13,8 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-lint.sh"
     "$REPO_ROOT/tests/template/test-platform-parity.sh"
     "$REPO_ROOT/tests/template/test-contracts.sh"
+    "$REPO_ROOT/tests/template/test-ui-design-install.sh"
+    "$REPO_ROOT/tests/template/test-ui-design-contracts.sh"
     "$REPO_ROOT/tests/template/test-pr-authorization.sh"
     "$REPO_ROOT/tests/template/test-candidate-worktree.sh"
     "$REPO_ROOT/tests/template/test-docs-closure.sh"

@@ -7,6 +7,31 @@
 
 ---
 
+## Premium Workspace Standard
+
+Efficiency and visual appeal are both acceptance criteria. Start with the
+documented direction from ui-design: a deliberate canvas/surface/accent palette,
+clear typography, confident composition and contemporary component craft.
+Search 21st.dev for new or substantially redesigned navigation, tables, command
+menus, forms, inspectors and backgrounds; integrate them into existing tokens.
+
+A rich workspace may use a deep navigation rail against a lighter work surface,
+subtle tonal gradients, translucent floating controls with opaque fallbacks,
+layered inspectors, refined borders and brief selection/disclosure transitions.
+Choose treatments that suit the brand; do not apply the same glass/neon recipe
+to every app. Data stays readable and controls respond immediately.
+
+Show the primary task and most important status first. Remove duplicate heading
+explanations and permanent help paragraphs. Put optional fields, provenance and
+secondary explanations in an inspector or expandable section, while keeping
+scope, costs, dates and irreversible consequences visible. Empty states need
+brief useful guidance and a primary action, not a manual.
+
+The independent forge-ui-qa role must assess visual quality separately from task
+success. Functional tables and predictable navigation alone do not pass.
+
+---
+
 ## App Shell Architecture
 
 Every product UI needs a consistent, predictable shell:
@@ -34,7 +59,10 @@ Every product UI needs a consistent, predictable shell:
 
 The most complex and important component in product UI.
 
-### Required Features
+### Features to Select for the Actual Task
+
+Use only the capabilities the user needs; this is not a quota to add every
+control to a simple list.
 
 - [ ] **Sticky header** — visible during scroll
 - [ ] **Sort** — click column header, visual indicator for sort direction

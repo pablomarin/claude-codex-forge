@@ -1,141 +1,92 @@
-# Polish Checklist
+# UI Polish and Acceptance Checklist
 
-> Post-build quality audit. Run through every section before delivering UI work.
+Use this for every website, app and component task. Check affected surfaces and
+applicable states; do not manufacture features to satisfy an unrelated checklist.
+The main agent inspects first, then a fresh forge-ui-qa reviewer checks the browser.
 
-## 1. Spacing Audit
+## Visual direction and component craft
 
-- [ ] Consistent spacing scale used throughout (4, 8, 12, 16, 24, 32, 48, 64, 96 — no arbitrary values)
-- [ ] Intentional whitespace — not over-padded (a common AI slop pattern)
-- [ ] Responsive padding scales down on mobile via `clamp()` or breakpoints
-- [ ] No giant gaps between sections just to fill vertical space
-- [ ] Section rhythm feels intentional — varying density creates visual interest
+- [ ] The short design brief names users, tasks, scope, visual references and a
+  specific aesthetic; the rendered surface follows that direction.
+- [ ] New/substantially redesigned standard components were researched on 21st.dev;
+  source URLs and reuse decisions, or an actual access/compatibility limitation,
+  are recorded. Existing project components are reused coherently.
+- [ ] The screen has a clear focal point and feels current and premium in its
+  context. A functional default component library is insufficient.
+- [ ] Canvas, layered surfaces, accents, borders and depth form a deliberate
+  system. Transparency/blur has readable contrast over real backgrounds and
+  a usable opaque fallback. No effect obscures task content.
+- [ ] Components share typography, spacing, radius and interaction tokens;
+  hover, selected and active treatments feel crafted rather than default.
 
-## 2. Typography Audit
+## Typography, color and composition
 
-- [ ] Clear type hierarchy visible (display, heading, subheading, body, caption)
-- [ ] Fluid `clamp()` scale applied — text scales smoothly between breakpoints
-- [ ] No default fonts (Inter, Roboto, Arial, Space Grotesk) unless brand requires them
-- [ ] `font-display: swap` set on all web fonts
-- [ ] Headings feel distinct from body text (weight, size, possibly different family)
-- [ ] Line-height: 1.4-1.6 for body, 1.1-1.2 for headings
+- [ ] Headings, body, labels, numeric values and captions have useful hierarchy.
+  Fonts fit the brand and remain readable; system fonts are valid for apps.
+- [ ] Spacing has consistent rhythm and comfortable density, without excessive
+  padding, arbitrary gaps, cramped controls or an endless identical-card grid.
+- [ ] Semantic colors support status and primary actions; color is never the
+  only indicator. Text is AA (4.5:1 normal, 3:1 large); UI boundaries meet 3:1.
+- [ ] Supported light/dark themes preserve contrast, identity and surface depth.
 
-## 3. Color Audit
+## Copy and progressive disclosure
 
-- [ ] Semantic color system defined via CSS custom properties (primary, accent, success, warning, error, neutral)
-- [ ] WCAG AA contrast met everywhere (4.5:1 normal text, 3:1 large text/UI elements)
-- [ ] Dark mode handled properly — reduced saturation, not just inverted colors
-- [ ] Accent colors are bold and intentional (not timid pastels or evenly-distributed)
-- [ ] Color is never the sole indicator — pair with icons, text, or patterns
+- [ ] Primary task, location and next action are understood within ten seconds.
+- [ ] Remove repeated headings, redundant introductory paragraphs, duplicate
+  status explanations, internal jargon and permanent tutorial text.
+- [ ] Secondary context is available on demand; essential costs, permissions,
+  risk, status and irreversible consequences remain visible.
+- [ ] Labels and actions are concise and clear. Empty states give brief guidance
+  and an action; errors explain recovery. Icon controls have accessible names.
 
-## 4. Component States Audit
+## Interactions, motion and real states
 
-Every interactive element needs ALL of these states:
+- [ ] Relevant hover, focus, active, disabled, loading, empty, success and error
+  states work. Long names, errors and realistic data do not break the composition.
+- [ ] Motion gives useful feedback and considered delight across all modes.
+  Apps feel fluid; critical decisions stay calm. No looping distraction, forced
+  particles or delayed actions merely to demonstrate animation.
+- [ ] Reduced motion keeps equivalent information and controls without animation.
+  Prefer transform/opacity; measure layout animation if actually necessary.
+- [ ] Loading and optimistic feedback preserve context; errors recover honestly.
+- [ ] Effects pause off-screen where relevant; cleanup removes listeners and
+  animation frames. Avoid large motion dependencies for simple effects.
 
-- [ ] **Hover** — subtle transform or color shift
-- [ ] **Focus** — visible ring/outline via `:focus-visible` (keyboard-only)
-- [ ] **Active** — pressed feedback (scale, color, or shadow change)
-- [ ] **Disabled** — muted, non-interactive appearance (`pointer-events: none`, reduced opacity)
-- [ ] **Loading** — skeleton placeholder or spinner
-- [ ] **Empty** — helpful empty state with guidance (not blank)
-- [ ] **Error** — clear error state with descriptive message
+## Browser, accessibility and responsive proof
 
-Component-specific checks:
+- [ ] Inspect screenshots at 1440×900 and 390×844, plus required project widths
+  (baseline 320, 375, 768, 1024, 1440). Check zoom and long-content overflow.
+- [ ] No unintended page overflow. Wide data tables may scroll in a clearly
+  bounded container while primary actions remain reachable.
+- [ ] Semantic controls, visible focus, useful tab order, labelled fields,
+  keyboard dialogs/menus and usable mobile targets (44px baseline; 48px critical).
+- [ ] Use permitted real assets or realistic synthetic fixtures; no private data
+  in screenshots. Meaningful images have alt text and explicit dimensions.
+- [ ] The final-candidate audit identifies URL, persona, viewports, states,
+  screenshots, task results and separate visual-quality/usability scores.
+- [ ] Both axes score at least 4/5 and all concrete acceptance failures are fixed.
+  A missing browser, state or screenshot is not visual approval.
 
-- [ ] Buttons: clear visual hierarchy (primary solid, secondary outline, ghost/text)
-- [ ] Forms: visible labels (not placeholder-only), inline validation, clear error messages
-- [ ] Cards: consistent border-radius, subtle shadows (not heavy drop-shadows)
+## Mode-specific judgment
 
-## 5. Motion Performance Audit
+- **Marketing:** memorable first impression, useful imagery/motion and a clear
+  conversion path. No mandatory effect recipe or motion quota.
+- **Product UI:** an attractive, comfortable workspace with strong task hierarchy,
+  polished controls, concise copy and efficient keyboard/touch interaction.
+- **Trust-First:** refined visual quality and calm motion, visible consequences,
+  accurate status and accessible decision paths. Professional does not mean dated.
 
-- [ ] Animations use GPU-only properties: `transform` and `opacity` (NEVER `width`, `height`, `margin`, `top`, `left`)
-- [ ] UI feedback transitions under 300ms; layout shifts max 500ms
-- [ ] Ease functions: `ease-out` for entrances, `ease-in` for exits, `ease-in-out` for state changes
-- [ ] `will-change` lifecycle: set before animation starts, remove after completion (NEVER leave permanently)
-- [ ] `cancelAnimationFrame` called and event listeners cleaned up on component unmount
-- [ ] Heavy animations (WebGL, canvas, particles) use `IntersectionObserver` to pause when off-screen
+Taste outside the documented direction is advisory. Failed acceptance requires
+a concrete observation and smallest fix. Use one repair and a bounded closure
+pass; do not chase subjective perfection through endless broad reviews.
+After a repair changes the frozen candidate, the final audit must still observe
+the complete required matrix on that new candidate. A findings-only closure
+report cannot stand in for current final coverage.
 
-## 6. Accessibility Audit
+## Public-facing metadata
 
-- [ ] Semantic HTML: `<nav>`, `<main>`, `<article>`, `<button>`, `<dialog>` (not div soup)
-- [ ] All images have `alt` text (decorative images: `alt=""`)
-- [ ] `aria-label` on all icon-only buttons
-- [ ] Keyboard navigation: all interactive elements focusable and operable via Tab/Enter/Space
-- [ ] Skip navigation link present for keyboard users
-- [ ] `prefers-reduced-motion` respected — static fallback for all animations
-- [ ] `prefers-color-scheme` respected — light and dark modes both tested
-- [ ] Touch targets: minimum 44x44px on mobile
-- [ ] `aria-hidden="true"` on decorative animated elements (SVG waves, particles, gradients)
-
-## 7. Responsive Audit
-
-- [ ] Tested at: 320px, 375px, 768px, 1024px, 1440px
-- [ ] Mobile-first breakpoints using `min-width` media queries
-- [ ] Container max-width set (1200-1440px) with auto margins
-- [ ] Touch targets adequate at mobile sizes
-- [ ] No horizontal overflow at any breakpoint — scroll only vertical
-
-## 8. Anti-Slop Final Check (Mode-Aware)
-
-**Universal** — ask these for ALL modes:
-
-1. **"Does this look intentionally designed, or generated by AI?"**
-2. **"Would I be proud to show this in a portfolio?"**
-3. **"Are all interactive states covered?"** (hover, focus, active, disabled, loading, error, empty)
-4. **"Does every animation serve a purpose?"** (feedback, state change, attention, delight)
-
-**Marketing / Expressive** — also ask:
-
-5. **"Is there HIGH-IMPACT visual motion above the fold?"** — not subtle blurs, but something a non-technical person notices immediately
-6. **"Are section dividers animated?"** — not flat lines or 1px borders
-7. **"Is there at least one interactive element?"** — responds to mouse or scroll
-8. **"Would a non-technical person say 'wow' on page load?"**
-
-**Product UI** — also ask:
-
-5. **"Can the user complete their primary task without confusion?"**
-6. **"Is navigation predictable?"** — can you always tell where you are?
-7. **"Are tables scannable and filterable?"**
-8. **"Are empty and loading states handled gracefully?"**
-
-**Trust-First** — also ask:
-
-5. **"Does the user feel safe and informed?"** — trust signals visible, status clear
-6. **"Are irreversible actions protected?"** — confirmation + explicit consequences
-7. **"Is sensitive data masked by default?"**
-8. **"Is all status communicated with color + icon + text?"** (never color alone)
-
-> If you can't confidently answer "yes" to all applicable checks, the work is not done.
-
-## 9. Social & SEO Metadata Audit
-
-Every deployed site MUST have these assets and metadata configured. Without them, links shared on Teams, Slack, Twitter, iMessage, and search results look broken and unprofessional.
-
-### Required files in `src/app/` (Next.js) or equivalent:
-
-- [ ] **`favicon.ico`** (48x48) — browser tab icon
-- [ ] **`icon.svg`** — scalable vector icon for modern browsers
-- [ ] **`apple-icon.png`** (180x180) — iOS home screen / macOS bookmarks
-- [ ] **`opengraph-image.png`** (1200x630) — branded, dark background with logo centered. This is what people see when sharing links on Teams/Slack/LinkedIn/iMessage
-
-### Required metadata in root layout:
-
-- [ ] **`metadataBase`** — full production URL (`new URL("https://example.com")`)
-- [ ] **`openGraph`** — `title`, `description`, `url`, `siteName`, `type: "website"`
-- [ ] **`twitter`** — `card: "summary_large_image"`, `title`, `description`
-- [ ] **`icons`** — favicon (.ico + .svg) and apple icon configured
-
-### Generation commands (ImageMagick):
-
-```bash
-# Favicon (48x48)
-magick logo.png -resize 48x48 src/app/favicon.ico
-
-# Apple icon (180x180)
-magick logo.png -resize 180x180 src/app/apple-icon.png
-
-# OG image (1200x630 dark background with centered logo)
-magick logo.png -resize 600x /tmp/logo-large.png
-magick -size 1200x630 xc:'#0a0f1a' /tmp/logo-large.png -gravity center -composite src/app/opengraph-image.png
-```
-
-> **Why this matters**: A missing OG image = a blank gray box when your link is shared. First impressions count.
+Every deployed site needs appropriate favicon, scalable icon, apple icon and
+branded share image (1200×630), plus production metadataBase, OpenGraph and Twitter
+card metadata in its framework's equivalent root. Check that public metadata
+does not disclose authenticated private content. Verify real assets and rendered
+share metadata rather than checking filenames alone.

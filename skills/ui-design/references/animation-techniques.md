@@ -1,5 +1,11 @@
 # Animation Techniques Reference
 
+These are optional techniques, not a recipe or effect quota. Use the UI skill's
+documented visual direction in all modes. Apps benefit from fluid selection,
+navigation, disclosure and restrained delight; Trust-First keeps decisions calm.
+Use CSS or existing dependencies before introducing a new animation library.
+Measure performance and provide equivalent reduced-motion/static states.
+
 ## Organic Shapes
 
 Break out of rectangles with organic, fluid forms:
@@ -46,9 +52,11 @@ Use layered `<path>` elements with sinusoidal shapes at different amplitudes:
 </Suspense>
 ```
 
-## Canvas Particles (Hero Default)
+## Canvas Particles (Optional Expressive Hero)
 
-Canvas particle networks are the **default hero background** for tech/SaaS/platform sites. They create immediate "wow" factor and interactivity.
+Canvas particle networks are one optional expressive treatment for a suitable
+tech/SaaS marketing hero. Use only when they fit the documented direction and
+performance/accessibility budget; apps and other heroes need no particle effect.
 
 - `tsparticles` for ready-made configs, or custom Canvas API + `requestAnimationFrame`
 - **Perlin noise** fields create organic, flowing motion (not random jitter)

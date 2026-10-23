@@ -27,8 +27,47 @@ The prompt you receive will specify:
 - **Plan file path** (for feature mode): `docs/plans/YYYY-MM-DD-<feature>.md` OR `docs/plans/<bug-name>-use-cases.md` (simple-fix staging file)
 - **Project type:** `fullstack` | `api` | `cli` | `hybrid` (or read `## E2E Configuration` from the active root host instructions)
 - **Server URLs** (if applicable): from the active root host instructions or the prompt
+- **Candidate/design scope:** exact candidate and running-build identity, changed user-facing surfaces
+  (including shared UI components), documented visual direction and required route/viewport/state matrix.
+- **Independent UI QA:** applicability and its concrete scope reason; for any UI design/change, the
+  unchanged full `forge-ui-qa` subreport dispatched by the main agent for this same candidate and scope.
+  The main agent supplies the browser/session and design brief to that fresh role; you do not ask an
+  implementation agent to grade its own UI or dispatch a nested substitute.
 
 ## Execution Process
+
+### Step 0: Independent UI QA aggregation — before every exit
+
+Determine UI QA applicability from candidate/design scope, not the presence of UI use cases or
+project type alone. Changes to rendered pages, styling, copy, interaction, shared components or UI
+design require this audit even if the regression/smoke collection is empty or contains only API UCs.
+For genuinely non-UI changes, include `UI QA: N/A — <concrete candidate-scope reason>`.
+
+Validate the supplied independent `forge-ui-qa` subreport: exact same candidate and running build,
+required routes/viewports/states and persona scope, screenshot evidence, both score rationales,
+and complete coverage. Do not silently accept a prior preliminary audit as final-candidate evidence.
+Preserve the unchanged full subreport under `## Independent UI QA` in your E2E report, alongside
+scope and validation results. A path, summary or caller assertion is not the full subreport.
+
+Apply this aggregation before every exit, including empty regression/smoke, all-invalid UCs,
+health/setup failure and otherwise N/A outcomes:
+
+- Validated, same-candidate required UI QA FAIL → E2E FAIL, even when all functional tasks pass.
+- Required UI QA BLOCKED, missing, stale, or wrong-candidate → E2E PARTIAL, unless an observed
+  product/test failure already requires FAIL. Incomplete/mismatched coverage, missing screenshot
+  evidence or an invalid PASS (score below 4, acceptance failure) is missing valid audit evidence.
+  Validate binding first: a stale/wrong-candidate FAIL does not prove a failure of this candidate.
+- Only UI QA PASS with both scores >=4, complete coverage and no concrete acceptance failures
+  permits E2E PASS; normal functional verdict rules must also pass. No executable UCs plus a
+  complete required UI QA PASS may PASS the audited UI-only scope; report UC coverage as empty.
+- A proven internal-only change can retain E2E N/A with its concrete reason and UI QA N/A.
+  Missing UI cases or browser access never establishes N/A for a UI change.
+- A supported non-UI behavior change with no executable use cases is PARTIAL for missing
+  functional coverage. An empty collection alone never establishes PASS or internal-only N/A.
+
+This is workflow acceptance aggregated through the existing E2E report and candidate-bound
+`verification-receipt write --kind e2e`. No new receipt type or hook-level visual intelligence is
+introduced. Do not claim that a hook evaluates design quality; the independent browser report does.
 
 ### Step 1: Determine project type and interfaces
 
@@ -38,7 +77,7 @@ Read `## E2E Configuration` from the active root host instructions. If missing, 
 - `pyproject.toml` with FastAPI and no frontend/ → api
 - CLI entrypoint and no API → cli
 
-If still ambiguous, report the ambiguity and stop — do not guess.
+If still ambiguous, report the ambiguity as PARTIAL and produce the report through Step 0 aggregation — do not guess.
 
 ### Step 2: Load use cases
 
@@ -47,9 +86,9 @@ If still ambiguous, report the ambiguity and stop — do not guess.
 - If it's a plan file (under `docs/plans/`): extract use cases from the `#### E2E Use Cases` section.
 - If it's a dedicated use-case file (under `tests/e2e/use-cases/`): the whole file is use cases. Parse all UCs directly.
 
-**Regression mode:** `Glob tests/e2e/use-cases/*.md`; read all files. If the directory is empty (no .md files), report this as mode-not-applicable and exit cleanly (not a failure — there are simply no accumulated use cases yet).
+**Regression mode:** `Glob tests/e2e/use-cases/*.md`; read all files. If the directory is empty (no .md files), record empty UC coverage and proceed to Step 5 through Step 0 aggregation; required UI QA still applies.
 
-**Smoke mode:** Same as regression but filter to use cases tagged `@smoke`.
+**Smoke mode:** Same as regression but filter to use cases tagged `@smoke`. An empty filtered collection also proceeds to Step 5 through Step 0 aggregation.
 
 ### Step 2b: Validate use-case shape (BEFORE health check — no server needed)
 
@@ -175,7 +214,7 @@ SURFACE_COVERAGE_WARNING: Project exposes <SET>. UCs cover <COVERED>. Missing su
 
 ### Step 3: Health check
 
-If the reviewed change is proven to have no supported user-facing behavior, do not invent a user
+If the reviewed change is proven to have no supported user-facing behavior, apply Step 0 first; do not invent a user
 journey or report PASS. Return `VERDICT: N/A` with the normal `SUGGESTED_PATH` header and a third
 line `N/A_REASON: <concrete reason>`. The reason must name the internal-only scope; missing access,
 missing use cases, broken setup, or an untested user surface is not N/A.
@@ -183,7 +222,7 @@ missing use cases, broken setup, or an untested user surface is not N/A.
 - **API:** `curl -fsS $API_URL/health` (or documented health endpoint)
 - **UI:** Navigate to root URL via Playwright MCP, verify page loads
 
-If health check fails, report FAIL_INFRA and stop. Do not test against a broken environment.
+If health check fails, report FAIL_INFRA and proceed to Step 5 through Step 0 aggregation. Do not test against a broken environment.
 
 ### Step 4: Execute use cases
 
@@ -279,6 +318,12 @@ N/A_REASON: <concrete internal-only reason; N/A only>
 - **Pre-justified exclusions:** [any `<Interface>: N/A — <reason>` lines from the plan's Surface coverage decision sub-block]
 - **Warnings:** [zero or more `SURFACE_COVERAGE_WARNING` lines per missing-and-not-pre-justified interface]
 
+## Independent UI QA
+
+- **Applicability:** required | N/A — [candidate/design scope reason]
+- **Binding/coverage validation:** [same candidate/build/persona/routes/viewports/states, evidence]
+- [Embed unchanged full independent subreport here; if absent, state missing and aggregate PARTIAL]
+
 ## Files Read
 
 - [every file read during execution, excluding reports]
@@ -288,7 +333,11 @@ N/A_REASON: <concrete internal-only reason; N/A only>
 [Why PASS/FAIL/PARTIAL — cite classifications]
 ```
 
-**Verdict rules** (top-level VERDICT enum stays at `PASS | FAIL | PARTIAL` — no new top-level value):
+**Verdict rules** (top-level VERDICT enum stays at `PASS | FAIL | PARTIAL`, with the existing
+internal-only `N/A` carve-out — no new top-level value):
+
+Apply Step 0's independent UI QA aggregation to the functional result below before returning.
+A required UI QA failure cannot be waived by all-PASS functional results.
 
 - Any `FAIL_BUG` → `FAIL`
 - Any `FAIL_INVALID_USE_CASE` → `FAIL` (the E2E gate cannot be satisfied until the UC is rewritten; it is a test-design failure but still blocks the gate)

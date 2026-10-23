@@ -87,7 +87,8 @@ to a fresh same-engine reviewer on launch or capability failure.
 | Simplification phase | Forge-owned cleanup before final candidate freeze |
 | Claude `/opinion` / Codex `$opinion` | Distinct fresh code-spec and code-quality receipts over the frozen candidate |
 | `verify-app` agent | Unit tests, migration check, lint, and types |
-| `verify-e2e` agent | User-journey E2E plus regression replay |
+| `forge-ui-qa` agent (UI changes) | Independent desktop/phone browser audit against the frozen candidate and documented direction; private screenshots, visual quality and usability |
+| `verify-e2e` agent | User-journey E2E plus regression replay; aggregates the unchanged same-candidate UI QA subreport before its receipt |
 
 Review uses one broad pass, one repair pass, and one closure pass limited to named findings and
 direct regressions. P3, cosmetic, and speculative concerns do not keep the loop open; reachable
@@ -130,7 +131,8 @@ you need a role directly.
 | Agent             | Purpose                                                                                           | Invocation                                            |
 | ----------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | `verify-app`      | Unit tests + lint + type checks + migrations                                                      | "Use the verify-app agent"                            |
-| `verify-e2e`      | User-journey E2E through API / UI / CLI; produces markdown report at `tests/e2e/reports/`         | "Use the verify-e2e agent"                            |
+| `verify-e2e`      | User-journey E2E through API / UI / CLI; caller persists report under `.forge/local/evidence/`         | "Use the verify-e2e agent"                            |
+| `forge-ui-qa`     | Premium visual quality and usability through browser-only desktop/phone inspection; unchanged subreport feeds E2E | "Use forge-ui-qa with this URL, design brief, persona and safe signed-in browser" |
 | `research-first`  | Pre-design library/API research via Context7 + official docs; writes `docs/research/<feature>.md` | Phase 2 of `/new-feature`, Phase 2.5 of `/fix-bug`    |
 | `council-advisor` | Engineering Council advisor (persona via prompt)                                                  | Dispatched by `/council` skill — not invoked directly |
 

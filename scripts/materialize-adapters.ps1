@@ -446,11 +446,38 @@ function Get-ForgeMaterializerTextHash([string]$Text) {
     finally { $sha.Dispose() }
 }
 
+# Canonical UI metadata uses plain or folded YAML descriptions, not arbitrary YAML.
+function Get-UiAdapterDescription {
+    param([string]$Canonical)
+    $lines = [IO.File]::ReadAllLines($Canonical)
+    if ($lines.Count -eq 0 -or $lines[0] -cne '---') { throw "canonical UI frontmatter missing: $Canonical" }
+    $parts = [Collections.Generic.List[string]]::new()
+    $folded = $false
+    foreach ($line in ($lines | Select-Object -Skip 1)) {
+        if ($line -ceq '---') { break }
+        if ($line -cmatch '^description:[ \t]*(.*)$') {
+            $value = $Matches[1].TrimEnd()
+            if ($value -cmatch '^>[-+]?$') { $folded = $true; continue }
+            if ($value) { return $value }
+            break
+        }
+        if ($folded) {
+            if ($line -cnotmatch '^[ \t]+') { break }
+            if ($line.Trim()) { $parts.Add($line.Trim()) }
+        }
+    }
+    if ($parts.Count) { return $parts -join ' ' }
+    throw "canonical UI discovery description missing: $Canonical"
+}
+
 function Render-Adapter {
     param([string]$Template, [string]$Destination, [string]$CanonicalPath, [string]$Revision)
     $name = [IO.Path]::GetFileNameWithoutExtension($Destination)
     if ([IO.Path]::GetFileName($Destination) -eq "SKILL.md") { $name = Split-Path (Split-Path $Destination -Parent) -Leaf }
     $description = "Forge adapter for $name"
+    if ($CanonicalPath -in @('.forge/skills/ui-design/SKILL.template.md', '.forge/agents/forge-ui-qa.md')) {
+        $description = Get-UiAdapterDescription (Join-Path $Target ($CanonicalPath -replace '/', '\'))
+    }
     if ($CanonicalPath -in @(
         '.forge/workflows/opinion.md',
         '.forge/workflows/new-feature.md',
@@ -485,6 +512,8 @@ function Render-Adapter {
         $capture = $false
     }
     $capabilities = if ($capabilityLines.Count) { $capabilityLines -join "`n" } else { 'tools: "Read, Grep, Glob, Bash"' }
+    # YAML and TOML wrappers both use double-quoted strings.
+    $description = $description.Replace('\', '\\').Replace('"', '\"')
     $text = [IO.File]::ReadAllText($Template)
     $text = $text.Replace("{{CANONICAL_PATH}}", $CanonicalPath).Replace("{{CANONICAL_REVISION}}", $Revision).Replace("{{REVISION}}", $Revision)
     $text = $text.Replace("{{NAME}}", $name).Replace("{{DESCRIPTION}}", $description).Replace("{{CAPABILITIES}}", $capabilities).Replace("{{MODEL}}", "inherit")

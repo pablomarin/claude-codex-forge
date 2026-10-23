@@ -7,14 +7,31 @@
 
 ---
 
+## Premium Visual Quality Without Lost Trust
+
+Trust-First keeps the same premium visual bar as apps and marketing. Use refined
+type, intentional color, layered surfaces and a composed layout. Calm movement
+and restrained translucency are welcome where they clarify focus; critical text
+and decisions need stable, readable backgrounds and opaque fallbacks. Avoid
+busy motion behind risk, balance, identity or confirmation information.
+
+Search 21st.dev for compatible presentation primitives and customize them into
+the product's visual system. Never copy payment, permission or regulated logic
+as a side effect of adopting a component. Keep essential consequences visible;
+move secondary explanations into details rather than surrounding every action
+with a wall of text. Concise language must not omit material risk or status.
+
+The independent forge-ui-qa reviewer checks premium visuals and first-time
+understanding separately. Calm and professional does not mean plain or dated.
+
 ## Trust Signals
 
 Users on high-stakes surfaces need constant reassurance. Make trust visible:
 
-### Required Trust Elements
+### Applicable, Verified Trust Elements
 
-- [ ] **Credentials/certifications** visible (HIPAA badge, SOC2, PCI, bar association, medical license)
-- [ ] **Security indicators** — HTTPS lock, encryption mention, "Your data is encrypted" near sensitive inputs
+- [ ] **Credentials/certifications** — display only verified, applicable credentials the product is authorized to claim; never invent a badge to make a design appear trustworthy
+- [ ] **Security indicators** — describe only verified protections in plain language; an icon is not evidence of encryption, compliance or non-storage
 - [ ] **Contact information** prominent — phone, email, chat. Users need to know a human is reachable
 - [ ] **Privacy policy** linked near data collection points (not just in the footer)
 - [ ] **Data ownership** — tell users what happens to their data, how long it's stored, how to delete it
@@ -39,8 +56,8 @@ Forms where mistakes have real consequences need extra friction and clarity.
 │  Routing Number *            [●●●●●●●89]  [Show]            │  ← Masked by default
 │  Account Number *            [●●●●●●4829] [Show]            │
 │                                                              │
-│  ⓘ Your bank details are encrypted and never stored          │  ← Trust signal inline
-│    on our servers. Learn more →                              │
+│  ⓘ How your payment details are handled →                   │  ← Link to verified facts
+│                                                              │
 │                                                              │
 │  [← Back]                              [Continue →]          │
 └──────────────────────────────────────────────────────────────┘
@@ -48,7 +65,9 @@ Forms where mistakes have real consequences need extra friction and clarity.
 
 ### Review Step (MANDATORY for Trust-First)
 
-Before any irreversible action, show a review screen summarizing ALL submitted data:
+Before an irreversible action, summarize decision-critical information, costs
+and consequences with edit controls. Keep sensitive identifiers masked and omit
+unnecessary personal data; do not turn review into an exhaustive data dump.
 
 ```
 ┌─────────────────────────────────────────┐
@@ -76,8 +95,8 @@ Before any irreversible action, show a review screen summarizing ALL submitted d
 - **Every required field** marked with `*` and "(required)" label
 - **Inline validation on blur** with specific, helpful error messages
 - **Sensitive fields masked by default** with a "Show" toggle
-- **Trust signals inline** near sensitive inputs (encryption, privacy, non-storage)
-- **Review step before submission** — show all data, allow editing each section
+- **Trust signals inline** near sensitive inputs only when verified and relevant
+- **Review before irreversible submission** — show essential facts and consequences, allow correction
 - **Explicit consequences** stated before confirm button
 - **Confirmation distinct from navigation** — "Confirm & Submit" not just "Continue"
 - **Success state** — clear confirmation page with reference number, next steps, and contact info
@@ -102,7 +121,7 @@ Before any irreversible action, show a review screen summarizing ALL submitted d
 - **Mask by default** — never show sensitive data without user intent
 - **Reveal controls** — "Show/Hide" toggle, not a separate page
 - **Session timeout warning** — "Your session expires in 2 minutes" with option to extend
-- **Copy protection** — disable autocomplete on sensitive fields, warn before copy
+- **Safe input assistance** — use appropriate autocomplete semantics and support password managers; disable assistance only for a concrete field-specific need, not as generic "copy protection"
 - **Audit trail** — log who viewed/modified sensitive data and when
 - **Export controls** — explicit consent before downloading/exporting sensitive data
 
@@ -230,4 +249,7 @@ Trust-First interfaces must exceed standard AA:
 | Focus ring transitions              | Staggered page load animations   |
 | Number transitions for data updates | Decorative background animations |
 
-**Principle:** Every animation should communicate state change or provide feedback. If it's decorative, remove it.
+**Principle:** Movement should support confidence and comfortable use. Restrained
+delight may be appropriate outside critical decisions; avoid distracting effects,
+moving decision data or delayed actions. Premium visual quality also comes from
+composition, typography, color and surface craft.

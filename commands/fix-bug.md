@@ -152,6 +152,13 @@ convergence-breaker in `.forge/rules/workflow.md`; only a human may adjudicate a
 
 Plan-stage spec-loss is P1 when it could produce the wrong fix; this does **not** relax the exit.
 
+Before UI implementation, load `.forge/skills/ui-design/SKILL.template.md` for every website or
+app UI task. Record a documented visual direction in the plan: mode, persona, visual references,
+color/typography/surface/motion choices, 21st.dev-first component discovery, concise-copy criteria,
+and route/viewport/state acceptance. Use the established brief or document a direction within the
+user's scope; this introduces no additional human design approval pause. Apply the skill while
+implementing, including small UI fixes and shared components.
+
 ## 4. TDD Fix
 
 Do not begin this phase before production implementation is authorized by clean plan evidence for
@@ -172,6 +179,19 @@ must emit the required structured spec and quality task receipts.
 
 ## 5. Preliminary E2E
 
+Determine UI audit applicability from candidate/design scope, not whether UI use cases exist.
+For every user-facing UI design/change, main dispatches a fresh forge-ui-qa independently before final freeze
+while fixes are allowed. Supply URL, persona/tasks, documented visual direction/references and concrete
+acceptance, candidate/running-build identity, route/viewport/state matrix, an already signed-in
+synthetic fixture session safe for private screenshots, and explicit writes scope (default no).
+Before dispatch, configure and verify browser image output under
+`.forge/local/evidence/<task-id>/ui-qa/` or an explicitly private outside-checkout directory.
+The main agent must be able to retrieve the saved images; do not leave screenshots in tracked assets.
+The role reads only its own definition and judges the rendered browser UI, not implementation.
+Persist its unchanged full UI QA subreport locally and pass it to `verify-e2e`; do not substitute a
+self-audit, task test result or report summary. Repair observed acceptance failures; unavailable
+browser, session or safe screenshot evidence is BLOCKED for affected coverage.
+
 For user-facing behavior, design Actor/Scenario/Intent/Interface/Setup/Steps/Verification/Persistence
 use cases and a Surface coverage decision. Run `verify-e2e` in feature mode while fixes are allowed.
 Parse its `VERDICT:` and `SUGGESTED_PATH:` headers, create the suggested local evidence directory,
@@ -189,10 +209,22 @@ and persist the unchanged leading header with the report. Handle `VERDICT: FAIL`
 6. At finalization, invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host <claude|codex>
    --phase review --next-step 'dispatch final paired reviews' --begin-review` before any reviewer
    dispatch. Read-only against that exact candidate: run distinct fresh `code-spec` and `code-quality`
-   reviews, `verify-app`, and the complete feature/regression E2E matrix. Persist reports with their
+   reviews and `verify-app`. For UI scope, dispatch fresh `forge-ui-qa` for this candidate/build
+   and pass its unchanged full subreport to `verify-e2e` before running the complete
+   feature/regression E2E matrix. Persist reports with their
    leading `VERDICT:` lines and write candidate-bound receipts under `.forge/local/`.
    Both review receipts must name the same candidate and the incremented iteration.
 7. Promote the exact tree through candidate promotion, then commit.
+
+For UI scope, the forge-ui-qa step above audits the final candidate before E2E aggregation.
+The verifier checks same-candidate/scope coverage and embeds it in the existing E2E report before
+the caller writes the existing candidate-bound E2E receipt. Required UI QA FAIL makes E2E FAIL;
+BLOCKED/missing/stale/wrong-candidate makes E2E PARTIAL (an observed failure still takes precedence).
+Only a complete UI QA PASS with visual quality and usability both >=4 and no concrete acceptance
+failures permits E2E PASS. Apply this even with no regression/smoke UCs; non-UI scope retains
+`UI QA: N/A` with a concrete reason. Candidate mutation invalidates the affected audit.
+This is workflow acceptance through the existing receipt, not hook-level visual intelligence.
+Host tool controls remain authoritative; the role's interaction restrictions are a behavioral contract.
 
 Before each final code-review iteration: use one broad review, one repair pass, and one closure
 review. Before production repairs, follow the shared [Final-review repair](../rules/workflow.md#final-review-repair) transition.
