@@ -2,16 +2,17 @@
 
 > Match design direction to product context. Use this BEFORE choosing styles, colors, or animations.
 >
-> Last reviewed: 2026-03-12
+> Last reviewed: 2026-10-23
 
 ## How to Use
 
 1. Find your product's **context row** below
 2. Note the **motion budget**, **palette direction**, and **font direction**
-3. Check the **must-do** and **avoid** columns — these override general skill defaults
+3. Use the **must-do** and **avoid** examples only where they fit the actual task;
+   they do not override the UI skill's quality bar or require unrelated features
 4. Reference specific palette IDs and font pairing IDs from `typography-and-color.md`
 
-**Important:** These are starting points, not rigid rules. A healthcare _marketing site_ has different needs than a healthcare _patient portal_. Always consider the specific product surface (marketing, app, dashboard, docs).
+**Important:** These are starting points, not rigid rules or effect quotas. A healthcare _marketing site_ has different needs than a healthcare _patient portal_. All surfaces require premium visual quality. Choose themes from the brand and user preference, not blanket industry bans on dark mode. Add only features in the task's scope; a property admin table does not need virtual tours because its industry row mentions them.
 
 ---
 
@@ -19,7 +20,10 @@
 
 ### Trust-First Products (low motion, high contrast, conservative)
 
-These products handle money, health, legal, or personal safety. Users need to feel secure, not impressed. **Override the default "high-impact motion" rules** — use restrained, purposeful animation only.
+These products handle money, health, legal, or personal safety. Make them refined,
+current and comfortable while preserving confidence. Use calm, purposeful motion,
+excellent composition, layered surfaces and typography; a conservative context
+does not waive visual appeal. Show only verified credentials/security claims.
 
 | Product Context                 | Style Direction             | Motion Budget                                       | Palette Direction                                                                 | Font Direction                                                            | Must-Do                                                                       | Avoid                                                                                  |
 | ------------------------------- | --------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -31,7 +35,8 @@ These products handle money, health, legal, or personal safety. Users need to fe
 
 ### Balanced Products (moderate motion, professional aesthetics)
 
-Mainstream products where trust and engagement are both important. Default motion rules apply but lean toward purposeful rather than decorative.
+Mainstream products need trust, engagement and premium craft. Use purposeful
+movement and considered delight without delaying tasks or distracting from data.
 
 | Product Context                    | Style Direction             | Motion Budget                                               | Palette Direction                                                       | Font Direction                                                 | Must-Do                                                                  | Avoid                                                         |
 | ---------------------------------- | --------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------- |
@@ -45,7 +50,8 @@ Mainstream products where trust and engagement are both important. Default motio
 
 ### Expressive Products (high motion, bold aesthetics)
 
-Products where visual impact IS the product value. Full motion rules apply — go bold.
+Products where visual expression supports the experience. Bold motion can fit,
+but choose it deliberately; no surface has a mandatory animation quota.
 
 | Product Context                 | Style Direction                               | Motion Budget                                                | Palette Direction                                       | Font Direction                                                   | Must-Do                                                  | Avoid                                                 |
 | ------------------------------- | --------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------- |

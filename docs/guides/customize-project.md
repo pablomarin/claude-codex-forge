@@ -120,6 +120,31 @@ the v6 rule/skill inventory. For UI work:
 Host-specific third-party plugins are optional and are not part of the Forge contract. Audit any
 one you add against `.forge/rules/skill-audit.md` and keep its policy out of the canonical harness.
 
+UI design applies implicitly to every website/app/component layout, styling,
+interaction and UI-copy task. All three modes require premium visual quality:
+intentional color, layered backgrounds, appropriate transparency, crafted
+components and purposeful motion. Product and Trust-First modes tune the
+treatment while retaining that bar. Keep copy concise and reveal secondary
+detail on demand.
+
+The skill requires a proportionate documented visual direction and 21st.dev-first
+discovery for new or substantially redesigned components, followed by compatible
+reuse/adaptation. Existing project primitives remain appropriate for small fixes.
+Record source URLs or actual access/compatibility limitations; a purchase or
+framework migration is not required.
+
+Forge installs the independent `forge-ui-qa` browser role on both hosts. The main
+agent supplies the design direction, candidate identity, affected routes/states,
+persona and an already signed-in test browser when needed. It checks desktop and
+phone screenshots, real tasks, visual quality, copy, motion and accessibility.
+Visual quality and usability must each score at least 4/5 with no unmet concrete
+acceptance criteria. A missing/blocked audit prevents E2E PASS; the unchanged
+subreport is included in the existing candidate-bound E2E artifact. This is
+workflow acceptance through the existing E2E result; hooks bind the report hash
+and candidate, while the verifier checks the embedded audit rather than a hook
+judging pixels. Project-owned `ui-qa` roles remain separate
+and are preserved.
+
 ## 5. Optional MCP Add-ons
 
 The default `.mcp.json` includes Playwright and Context7. For web projects, you may want:

@@ -142,9 +142,30 @@ install_canonical_file() {
     case "$destination" in *.sh|*/bin/*|*/verify-runtime|*/qualify-*) chmod +x "$destination" 2>/dev/null || true ;; esac
 }
 
+# The two UI sources use plain or folded YAML descriptions. Keep their discovery
+# text without adding a general YAML parser to the installer.
+ui_adapter_description() {
+    awk '
+        NR == 1 && /^---\r?$/ { frontmatter=1; next }
+        frontmatter && /^---\r?$/ { exit }
+        frontmatter && /^description:/ {
+            value=$0; sub(/^description:[ \t]*/, "", value); sub(/[ \t\r]+$/, "", value)
+            if (value ~ /^>[-+]?$/) { folded=1; value=""; next }
+            found=1; exit
+        }
+        folded && /^[ \t]+/ {
+            line=$0; sub(/^[ \t]+/, "", line); sub(/[ \t\r]+$/, "", line)
+            if (length(line)) value=value (length(value) ? " " : "") line
+            found=1; next
+        }
+        folded { exit }
+        END { if (!found || !length(value)) exit 1; print value }
+    ' "$1"
+}
+
 render_adapter() {
     local template="$1" destination="$2" canonical_path="$3" revision="$4"
-    local stem name description capabilities model tmp rendered
+    local stem name description description_replacement capabilities model tmp rendered
     stem=$(basename "$destination")
     stem=${stem%.md}; stem=${stem%.toml}
     case "$destination" in
@@ -152,6 +173,14 @@ render_adapter() {
         *) name="$stem" ;;
     esac
     description="Forge adapter for $name"
+    case "$canonical_path" in
+        .forge/skills/ui-design/SKILL.template.md|.forge/agents/forge-ui-qa.md)
+            description=$(ui_adapter_description "$MATERIALIZE_TARGET/$canonical_path") || {
+                echo "BLOCKED: canonical UI discovery description missing: $canonical_path" >&2
+                return 1
+            }
+            ;;
+    esac
     case "$canonical_path" in
         .forge/workflows/opinion.md|.forge/workflows/new-feature.md|.forge/workflows/fix-bug.md|.forge/workflows/review-pr-comments.md|.forge/skills/council/SKILL.template.md)
             description="$description. Standing human approval covers ordinary-review transport of the bounded immutable candidate, prompt, and evidence, including sensitive tracked or in-scope non-ignored files, to the configured Claude Code/Codex reviewer services, and full-agent investigation selected from task needs. No extra Forge consent question. Ordinary review stays hermetic; investigate uses normal config, tools, network, and real-worktree write access. Host security and external/destructive mutation boundaries still apply."
@@ -165,6 +194,9 @@ render_adapter() {
         { capture=0 }
     ' "$MATERIALIZE_TARGET/$canonical_path")
     [ -n "$capabilities" ] || capabilities='tools: "Read, Grep, Glob, Bash"'
+    # Both adapter formats embed a double-quoted YAML/TOML string; then escape
+    # the sed replacement separately so &, pipes and backslashes stay literal.
+    description_replacement=$(printf '%s' "$description" | sed 's/\\/\\\\/g; s/"/\\"/g' | sed 's/[\\&|]/\\&/g')
     model="inherit"
     mkdir -p "$(dirname "$destination")"
     tmp="$destination.forge-tmp.$$"
@@ -174,7 +206,7 @@ render_adapter() {
         -e "s|{{CANONICAL_REVISION}}|$revision|g" \
         -e "s|{{REVISION}}|$revision|g" \
         -e "s|{{NAME}}|$name|g" \
-        -e "s|{{DESCRIPTION}}|$description|g" \
+        -e "s|{{DESCRIPTION}}|$description_replacement|g" \
         -e "s|{{MODEL}}|$model|g" \
         "$template" > "$rendered"
     while IFS= read -r line || [ -n "$line" ]; do

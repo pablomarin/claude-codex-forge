@@ -2,6 +2,37 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.5.0 — 2026-10-23
+
+### Premium UI design and independent browser acceptance
+
+Require a documented visual direction and premium quality for websites, product
+apps and Trust-First interfaces. Restore 21st.dev-first discovery for new or
+substantially redesigned components, with source attribution, compatible reuse
+and honest offline/access fallback. Add concise UI copy, progressive disclosure,
+layered color/background systems, readable transparency and purposeful motion.
+Revise the polish checklist to evaluate real rendered states without arbitrary
+font bans or decorative-effect quotas.
+Align industry/type references with that shared bar, remove unverified palette
+contrast certificates, and correct the large-text contrast threshold. Trust
+guidance now requires verified claims and concise, masked decision summaries.
+
+Preserve semantic UI skill discovery in generated Claude and Codex adapters.
+Install the namespaced `forge-ui-qa` browser role while preserving project-owned
+`ui-qa` roles. New-feature and fix-bug workflows require independent preliminary
+and final-candidate visual acceptance. The existing E2E report includes the
+unchanged UI audit: failed acceptance prevents PASS; missing, blocked or stale
+required evidence yields PARTIAL. Both visual quality and usability must score
+at least 4/5 with screenshot evidence and no unmet concrete acceptance criteria.
+Require explicit premium-brief fidelity across affected screens and states;
+a polished conventional screen's craft score cannot waive that direction.
+This adds workflow acceptance through existing E2E evidence, not automated
+aesthetic judgment by shipping hooks.
+
+Add Bash/PowerShell installation and workflow contracts for discovery, QA role
+capabilities, project-role preservation and repeat upgrades. Align the owning
+layout contract with the existing literal-path PowerShell suite discovery.
+
 ## 6.4.13 — 2026-10-22
 
 ### Connected development is the normal behavior

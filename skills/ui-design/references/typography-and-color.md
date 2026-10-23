@@ -25,7 +25,10 @@ Modular scale ratios: 1.25 (major third) or 1.333 (perfect fourth). Line-height:
 | **Body**    | Paragraphs, UI   | Instrument Sans, Plus Jakarta Sans, DM Sans      |
 | **Caption** | Labels, metadata | Body font at smaller size                        |
 
-2 families max. Pair distinctive display with refined body. AVOID Inter, Roboto, Arial, Space Grotesk unless brand requires.
+Usually keep to one or two families. Pair a distinctive display face with a
+readable body where useful. System fonts, Inter, Roboto, Arial and Space Grotesk
+are valid when suited to the product; create identity through hierarchy,
+composition and craft rather than arbitrary font bans.
 
 ## OKLCH Color System
 
@@ -48,9 +51,12 @@ HSL fallback: `@supports not (color: oklch(0% 0 0)) { }`. Semantic tokens: prima
 
 ## WCAG Contrast
 
+Use the [W3C contrast guidance](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html)
+for actual measurements and large-text definitions.
+
 - **Normal text**: 4.5:1 minimum (WCAG AA)
-- **Large text** (18px+) and **UI elements**: 3:1 minimum
-- OKLCH helps: equal lightness deltas produce equal visual contrast across hues
+- **Large text** (18pt / 24 CSS px, or 14pt / approximately 18.7 CSS px bold) and **UI elements**: 3:1 minimum
+- Measure actual foreground/background pairs; OKLCH lightness differences do not establish WCAG contrast
 - Target AA, aim for AAA (7:1 text, 4.5:1 large)
 
 ## Dark Mode
@@ -67,7 +73,9 @@ HSL fallback: `@supports not (color: oklch(0% 0 0)) { }`. Semantic tokens: prima
 }
 ```
 
-Reduce chroma -- don't just invert. Use dark grays (`oklch(15% 0.01 250)` / `#1a1a2e`), never pure black. Raise accent lightness. Test both modes throughout.
+Reduce chroma rather than just inverting. Dark neutrals usually preserve depth;
+pure black can suit an intentional OLED treatment. Adjust accent lightness and
+verify contrast in the actual theme. Test supported modes throughout.
 
 ## Spacing Scale
 
@@ -137,7 +145,9 @@ fontFamily: {
 
 ## Industry Color Palettes
 
-12 curated palettes with full semantic tokens. Referenced by ID from `industry-design-guide.md`. All accent colors verified for WCAG AA (3:1+) against their background.
+12 palette starting points. Referenced by ID from `industry-design-guide.md`.
+These are not contrast certificates: measure each actual text/control pair,
+including hover/disabled/selected states and transparent layers, before acceptance.
 
 | ID     | Name               | Primary   | Secondary | Accent    | Background | Foreground | Muted     | Border    |
 | ------ | ------------------ | --------- | --------- | --------- | ---------- | ---------- | --------- | --------- |

@@ -622,7 +622,7 @@ for function_name in Read-ManagedManifest Install-CanonicalFile Render-Adapter S
 done
 assert_not_contains "$REPO_ROOT/setup.ps1" '-Scope global -Platform windows' "PowerShell has no active global materialization"
 assert_contains "$REPO_ROOT/setup.ps1" '-Scope project -Platform windows' "PowerShell project setup delegates with explicit scope/platform"
-assert_contains "$REPO_ROOT/tests/template/run-all.ps1" 'Get-ChildItem -Path $PSScriptRoot -Filter "test-*.ps1"' "PowerShell runner discovers every owning suite"
+assert_contains "$REPO_ROOT/tests/template/run-all.ps1" 'Get-ChildItem -LiteralPath $PSScriptRoot -Filter "test-*.ps1"' "PowerShell runner discovers every owning suite"
 assert_not_contains "$REPO_ROOT/tests/template/run-all.ps1" 'ignore' "PowerShell runner has no silent ignore list"
 assert_contains "$REPO_ROOT/.github/workflows/windows-parity.yml" 'shell: powershell' "Windows workflow uses Windows PowerShell"
 
