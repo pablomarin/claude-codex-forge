@@ -5,6 +5,27 @@ source "$REPO_ROOT/tests/template/lib.sh"
 init_counters
 ROLE="$REPO_ROOT/agents/forge-ui-qa.md"
 VERIFIER="$REPO_ROOT/agents/verify-e2e.md"
+SKILL="$REPO_ROOT/skills/ui-design/SKILL.template.md"
+COMPONENTS="$REPO_ROOT/skills/ui-design/references/21st-dev-components.md"
+
+start_test "21st discovery retrieves source before claiming component reuse"
+assert_contains "$SKILL" 'retrieve and read its actual source before implementation' \
+    "selected compatible components require source inspection in the skill entrypoint"
+assert_contains "$SKILL" 'ask the user to sign in' \
+    "entrypoint routes authentication limits to a login handoff"
+for contract in \
+    'ask the user once to sign in' \
+    'continue work that does not depend on sign-in' \
+    'Use available free component-code retrievals' \
+    'shared across web, MCP and CLI' \
+    'Do not spend copies on every search result' \
+    'A copy prompt or install command alone is not source inspection' \
+    'source retrieved and adapted' \
+    'source inspected, not adopted' \
+    'visual reference only' \
+    'Do not infer exhaustion from a login screen'; do
+    assert_contains "$COMPONENTS" "$contract" "component acquisition requires $contract"
+done
 
 start_test "browser QA is independent, bounded and evidence-based"
 assert_file_exists "$ROLE" "managed forge-ui-qa role exists without replacing project ui-qa"

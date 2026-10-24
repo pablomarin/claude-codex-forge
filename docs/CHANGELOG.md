@@ -2,6 +2,20 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.5.1 — 2026-10-24
+
+### Retrieve selected 21st.dev component source
+
+Require the UI design skill to retrieve and inspect selected compatible component
+source using available free copies before implementation. Offer one sign-in
+handoff when authentication limits discovery or code access, resume retrieval
+after login, and continue independent work while waiting. Shortlist before
+spending the shared daily allowance and verify actual access/quota responses.
+Record source reuse, rejected source and visual-only references distinctly;
+retain honest fallback for unavailable access, exhausted copies or incompatible
+components. Keep independent browser UI QA focused on rendered acceptance.
+Add focused acquisition-policy contracts; update the release badge.
+
 ## 6.5.0 — 2026-10-23
 
 ### Premium UI design and independent browser acceptance
