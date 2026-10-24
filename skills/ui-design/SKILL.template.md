@@ -78,8 +78,13 @@ Also inspect existing project primitives. Reuse an established primitive for a
 small fix; do not replace it just to satisfy a component quota. For new or
 substantially redesigned components, compare a small relevant selection from
 21st.dev, then reuse or adapt the best compatible option. Record source URLs,
-what was selected and why. Use copy prompts or verified install instructions;
-adapt colors, type and behavior into one coherent design system.
+what was selected and why. For a selected compatible component,
+retrieve and read its actual source before implementation
+using the available free allowance; do not settle for recreating its preview.
+If authentication limits discovery or source access, ask the user to sign in
+in an agent-accessible session. Follow the linked acquisition workflow, then adapt
+colors, type and behavior into one coherent design system. Report whether source
+was retrieved/adapted, inspected but rejected, or used only as a visual reference.
 
 Read [21st.dev discovery and adoption](references/21st-dev-components.md) for the
 workflow, compatibility checks and honest fallback. A source being inaccessible
