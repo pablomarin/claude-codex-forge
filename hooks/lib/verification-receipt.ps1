@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('write', 'check', 'close-docs')][string]$Mode,
+    [ValidateSet('write', 'check', 'close-docs', 'record-review-waiver', 'check-review-waiver')][string]$Mode,
     [string]$Kind,
     [string]$Candidate,
     [string]$Command,
@@ -11,7 +11,9 @@ param(
     [string]$StartedAt,
     [string]$EndedAt,
     [string]$State,
-    [string]$PreviousCandidate
+    [string]$PreviousCandidate,
+    [string]$Decision,
+    [string]$Provenance
 )
 
 # PowerShell 5.1 mirror of verification-receipt.sh. Receipts are line-oriented
@@ -186,6 +188,122 @@ function Test-Verifier([string]$Root, [string]$Receipt, [string]$ReceiptKind, [s
     catch { return $false }
 }
 
+# Human approval is separate authorization, never an independent review PASS.
+# Bind both the staged candidate and its exact ordinary (possibly merge) commit.
+function Test-WaiverText([string]$Text) {
+    return -not [string]::IsNullOrWhiteSpace($Text) -and $Text -notmatch '[\x00\r\n]'
+}
+function Invoke-WaiverGit([string]$Root, [string[]]$Arguments) {
+    $lines = @(& git -C $Root @Arguments 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'review waiver Git identity check failed' }
+    return $lines -join "`n"
+}
+function Get-WaiverNonce([string]$StateFile) {
+    $sections = 0; $inside = $false; $values = @()
+    foreach ($line in [IO.File]::ReadAllLines($StateFile)) {
+        if ($line -ceq '## /goal session') { $sections++; $inside = $true; continue }
+        if ($line.StartsWith('## ')) { $inside = $false }
+        if ($inside) {
+            $parts = $line.Split('|')
+            if ($parts.Count -ge 4 -and $parts[1].Trim() -ceq 'nonce') { $values += $parts[2].Trim() }
+        }
+    }
+    if ($sections -gt 1 -or $values.Count -gt 1) { throw 'review waiver requires unambiguous Goal nonce' }
+    if ($values.Count -eq 0 -or -not $values[0] -or $values[0] -ceq '<uuid-v4-lowercase>') { return 'none' }
+    if ($values[0] -ceq 'none') { throw 'active Goal nonce conflicts with inactive review waiver marker' }
+    return [string]$values[0]
+}
+function Get-WaiverScope([string]$Root, [string]$StateFile, [string]$CandidateFile) {
+    $workflow = Get-StateValue $StateFile 'Command'
+    if (-not (Test-WaiverText $workflow) -or $workflow -in @('none','-',[string][char]0x2014) -or $workflow.Contains('<')) { throw 'review waiver requires an active workflow' }
+    $baseRef = Get-StateValue $StateFile 'Workflow base ref'; $base = Get-StateValue $StateFile 'Workflow base SHA'
+    if ($baseRef -cne (Get-Kv $CandidateFile 'workflow_base_ref') -or $base -cne (Get-Kv $CandidateFile 'workflow_base_sha')) { throw 'review waiver workflow base differs from candidate' }
+    $branch = Invoke-WaiverGit $Root @('symbolic-ref','-q','HEAD')
+    if ($branch -cnotmatch '^refs/heads/.+$') { throw 'review waiver requires a named branch' }
+    return [ordered]@{ workflow_command = $workflow; workflow_base_ref = $baseRef; workflow_base_sha = $base; goal_nonce = (Get-WaiverNonce $StateFile); branch_ref = $branch }
+}
+function Get-WaiverParents([string]$Root) {
+    $head = Invoke-WaiverGit $Root @('rev-parse','HEAD')
+    $parents = @($head)
+    $rawPath = Invoke-WaiverGit $Root @('rev-parse','--git-path','MERGE_HEAD')
+    $mergePath = if ([IO.Path]::IsPathRooted($rawPath)) { $rawPath } else { Join-Path $Root $rawPath }
+    $mergeItem = Get-Item -LiteralPath $mergePath -Force -ErrorAction SilentlyContinue
+    if ($mergeItem) {
+        if ($mergeItem.PSIsContainer -or (($mergeItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'review waiver merge parents must be a regular file' }
+        $mergeParents = @([IO.File]::ReadAllLines($mergePath))
+        if ($mergeParents.Count -eq 0) { throw 'review waiver merge parents are empty' }
+        $parents += $mergeParents
+    }
+    $seenParents = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($parent in $parents) {
+        if (-not $seenParents.Add($parent)) { throw 'review waiver merge parents must be distinct' }
+        if ($parent -cnotmatch '^[0-9a-f]{40}([0-9a-f]{24})?$' -or (Invoke-WaiverGit $Root @('rev-parse',"$parent^{commit}")) -cne $parent) { throw 'review waiver parent is invalid' }
+    }
+    return $parents -join ' '
+}
+function Get-WaiverCandidateState([string]$Root, [string]$CandidateFile, [string]$Parents) {
+    if ((Get-Kv $CandidateFile 'schema_version') -cne '2' -or (Get-Kv $CandidateFile 'candidate_state') -cne 'staged-clean') { throw 'review waiver requires a staged-clean candidate' }
+    $base = Get-Kv $CandidateFile 'workflow_base_sha'; $oldHead = Get-Kv $CandidateFile 'git_head'
+    $tree = Get-Kv $CandidateFile 'index_tree'; $worktree = Get-Kv $CandidateFile 'worktree_identity'
+    if ((Get-Kv $CandidateFile 'candidate_id') -cne (Get-ShaText "$base`n$oldHead`n$tree`n$worktree`n")) { throw 'review waiver candidate identity is invalid' }
+    if ($Parents -cne $oldHead -and -not $Parents.StartsWith("$oldHead ", [StringComparison]::Ordinal)) { throw 'review waiver first parent differs from approved HEAD' }
+    $currentHead = Invoke-WaiverGit $Root @('rev-parse','HEAD')
+    if ($currentHead -ceq $oldHead) {
+        if (-not (Test-CurrentCandidate $Root $CandidateFile) -or (Get-WaiverParents $Root) -cne $Parents) { throw 'review waiver staged candidate or ordered parents changed' }
+        if ($Parents -ceq $oldHead -and (Invoke-WaiverGit $Root @('rev-parse',"$oldHead^{tree}")) -ceq $tree) { return 'postcommit' }
+        return 'precommit'
+    }
+    if ($Parents -ceq $oldHead -and (Invoke-WaiverGit $Root @('rev-parse',"$oldHead^{tree}")) -ceq $tree) { throw 'review waiver approved an existing commit, not another child commit' }
+    if ((Get-WaiverParents $Root) -cne $currentHead -or
+        (Invoke-WaiverGit $Root @('rev-parse',"$currentHead^{tree}")) -cne $tree -or
+        (Invoke-WaiverGit $Root @('rev-list','--parents','-n','1',$currentHead)) -cne "$currentHead $Parents") { throw 'review waiver commit tree or ordered parents changed' }
+    $fingerprint = Join-Path $PSScriptRoot 'candidate-fingerprint.ps1'
+    if (-not (Test-Path -LiteralPath $fingerprint)) { $fingerprint = Join-Path $Root 'hooks/lib/candidate-fingerprint.ps1' }
+    $temporary = Join-Path ([IO.Path]::GetTempPath()) ('forge-waiver-current-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        & $fingerprint -Mode identity -Artifact 'git:working-tree' -WorkflowBaseSha $base -WorkflowBaseRef (Get-Kv $CandidateFile 'workflow_base_ref') -Output $temporary
+        if ($LASTEXITCODE -ne 0 -or (Get-Kv $temporary 'git_head') -cne $currentHead) { throw 'review waiver cannot validate current commit' }
+        foreach ($key in @('worktree_identity','workflow_base_sha','index_tree','candidate_state')) {
+            if ((Get-Kv $CandidateFile $key) -cne (Get-Kv $temporary $key)) { throw 'review waiver requires the exact clean committed candidate' }
+        }
+        return 'postcommit'
+    }
+    finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+}
+function Assert-ReviewWaiver([string]$Root, [string]$StateFile, [string]$CandidateFile, [string]$AppFile, [string]$E2eFile, [string]$Waiver) {
+    if ((Get-Kv $Waiver 'schema_version') -cne '1' -or (Get-Kv $Waiver 'receipt_kind') -cne 'human-review-waiver' -or
+        -not (Test-Fresh (Get-Kv $Waiver 'recorded_at')) -or -not (Test-WaiverText (Get-Kv $Waiver 'decision')) -or
+        -not (Test-WaiverText (Get-Kv $Waiver 'provenance'))) { throw 'review waiver decision or provenance is missing, invalid, or stale' }
+    if ((Get-Kv $Waiver 'candidate_path') -cne $CandidateFile -or (Get-Kv $Waiver 'candidate_hash') -cne (Get-ShaFile $CandidateFile)) { throw 'review waiver candidate receipt changed' }
+    foreach ($key in @('candidate_id','worktree_identity','git_head','index_tree')) {
+        if ((Get-Kv $Waiver $key) -cne (Get-Kv $CandidateFile $key)) { throw 'review waiver candidate identity changed' }
+    }
+    $scope = Get-WaiverScope $Root $StateFile $CandidateFile
+    foreach ($key in $scope.Keys) { if ((Get-Kv $Waiver $key) -cne $scope[$key]) { throw 'review waiver workflow, Goal, or branch changed' } }
+    if ((Get-Kv $Waiver 'verify_app_receipt_hash') -cne (Get-ShaFile $AppFile) -or (Get-Kv $Waiver 'e2e_receipt_hash') -cne (Get-ShaFile $E2eFile) -or
+        -not (Test-Verifier $Root $AppFile 'verify-app' $CandidateFile) -or -not (Test-Verifier $Root $E2eFile 'e2e' $CandidateFile)) { throw 'review waiver verification is missing, stale, changed, or unsuccessful' }
+    return Get-WaiverCandidateState $Root $CandidateFile (Get-Kv $Waiver 'parents')
+}
+function Write-ReviewWaiver([string]$Root, [string]$StateFile, [string]$CandidateFile, [string]$AppFile, [string]$E2eFile, [string]$HumanDecision, [string]$HumanProvenance) {
+    if (-not (Test-WaiverText $HumanDecision) -or -not (Test-WaiverText $HumanProvenance)) { throw 'review waiver requires the actual human decision and conversation provenance' }
+    if (-not (Test-CurrentCandidate $Root $CandidateFile)) { throw 'review waiver needs the current staged-clean frozen candidate' }
+    $scope = Get-WaiverScope $Root $StateFile $CandidateFile
+    $body = @('schema_version=1','receipt_kind=human-review-waiver',"recorded_at=$([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))", "decision=$HumanDecision", "provenance=$HumanProvenance")
+    foreach ($key in $scope.Keys) { $body += "$key=$($scope[$key])" }
+    $body += @("candidate_path=$CandidateFile", "candidate_hash=$(Get-ShaFile $CandidateFile)")
+    foreach ($key in @('candidate_id','worktree_identity','git_head','index_tree')) { $body += "$key=$(Get-Kv $CandidateFile $key)" }
+    $body += @("parents=$(Get-WaiverParents $Root)", "verify_app_receipt_hash=$(Get-ShaFile $AppFile)", "e2e_receipt_hash=$(Get-ShaFile $E2eFile)")
+    $waiver = Get-OwnedPath $Root "$CandidateFile.review-waiver" $false
+    $temporary = Get-OwnedPath $Root "$waiver.tmp.$PID" $false
+    try {
+        [IO.File]::WriteAllText($temporary, (($body -join "`n") + "`n"), $Utf8)
+        $waiverState = Assert-ReviewWaiver $Root $StateFile $CandidateFile $AppFile $E2eFile $temporary
+        Move-Item -LiteralPath $temporary -Destination $waiver -Force
+        return [pscustomobject]@{ Path = $waiver; State = $waiverState }
+    }
+    finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+}
+
 
 # Original receipts keep their original candidate and age; a separate bounded
 # closure proves only the opt-in non-runtime prose delta to the final candidate.
@@ -354,11 +472,12 @@ function Write-DocsClosure([string]$Root, [string]$StateFile, [string]$Candidate
 
 function Invoke-VerificationReceipt {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('write', 'check', 'close-docs')][string]$ReceiptMode,
+        [Parameter(Mandatory = $true)][ValidateSet('write', 'check', 'close-docs', 'record-review-waiver', 'check-review-waiver')][string]$ReceiptMode,
         [string]$ReceiptKind, [string]$CandidatePath, [string]$CommandText,
         [string]$ProfileName, [string]$ReportPath, [string]$ReceiptResult,
         [int]$ReceiptExitStatus = -1, [string]$OutputPath,
-        [string]$ReceiptStartedAt, [string]$ReceiptEndedAt, [string]$StatePath, [string]$PreviousCandidatePath
+        [string]$ReceiptStartedAt, [string]$ReceiptEndedAt, [string]$StatePath, [string]$PreviousCandidatePath,
+        [string]$ReceiptDecision, [string]$ReceiptProvenance
     )
     $response = [ordered]@{ Status = 2; Lines = @(); Error = '' }
     $root = (& git rev-parse --show-toplevel 2>$null | Select-Object -First 1)
@@ -399,6 +518,23 @@ function Invoke-VerificationReceipt {
         $stateFile = if ([IO.Path]::IsPathRooted($StatePath)) { [IO.Path]::GetFullPath($StatePath) } else { [IO.Path]::GetFullPath((Join-Path $root $StatePath)) }
         if ((Get-Content -LiteralPath $stateFile -TotalCount 1) -cne '<!-- forge:state-schema v6 -->') { throw 'receipt-v2 requires canonical v6 state' }
         $candidateFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Candidate receipt') $true
+        if ($ReceiptMode -in @('record-review-waiver','check-review-waiver')) {
+            $stateFile = Get-OwnedPath $root $stateFile $true
+            $appFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Verify app receipt') $true
+            $e2eFile = Get-OwnedPath $root (Get-StateValue $stateFile 'E2E receipt') $true
+            if ($ReceiptMode -ceq 'record-review-waiver') {
+                $recordedWaiver = Write-ReviewWaiver $root $stateFile $candidateFile $appFile $e2eFile $ReceiptDecision $ReceiptProvenance
+                $response.Lines = @("REVIEW_WAIVER:$($recordedWaiver.Path)")
+                $waiverState = $recordedWaiver.State
+            }
+            else {
+                $waiver = Get-OwnedPath $root "$candidateFile.review-waiver" $true
+                $waiverState = Assert-ReviewWaiver $root $stateFile $candidateFile $appFile $e2eFile $waiver
+            }
+            $response.Status = 0
+            $response.Lines += @('REVIEW_WAIVER_VALID:true','REVIEW_STATUS:human-waived',"REVIEW_WAIVER_STATE:$waiverState")
+            return [pscustomobject]$response
+        }
         $specFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Spec review receipt') $true
         $qualityFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Quality review receipt') $true
         $appFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Verify app receipt') $true
@@ -443,7 +579,7 @@ function Invoke-VerificationReceipt {
 # Dot-source consumers call Invoke-VerificationReceipt directly. Only the
 # standalone entrypoint writes streams or exits the host process.
 if ($MyInvocation.InvocationName -ne '.') {
-    $receiptResponse = Invoke-VerificationReceipt -ReceiptMode $Mode -ReceiptKind $Kind -CandidatePath $Candidate -CommandText $Command -ProfileName $Profile -ReportPath $Report -ReceiptResult $Result -ReceiptExitStatus $ExitStatus -OutputPath $Output -ReceiptStartedAt $StartedAt -ReceiptEndedAt $EndedAt -StatePath $State -PreviousCandidatePath $PreviousCandidate
+    $receiptResponse = Invoke-VerificationReceipt -ReceiptMode $Mode -ReceiptKind $Kind -CandidatePath $Candidate -CommandText $Command -ProfileName $Profile -ReportPath $Report -ReceiptResult $Result -ReceiptExitStatus $ExitStatus -OutputPath $Output -ReceiptStartedAt $StartedAt -ReceiptEndedAt $EndedAt -StatePath $State -PreviousCandidatePath $PreviousCandidate -ReceiptDecision $Decision -ReceiptProvenance $Provenance
     foreach ($line in $receiptResponse.Lines) { Write-Output $line }
     if ($receiptResponse.Error) { [Console]::Error.WriteLine($receiptResponse.Error) }
     exit $receiptResponse.Status

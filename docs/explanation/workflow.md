@@ -53,7 +53,19 @@ evidence; portable or synthetic checks cannot stand in for them. Process success
 confident producer report alone cannot certify an unchanged or changed candidate.
 
 During development, Stop preserves progress without demanding final evidence on each turn.
-Final receipt advisories apply in finalization phases; shipping still enforces certification.
+Final receipt advisories apply in finalization phases; shipping enforces the applicable evidence
+requirements. An ordinary Stop advisory about full certification does not request another review
+when you have explicitly waived it.
+When you explicitly tell the agent to skip final code review or re-review for a named change,
+Forge supports that decision for any approved scope, including code and merge-conflict resolution.
+The agent freezes the changed tree, directly runs fresh app and applicable E2E checks, and records
+your actual instruction and conversation provenance in a local review-waiver sidecar. It then
+commits through the normal hook with ordinary Git, preserving merge parents, and pushes when
+authorized. You do not need to run those commands yourself or predeclare a documentation allowlist.
+The result is labeled **human-waived review**, not a clean review or full certification. Failed
+verification, other checklist requirements, separate external-action approval and native host
+controls still apply. See the [explicit human review waiver](../../rules/workflow.md#explicit-human-review-waiver).
+
 After full certification, an explicitly enrolled non-runtime prose correction may use the shared
 [documentation closure](../../rules/workflow.md#documentation-only-corrections) procedure: compare
 the original certified tree to the final tree and run the focused prose check, retaining original

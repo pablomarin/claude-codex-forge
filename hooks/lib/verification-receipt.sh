@@ -205,6 +205,148 @@ vr_validate_verifier() {
     return 0
 }
 
+# A human review waiver is authorization, not review certification. Keep its
+# checker separate so ordinary check/closure and convergence anchors stay true.
+vr_waiver_nonce() {
+    awk -F'|' '
+        { sub(/\r$/, "") }
+        /^## \/goal session$/ { sections++; active=1; next }
+        /^## / { active=0 }
+        active {
+            key=$2; gsub(/^[ \t]+|[ \t]+$/, "", key)
+            if (key=="nonce") { rows++; value=$3; gsub(/^[ \t]+|[ \t]+$/, "", value) }
+        }
+        END {
+            if (sections>1 || rows>1) exit 1
+            if (value=="none") exit 1
+            if (value=="" || value=="<uuid-v4-lowercase>") print "none"
+            else print value
+        }
+    ' "$state"
+}
+vr_waiver_context() {
+    local common worktree expected
+    WAIVER_COMMAND=$(vr_state_value "$state" Command) || return 1
+    case "$WAIVER_COMMAND" in ''|none|—|-|*'<'*) return 1 ;; esac
+    WAIVER_NONCE=$(vr_waiver_nonce) || return 1
+    WAIVER_BRANCH=$(git -C "$VR_ROOT" symbolic-ref -q HEAD 2>/dev/null) || return 1
+    common=$(git -C "$VR_ROOT" rev-parse --git-common-dir 2>/dev/null) || return 1
+    common=$(cd "$VR_ROOT" && cd "$common" && pwd -P) || return 1
+    [ "$(vr_state_value "$state" 'Worktree root')" = "$VR_ROOT" ] && \
+        [ "$(vr_state_value "$state" 'Git common directory')" = "$common" ] || return 1
+    [ "$(vr_kv "$candidate" schema_version)" = 2 ] && \
+        [ "$(vr_kv "$candidate" candidate_state)" = staged-clean ] || return 1
+    WAIVER_BASE=$(vr_kv "$candidate" workflow_base_sha) || return 1
+    WAIVER_BASE_REF=$(vr_kv "$candidate" workflow_base_ref) || return 1
+    [ "$(vr_state_value "$state" 'Workflow base SHA')" = "$WAIVER_BASE" ] && \
+        [ "$(vr_state_value "$state" 'Workflow base ref')" = "$WAIVER_BASE_REF" ] || return 1
+    WAIVER_HEAD=$(vr_kv "$candidate" git_head) || return 1
+    WAIVER_TREE=$(vr_kv "$candidate" index_tree) || return 1
+    WAIVER_WORKTREE=$(vr_kv "$candidate" worktree_identity) || return 1
+    worktree=$(printf '%s|%s\n' "$VR_ROOT" "$common" | vr_hash_stream)
+    [ "$WAIVER_WORKTREE" = "$worktree" ] || return 1
+    WAIVER_ID=$(vr_kv "$candidate" candidate_id) || return 1
+    expected=$(printf '%s\n' "$WAIVER_BASE" "$WAIVER_HEAD" "$WAIVER_TREE" "$worktree" | vr_hash_stream)
+    [ "$WAIVER_ID" = "$expected" ] || return 1
+    git -C "$VR_ROOT" cat-file -e "$WAIVER_TREE^{tree}" 2>/dev/null && \
+        git -C "$VR_ROOT" merge-base --is-ancestor "$WAIVER_BASE" "$WAIVER_HEAD" 2>/dev/null
+}
+vr_waiver_parents() {
+    local parents merge_file parent
+    parents=$(git -C "$VR_ROOT" rev-parse HEAD 2>/dev/null) || return 1
+    merge_file=$(git -C "$VR_ROOT" rev-parse --git-path MERGE_HEAD 2>/dev/null) || return 1
+    case "$merge_file" in /*) ;; *) merge_file="$VR_ROOT/$merge_file" ;; esac
+    if [ -e "$merge_file" ] || [ -L "$merge_file" ]; then
+        [ -f "$merge_file" ] && [ ! -L "$merge_file" ] && [ -s "$merge_file" ] || return 1
+        while IFS= read -r parent || [ -n "$parent" ]; do
+            printf '%s\n' "$parent" | grep -Eq '^[0-9a-f]{40}([0-9a-f]{24})?$' || return 1
+            [ "$(git -C "$VR_ROOT" cat-file -t "$parent" 2>/dev/null)" = commit ] || return 1
+            case " $parents " in *" $parent "*) return 1 ;; esac
+            parents="$parents $parent"
+        done < "$merge_file"
+    fi
+    printf '%s\n' "$parents"
+}
+vr_waiver_validate() {
+    local waiver="$1" key text expected current_head parents merge_file
+    [ -f "$waiver" ] && [ ! -L "$waiver" ] || return 1
+    for key in schema_version receipt_kind recorded_at decision provenance workflow_command workflow_base_ref workflow_base_sha goal_nonce branch_ref candidate_path candidate_hash candidate_id worktree_identity git_head index_tree parents verify_app_receipt_hash e2e_receipt_hash; do
+        vr_kv "$waiver" "$key" >/dev/null 2>&1 || return 1
+    done
+    [ "$(vr_kv "$waiver" schema_version)" = 1 ] && \
+        [ "$(vr_kv "$waiver" receipt_kind)" = human-review-waiver ] || return 1
+    vr_fresh "$(vr_kv "$waiver" recorded_at)" || return 1
+    for key in decision provenance; do
+        text=$(vr_kv "$waiver" "$key") || return 1
+        [ -n "$(printf '%s' "$text" | tr -d '[:space:]')" ] || return 1
+        case "$text" in *$'\n'*|*$'\r'*) return 1 ;; esac
+    done
+    vr_waiver_context || return 1
+    [ "$(vr_kv "$waiver" workflow_command)" = "$WAIVER_COMMAND" ] && \
+        [ "$(vr_kv "$waiver" goal_nonce)" = "$WAIVER_NONCE" ] && \
+        [ "$(vr_kv "$waiver" branch_ref)" = "$WAIVER_BRANCH" ] && \
+        [ "$(vr_kv "$waiver" candidate_path)" = "$candidate" ] && \
+        [ "$(vr_kv "$waiver" candidate_hash)" = "$(vr_hash_file "$candidate")" ] || return 1
+    for key in workflow_base_ref workflow_base_sha candidate_id worktree_identity git_head index_tree; do
+        expected=$(vr_kv "$candidate" "$key") || return 1
+        [ "$(vr_kv "$waiver" "$key")" = "$expected" ] || return 1
+    done
+    [ "$(vr_kv "$waiver" verify_app_receipt_hash)" = "$(vr_hash_file "$verify_app")" ] && \
+        [ "$(vr_kv "$waiver" e2e_receipt_hash)" = "$(vr_hash_file "$e2e")" ] && \
+        vr_validate_verifier "$verify_app" verify-app "$candidate" && \
+        vr_validate_verifier "$e2e" e2e "$candidate" || return 1
+    parents=$(vr_kv "$waiver" parents) || return 1
+    case "$parents" in "$WAIVER_HEAD"|"$WAIVER_HEAD "*) ;; *) return 1 ;; esac
+    current_head=$(git -C "$VR_ROOT" rev-parse HEAD 2>/dev/null) || return 1
+    if [ "$current_head" = "$WAIVER_HEAD" ]; then
+        vr_candidate_current "$candidate" && [ "$(vr_waiver_parents)" = "$parents" ] || return 1
+        WAIVER_STATE=precommit
+        # Fresh verification may approve an existing commit (for example after
+        # expiry). With no pending merge or tree change, only push/PR is needed.
+        if [ "$parents" = "$WAIVER_HEAD" ] && \
+            [ "$(git -C "$VR_ROOT" rev-parse "$WAIVER_HEAD^{tree}" 2>/dev/null)" = "$WAIVER_TREE" ]; then
+            WAIVER_STATE=postcommit
+        fi
+    else
+        # Approval recorded over an existing commit never authorizes a child,
+        # even an empty one. A pending same-tree merge has additional parents.
+        if [ "$parents" = "$WAIVER_HEAD" ] && \
+            [ "$(git -C "$VR_ROOT" rev-parse "$WAIVER_HEAD^{tree}" 2>/dev/null)" = "$WAIVER_TREE" ]; then
+            return 1
+        fi
+        merge_file=$(git -C "$VR_ROOT" rev-parse --git-path MERGE_HEAD 2>/dev/null) || return 1
+        case "$merge_file" in /*) ;; *) merge_file="$VR_ROOT/$merge_file" ;; esac
+        [ ! -e "$merge_file" ] && [ ! -L "$merge_file" ] || return 1
+        [ "$(git -C "$VR_ROOT" rev-parse 'HEAD^{tree}' 2>/dev/null)" = "$WAIVER_TREE" ] && \
+            [ "$(git -C "$VR_ROOT" rev-list --parents -n 1 HEAD 2>/dev/null)" = "$current_head $parents" ] || return 1
+        text=$(git -C "$VR_ROOT" status --porcelain --untracked-files=all 2>/dev/null) || return 1
+        [ -z "$text" ] || return 1
+        WAIVER_STATE=postcommit
+    fi
+}
+vr_waiver_record() {
+    local waiver tmp parents key
+    vr_scalar decision "$decision"; vr_scalar provenance "$provenance"
+    [ -n "$(printf '%s' "$decision" | tr -d '[:space:]')" ] && \
+        [ -n "$(printf '%s' "$provenance" | tr -d '[:space:]')" ] || vr_die 'actual human decision and conversation provenance are required'
+    vr_candidate_current "$candidate" && vr_waiver_context || vr_die 'review waiver needs the current staged-clean frozen candidate and workflow'
+    vr_validate_verifier "$verify_app" verify-app "$candidate" && \
+        vr_validate_verifier "$e2e" e2e "$candidate" || vr_die 'review waiver requires fresh passing app and E2E verification'
+    parents=$(vr_waiver_parents) || vr_die 'cannot bind the exact commit parents'
+    waiver=$(vr_owned_path "$candidate.review-waiver" false) || vr_die 'invalid review waiver output'
+    tmp=$(vr_owned_path "$waiver.tmp.$$" false) || vr_die 'invalid temporary review waiver output'
+    {
+        printf 'schema_version=1\nreceipt_kind=human-review-waiver\nrecorded_at=%s\ndecision=%s\nprovenance=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$decision" "$provenance"
+        printf 'workflow_command=%s\ngoal_nonce=%s\nbranch_ref=%s\ncandidate_path=%s\ncandidate_hash=%s\n' "$WAIVER_COMMAND" "$WAIVER_NONCE" "$WAIVER_BRANCH" "$candidate" "$(vr_hash_file "$candidate")"
+        for key in workflow_base_ref workflow_base_sha candidate_id worktree_identity git_head index_tree; do printf '%s=%s\n' "$key" "$(vr_kv "$candidate" "$key")"; done
+        printf 'parents=%s\nverify_app_receipt_hash=%s\ne2e_receipt_hash=%s\n' "$parents" "$(vr_hash_file "$verify_app")" "$(vr_hash_file "$e2e")"
+    } > "$tmp" || vr_die 'cannot write review waiver'
+    if ! vr_waiver_validate "$tmp"; then
+        rm -f "$tmp"; vr_die 'approved candidate, workflow, parents or verification changed while recording review waiver'
+    fi
+    mv "$tmp" "$waiver" || vr_die 'cannot publish review waiver'
+    printf 'REVIEW_WAIVER:%s\n' "$waiver"
+}
 
 # A docs closure carries original evidence; it never changes what a receipt tested.
 vr_docs_bundle() {
@@ -412,14 +554,35 @@ if [ "$mode" = write ]; then
     exit 0
 fi
 
-[ "$mode" = check ] || [ "$mode" = close-docs ] || vr_die 'usage: verification-receipt.sh write|check|close-docs ...'
-state=""; previous_candidate=""
-while [ "$#" -gt 0 ]; do case "$1" in --state) state="${2:-}"; shift 2 ;; --previous-candidate) previous_candidate="${2:-}"; shift 2 ;; *) vr_die "unknown check argument $1" ;; esac; done
+case "$mode" in check|close-docs|record-review-waiver|check-review-waiver) ;; *) vr_die 'usage: verification-receipt.sh write|check|close-docs|record-review-waiver|check-review-waiver ...' ;; esac
+state=""; previous_candidate=""; decision=""; provenance=""
+while [ "$#" -gt 0 ]; do case "$1" in
+    --state) [ "$#" -ge 2 ] || vr_die 'state value is required'; state="$2"; shift 2 ;;
+    --previous-candidate) [ "$#" -ge 2 ] || vr_die 'previous candidate value is required'; previous_candidate="$2"; shift 2 ;;
+    --decision) [ "$mode" = record-review-waiver ] && [ "$#" -ge 2 ] || vr_die 'decision value is required when recording a review waiver'; decision="$2"; shift 2 ;;
+    --provenance) [ "$mode" = record-review-waiver ] && [ "$#" -ge 2 ] || vr_die 'provenance value is required when recording a review waiver'; provenance="$2"; shift 2 ;;
+    *) vr_die "unknown check argument $1" ;;
+esac; done
 [ -n "$state" ] || state=.forge/local/state.md
 case "$state" in /*) ;; *) state="$VR_ROOT/$state" ;; esac
 [ -f "$state" ] && [ ! -L "$state" ] || vr_die 'canonical state is required'
 [ "$(sed -n '1p' "$state")" = '<!-- forge:state-schema v6 -->' ] || vr_die 'receipt-v2 requires canonical v6 state'
 candidate=$(vr_state_value "$state" 'Candidate receipt' 2>/dev/null) || vr_die 'Candidate receipt state linkage is missing'
+if [ "$mode" = record-review-waiver ] || [ "$mode" = check-review-waiver ]; then
+    state=$(vr_owned_path "$state" true) || vr_die 'review waiver state must be Forge-local'
+    candidate=$(vr_owned_path "$candidate" true) || vr_die 'candidate receipt path is invalid'
+    verify_app=$(vr_state_value "$state" 'Verify app receipt') || vr_die 'Verify app receipt state linkage is missing'
+    e2e=$(vr_state_value "$state" 'E2E receipt') || vr_die 'E2E receipt state linkage is missing'
+    verify_app=$(vr_owned_path "$verify_app" true) || vr_die 'verify-app receipt path is invalid'
+    e2e=$(vr_owned_path "$e2e" true) || vr_die 'E2E receipt path is invalid'
+    if [ "$mode" = record-review-waiver ]; then vr_waiver_record
+    else
+        waiver=$(vr_owned_path "$candidate.review-waiver" true) || vr_die 'human review waiver is missing or invalid'
+        vr_waiver_validate "$waiver" || vr_die 'human review waiver is stale or its workflow, candidate, parents or verification changed'
+    fi
+    printf 'REVIEW_WAIVER_VALID:true\nREVIEW_STATUS:human-waived\nREVIEW_WAIVER_STATE:%s\n' "$WAIVER_STATE"
+    exit 0
+fi
 spec=$(vr_state_value "$state" 'Spec review receipt' 2>/dev/null) || vr_die 'Spec review receipt state linkage is missing'
 quality=$(vr_state_value "$state" 'Quality review receipt' 2>/dev/null) || vr_die 'Quality review receipt state linkage is missing'
 verify_app=$(vr_state_value "$state" 'Verify app receipt' 2>/dev/null) || vr_die 'Verify app receipt state linkage is missing'

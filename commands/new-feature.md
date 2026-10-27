@@ -70,7 +70,7 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
    - [ ] Final code review receipts clean
    - [ ] Verify-app receipt PASS
    - [ ] E2E verified
-   - [ ] Candidate promoted and committed
+   - [ ] Candidate committed through the applicable gate
    - [ ] State and memory updated
    - [ ] PR creation authorized
    - [ ] PR open
@@ -192,7 +192,10 @@ or undocumented interface.
 
 ## 6. Finalize One Exact Candidate
 
-Run this order exactly:
+For ordinary certification, run this order exactly. If the human explicitly waives final code
+review for this named change, follow the shared
+[explicit human review waiver](../rules/workflow.md#explicit-human-review-waiver) for final review,
+fresh verification, and ordinary commit; preserve the other workflow requirements.
 
 1. Finish implementation and TDD.
 2. Create/update solution documentation and `docs/CHANGELOG.md` when applicable.

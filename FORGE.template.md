@@ -164,6 +164,21 @@ If ordinary reviewer fallback emits `AUTH_REQUIRED`, follow the single login han
 retry in `.forge/rules/workflow.md#reviewer-authentication-recovery`. Authentication recovery is
 not a request to reapprove review transport; keep completed reviews and failed evidence.
 
+### Explicit human review waiver
+
+Honor an actual human instruction to skip independent code review or re-review for any explicitly
+named change, including code and merge-conflict resolution. Follow
+`.forge/rules/workflow.md#explicit-human-review-waiver`: freeze the current candidate, run fresh
+app verification and applicable E2E directly as the main agent, then record the human's decision
+and conversation provenance with `verification-receipt record-review-waiver`. Do not dispatch
+reviewer agents merely to satisfy the review the human waived. The local waiver is separate
+authorization, never a `CLEAN`/`PASS` review or full certification; preserve existing receipts and
+review counters. It needs no prior documentation allowlist. Commit through the normal hook with
+ordinary Git so merge parents survive, then execute an already-authorized push. The waiver covers
+only independent final code review: verification, other checklist gates, convergence adjudication,
+consequential-action authorization, and native host controls remain in force. The agent records and
+executes the supported route; do not send the human to a terminal merely to get past a Forge gate.
+
 ## Human Authorization for Consequential Actions
 
 The human decides; the agent prepares, records, executes, and verifies. For PR creation, merge,
@@ -180,7 +195,8 @@ Absent, declined, ambiguous, or stale approval is not authority; a changed targe
 effect requires a new decision. An agent-written record, environment flag, or hook success cannot
 create approval or bypass native host controls. Independently verify the result before claiming
 success or retrying an uncertain mutation. Manual execution is only a fallback when the required
-tool is actually unavailable. Independent review, evidence, and convergence gates still apply.
+tool is actually unavailable. Evidence and convergence gates still apply; independent final code
+review follows either ordinary certification or the explicit human review waiver above.
 
 ## Native Goal Composition
 
@@ -219,7 +235,9 @@ owning check before claiming behavior works, and distinguish fact from inference
 mutation invalidates earlier evidence. An eligible correction to explicitly declared non-runtime
 prose may retain original evidence only through the recomputed documentation closure in
 `.forge/rules/workflow.md#documentation-only-corrections`; never relabel old receipts or renew their
-age. Missing, placeholder, stale, mixed-candidate, or non-clean receipts block shipping. During
+age. Missing, placeholder, stale, mixed-candidate, or non-clean receipts block ordinary certification.
+An explicit human review waiver may replace only independent final code review; fresh verification
+must still match the waived candidate, and the result must be reported as human-waived. During
 development use focused checks; final receipt advisories belong to finalization phases. Exact
 bounded `/quick-fix` work instead requires one direct focused check and the
 hook-validated base/scope contract; it never dispatches reviewer or verifier agents. Legacy prose

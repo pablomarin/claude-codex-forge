@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
-  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-6.5.1-blue?style=flat-square"></a>
+  <a href="#version-history"><img alt="Version" src="https://img.shields.io/badge/version-6.5.2-blue?style=flat-square"></a>
   <a href="docs/getting-started.md"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square"></a>
   <a href="https://code.claude.com"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-enabled-purple?style=flat-square"></a>
   <a href="https://developers.openai.com/codex/"><img alt="Codex CLI" src="https://img.shields.io/badge/Codex_CLI-supported-orange?style=flat-square"></a>
@@ -42,6 +42,11 @@ Codex leads. The other engine is preferred for review, with a visible fresh same
 when it is unavailable.
 
 Claude Code uses `/opinion`; Codex uses `$opinion` for the same canonical opinion workflow.
+
+An explicit instruction to skip final code review or re-review can cover any named approved change.
+Forge records your decision, requires fresh app and applicable E2E verification, and lets the agent
+finish the authorized commit and push through the normal gates, including merge-conflict cleanup.
+The result is labeled human-waived review; see the [waiver workflow](rules/workflow.md#explicit-human-review-waiver).
 
 ## Why Forge instead of vanilla Claude Code or Codex?
 

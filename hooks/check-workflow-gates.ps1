@@ -372,6 +372,31 @@ if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $st
     }
 }
 
+# A human decision can waive independent code review only. Configuration,
+# separate PR authority and convergence have already been checked above.
+$ReviewWaiverValid = $false
+$verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
+if (-not (Test-Path -LiteralPath $verificationReceipt)) { $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1' }
+if (Test-Path -LiteralPath $verificationReceipt) {
+    # Keep the helper's typed parameters and error policy out of hook scope.
+    try { $waiverResponse = & { . $verificationReceipt; Invoke-VerificationReceipt -ReceiptMode check-review-waiver -StatePath $stateFile } }
+    catch { $waiverResponse = [pscustomobject]@{ Status = 2; Lines = @(); Error = $_.Exception.Message } }
+    if ($waiverResponse.Status -eq 0 -and $waiverResponse.Lines -ccontains 'REVIEW_WAIVER_VALID:true') {
+        $isWaiverCommit = $command -match "^\s*${envp}git${gitopt}\s+commit\b"
+        if ($isWaiverCommit) {
+            # Only a plain full-index commit may consume precommit approval.
+            # Other syntax declines this route; existing ordinary gates remain.
+            $waiverValue = '(''[^'']*''|"[^"$`\\]*"|[A-Za-z0-9_./:+,-]+)'
+            $waiverFlag = '(--no-edit|-q|--quiet|-s|--signoff)'
+            $waiverValueOption = '(-m|--message|-F|--file)'
+            $waiverCommitPattern = "^[ \t]*git[ \t]+commit([ \t]+$waiverFlag|[ \t]+$waiverValueOption[ \t]+$waiverValue|[ \t]+(--message|--file)=$waiverValue)*[ \t]*$"
+            $waiverExpectedState = 'precommit'
+            $ReviewWaiverValid = $command -cnotmatch '[^\x20-\x7e]' -and $command -cmatch $waiverCommitPattern -and $waiverResponse.Lines -ccontains 'REVIEW_WAIVER_STATE:precommit'
+        }
+        else { $waiverExpectedState = 'postcommit'; $ReviewWaiverValid = $waiverResponse.Lines -ccontains 'REVIEW_WAIVER_STATE:postcommit' }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # No-code carve-out (git commit only) — closes the integrity hole (mirrors .sh)
 # See check-workflow-gates.sh for the full rationale + scope decision. When a
@@ -449,6 +474,7 @@ foreach ($line in $workflowBlockLines) {
     # prose (e.g. an N/A justification) and on unrelated unchecked items whose
     # prose merely mentions a gate name. Keep this single anchored regex.
     if ($inChecklist -and $line -match '^\s*- \[ \]\s+(Code review loop|Simplified|Verified \(tests|E2E verified)') {
+        if ($ReviewWaiverValid -and $line -match '^\s*- \[ \]\s+Code review loop') { continue }
         $unchecked += $line
     }
 }
@@ -785,6 +811,17 @@ if ($codePassLine -and $headShaCode) {
 # Strict v6 boundary: receipt linkage never controls whether enforcement runs.
 # Placeholder, absent, and stale receipt sets all fail closed here after any
 # more-specific checklist diagnostic has had a chance to guide the developer.
+if ($ReviewWaiverValid) {
+    try { $finalWaiver = & { . $verificationReceipt; Invoke-VerificationReceipt -ReceiptMode check-review-waiver -StatePath $stateFile } }
+    catch { $finalWaiver = [pscustomobject]@{ Status = 2; Lines = @(); Error = $_.Exception.Message } }
+    if ($finalWaiver.Status -ne 0 -or $finalWaiver.Lines -cnotcontains "REVIEW_WAIVER_STATE:$waiverExpectedState") {
+        [Console]::Error.WriteLine('WORKFLOW GATE: human review waiver changed before the shipping boundary.')
+        if ($finalWaiver.Error) { [Console]::Error.WriteLine($finalWaiver.Error) }
+        exit 2
+    }
+    [Console]::Error.WriteLine('WORKFLOW GATE: independent code review explicitly human-waived for this exact candidate.')
+    Exit-ForgeAllow
+}
 $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
 if (-not (Test-Path -LiteralPath $verificationReceipt)) {
     $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1'

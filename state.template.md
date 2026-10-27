@@ -120,6 +120,15 @@ incremented before each final paired-review dispatch. `First certified iteration
 it starts as `none`, is set from the first valid paired-review receipt, and never advances. A
 populated candidate path is progress, not an evidence-mode switch.
 
+An explicit human instruction to skip final code review is recorded through
+`verification-receipt record-review-waiver`, under
+`.forge/rules/workflow.md#explicit-human-review-waiver`. Its `<candidate-receipt>.review-waiver`
+sidecar is local authorization, not a clean review receipt or certification. Keep review receipts,
+review iteration, and first-certified iteration unchanged; fresh candidate-bound app and E2E
+verification remain required. The agent records actual decision/provenance and executes ordinary
+Git commit/push through the normal hook when authorized; do not mark a review CLEAN/PASS or ask the
+human to type commands to get past the gate.
+
 ## State
 
 ### Done (recent 2-3 only)
@@ -179,7 +188,7 @@ workflow; the ship hook gates commit/push/PR on the checklist.
    step>' --begin-review` exactly once before the paired dispatch.
 3. Record distinct `code-spec` and `code-quality` review receipts for the same review iteration and candidate. Engine choice is neutral: same-engine reviews and a visible fallback are valid when each receipt records requested engine, actual engine, and fallback reason.
 4. Persist candidate-bound `verify-app` and `e2e` receipts only after their reports are written under `.forge/local/evidence/` and hashed by `verification-receipt`.
-5. Functional staged, unstaged, or in-scope untracked mutation invalidates final receipts. Freeze the new candidate and rerun the affected final gates; never relabel an old receipt. An explicitly enrolled non-runtime prose correction may retain original certification through `verification-receipt close-docs` under `.forge/rules/workflow.md#documentation-only-corrections`. Preserve the original candidate before editing/refreezing; keep original receipt timestamps and the review iteration unchanged. Missing scope policy, mixed functional changes, or invalid original evidence require normal certification.
+5. Functional staged, unstaged, or in-scope untracked mutation invalidates final receipts. Freeze the new candidate and rerun the affected final gates; never relabel an old receipt. An explicitly enrolled non-runtime prose correction may retain original certification through `verification-receipt close-docs` under `.forge/rules/workflow.md#documentation-only-corrections`. Preserve the original candidate before editing/refreezing; keep original receipt timestamps and the review iteration unchanged. Missing scope policy, mixed functional changes, or invalid original evidence require normal certification, unless an actual human instruction authorizes the separate review-waiver route with fresh app and E2E verification.
 6. Genuine unmigrated v5 fixtures retain the legacy checklist reader during dual-read. Every active canonical V6 workflow is receipt-native immediately; legacy clean rows cannot certify it.
 7. Exact-tree promotion revalidates the receipt set before hook execution and compare-and-swap, then records `Promotion receipt`; the real branch is not advanced early.
 8. **Convergence breaker (v5.54):** for canonical V6, the unique `Receipts/Review iteration` value is counted from the helper-owned `Receipts/First certified iteration`; legacy checklist counters remain readable only for pre-V6 state. After certification, malformed, missing, duplicate, or backward canonical counters fail closed. More than `POST_CERT_REVIEW_ROUND_LIMIT` (=3) further rounds trips a hook-enforced breaker that blocks commit/push/PR. Only a HUMAN decides whether to release it. After that explicit decision, the agent records in `### Checklist`:

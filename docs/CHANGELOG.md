@@ -2,6 +2,29 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.5.2 — 2026-10-27
+
+### Honor explicit human decisions to skip code re-review
+
+Add a bounded human review waiver for any explicitly approved change, including
+merge-conflict resolution with code, package or test changes from the base branch.
+The agent records the actual instruction and conversation provenance in a local
+candidate-bound sidecar after fresh app and applicable E2E verification. Normal
+Git commit preserves merge parents, and commit/push hooks validate the approved
+tree, parents, workflow identity and evidence before reporting human-waived review.
+The agent can finish authorized work without asking the human to commit manually.
+Fresh verification can also renew a waiver for an already committed approved HEAD
+after expiry, manual commit or a hook rewrite. That route permits push/PR only,
+binds the exact existing commit and rejects later children, including same-tree
+commits. Keep commit command syntax printable ASCII; Unicode messages can use
+`-F` with an ASCII file path.
+
+Keep the waiver separate from clean review receipts and full certification. Prior
+review evidence and counters stay intact; changed candidates or evidence invalidate
+the waiver. Other checklist gates, convergence adjudication, external-action
+authorization and native controls remain in force. Add Bash/PowerShell regression
+coverage and clarify the shared workflow and finish-branch guidance.
+
 ## 6.5.1 — 2026-10-24
 
 ### Retrieve selected 21st.dev component source
