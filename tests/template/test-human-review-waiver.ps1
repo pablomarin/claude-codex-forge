@@ -76,7 +76,7 @@ function New-WaiverFixture([string]$Name, [string]$MainHost = 'codex', [bool]$Me
     & git -C $script:project add -A
     & git -C $script:project commit -qm base
     $script:base = ([string](& git -C $script:project rev-parse HEAD)).Trim()
-    $common = ([string](& git -C $script:project rev-parse --absolute-git-dir)).Trim()
+    $common = (Resolve-Path -LiteralPath (([string](& git -C $script:project rev-parse --absolute-git-dir)).Trim())).Path
     & git -C $script:project checkout -qb fix/review-waiver
     Write-Fixture 'app.txt' "changed application behavior`n"
     if ($Merge) {
@@ -196,7 +196,7 @@ try {
             workflow { Edit-State '/fix-bug review-waiver' '/fix-bug different-task' }
             base { Edit-State "| Workflow base SHA | $script:base |" '| Workflow base SHA | changed |' }
             state-root { Edit-State "| Worktree root | $script:project |" '| Worktree root | changed |' }
-            state-common { $common = ([string](& git -C $script:project rev-parse --absolute-git-dir)).Trim(); Edit-State "| Git common directory | $common |" '| Git common directory | changed |' }
+            state-common { $common = (Resolve-Path -LiteralPath (([string](& git -C $script:project rev-parse --absolute-git-dir)).Trim())).Path; Edit-State "| Git common directory | $common |" '| Git common directory | changed |' }
             goal-nonce { Edit-State '<uuid-v4-lowercase>' 'different-active-goal' }
             goal-none { Edit-State '<uuid-v4-lowercase>' 'none' }
             parents { $gitDir = ([string](& git -C $script:project rev-parse --absolute-git-dir)).Trim(); [IO.File]::WriteAllText((Join-Path $gitDir 'MERGE_HEAD'), "$script:base`n", $utf8) }
