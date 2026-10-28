@@ -72,7 +72,7 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
    - [ ] Final code review receipts clean
    - [ ] Verify-app receipt PASS
    - [ ] E2E verified
-   - [ ] Candidate promoted and committed
+   - [ ] Candidate committed through the applicable gate
    - [ ] State and memory updated
    - [ ] PR creation authorized
    - [ ] PR open
@@ -200,6 +200,11 @@ and persist the unchanged leading header with the report. Handle `VERDICT: FAIL`
 `FAIL_BUG`, `FAIL_INFRA`, `FAIL_INVALID_USE_CASE`, and `FAIL_STALE` explicitly.
 
 ## 6. Finalize One Exact Candidate
+
+The sequence below is ordinary certification. After development or review fixes, honor an actual
+developer instruction to skip named remaining steps or all remaining workflow steps through the
+[explicit human workflow waiver](../rules/workflow.md#explicit-human-workflow-waiver). Run only
+unwaived checks, record actual omissions and preserve evidence/counters, then commit normally.
 
 1. Finish implementation/TDD and update solution/changelog material.
 2. After preliminary E2E, graduate committed use cases and generate/run tracked specs.

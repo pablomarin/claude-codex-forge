@@ -3,12 +3,18 @@
 Use after the PR is approved. This workflow merges only with explicit human authorization, preserves
 developer continuity, and removes the feature worktree without choosing a permanent engine.
 
-## 1. Inspect Without Mutation
+## 1. Inspect and Resolve Authorized Blockers
 
 1. Read `.forge/local/state.md` and resolve the active host through its adapter.
 2. Resolve the current branch and inspect its PR state, URL, title, base, checks, and review status.
 3. If no PR exists, stop. If it is already merged, skip to continuity/cleanup.
-4. If checks, review, or conflicts still block merge, report the exact blocker and stop.
+4. Inspect check, review and conflict blockers. Resolve authorized conflicts and preserve all
+   intended changes. If the developer explicitly omits remaining checks for the current change,
+   follow `.forge/rules/workflow.md#explicit-human-workflow-waiver`: freeze, record the actual
+   decision/provenance and exact omissions, run unwaived checks, and commit through ordinary Git
+   to preserve merge parents. Then push when authorized. Do not rerun waived steps, repeat a valid
+   approval question or require manual human commit/push commands. Hosted CI/branch protections
+   and native controls keep their authority. Report any independent remaining blocker.
 
 ## 2. Authorize and Merge
 

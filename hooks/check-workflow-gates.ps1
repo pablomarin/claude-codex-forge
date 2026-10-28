@@ -334,6 +334,37 @@ if ($cmd -cmatch '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$') {
     }
 }
 
+# Human process decisions remain separate from configuration and external-action authority.
+$ReviewWaiverValid = $false
+$WaivedGates = @()
+$verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
+if (-not (Test-Path -LiteralPath $verificationReceipt)) { $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1' }
+if (Test-Path -LiteralPath $verificationReceipt) {
+    # Keep the helper's typed parameters and error policy out of hook scope.
+    try { $waiverResponse = & { . $verificationReceipt; Invoke-VerificationReceipt -ReceiptMode check-workflow-waiver -StatePath $stateFile } }
+    catch { $waiverResponse = [pscustomobject]@{ Status = 2; Lines = @(); Error = $_.Exception.Message } }
+    if ($waiverResponse.Status -eq 0 -and $waiverResponse.Lines -ccontains 'WORKFLOW_WAIVER_VALID:true') {
+        $scopeLine = @($waiverResponse.Lines | Where-Object { $_.StartsWith('WAIVED_GATES:') })
+        if ($scopeLine.Count -eq 1) { $WaivedGates = $scopeLine[0].Substring(13).Split(',') }
+        $isWaiverCommit = $command -match "^\s*${envp}git${gitopt}\s+commit\b"
+        if ($isWaiverCommit) {
+            # Only a plain full-index commit may consume precommit approval.
+            # Other syntax declines this route; existing ordinary gates remain.
+            $waiverValue = '(''[^'']*''|"[^"$`\\]*"|[A-Za-z0-9_./:+,-]+)'
+            $waiverFlag = '(--no-edit|-q|--quiet|-s|--signoff)'
+            $waiverValueOption = '(-m|--message|-F|--file)'
+            $waiverCommitPattern = "^[ \t]*git[ \t]+commit([ \t]+$waiverFlag|[ \t]+$waiverValueOption[ \t]+$waiverValue|[ \t]+(--message|--file)=$waiverValue)*[ \t]*$"
+            $waiverExpectedState = 'precommit'
+            $ReviewWaiverValid = $command -cnotmatch '[^\x20-\x7e]' -and $command -cmatch $waiverCommitPattern -and $waiverResponse.Lines -ccontains 'WORKFLOW_WAIVER_STATE:precommit'
+        }
+        elseif ($command -match "^\s*${envp}(git${gitopt}\s+push\b|gh\s+pr\s+create\b)") { $waiverExpectedState = 'postcommit'; $ReviewWaiverValid = $waiverResponse.Lines -ccontains 'WORKFLOW_WAIVER_STATE:postcommit' }
+    }
+}
+
+function Test-WorkflowSkipped([string]$Gate) {
+    return $ReviewWaiverValid -and $WaivedGates -ccontains $Gate
+}
+
 # --- Convergence breaker (hook-enforced backstop; ADR 0009) ---
 # Placement: BEFORE the docs-only commit carve-out and OUTSIDE the PASS-evidence
 # branch — neither a docs-only staged diff, a `Code review loop — N/A:` escape,
@@ -358,7 +389,7 @@ if ($brkHead -and (Test-Path -LiteralPath $ReviewBreakerPs1) -and (Test-Path $st
     $rsOut2 = Invoke-ReviewBreaker $stateFile
     $brkTripped = ($rsOut2 | Where-Object { $_ -eq 'BREAKER:tripped' } | Select-Object -First 1)
     $adjNo = ($rsOut2 | Where-Object { $_ -eq 'ADJUDICATED:no' } | Select-Object -First 1)
-    if ($brkTripped -and $adjNo) {
+    if ($brkTripped -and $adjNo -and -not (Test-WorkflowSkipped 'convergence')) {
         [Console]::Error.WriteLine("WORKFLOW GATE: convergence breaker — POST_CERT_REVIEW_ROUND_LIMIT exceeded.")
         foreach ($l in ($rsOut2 | Where-Object { $_ -match '^POST_CERT_ROUNDS' })) {
             [Console]::Error.WriteLine($l)
@@ -449,6 +480,10 @@ foreach ($line in $workflowBlockLines) {
     # prose (e.g. an N/A justification) and on unrelated unchecked items whose
     # prose merely mentions a gate name. Keep this single anchored regex.
     if ($inChecklist -and $line -match '^\s*- \[ \]\s+(Code review loop|Simplified|Verified \(tests|E2E verified)') {
+        if (($line -match '^\s*- \[ \]\s+Code review loop' -and (Test-WorkflowSkipped 'review')) -or
+            ($line -match '^\s*- \[ \]\s+Simplified' -and (Test-WorkflowSkipped 'simplification')) -or
+            ($line -match '^\s*- \[ \]\s+Verified \(tests' -and (Test-WorkflowSkipped 'verify-app')) -or
+            ($line -match '^\s*- \[ \]\s+E2E verified' -and (Test-WorkflowSkipped 'e2e'))) { continue }
         $unchecked += $line
     }
 }
@@ -575,6 +610,7 @@ if (-not $ReceiptV2Active -and $e2eCheckedLine -and ($e2eCheckedLine -notmatch '
 
 # N/A escape: any `[x] Plan review loop ... N/A:` line skips the evidence check
 # (mirrors the E2E verified — N/A: gate).
+if (-not (Test-WorkflowSkipped 'plan-review')) {
 $planNaLine = ($checklistLines `
     | Where-Object { $_ -match '^\s*-\s*\[x\]\s+Plan review loop' -and $_ -match 'N/A:' } `
     | Select-Object -First 1)
@@ -681,6 +717,8 @@ if ($planPassLine) {
     }
 }
 
+} # unwaived plan-review evidence
+
 # ---------------------------------------------------------------------------
 # Evidence-based gate for Code review loop PASS
 # Mirrors check-workflow-gates.sh Task 5 — binds to git HEAD. Codex + pr-toolkit
@@ -785,6 +823,17 @@ if ($codePassLine -and $headShaCode) {
 # Strict v6 boundary: receipt linkage never controls whether enforcement runs.
 # Placeholder, absent, and stale receipt sets all fail closed here after any
 # more-specific checklist diagnostic has had a chance to guide the developer.
+if ($ReviewWaiverValid) {
+    try { $finalWaiver = & { . $verificationReceipt; Invoke-VerificationReceipt -ReceiptMode check-workflow-waiver -StatePath $stateFile } }
+    catch { $finalWaiver = [pscustomobject]@{ Status = 2; Lines = @(); Error = $_.Exception.Message } }
+    if ($finalWaiver.Status -ne 0 -or $finalWaiver.Lines -cnotcontains "WORKFLOW_WAIVER_STATE:$waiverExpectedState" -or $finalWaiver.Lines -cnotcontains "WAIVED_GATES:$($WaivedGates -join ',')") {
+        [Console]::Error.WriteLine('WORKFLOW GATE: human review waiver changed before the shipping boundary.')
+        if ($finalWaiver.Error) { [Console]::Error.WriteLine($finalWaiver.Error) }
+        exit 2
+    }
+    [Console]::Error.WriteLine("WORKFLOW GATE: human-waived steps: $($WaivedGates -join ','); unwaived evidence and exact approved tree/parents validated.")
+    Exit-ForgeAllow
+}
 $verificationReceipt = Join-Path $hookDir 'lib\verification-receipt.ps1'
 if (-not (Test-Path -LiteralPath $verificationReceipt)) {
     $verificationReceipt = Join-Path $topLevel 'hooks\lib\verification-receipt.ps1'

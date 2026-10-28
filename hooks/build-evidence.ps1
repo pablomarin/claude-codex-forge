@@ -113,6 +113,9 @@ if (-not (Test-Path -LiteralPath $VerificationReceiptPs1)) {
 if (-not (Test-Path -LiteralPath $VerificationReceiptPs1)) {
     $VerificationReceiptPs1 = Join-Path (Get-Location) "hooks\lib\verification-receipt.ps1"
 }
+if (-not (Test-Path -LiteralPath $VerificationReceiptPs1)) {
+    $VerificationReceiptPs1 = Join-Path $hookDir "lib\verification-receipt.ps1"
+}
 
 # ---------------------------------------------------------------------------
 # Helper: Unix epoch time (PS 5.1 compatible)
@@ -634,8 +637,7 @@ if ($StateIsV6 -and $WorkflowActive) {
     $RgClean = "false"
     $E2eFresh = "false"
     if (Test-Path -LiteralPath $VerificationReceiptPs1) {
-        . $VerificationReceiptPs1
-        $vrResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateMd
+        $vrResponse = & { . $VerificationReceiptPs1; Invoke-VerificationReceipt -ReceiptMode check -StatePath $StateMd }
         $vrOut = @($vrResponse.Lines)
         foreach ($line in $vrOut) {
             if ($line -eq 'CANDIDATE_VALID:true') { $CandidateClean = "true" }
@@ -670,6 +672,22 @@ $PaHead = $pa.head_sha_at_auth
 $PaNonce = $pa.nonce_at_auth
 
 # ---------------------------------------------------------------------------
+# Human decision and remaining evidence stay distinct from actual certification.
+$HumanWaiverValid = "false"; $HumanWaiverReady = "false"; $HumanWaiverGates = ""
+if ($StateIsV6 -and $WorkflowActive -and (Test-Path -LiteralPath $VerificationReceiptPs1)) {
+    try {
+        $humanWaiver = & { . $VerificationReceiptPs1; Invoke-VerificationReceipt -ReceiptMode check-workflow-waiver -StatePath $StateMd -ReceiptBoundary stop }
+        if ($humanWaiver.Status -eq 0) {
+            $HumanWaiverValid = "true"
+            $scopeLine = @($humanWaiver.Lines | Where-Object { $_.StartsWith('WAIVED_GATES:') })
+            if ($scopeLine.Count -eq 1) { $HumanWaiverGates = $scopeLine[0].Substring(13) }
+            $remaining = & { . $VerificationReceiptPs1; Invoke-VerificationReceipt -ReceiptMode check-workflow-waiver -StatePath $StateMd }
+            if ($remaining.Status -eq 0) { $HumanWaiverReady = "true" }
+        }
+    } catch { }
+}
+$HumanWaiverGatesJson = Build-JsonStringField "waived_gates" $HumanWaiverGates
+
 # Task 7: Derived fields — pr_ready, all_gates_green, progress_fingerprint
 # ---------------------------------------------------------------------------
 
@@ -818,6 +836,7 @@ $json = '{' +
     '"reviewer_gate":{"clean_same_iteration":' + $RgClean + ',' + $RgIterJson + ',' + $RgHeadJson + ',"post_cert_rounds":' + $PostCertRounds + ',"breaker":"' + $Breaker + '"},' +
     '"candidate_gate":{"staged_clean":' + $CandidateClean + ',' + $CandidateIdJson + ',"all_receipts_same_candidate":' + $ShipReceiptsClean + '},' +
     '"verification_gate":{"verify_app":' + $VerifyAppClean + ',"e2e":' + $E2eReceiptClean + '},' +
+    '"workflow_waiver":{"valid":' + $HumanWaiverValid + ',"unwaived_evidence_ready":' + $HumanWaiverReady + ',' + $HumanWaiverGatesJson + '},' +
     '"plan_review_gate":{"clean_same_iteration":' + $PrgClean + ',' + $PrgIterJson + ',' + $PrgShaJson + '},' +
     $BranchJson + ',' +
     $HeadShaJson + ',' +

@@ -52,8 +52,16 @@ an explicit request. Native Windows and authenticated host behavior require thei
 evidence; portable or synthetic checks cannot stand in for them. Process success or a
 confident producer report alone cannot certify an unchanged or changed candidate.
 
-During development, Stop preserves progress without demanding final evidence on each turn.
-Final receipt advisories apply in finalization phases; shipping still enforces certification.
+During development, Stop prompts preserve progress without demanding final certification.
+Final-evidence advisories belong to finalization; they do not start another review by themselves.
+
+After development or review fixes, you can explicitly skip E2E, unit tests, re-review or any other
+remaining workflow step for the current change. You can also say to skip all remaining checks.
+The agent records your decision and exact scope, runs everything you did not omit and completes
+already-authorized work. Individual omitted tests stay visible beside the checks that actually
+ran. No skipped work is reported as passing or fully certified, and further development invalidates
+the approval. See the [developer workflow decision](../../rules/workflow.md#explicit-human-workflow-waiver).
+
 After full certification, an explicitly enrolled non-runtime prose correction may use the shared
 [documentation closure](../../rules/workflow.md#documentation-only-corrections) procedure: compare
 the original certified tree to the final tree and run the focused prose check, retaining original

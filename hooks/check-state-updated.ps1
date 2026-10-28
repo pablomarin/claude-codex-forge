@@ -110,6 +110,34 @@ if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd
     $workflowCommand = if ($workflowCommandRows.Count -eq 1) { [string]$workflowCommandRows[0] } else { "" }
     $workflowPhase = if ($workflowPhaseRows.Count -eq 1) { [string]$workflowPhaseRows[0] } else { "" }
     $quickFixDirect = $workflowCommand -cmatch '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'
+    $workflowWaivedGates = @()
+    $waiverHelper = Join-Path $hookDir 'lib\verification-receipt.ps1'
+    if (-not (Test-Path -LiteralPath $waiverHelper)) { $waiverHelper = Join-Path (Get-Location) 'hooks\lib\verification-receipt.ps1' }
+    $waiverSidecarPresent = $false
+    $candidateRows = @()
+    foreach ($row in @($receiptStateRaw -split "`n")) {
+        $cells = $row.Split('|')
+        if ($cells.Count -ge 4 -and $cells[1].Trim() -ceq 'Candidate receipt') { $candidateRows += $cells[2].Trim() }
+    }
+    if ($candidateRows.Count -eq 1 -and $candidateRows[0]) {
+        try {
+            $waiverCandidate = if ([IO.Path]::IsPathRooted($candidateRows[0])) { $candidateRows[0] } else { Join-Path (Get-Location).Path $candidateRows[0] }
+            foreach ($suffix in @('workflow-waiver','review-waiver')) {
+                if (Get-Item -LiteralPath "$waiverCandidate.$suffix" -Force -ErrorAction SilentlyContinue) { $waiverSidecarPresent = $true }
+            }
+        } catch { $waiverSidecarPresent = $false }
+    }
+    # Presence is only a cheap activation guard; the helper still validates everything.
+    if ($waiverSidecarPresent -and (Test-Path -LiteralPath $waiverHelper)) {
+        try {
+            $stopWaiver = & { . $waiverHelper; Invoke-VerificationReceipt -ReceiptMode check-workflow-waiver -StatePath $stateMd -ReceiptBoundary stop }
+            if ($stopWaiver.Status -eq 0) {
+                $scopeLine = @($stopWaiver.Lines | Where-Object { $_.StartsWith('WAIVED_GATES:') })
+                if ($scopeLine.Count -eq 1) { $workflowWaivedGates = $scopeLine[0].Substring(13).Split(',') }
+                [Console]::Error.WriteLine("FORGE_WORKFLOW_WAIVED: $($workflowWaivedGates -join ','); unwaived shipping checks remain required.")
+            }
+        } catch { }
+    }
     # Final receipts belong to finalization, not ordinary development stops.
     # PreToolUse continues enforcing shipping regardless of the recorded phase.
     $finalEvidencePhase = $workflowPhase -cin @('review', 'verify', 'verification', 'finalize', 'finalization', 'promote', 'promotion', 'ship', 'shipping')
@@ -118,11 +146,10 @@ if ($stateLocalDir -eq ".forge/local" -and -not [string]::IsNullOrEmpty($stateMd
         if (-not (Test-Path -LiteralPath $verificationReceipt)) { $verificationReceipt = Join-Path (Get-Location) 'hooks\lib\verification-receipt.ps1' }
         $receiptStatus = 2
         if (Test-Path -LiteralPath $verificationReceipt) {
-            . $verificationReceipt
-            $receiptResponse = Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateMd
+            $receiptResponse = & { . $verificationReceipt; Invoke-VerificationReceipt -ReceiptMode check -StatePath $stateMd }
             $receiptStatus = $receiptResponse.Status
         }
-        if ($receiptStatus -ne 0) {
+        if ($receiptStatus -ne 0 -and @($workflowWaivedGates).Count -eq 0) {
             [Console]::Error.WriteLine('FORGE_FINAL_EVIDENCE_STALE: candidate-bound review, verify-app, and E2E receipts no longer certify the current staged-clean candidate.')
         }
     }
@@ -361,7 +388,7 @@ $issues = ""
 # Block: 3+ files changed on branch but CHANGELOG.md never updated.
 # "files changed on branch vs $defaultBranch" — count is committed + uncommitted
 # diff vs the merge-base, NOT files-this-turn.
-if ($totalChanged -gt 3 -and $changelogInBranch -eq 0 -and $changelogModified -eq 0) {
+if ($workflowWaivedGates -cnotcontains 'changelog' -and $totalChanged -gt 3 -and $changelogInBranch -eq 0 -and $changelogModified -eq 0) {
     if ($issues) {
         $issues = "$issues Update docs/CHANGELOG.md ($totalChanged files changed on branch vs $defaultBranch)."
     } else {
@@ -398,7 +425,7 @@ if ($issues) {
 
 # A changed v6 state checkpoint stops normally. If the exact state hash remains
 # unchanged across normal Stops, give the model one visible continuation turn.
-if ($workflowReminder) {
+if ($workflowReminder -and $workflowWaivedGates -cnotcontains 'continuation') {
     if ($stateLocalDir -ne ".forge/local") {
         [Console]::Error.WriteLine($workflowReminder)
         Exit-ForgeAllow

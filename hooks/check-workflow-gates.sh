@@ -35,8 +35,11 @@ forge_allow() {
 }
 
 # --- Parse command ---
+COMMAND_DECODED_EXACTLY=false
 if command -v jq &> /dev/null; then
-    COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
+    if COMMAND=$(printf '%s' "$INPUT" | jq -er '.tool_input.command | select(type == "string")'); then
+        COMMAND_DECODED_EXACTLY=true
+    fi
 else
     COMMAND=$(echo "$INPUT" | grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//;s/"$//')
 fi
@@ -337,6 +340,43 @@ if printf '%s\n' "$WORKFLOW_CMD" | grep -qE '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$
     fi
 fi
 
+# Human review authorization has its own checker; it never makes normal review
+# receipts CLEAN. Configuration, exact command/context and PR authority remain required.
+# The legacy no-jq command fallback is not exact enough to authorize a waiver.
+REVIEW_WAIVER_VALID=false
+WAIVED_GATES=""
+VR="$HOOK_DIR/lib/verification-receipt.sh"
+[ -f "$VR" ] || VR="$_TOPLEVEL/hooks/lib/verification-receipt.sh"
+if [ "$COMMAND_DECODED_EXACTLY" = true ] && [ -f "$VR" ] \
+    && WAIVER_OUT=$(bash "$VR" check-workflow-waiver --state "$STATE_FILE" 2>/dev/null) \
+    && printf '%s\n' "$WAIVER_OUT" | grep -qx 'WORKFLOW_WAIVER_VALID:true'; then
+    WAIVED_GATES=$(printf '%s\n' "$WAIVER_OUT" | sed -n 's/^WAIVED_GATES://p')
+    WAIVER_STATE=$(printf '%s\n' "$WAIVER_OUT" | sed -n 's/^WORKFLOW_WAIVER_STATE://p')
+    # Deliberately narrow plain full-index commit syntax. Unsupported forms use
+    # ordinary gates; never infer approval for hook skipping or content selection.
+    _WAIVER_VALUE="('[^']*'|\"[^\"\$\`\\\\]*\"|[A-Za-z0-9_./:+,-]+)"
+    _WAIVER_FLAG='(--no-edit|-q|--quiet|-s|--signoff)'
+    _WAIVER_VALUEOPT='(-m|--message|-F|--file)'
+    _WAIVER_COMMIT="^[[:blank:]]*git[[:blank:]]+commit([[:blank:]]+${_WAIVER_FLAG}|[[:blank:]]+${_WAIVER_VALUEOPT}[[:blank:]]+${_WAIVER_VALUE}|[[:blank:]]+(--message|--file)=${_WAIVER_VALUE})*[[:blank:]]*$"
+    # PowerShell treats curly quotes, @ splatting and --% as syntax. Keep the
+    # shared literal allowance ASCII and single-line before matching arguments.
+    _WAIVER_ASCII=true
+    case "$COMMAND" in *$'\n'*|*$'\r'*) _WAIVER_ASCII=false ;; esac
+    if printf '%s' "$COMMAND" | LC_ALL=C grep -q '[^ -~]'; then _WAIVER_ASCII=false; fi
+    if [ "$WAIVER_STATE" = precommit ] && [ "$_WAIVER_ASCII" = true ] \
+        && printf '%s\n' "$COMMAND" | grep -Eq "$_WAIVER_COMMIT"; then
+        REVIEW_WAIVER_VALID=true
+    elif [ "$WAIVER_STATE" = postcommit ] \
+        && printf '%s\n' "$COMMAND" | grep -qE "^[[:space:]]*${_ENVP}(git${_GITOPT}[[:space:]]+push\b|gh[[:space:]]+pr[[:space:]]+create\b)"; then
+        REVIEW_WAIVER_VALID=true
+    fi
+fi
+
+workflow_skips() {
+    [ "$REVIEW_WAIVER_VALID" = true ] || return 1
+    case ",$WAIVED_GATES," in *",$1,"*) return 0 ;; *) return 1 ;; esac
+}
+
 # --- Convergence breaker (hook-enforced backstop; ADR 0009) ---
 # Placement: BEFORE the docs-only commit carve-out and OUTSIDE the PASS-evidence
 # branch — neither a docs-only staged diff, a `Code review loop — N/A:` escape,
@@ -353,7 +393,7 @@ fi
 BRK_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 if [ -n "$BRK_HEAD" ] && [ -f "$RS" ] && [ -f "$STATE_FILE" ]; then
     RS_OUT2=$(bash "$RS" "$STATE_FILE" 2>/dev/null)
-    if echo "$RS_OUT2" | grep -q "BREAKER:tripped" && echo "$RS_OUT2" | grep -q "ADJUDICATED:no"; then
+    if ! workflow_skips convergence && echo "$RS_OUT2" | grep -q "BREAKER:tripped" && echo "$RS_OUT2" | grep -q "ADJUDICATED:no"; then
         echo "WORKFLOW GATE: convergence breaker — POST_CERT_REVIEW_ROUND_LIMIT exceeded." >&2
         echo "$RS_OUT2" | grep -E "POST_CERT_ROUNDS" >&2
         echo "" >&2
@@ -478,6 +518,17 @@ CHECKLIST=$(echo "$WORKFLOW_BLOCK" | awk '
 # unchecked item whose prose merely mentions a gate name gets counted. Anchoring
 # the checkbox + stem together closes both. Keep this single anchored regex.
 UNCHECKED=$(echo "$CHECKLIST" | grep -iE '^[[:space:]]*- \[ \][[:space:]]+(Code review loop|Simplified|Verified \(tests|E2E verified)' || true)
+for _gate in review simplification verify-app e2e; do
+    if workflow_skips "$_gate"; then
+        case "$_gate" in
+            review) _stem='Code review loop' ;;
+            simplification) _stem='Simplified' ;;
+            verify-app) _stem='Verified \(tests' ;;
+            e2e) _stem='E2E verified' ;;
+        esac
+        UNCHECKED=$(printf '%s\n' "$UNCHECKED" | grep -viE "^[[:space:]]*- \[ \][[:space:]]+$_stem" || true)
+    fi
+done
 
 if [ -n "$UNCHECKED" ]; then
     UNCHECKED_COUNT=$(echo "$UNCHECKED" | wc -l | tr -d ' ')
@@ -611,6 +662,7 @@ fi
 #   - No `[x] Plan review loop` at all → gate inert (simple-fix path)
 # ---------------------------------------------------------------------------
 # N/A escape: any `[x] Plan review loop ... N/A:` line skips the evidence check.
+if ! workflow_skips plan-review; then
 PLAN_NA_LINE=$(echo "$CHECKLIST" | tr -d '\r' \
     | grep -E '^\s*-\s*\[x\]\s+Plan review loop' \
     | grep -E 'N/A:' \
@@ -744,6 +796,8 @@ if [ -n "$PLAN_PASS_LINE" ]; then
     fi
 fi
 
+fi # unwaived plan-review evidence
+
 # ---------------------------------------------------------------------------
 # Evidence-based gate for Code review loop PASS
 #
@@ -861,9 +915,20 @@ fi
 # Strict v6 boundary: receipt linkage never controls whether enforcement runs.
 # Placeholder, absent, and stale receipt sets all fail closed here after any
 # more-specific checklist diagnostic has had a chance to guide the developer.
-VR="$HOOK_DIR/lib/verification-receipt.sh"
-[ -f "$VR" ] || VR="$_TOPLEVEL/hooks/lib/verification-receipt.sh"
-if [ ! -f "$VR" ] || ! VR_OUT=$(bash "$VR" check --state "$STATE_FILE" 2>&1); then
+if [ "$REVIEW_WAIVER_VALID" = true ]; then
+    # Recheck at the final boundary after the remaining independent gates.
+    if ! WAIVER_OUT=$(bash "$VR" check-workflow-waiver --state "$STATE_FILE" 2>&1) \
+        || ! printf '%s\n' "$WAIVER_OUT" | grep -qx "WORKFLOW_WAIVER_STATE:$WAIVER_STATE" \
+        || ! printf '%s\n' "$WAIVER_OUT" | grep -qx "WAIVED_GATES:$WAIVED_GATES"; then
+        echo 'WORKFLOW GATE: human review waiver changed during gate validation.' >&2
+        exit 2
+    fi
+    if [ "$WAIVED_GATES" = review ]; then
+        echo 'WORKFLOW GATE: human-waived review; fresh app/E2E verification and exact approved tree/parents validated.' >&2
+    else
+        echo "WORKFLOW GATE: human-waived steps: $WAIVED_GATES; unwaived evidence and exact approved tree/parents validated." >&2
+    fi
+elif [ ! -f "$VR" ] || ! VR_OUT=$(bash "$VR" check --state "$STATE_FILE" 2>&1); then
     echo "WORKFLOW GATE: final receipt set is missing, stale, mixed-candidate, or non-clean." >&2
     printf '%s\n' "${VR_OUT:-verification-receipt helper unavailable}" >&2
     echo "Initialize the v6 receipt paths and Review iteration, freeze the staged-clean candidate, then rerun both review lenses, verify-app, and E2E." >&2

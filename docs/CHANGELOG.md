@@ -2,6 +2,29 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.5.2 — 2026-10-27
+
+### Keep developer authority over remaining workflow steps
+
+Keep Forge's strict defaults while honoring an explicit developer decision to skip
+any named remaining step or all remaining steps for a completed change, including
+after review fixes. Add a candidate-bound workflow waiver for review, app checks,
+E2E, simplification, plan review, convergence and Stop changelog/continuation gates.
+Individual app/E2E subchecks use scoped reports for the checks that actually ran;
+unwaived evidence still needs to pass. Preserve prior findings, reports, unchecked
+boxes and counters. Skipped work never becomes a fabricated PASS or full certification.
+
+The agent records the actual instruction and provenance, commits normally with
+ordered merge parents intact, and executes already-authorized actions without a
+manual human terminal handoff. Support renewal at the exact existing committed
+HEAD; reject later edits/children and stale scope. Keep configuration/candidate
+integrity, repository hooks, separate external-action authority, native controls
+and Goal budgets intact. Stop and Goal evidence distinguish human-waived work.
+Retain the original review-only waiver for compatibility. Add Bash/PowerShell and
+installed CLI regression coverage for explicit E2E, individual and all-step skips.
+Close PowerShell report readers deterministically so reports can be replaced
+immediately; preserve Unicode commands in native Windows test transport.
+
 ## 6.5.1 — 2026-10-24
 
 ### Retrieve selected 21st.dev component source
