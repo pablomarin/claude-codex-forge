@@ -113,6 +113,37 @@ if [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ]; then
     fi
 fi
 
+# A Stop-only human decision must not wait for unrelated final evidence.
+# Keep budgets/state integrity independent and preserve full-certification truth.
+_WORKFLOW_WAIVED_GATES=""
+_WORKFLOW_WAIVER_HELPER="$HOOK_DIR/lib/verification-receipt.sh"
+[ -f "$_WORKFLOW_WAIVER_HELPER" ] || _WORKFLOW_WAIVER_HELPER=hooks/lib/verification-receipt.sh
+# With no decision sidecar, ordinary development must not invoke receipt checks.
+_WORKFLOW_HAS_WAIVER=false
+if [ -f "$STATE_MD" ]; then
+    _WORKFLOW_WAIVER_CANDIDATE=$(tr -d '\r' < "$STATE_MD" | awk -F'|' '
+        { key=$2; gsub(/^[ \t]+|[ \t]+$/, "", key) }
+        key=="Candidate receipt" { n++; value=$3; gsub(/^[ \t]+|[ \t]+$/, "", value) }
+        END { if(n==1) print value }
+    ')
+    case "$_WORKFLOW_WAIVER_CANDIDATE" in
+        '') ;;
+        *)
+            for _suffix in workflow-waiver review-waiver; do
+                if [ -e "$_WORKFLOW_WAIVER_CANDIDATE.$_suffix" ] || [ -L "$_WORKFLOW_WAIVER_CANDIDATE.$_suffix" ]; then
+                    _WORKFLOW_HAS_WAIVER=true
+                fi
+            done ;;
+    esac
+fi
+if [ "$_WORKFLOW_HAS_WAIVER" = true ] && [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ] && [ -f "$_WORKFLOW_WAIVER_HELPER" ]; then
+    if _WORKFLOW_WAIVER_OUT=$(bash "$_WORKFLOW_WAIVER_HELPER" check-workflow-waiver --boundary stop --state "$STATE_MD" 2>/dev/null); then
+        _WORKFLOW_WAIVED_GATES=$(printf '%s\n' "$_WORKFLOW_WAIVER_OUT" | sed -n 's/^WAIVED_GATES://p')
+        echo "FORGE_WORKFLOW_WAIVED: $_WORKFLOW_WAIVED_GATES; unwaived shipping checks remain required." >&2
+    fi
+fi
+_workflow_stop_skipped() { case ",$_WORKFLOW_WAIVED_GATES," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+
 # Receipt-v2 Stop advisory belongs to finalization. Development checkpoints do
 # not need final receipts; avoid repeated checks and stale warnings while the
 # candidate is still being built. Shipping remains enforced by PreToolUse.
@@ -148,7 +179,7 @@ if [ "$STATE_LOCAL_DIR" = .forge/local ] && [ -f "$STATE_MD" ]; then
             if ! printf '%s\n' "$_workflow_command" | grep -qE '^/quick-fix [a-z0-9]+(-[a-z0-9]+)*$'; then
                 _vr="$HOOK_DIR/lib/verification-receipt.sh"
                 [ -f "$_vr" ] || _vr="hooks/lib/verification-receipt.sh"
-                if [ ! -f "$_vr" ] || ! bash "$_vr" check --state "$STATE_MD" >/dev/null 2>&1; then
+                if [ -z "$_WORKFLOW_WAIVED_GATES" ] && { [ ! -f "$_vr" ] || ! bash "$_vr" check --state "$STATE_MD" >/dev/null 2>&1; }; then
                     echo "FORGE_FINAL_EVIDENCE_STALE: candidate-bound review, verify-app, and E2E receipts no longer certify the current staged-clean candidate." >&2
                 fi
             fi
@@ -343,7 +374,7 @@ ISSUES=""
 # Block: 3+ files changed on branch but CHANGELOG.md never updated.
 # "files changed on branch vs $DEFAULT_BRANCH" — count is committed + uncommitted
 # diff vs the merge-base, NOT files-this-turn.
-if [ "$TOTAL_CHANGED" -gt 3 ] && [ "$CHANGELOG_IN_BRANCH" -eq 0 ] && [ "$CHANGELOG_MODIFIED" -eq 0 ]; then
+if ! _workflow_stop_skipped changelog && [ "$TOTAL_CHANGED" -gt 3 ] && [ "$CHANGELOG_IN_BRANCH" -eq 0 ] && [ "$CHANGELOG_MODIFIED" -eq 0 ]; then
     ISSUES="${ISSUES:+$ISSUES }Update docs/CHANGELOG.md ($TOTAL_CHANGED files changed on branch vs $DEFAULT_BRANCH)."
 fi
 
@@ -376,7 +407,7 @@ fi
 # A changed v6 state checkpoint stops normally. If the exact state hash remains
 # unchanged across normal Stops, give the model one visible continuation turn.
 # This avoids paying an extra model turn when the workflow already checkpointed.
-if [ -n "$WORKFLOW_REMINDER" ]; then
+if [ -n "$WORKFLOW_REMINDER" ] && ! _workflow_stop_skipped continuation; then
     if [ "$STATE_LOCAL_DIR" != .forge/local ]; then
         echo "$WORKFLOW_REMINDER" >&2
         forge_allow

@@ -52,19 +52,15 @@ an explicit request. Native Windows and authenticated host behavior require thei
 evidence; portable or synthetic checks cannot stand in for them. Process success or a
 confident producer report alone cannot certify an unchanged or changed candidate.
 
-During development, Stop preserves progress without demanding final evidence on each turn.
-Final receipt advisories apply in finalization phases; shipping enforces the applicable evidence
-requirements. An ordinary Stop advisory about full certification does not request another review
-when you have explicitly waived it.
-When you explicitly tell the agent to skip final code review or re-review for a named change,
-Forge supports that decision for any approved scope, including code and merge-conflict resolution.
-The agent freezes the changed tree, directly runs fresh app and applicable E2E checks, and records
-your actual instruction and conversation provenance in a local review-waiver sidecar. It then
-commits through the normal hook with ordinary Git, preserving merge parents, and pushes when
-authorized. You do not need to run those commands yourself or predeclare a documentation allowlist.
-The result is labeled **human-waived review**, not a clean review or full certification. Failed
-verification, other checklist requirements, separate external-action approval and native host
-controls still apply. See the [explicit human review waiver](../../rules/workflow.md#explicit-human-review-waiver).
+During development, Stop prompts preserve progress without demanding final certification.
+Final-evidence advisories belong to finalization; they do not start another review by themselves.
+
+After development or review fixes, you can explicitly skip E2E, unit tests, re-review or any other
+remaining workflow step for the current change. You can also say to skip all remaining checks.
+The agent records your decision and exact scope, runs everything you did not omit and completes
+already-authorized work. Individual omitted tests stay visible beside the checks that actually
+ran. No skipped work is reported as passing or fully certified, and further development invalidates
+the approval. See the [developer workflow decision](../../rules/workflow.md#explicit-human-workflow-waiver).
 
 After full certification, an explicitly enrolled non-runtime prose correction may use the shared
 [documentation closure](../../rules/workflow.md#documentation-only-corrections) procedure: compare

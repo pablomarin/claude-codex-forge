@@ -192,10 +192,10 @@ or undocumented interface.
 
 ## 6. Finalize One Exact Candidate
 
-For ordinary certification, run this order exactly. If the human explicitly waives final code
-review for this named change, follow the shared
-[explicit human review waiver](../rules/workflow.md#explicit-human-review-waiver) for final review,
-fresh verification, and ordinary commit; preserve the other workflow requirements.
+The sequence below is ordinary certification. After development or review fixes, honor an actual
+developer instruction to skip named remaining steps or all remaining workflow steps through the
+[explicit human workflow waiver](../rules/workflow.md#explicit-human-workflow-waiver). Run only
+unwaived checks, record actual omissions and preserve evidence/counters, then commit normally.
 
 1. Finish implementation and TDD.
 2. Create/update solution documentation and `docs/CHANGELOG.md` when applicable.

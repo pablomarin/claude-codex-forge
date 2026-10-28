@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('write', 'check', 'close-docs', 'record-review-waiver', 'check-review-waiver')][string]$Mode,
+    [ValidateSet('write', 'check', 'close-docs', 'record-review-waiver', 'check-review-waiver', 'record-workflow-waiver', 'check-workflow-waiver')][string]$Mode,
     [string]$Kind,
     [string]$Candidate,
     [string]$Command,
@@ -13,7 +13,9 @@ param(
     [string]$State,
     [string]$PreviousCandidate,
     [string]$Decision,
-    [string]$Provenance
+    [string]$Provenance,
+    [string]$Skip,
+    [string]$Boundary = 'ship'
 )
 
 # PowerShell 5.1 mirror of verification-receipt.sh. Receipts are line-oriented
@@ -165,7 +167,7 @@ function Test-Review([string]$Root, [string]$Receipt, [string]$Role, [string]$Ca
     }
     catch { return $false }
 }
-function Test-Verifier([string]$Root, [string]$Receipt, [string]$ReceiptKind, [string]$CandidateReceipt) {
+function Test-Verifier([string]$Root, [string]$Receipt, [string]$ReceiptKind, [string]$CandidateReceipt, [string]$AllowedOmissions = '') {
     try {
         foreach ($key in @('schema_version','receipt_kind','invocation_id','started_at','ended_at','candidate_id','worktree_identity','git_head','workflow_base_sha','index_tree','command_hash','profile','exit_status','report_path','report_hash','report_verdict','result')) { $null = Get-Kv $Receipt $key }
         if ((Get-Kv $Receipt 'schema_version') -cne '2' -or (Get-Kv $Receipt 'receipt_kind') -cne $ReceiptKind -or -not (Test-Fresh (Get-Kv $Receipt 'ended_at'))) { return $false }
@@ -174,6 +176,12 @@ function Test-Verifier([string]$Root, [string]$Receipt, [string]$ReceiptKind, [s
         $report = Get-OwnedPath $Root (Get-Kv $Receipt 'report_path') $true
         if ((Get-ShaFile $report) -cne (Get-Kv $Receipt 'report_hash')) { return $false }
         $actualVerdict = Get-ReportVerdict $report $ReceiptKind
+        $reportLines = [IO.File]::ReadAllLines($report)
+        $markers = @($reportLines | Where-Object { $_.StartsWith('HUMAN_WAIVED_CHECKS:', [StringComparison]::Ordinal) })
+        if ($markers.Count -gt 0) {
+            if ($markers.Count -ne 1 -or $actualVerdict -cne 'PASS' -or -not $AllowedOmissions -or
+                $reportLines.Count -lt 3 -or $reportLines[2] -cne "HUMAN_WAIVED_CHECKS: $AllowedOmissions") { return $false }
+        }
         $reportVerdict = Get-Kv $Receipt 'report_verdict'
         $result = Get-Kv $Receipt 'result'
         if ($actualVerdict -cne $reportVerdict) { return $false }
@@ -190,6 +198,44 @@ function Test-Verifier([string]$Root, [string]$Receipt, [string]$ReceiptKind, [s
 
 # Human approval is separate authorization, never an independent review PASS.
 # Bind both the staged candidate and its exact ordinary (possibly merge) commit.
+function Get-WorkflowSkips([string]$Raw) {
+    $fixed = @('review','verify-app','e2e','simplification','plan-review','convergence','changelog','continuation')
+    if ($Raw -ceq 'all') { return $fixed -join ',' }
+    if (-not $Raw -or $Raw -cmatch '[^a-z0-9,:-]' -or $Raw -match '^,|,$|,,') { throw 'explicit nonempty skip scopes required' }
+    $tokens = @($Raw.Split(',')); $seen = @()
+    foreach ($token in $tokens) {
+        if ($seen -ccontains $token) { throw 'duplicate skip scope' }
+        if ($fixed -cnotcontains $token -and $token -cnotmatch '^(verify-app|e2e):[a-z0-9]+(-[a-z0-9]+)*$') { throw 'unknown skip scope' }
+        $seen += $token
+    }
+    foreach ($kind in @('verify-app','e2e')) {
+        if ($tokens -ccontains $kind -and @($tokens | Where-Object { $_.StartsWith("${kind}:", [StringComparison]::Ordinal) }).Count -gt 0) { throw 'overlapping skip scopes' }
+    }
+    $normalized = @($fixed | Where-Object { $tokens -ccontains $_ })
+    [string[]]$subchecks = @($tokens | Where-Object { $_.Contains(':') })
+    [Array]::Sort($subchecks, [StringComparer]::Ordinal)
+    return (@($normalized) + @($subchecks)) -join ','
+}
+function Get-WorkflowSubchecks([string]$Gates, [string]$Kind) {
+    return @($Gates.Split(',') | Where-Object { $_.StartsWith("${Kind}:", [StringComparison]::Ordinal) } | ForEach-Object { $_.Substring($Kind.Length + 1) }) -join ','
+}
+function Assert-WorkflowEvidence([string]$Root, [string]$StateFile, [string]$CandidateFile, [string]$Gates) {
+    $skips = $Gates.Split(',')
+    if ($skips -cnotcontains 'review') {
+        $spec = Get-OwnedPath $Root (Get-StateValue $StateFile 'Spec review receipt') $true
+        $quality = Get-OwnedPath $Root (Get-StateValue $StateFile 'Quality review receipt') $true
+        $iteration = Get-StateValue $StateFile 'Review iteration'
+        if (-not (Test-Review $Root $spec 'code-spec' $CandidateFile $iteration) -or
+            -not (Test-Review $Root $quality 'code-quality' $CandidateFile $iteration) -or
+            (Get-Kv $spec 'invocation_id') -ceq (Get-Kv $quality 'invocation_id')) { throw 'unwaived independent review is missing or unsuccessful' }
+    }
+    foreach ($kind in @('verify-app','e2e')) {
+        if ($skips -ccontains $kind) { continue }
+        $field = if ($kind -ceq 'verify-app') { 'Verify app receipt' } else { 'E2E receipt' }
+        $file = Get-OwnedPath $Root (Get-StateValue $StateFile $field) $true
+        if (-not (Test-Verifier $Root $file $kind $CandidateFile (Get-WorkflowSubchecks $Gates $kind))) { throw "unwaived $kind is missing, stale or unsuccessful" }
+    }
+}
 function Test-WaiverText([string]$Text) {
     return -not [string]::IsNullOrWhiteSpace($Text) -and $Text -notmatch '[\x00\r\n]'
 }
@@ -271,29 +317,39 @@ function Get-WaiverCandidateState([string]$Root, [string]$CandidateFile, [string
     finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
 }
 function Assert-ReviewWaiver([string]$Root, [string]$StateFile, [string]$CandidateFile, [string]$AppFile, [string]$E2eFile, [string]$Waiver) {
-    if ((Get-Kv $Waiver 'schema_version') -cne '1' -or (Get-Kv $Waiver 'receipt_kind') -cne 'human-review-waiver' -or
-        -not (Test-Fresh (Get-Kv $Waiver 'recorded_at')) -or -not (Test-WaiverText (Get-Kv $Waiver 'decision')) -or
-        -not (Test-WaiverText (Get-Kv $Waiver 'provenance'))) { throw 'review waiver decision or provenance is missing, invalid, or stale' }
+    $schema = Get-Kv $Waiver 'schema_version'; $kind = Get-Kv $Waiver 'receipt_kind'
+    if ($schema -ceq '2' -and $kind -ceq 'human-workflow-waiver') {
+        $gates = Get-Kv $Waiver 'waived_gates'
+        if ((Get-WorkflowSkips $gates) -cne $gates) { throw 'invalid normalized workflow skip scopes' }
+    } elseif ($schema -cne '1' -or $kind -cne 'human-review-waiver') { throw 'invalid waiver schema or kind' }
+    if (-not (Test-Fresh (Get-Kv $Waiver 'recorded_at')) -or -not (Test-WaiverText (Get-Kv $Waiver 'decision')) -or
+        -not (Test-WaiverText (Get-Kv $Waiver 'provenance'))) { throw 'waiver decision or provenance missing, invalid or stale' }
     if ((Get-Kv $Waiver 'candidate_path') -cne $CandidateFile -or (Get-Kv $Waiver 'candidate_hash') -cne (Get-ShaFile $CandidateFile)) { throw 'review waiver candidate receipt changed' }
     foreach ($key in @('candidate_id','worktree_identity','git_head','index_tree')) {
         if ((Get-Kv $Waiver $key) -cne (Get-Kv $CandidateFile $key)) { throw 'review waiver candidate identity changed' }
     }
     $scope = Get-WaiverScope $Root $StateFile $CandidateFile
     foreach ($key in $scope.Keys) { if ((Get-Kv $Waiver $key) -cne $scope[$key]) { throw 'review waiver workflow, Goal, or branch changed' } }
-    if ((Get-Kv $Waiver 'verify_app_receipt_hash') -cne (Get-ShaFile $AppFile) -or (Get-Kv $Waiver 'e2e_receipt_hash') -cne (Get-ShaFile $E2eFile) -or
-        -not (Test-Verifier $Root $AppFile 'verify-app' $CandidateFile) -or -not (Test-Verifier $Root $E2eFile 'e2e' $CandidateFile)) { throw 'review waiver verification is missing, stale, changed, or unsuccessful' }
+    if ($schema -ceq '1' -and ((Get-Kv $Waiver 'verify_app_receipt_hash') -cne (Get-ShaFile $AppFile) -or (Get-Kv $Waiver 'e2e_receipt_hash') -cne (Get-ShaFile $E2eFile) -or
+        -not (Test-Verifier $Root $AppFile 'verify-app' $CandidateFile) -or -not (Test-Verifier $Root $E2eFile 'e2e' $CandidateFile))) { throw 'review waiver verification is missing, stale, changed, or unsuccessful' }
     return Get-WaiverCandidateState $Root $CandidateFile (Get-Kv $Waiver 'parents')
 }
-function Write-ReviewWaiver([string]$Root, [string]$StateFile, [string]$CandidateFile, [string]$AppFile, [string]$E2eFile, [string]$HumanDecision, [string]$HumanProvenance) {
+function Write-ReviewWaiver([string]$Root, [string]$StateFile, [string]$CandidateFile, [string]$AppFile, [string]$E2eFile, [string]$HumanDecision, [string]$HumanProvenance, [string]$Skipped = '') {
     if (-not (Test-WaiverText $HumanDecision) -or -not (Test-WaiverText $HumanProvenance)) { throw 'review waiver requires the actual human decision and conversation provenance' }
     if (-not (Test-CurrentCandidate $Root $CandidateFile)) { throw 'review waiver needs the current staged-clean frozen candidate' }
     $scope = Get-WaiverScope $Root $StateFile $CandidateFile
     $body = @('schema_version=1','receipt_kind=human-review-waiver',"recorded_at=$([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))", "decision=$HumanDecision", "provenance=$HumanProvenance")
+    if ($Skipped) {
+        $body[0] = 'schema_version=2'; $body[1] = 'receipt_kind=human-workflow-waiver'
+        $body += "waived_gates=$(Get-WorkflowSkips $Skipped)"
+    }
     foreach ($key in $scope.Keys) { $body += "$key=$($scope[$key])" }
     $body += @("candidate_path=$CandidateFile", "candidate_hash=$(Get-ShaFile $CandidateFile)")
     foreach ($key in @('candidate_id','worktree_identity','git_head','index_tree')) { $body += "$key=$(Get-Kv $CandidateFile $key)" }
-    $body += @("parents=$(Get-WaiverParents $Root)", "verify_app_receipt_hash=$(Get-ShaFile $AppFile)", "e2e_receipt_hash=$(Get-ShaFile $E2eFile)")
-    $waiver = Get-OwnedPath $Root "$CandidateFile.review-waiver" $false
+    $body += "parents=$(Get-WaiverParents $Root)"
+    if (-not $Skipped) { $body += @("verify_app_receipt_hash=$(Get-ShaFile $AppFile)", "e2e_receipt_hash=$(Get-ShaFile $E2eFile)") }
+    $suffix = if ($Skipped) { 'workflow-waiver' } else { 'review-waiver' }
+    $waiver = Get-OwnedPath $Root "$CandidateFile.$suffix" $false
     $temporary = Get-OwnedPath $Root "$waiver.tmp.$PID" $false
     try {
         [IO.File]::WriteAllText($temporary, (($body -join "`n") + "`n"), $Utf8)
@@ -472,12 +528,12 @@ function Write-DocsClosure([string]$Root, [string]$StateFile, [string]$Candidate
 
 function Invoke-VerificationReceipt {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('write', 'check', 'close-docs', 'record-review-waiver', 'check-review-waiver')][string]$ReceiptMode,
+        [Parameter(Mandatory = $true)][ValidateSet('write', 'check', 'close-docs', 'record-review-waiver', 'check-review-waiver', 'record-workflow-waiver', 'check-workflow-waiver')][string]$ReceiptMode,
         [string]$ReceiptKind, [string]$CandidatePath, [string]$CommandText,
         [string]$ProfileName, [string]$ReportPath, [string]$ReceiptResult,
         [int]$ReceiptExitStatus = -1, [string]$OutputPath,
         [string]$ReceiptStartedAt, [string]$ReceiptEndedAt, [string]$StatePath, [string]$PreviousCandidatePath,
-        [string]$ReceiptDecision, [string]$ReceiptProvenance
+        [string]$ReceiptDecision, [string]$ReceiptProvenance, [string]$ReceiptSkip, [ValidateSet('ship','stop')][string]$ReceiptBoundary = 'ship'
     )
     $response = [ordered]@{ Status = 2; Lines = @(); Error = '' }
     $root = (& git rev-parse --show-toplevel 2>$null | Select-Object -First 1)
@@ -518,6 +574,30 @@ function Invoke-VerificationReceipt {
         $stateFile = if ([IO.Path]::IsPathRooted($StatePath)) { [IO.Path]::GetFullPath($StatePath) } else { [IO.Path]::GetFullPath((Join-Path $root $StatePath)) }
         if ((Get-Content -LiteralPath $stateFile -TotalCount 1) -cne '<!-- forge:state-schema v6 -->') { throw 'receipt-v2 requires canonical v6 state' }
         $candidateFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Candidate receipt') $true
+        if ($ReceiptMode -in @('record-workflow-waiver','check-workflow-waiver')) {
+            $stateFile = Get-OwnedPath $root $stateFile $true
+            if ($ReceiptMode -ceq 'record-workflow-waiver') {
+                $gates = Get-WorkflowSkips $ReceiptSkip
+                $recorded = Write-ReviewWaiver $root $stateFile $candidateFile '' '' $ReceiptDecision $ReceiptProvenance $gates
+                $waiverState = $recorded.State; $response.Lines = @("WORKFLOW_WAIVER:$($recorded.Path)")
+            } else {
+                $newPath = "$candidateFile.workflow-waiver"
+                if (Get-Item -LiteralPath $newPath -Force -ErrorAction SilentlyContinue) {
+                    $waiver = Get-OwnedPath $root $newPath $true
+                    if ((Get-Kv $waiver 'receipt_kind') -cne 'human-workflow-waiver') { throw 'invalid workflow waiver kind' }
+                    $gates = Get-Kv $waiver 'waived_gates'; $appFile = ''; $e2eFile = ''
+                } else {
+                    $waiver = Get-OwnedPath $root "$candidateFile.review-waiver" $true; $gates = 'review'
+                    $appFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Verify app receipt') $true
+                    $e2eFile = Get-OwnedPath $root (Get-StateValue $stateFile 'E2E receipt') $true
+                }
+                $waiverState = Assert-ReviewWaiver $root $stateFile $candidateFile $appFile $e2eFile $waiver
+                if ($ReceiptBoundary -ceq 'ship') { Assert-WorkflowEvidence $root $stateFile $candidateFile $gates }
+            }
+            $response.Status = 0
+            $response.Lines += @('WORKFLOW_WAIVER_VALID:true','WORKFLOW_STATUS:human-waived',"WAIVED_GATES:$gates", "WORKFLOW_WAIVER_STATE:$waiverState")
+            return [pscustomobject]$response
+        }
         if ($ReceiptMode -in @('record-review-waiver','check-review-waiver')) {
             $stateFile = Get-OwnedPath $root $stateFile $true
             $appFile = Get-OwnedPath $root (Get-StateValue $stateFile 'Verify app receipt') $true
@@ -579,7 +659,7 @@ function Invoke-VerificationReceipt {
 # Dot-source consumers call Invoke-VerificationReceipt directly. Only the
 # standalone entrypoint writes streams or exits the host process.
 if ($MyInvocation.InvocationName -ne '.') {
-    $receiptResponse = Invoke-VerificationReceipt -ReceiptMode $Mode -ReceiptKind $Kind -CandidatePath $Candidate -CommandText $Command -ProfileName $Profile -ReportPath $Report -ReceiptResult $Result -ReceiptExitStatus $ExitStatus -OutputPath $Output -ReceiptStartedAt $StartedAt -ReceiptEndedAt $EndedAt -StatePath $State -PreviousCandidatePath $PreviousCandidate -ReceiptDecision $Decision -ReceiptProvenance $Provenance
+    $receiptResponse = Invoke-VerificationReceipt -ReceiptMode $Mode -ReceiptKind $Kind -CandidatePath $Candidate -CommandText $Command -ProfileName $Profile -ReportPath $Report -ReceiptResult $Result -ReceiptExitStatus $ExitStatus -OutputPath $Output -ReceiptStartedAt $StartedAt -ReceiptEndedAt $EndedAt -StatePath $State -PreviousCandidatePath $PreviousCandidate -ReceiptDecision $Decision -ReceiptProvenance $Provenance -ReceiptSkip $Skip -ReceiptBoundary $Boundary
     foreach ($line in $receiptResponse.Lines) { Write-Output $line }
     if ($receiptResponse.Error) { [Console]::Error.WriteLine($receiptResponse.Error) }
     exit $receiptResponse.Status

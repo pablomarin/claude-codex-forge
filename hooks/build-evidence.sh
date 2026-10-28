@@ -562,6 +562,19 @@ PA_REST2="${PA_REST#*|}"
 PA_HEAD="${PA_REST2%%|*}"
 PA_NONCE="${PA_REST2#*|}"
 
+# Human decisions are visible separately; never paint omitted tests/reviews green.
+HUMAN_WAIVER_VALID=false
+HUMAN_WAIVER_READY=false
+HUMAN_WAIVER_GATES=""
+if [ "$STATE_IS_V6" = true ] && [ "$WORKFLOW_ACTIVE" = true ] && [ -f "$VR" ]; then
+    if HUMAN_WAIVER_OUT=$(bash "$VR" check-workflow-waiver --boundary stop --state "$STATE_MD" 2>/dev/null); then
+        HUMAN_WAIVER_VALID=true
+        HUMAN_WAIVER_GATES=$(printf '%s\n' "$HUMAN_WAIVER_OUT" | sed -n 's/^WAIVED_GATES://p')
+        bash "$VR" check-workflow-waiver --state "$STATE_MD" >/dev/null 2>&1 && HUMAN_WAIVER_READY=true
+    fi
+fi
+HUMAN_WAIVER_GATES_JSON=$(json_str_field "waived_gates" "$HUMAN_WAIVER_GATES")
+
 # Build JSON-safe field values for string fields that need escaping/null handling.
 PHASE_JSON=$(json_str_field "phase" "$PHASE")
 NEXT_STEP_JSON=$(json_str_field "next_step" "$NEXT_STEP")
@@ -685,6 +698,7 @@ if [ -n "$GOAL_NONCE" ] || [ "$DIAGNOSTIC" = true ]; then
     printf '"candidate_gate":{"staged_clean":%s,%s,"all_receipts_same_candidate":%s},' \
         "$CANDIDATE_CLEAN" "$CANDIDATE_ID_JSON" "$SHIP_RECEIPTS_CLEAN"
     printf '"verification_gate":{"verify_app":%s,"e2e":%s},' "$VERIFY_APP_CLEAN" "$E2E_RECEIPT_CLEAN"
+    printf '"workflow_waiver":{"valid":%s,"unwaived_evidence_ready":%s,%s},' "$HUMAN_WAIVER_VALID" "$HUMAN_WAIVER_READY" "$HUMAN_WAIVER_GATES_JSON"
     printf '"plan_review_gate":{"clean_same_iteration":%s,%s,%s},' \
         "$PRG_CLEAN" "$PRG_ITER_JSON" "$PRG_SHA_JSON"
     printf '%s,' "$BRANCH_JSON"

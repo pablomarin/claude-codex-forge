@@ -8,15 +8,13 @@ developer continuity, and removes the feature worktree without choosing a perman
 1. Read `.forge/local/state.md` and resolve the active host through its adapter.
 2. Resolve the current branch and inspect its PR state, URL, title, base, checks, and review status.
 3. If no PR exists, stop. If it is already merged, skip to continuity/cleanup.
-4. Inspect any check, review, or conflict blocker. When authorized to resolve a conflict, preserve
-   all intended changes and run the required checks on the resulting tree. If the human has
-   explicitly said to skip independent code re-review for that change, follow
-   `.forge/rules/workflow.md#explicit-human-review-waiver`: freeze, run fresh main-agent app/E2E
-   verification, record the actual decision and conversation provenance, and commit through the
-   normal gate with ordinary Git to preserve merge parents. Then push when authorized. Do not
-   dispatch reviewers merely to supply waived review or require manual human commit/push commands.
-   The waiver does not bypass required CI, hosted review/branch protections, convergence, or native
-   host controls. Report and stop on any remaining blocker.
+4. Inspect check, review and conflict blockers. Resolve authorized conflicts and preserve all
+   intended changes. If the developer explicitly omits remaining checks for the current change,
+   follow `.forge/rules/workflow.md#explicit-human-workflow-waiver`: freeze, record the actual
+   decision/provenance and exact omissions, run unwaived checks, and commit through ordinary Git
+   to preserve merge parents. Then push when authorized. Do not rerun waived steps, repeat a valid
+   approval question or require manual human commit/push commands. Hosted CI/branch protections
+   and native controls keep their authority. Report any independent remaining blocker.
 
 ## 2. Authorize and Merge
 

@@ -64,7 +64,8 @@ End native autonomy and persist the exact next step when:
 - the developer interrupts or cancels the run.
 
 Record only `complete`, `blocked`, or `cancelled`. `complete` requires the workflow's current
-candidate-bound evidence and all authorized mutations to have succeeded; native goal exit is never
+candidate-bound evidence (including an explicit human workflow waiver with successful unwaived
+requirements) and all authorized mutations to have succeeded; native goal exit is never
 proof. PR creation requires explicit human approval bound to the active nonce and candidate. Reuse an
 already-granted approval only while that exact scope remains current; the agent records the decision
 and executes the approved action. No manual command or authorization-file edit is required. Merge, deployment, publishing, destructive work, and every other external mutation keep

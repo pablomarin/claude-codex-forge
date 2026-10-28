@@ -178,7 +178,7 @@ vr_validate_review() {
     return 0
 }
 vr_validate_verifier() {
-    local receipt="$1" kind="$2" candidate="$3" key report candidate_id report_verdict result actual_verdict
+    local receipt="$1" kind="$2" candidate="$3" allowed_omissions="${4:-}" key report candidate_id report_verdict result actual_verdict omissions count
     [ -f "$receipt" ] && [ ! -L "$receipt" ] || return 1
     for key in schema_version receipt_kind invocation_id started_at ended_at candidate_id worktree_identity git_head workflow_base_sha index_tree command_hash profile exit_status report_path report_hash report_verdict result; do
         vr_kv "$receipt" "$key" >/dev/null 2>&1 || return 1
@@ -194,6 +194,12 @@ vr_validate_verifier() {
     report=$(vr_owned_path "$(vr_kv "$receipt" report_path)" true) || return 1
     [ "$(vr_hash_file "$report")" = "$(vr_kv "$receipt" report_hash)" ] || return 1
     actual_verdict=$(vr_report_verdict "$report" "$kind") || return 1
+    count=$(awk '/^HUMAN_WAIVED_CHECKS:/ {n++} END {print n+0}' "$report")
+    if [ "$count" -ne 0 ]; then
+        [ "$count" -eq 1 ] && [ "$actual_verdict" = PASS ] || return 1
+        omissions=$(tr -d '\r' < "$report" | sed -n '3s/^HUMAN_WAIVED_CHECKS: //p')
+        [ -n "$allowed_omissions" ] && [ "$omissions" = "$allowed_omissions" ] || return 1
+    fi
     report_verdict=$(vr_kv "$receipt" report_verdict)
     result=$(vr_kv "$receipt" result)
     [ "$actual_verdict" = "$report_verdict" ] || return 1
@@ -207,6 +213,56 @@ vr_validate_verifier() {
 
 # A human review waiver is authorization, not review certification. Keep its
 # checker separate so ordinary check/closure and convergence anchors stay true.
+# Supported process steps and scoped verifier subchecks. This is permission,
+# never certification. Keep all expansion stable across Bash and PowerShell.
+vr_normalize_skips() {
+    local raw="$1" token seen= normalized= fixed
+    local all='review,verify-app,e2e,simplification,plan-review,convergence,changelog,continuation'
+    [ "$raw" != all ] || { printf '%s\n' "$all"; return 0; }
+    case "$raw" in ''|,*|*,|*,,*|*[!a-z0-9,:-]*) return 1 ;; esac
+    local old_ifs="$IFS"; IFS=,
+    for token in $raw; do
+        case "$token" in review|verify-app|e2e|simplification|plan-review|convergence|changelog|continuation) ;;
+            verify-app:*|e2e:*) printf '%s\n' "${token#*:}" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$' || { IFS="$old_ifs"; return 1; } ;;
+            *) IFS="$old_ifs"; return 1 ;; esac
+        case ",$seen," in *",$token,"*) IFS="$old_ifs"; return 1 ;; esac
+        seen="${seen:+$seen,}$token"
+    done
+    IFS="$old_ifs"
+    for fixed in verify-app e2e; do
+        case ",$seen," in *",$fixed,"*) case ",$seen," in *",$fixed:"*) return 1 ;; esac ;; esac
+    done
+    for fixed in review verify-app e2e simplification plan-review convergence changelog continuation; do
+        case ",$seen," in *",$fixed,"*) normalized="${normalized:+$normalized,}$fixed" ;; esac
+    done
+    for token in $(printf '%s' "$seen" | tr ',' '\n' | LC_ALL=C sort); do
+        case "$token" in *:*) normalized="${normalized:+$normalized,}$token" ;; esac
+    done
+    printf '%s\n' "$normalized"
+}
+vr_skipped() { case ",$WAIVER_GATES," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+vr_subchecks() {
+    printf '%s' "$WAIVER_GATES" | tr ',' '\n' | sed -n "s/^$1://p" | paste -sd, -
+}
+vr_workflow_evidence() {
+    local spec quality iteration app e2e
+    if ! vr_skipped review; then
+        spec=$(vr_owned_path "$(vr_state_value "$state" 'Spec review receipt')" true) || return 1
+        quality=$(vr_owned_path "$(vr_state_value "$state" 'Quality review receipt')" true) || return 1
+        iteration=$(vr_state_value "$state" 'Review iteration') || return 1
+        vr_validate_review "$spec" code-spec "$candidate" "$iteration" && \
+            vr_validate_review "$quality" code-quality "$candidate" "$iteration" && \
+            [ "$(vr_kv "$spec" invocation_id)" != "$(vr_kv "$quality" invocation_id)" ] || return 1
+    fi
+    if ! vr_skipped verify-app; then
+        app=$(vr_owned_path "$(vr_state_value "$state" 'Verify app receipt')" true) || return 1
+        vr_validate_verifier "$app" verify-app "$candidate" "$(vr_subchecks verify-app)" || return 1
+    fi
+    if ! vr_skipped e2e; then
+        e2e=$(vr_owned_path "$(vr_state_value "$state" 'E2E receipt')" true) || return 1
+        vr_validate_verifier "$e2e" e2e "$candidate" "$(vr_subchecks e2e)" || return 1
+    fi
+}
 vr_waiver_nonce() {
     awk -F'|' '
         { sub(/\r$/, "") }
@@ -270,11 +326,16 @@ vr_waiver_parents() {
 vr_waiver_validate() {
     local waiver="$1" key text expected current_head parents merge_file
     [ -f "$waiver" ] && [ ! -L "$waiver" ] || return 1
-    for key in schema_version receipt_kind recorded_at decision provenance workflow_command workflow_base_ref workflow_base_sha goal_nonce branch_ref candidate_path candidate_hash candidate_id worktree_identity git_head index_tree parents verify_app_receipt_hash e2e_receipt_hash; do
+    for key in schema_version receipt_kind recorded_at decision provenance workflow_command workflow_base_ref workflow_base_sha goal_nonce branch_ref candidate_path candidate_hash candidate_id worktree_identity git_head index_tree parents; do
         vr_kv "$waiver" "$key" >/dev/null 2>&1 || return 1
     done
-    [ "$(vr_kv "$waiver" schema_version)" = 1 ] && \
-        [ "$(vr_kv "$waiver" receipt_kind)" = human-review-waiver ] || return 1
+    case "$(vr_kv "$waiver" schema_version):$(vr_kv "$waiver" receipt_kind)" in
+        1:human-review-waiver) WAIVER_GATES=review ;;
+        2:human-workflow-waiver)
+            WAIVER_GATES=$(vr_kv "$waiver" waived_gates) || return 1
+            [ "$(vr_normalize_skips "$WAIVER_GATES")" = "$WAIVER_GATES" ] || return 1 ;;
+        *) return 1 ;;
+    esac
     vr_fresh "$(vr_kv "$waiver" recorded_at)" || return 1
     for key in decision provenance; do
         text=$(vr_kv "$waiver" "$key") || return 1
@@ -291,10 +352,12 @@ vr_waiver_validate() {
         expected=$(vr_kv "$candidate" "$key") || return 1
         [ "$(vr_kv "$waiver" "$key")" = "$expected" ] || return 1
     done
-    [ "$(vr_kv "$waiver" verify_app_receipt_hash)" = "$(vr_hash_file "$verify_app")" ] && \
-        [ "$(vr_kv "$waiver" e2e_receipt_hash)" = "$(vr_hash_file "$e2e")" ] && \
-        vr_validate_verifier "$verify_app" verify-app "$candidate" && \
-        vr_validate_verifier "$e2e" e2e "$candidate" || return 1
+    if [ "$(vr_kv "$waiver" schema_version)" = 1 ]; then
+        [ "$(vr_kv "$waiver" verify_app_receipt_hash)" = "$(vr_hash_file "$verify_app")" ] && \
+            [ "$(vr_kv "$waiver" e2e_receipt_hash)" = "$(vr_hash_file "$e2e")" ] && \
+            vr_validate_verifier "$verify_app" verify-app "$candidate" && \
+            vr_validate_verifier "$e2e" e2e "$candidate" || return 1
+    fi
     parents=$(vr_kv "$waiver" parents) || return 1
     case "$parents" in "$WAIVER_HEAD"|"$WAIVER_HEAD "*) ;; *) return 1 ;; esac
     current_head=$(git -C "$VR_ROOT" rev-parse HEAD 2>/dev/null) || return 1
@@ -330,22 +393,30 @@ vr_waiver_record() {
     [ -n "$(printf '%s' "$decision" | tr -d '[:space:]')" ] && \
         [ -n "$(printf '%s' "$provenance" | tr -d '[:space:]')" ] || vr_die 'actual human decision and conversation provenance are required'
     vr_candidate_current "$candidate" && vr_waiver_context || vr_die 'review waiver needs the current staged-clean frozen candidate and workflow'
-    vr_validate_verifier "$verify_app" verify-app "$candidate" && \
-        vr_validate_verifier "$e2e" e2e "$candidate" || vr_die 'review waiver requires fresh passing app and E2E verification'
+    if [ "$mode" = record-review-waiver ]; then
+        vr_validate_verifier "$verify_app" verify-app "$candidate" && \
+            vr_validate_verifier "$e2e" e2e "$candidate" || vr_die 'review waiver requires fresh passing app and E2E verification'
+    fi
     parents=$(vr_waiver_parents) || vr_die 'cannot bind the exact commit parents'
-    waiver=$(vr_owned_path "$candidate.review-waiver" false) || vr_die 'invalid review waiver output'
+    waiver=$(vr_owned_path "$candidate.$waiver_suffix" false) || vr_die 'invalid review waiver output'
     tmp=$(vr_owned_path "$waiver.tmp.$$" false) || vr_die 'invalid temporary review waiver output'
     {
-        printf 'schema_version=1\nreceipt_kind=human-review-waiver\nrecorded_at=%s\ndecision=%s\nprovenance=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$decision" "$provenance"
+        if [ "$mode" = record-workflow-waiver ]; then
+            printf 'schema_version=2\nreceipt_kind=human-workflow-waiver\nwaived_gates=%s\n' "$WAIVER_GATES"
+        else printf 'schema_version=1\nreceipt_kind=human-review-waiver\n'; fi
+        printf 'recorded_at=%s\ndecision=%s\nprovenance=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$decision" "$provenance"
         printf 'workflow_command=%s\ngoal_nonce=%s\nbranch_ref=%s\ncandidate_path=%s\ncandidate_hash=%s\n' "$WAIVER_COMMAND" "$WAIVER_NONCE" "$WAIVER_BRANCH" "$candidate" "$(vr_hash_file "$candidate")"
         for key in workflow_base_ref workflow_base_sha candidate_id worktree_identity git_head index_tree; do printf '%s=%s\n' "$key" "$(vr_kv "$candidate" "$key")"; done
-        printf 'parents=%s\nverify_app_receipt_hash=%s\ne2e_receipt_hash=%s\n' "$parents" "$(vr_hash_file "$verify_app")" "$(vr_hash_file "$e2e")"
+        printf 'parents=%s\n' "$parents"
+        if [ "$mode" = record-review-waiver ]; then
+            printf 'verify_app_receipt_hash=%s\ne2e_receipt_hash=%s\n' "$(vr_hash_file "$verify_app")" "$(vr_hash_file "$e2e")"
+        fi
     } > "$tmp" || vr_die 'cannot write review waiver'
     if ! vr_waiver_validate "$tmp"; then
         rm -f "$tmp"; vr_die 'approved candidate, workflow, parents or verification changed while recording review waiver'
     fi
     mv "$tmp" "$waiver" || vr_die 'cannot publish review waiver'
-    printf 'REVIEW_WAIVER:%s\n' "$waiver"
+    if [ "$mode" = record-workflow-waiver ]; then printf 'WORKFLOW_WAIVER:%s\n' "$waiver"; else printf 'REVIEW_WAIVER:%s\n' "$waiver"; fi
 }
 
 # A docs closure carries original evidence; it never changes what a receipt tested.
@@ -554,13 +625,15 @@ if [ "$mode" = write ]; then
     exit 0
 fi
 
-case "$mode" in check|close-docs|record-review-waiver|check-review-waiver) ;; *) vr_die 'usage: verification-receipt.sh write|check|close-docs|record-review-waiver|check-review-waiver ...' ;; esac
-state=""; previous_candidate=""; decision=""; provenance=""
+case "$mode" in check|close-docs|record-review-waiver|check-review-waiver|record-workflow-waiver|check-workflow-waiver) ;; *) vr_die 'usage: verification-receipt.sh write|check|close-docs|record-review-waiver|check-review-waiver ...' ;; esac
+state=""; previous_candidate=""; decision=""; provenance=""; skips=""; boundary=ship; waiver_suffix=review-waiver
 while [ "$#" -gt 0 ]; do case "$1" in
     --state) [ "$#" -ge 2 ] || vr_die 'state value is required'; state="$2"; shift 2 ;;
     --previous-candidate) [ "$#" -ge 2 ] || vr_die 'previous candidate value is required'; previous_candidate="$2"; shift 2 ;;
-    --decision) [ "$mode" = record-review-waiver ] && [ "$#" -ge 2 ] || vr_die 'decision value is required when recording a review waiver'; decision="$2"; shift 2 ;;
-    --provenance) [ "$mode" = record-review-waiver ] && [ "$#" -ge 2 ] || vr_die 'provenance value is required when recording a review waiver'; provenance="$2"; shift 2 ;;
+    --decision) { [ "$mode" = record-review-waiver ] || [ "$mode" = record-workflow-waiver ]; } && [ "$#" -ge 2 ] || vr_die 'decision value is required when recording a review waiver'; decision="$2"; shift 2 ;;
+    --provenance) { [ "$mode" = record-review-waiver ] || [ "$mode" = record-workflow-waiver ]; } && [ "$#" -ge 2 ] || vr_die 'provenance value is required when recording a review waiver'; provenance="$2"; shift 2 ;;
+    --skip) [ "$mode" = record-workflow-waiver ] && [ "$#" -ge 2 ] || vr_die 'skip list is required only when recording a workflow waiver'; skips="$2"; shift 2 ;;
+    --boundary) [ "$mode" = check-workflow-waiver ] && [ "$#" -ge 2 ] || vr_die 'boundary requires a workflow check'; boundary="$2"; shift 2 ;;
     *) vr_die "unknown check argument $1" ;;
 esac; done
 [ -n "$state" ] || state=.forge/local/state.md
@@ -568,6 +641,31 @@ case "$state" in /*) ;; *) state="$VR_ROOT/$state" ;; esac
 [ -f "$state" ] && [ ! -L "$state" ] || vr_die 'canonical state is required'
 [ "$(sed -n '1p' "$state")" = '<!-- forge:state-schema v6 -->' ] || vr_die 'receipt-v2 requires canonical v6 state'
 candidate=$(vr_state_value "$state" 'Candidate receipt' 2>/dev/null) || vr_die 'Candidate receipt state linkage is missing'
+if [ "$mode" = record-workflow-waiver ] || [ "$mode" = check-workflow-waiver ]; then
+    case "$boundary" in ship|stop) ;; *) vr_die 'boundary must be ship or stop' ;; esac
+    state=$(vr_owned_path "$state" true) || vr_die 'workflow waiver state must be Forge-local'
+    candidate=$(vr_owned_path "$candidate" true) || vr_die 'candidate receipt path is invalid'
+    waiver_suffix=workflow-waiver
+    if [ "$mode" = record-workflow-waiver ]; then
+        WAIVER_GATES=$(vr_normalize_skips "$skips") || vr_die 'explicit valid nonoverlapping skip scopes are required'
+        vr_waiver_record
+    else
+        if [ -e "$candidate.workflow-waiver" ] || [ -L "$candidate.workflow-waiver" ]; then
+            waiver=$(vr_owned_path "$candidate.workflow-waiver" true) || vr_die 'invalid workflow waiver'
+            [ "$(vr_kv "$waiver" receipt_kind)" = human-workflow-waiver ] || vr_die 'invalid workflow waiver kind'
+        else
+            waiver=$(vr_owned_path "$candidate.review-waiver" true) || vr_die 'human workflow waiver is missing'
+            verify_app=$(vr_owned_path "$(vr_state_value "$state" 'Verify app receipt')" true) || vr_die 'verify-app receipt missing'
+            e2e=$(vr_owned_path "$(vr_state_value "$state" 'E2E receipt')" true) || vr_die 'E2E receipt missing'
+        fi
+        vr_waiver_validate "$waiver" || vr_die 'human workflow waiver is stale or candidate/context changed'
+        if [ "$boundary" = ship ]; then
+            vr_workflow_evidence || vr_die 'unwaived review or verification is missing, stale, changed or unsuccessful'
+        fi
+    fi
+    printf 'WORKFLOW_WAIVER_VALID:true\nWORKFLOW_STATUS:human-waived\nWAIVED_GATES:%s\nWORKFLOW_WAIVER_STATE:%s\n' "$WAIVER_GATES" "$WAIVER_STATE"
+    exit 0
+fi
 if [ "$mode" = record-review-waiver ] || [ "$mode" = check-review-waiver ]; then
     state=$(vr_owned_path "$state" true) || vr_die 'review waiver state must be Forge-local'
     candidate=$(vr_owned_path "$candidate" true) || vr_die 'candidate receipt path is invalid'

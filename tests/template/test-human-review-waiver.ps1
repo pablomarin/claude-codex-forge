@@ -35,12 +35,12 @@ function Invoke-FixtureReceipt([string]$Action, [string]$HumanDecision = $decisi
     catch { return [pscustomobject]@{ Status = 2; Error = $_.Exception.Message; Lines = @() } }
     finally { Pop-Location }
 }
-function Invoke-FixtureGate([string]$CommandText, [string]$HookPath = (Join-Path $repo 'hooks/check-workflow-gates.ps1')) {
+function Invoke-FixtureGate([string]$CommandText, [string]$HookPath = (Join-Path $repo 'hooks/check-workflow-gates.ps1'), [string[]]$HookArguments = @()) {
     $payload = @{ cwd = $script:project; host = $script:mainHost; tool_input = @{ command = $CommandText } } | ConvertTo-Json -Compress
     $out = Join-Path $scratch 'gate.out'; $err = Join-Path $scratch 'gate.err'
     # powershell.exe 5.1 turns native stderr into ErrorRecords, so capture each stream to a file.
     $savedPreference = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    try { $payload | & $runner -NoProfile -File $HookPath > $out 2> $err; $status = $LASTEXITCODE }
+    try { $payload | & $runner -NoProfile -File $HookPath @HookArguments > $out 2> $err; $status = $LASTEXITCODE }
     finally { $ErrorActionPreference = $savedPreference }
     return [pscustomobject]@{ Status = $status; Text = ([IO.File]::ReadAllText($out) + [IO.File]::ReadAllText($err)) }
 }
@@ -132,6 +132,7 @@ function New-WaiverFixture([string]$Name, [string]$MainHost = 'codex', [bool]$Me
     Write-VerifierFixture e2e $E2e
 }
 try {
+    if ($env:FORGE_WAIVER_EXTENSION_ONLY -ne '1') {
     foreach ($mainHost in @('claude','codex')) {
         foreach ($merge in @($false,$true)) {
             $e2e = if ($merge) { 'N/A' } else { 'PASS' }
@@ -308,6 +309,115 @@ try {
             breaker { Assert-Waiver ($gate.Text.Contains('convergence breaker')) 'convergence breaker remains blocker' }
         }
     }
+    }
+    function Invoke-WorkflowFixture([string]$Action, [string]$Scopes = '') {
+        Push-Location $script:project
+        try { return Invoke-VerificationReceipt -ReceiptMode $Action -StatePath '.forge/local/state.md' -ReceiptSkip $Scopes -ReceiptDecision $decision -ReceiptProvenance $provenance }
+        catch { return [pscustomobject]@{ Status = 2; Error = $_.Exception.Message; Lines = @() } }
+        finally { Pop-Location }
+    }
+    function Write-CleanReviewFixture([string]$Role) {
+        $candidateFile = Join-Path $script:project '.forge/local/evidence/candidate.receipt'
+        $report = Join-Path $script:project ".forge/local/reviews/$Role.report"
+        Write-Fixture ".forge/local/reviews/$Role.report" "schema_version=1`nverdict=CLEAN`nmax_severity=NONE`nblocked_class=none`n"
+        $data = [ordered]@{schema_version='1'; invocation_id=$Role; timestamp=[DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'); main_host=$script:mainHost; requested_engine='claude'; actual_engine='claude'; fallback='false'; fallback_reason='none'; role=$Role; profile='review'; review_iteration='1'; fresh_process='true'; artifact_kind='git-working-tree'; artifact_hash=(Get-Kv $candidateFile 'candidate_id'); output_path=$report; output_hash=(Get-ShaFile $report); process_exit_status='0'; semantic_verdict='CLEAN'; max_severity='NONE'; findings_digest=(Get-ShaText ''); result_schema_version='1'; blocked_class='none'}
+        foreach ($key in @('worktree_identity','git_head','workflow_base_sha')) { $data[$key] = Get-Kv $candidateFile $key }
+        $body = @(); foreach ($key in $data.Keys) { $body += "$key=$($data[$key])" }
+        Write-Fixture ".forge/local/reviews/$Role.receipt" (($body -join "`n") + "`n")
+    }
+    foreach ($hostName in @('claude','codex')) {
+        New-WaiverFixture "extension-e2e-$hostName" $hostName
+        Write-CleanReviewFixture code-spec; Write-CleanReviewFixture code-quality
+        Edit-State '- [ ] Code review loop' '- [x] Code review loop'
+        Edit-State '- [x] E2E verified' '- [ ] E2E verified'
+        Remove-Item -LiteralPath (Join-Path $script:project '.forge/local/evidence/e2e.receipt')
+        Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver e2e).Status -eq 0) "$hostName explicit E2E omission needs no E2E receipt"
+        $checked = Invoke-WorkflowFixture check-workflow-waiver
+        Assert-Waiver ($checked.Status -eq 0 -and $checked.Lines -ccontains 'WAIVED_GATES:e2e') 'selected scope is precise'
+        $e2eOnlyGate = Invoke-FixtureGate 'git commit -m approved'
+        Assert-Waiver ($e2eOnlyGate.Status -eq 0 -and $e2eOnlyGate.Text.Contains('human-waived steps: e2e')) 'E2E-only commit accurately names the omitted step'
+        Assert-Waiver ((Invoke-FixtureReceipt check).Status -eq 2) 'waived E2E is not full certification'
+        Write-VerifierFixture verify-app FAIL 1
+        Assert-Waiver ((Invoke-WorkflowFixture check-workflow-waiver).Status -eq 2) 'unwaived app failure invalidates decision'
+
+        New-WaiverFixture "extension-all-$hostName" $hostName $true
+        foreach ($stem in @('Simplified','Verified (tests/lint/types)','E2E verified')) { Edit-State "- [x] $stem" "- [ ] $stem" }
+        Edit-State '| First certified iteration | none |' '| First certified iteration | 1 |'
+        Edit-State '| Review iteration | 1 |' '| Review iteration | 5 |'
+        Edit-State '## /goal session' "- [x] Plan review loop — FAIL`n## /goal session"
+        Remove-Item -LiteralPath (Join-Path $script:project '.forge/local/evidence/e2e.receipt'),(Join-Path $script:project '.forge/local/evidence/verify-app.receipt')
+        $before = Get-ShaFile (Join-Path $script:project '.forge/local/state.md')
+        Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver all).Status -eq 0) 'all remaining development checks can be explicitly omitted'
+        Assert-Waiver ((Invoke-WorkflowFixture check-workflow-waiver).Status -eq 0) 'all-scope current candidate validates'
+        Assert-Waiver ((Get-ShaFile (Join-Path $script:project '.forge/local/state.md')) -ceq $before) 'all omissions preserve unchecked state and counters'
+        Assert-Waiver ((Invoke-FixtureGate 'git commit --no-edit').Status -eq 0) 'all omissions clear checklist, plan and convergence'
+        & git -C $script:project commit --no-edit | Out-Null
+        Assert-Waiver ($LASTEXITCODE -eq 0) 'normal merge commit succeeds'
+        Assert-Waiver ((Invoke-FixtureGate 'git push origin fix/review-waiver').Status -eq 0) 'exact committed candidate reaches push'
+        Assert-Waiver ((Invoke-FixtureReceipt check).Status -eq 2) 'all omissions never manufacture full certification'
+        Assert-Waiver ((Invoke-FixtureGate 'git commit -n -m another').Status -eq 2) 'all omissions retain normal repository hooks'
+        Write-Fixture 'app.txt' "later development`n"
+        Assert-Waiver ((Invoke-WorkflowFixture check-workflow-waiver).Status -eq 2) 'subsequent development invalidates exemption'
+    }
+    foreach ($scopes in @('', 'unknown', 'e2e,e2e', 'all,e2e', 'e2e,')) {
+        New-WaiverFixture ('extension-invalid-' + [Guid]::NewGuid().ToString('N'))
+        Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver $scopes).Status -eq 2) 'invalid or absent explicit scopes fail'
+    }
+    foreach ($guard in @('convergence','plan-review')) {
+        New-WaiverFixture "narrow-$guard"
+        if ($guard -ceq 'convergence') {
+            Edit-State '| First certified iteration | none |' '| First certified iteration | 1 |'
+            Edit-State '| Review iteration | 1 |' '| Review iteration | 5 |'
+        } else { Edit-State '## /goal session' "- [x] Plan review loop — FAIL`n## /goal session" }
+        Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver 'review,e2e').Status -eq 0) 'narrower actual decision records without self-adjudicating other gates'
+        Assert-Waiver ((Invoke-FixtureGate 'git commit -m approved').Status -eq 2) "unwaived $guard stays enforced"
+        Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver "review,e2e,$guard").Status -eq 0) "developer may explicitly omit $guard"
+        Assert-Waiver ((Invoke-FixtureGate 'git commit -m approved').Status -eq 0) "only named $guard exemption releases that gate"
+    }
+    New-WaiverFixture extension-selected
+    Remove-Item -LiteralPath (Join-Path $script:project '.forge/local/evidence/e2e.receipt')
+    Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver 'review,e2e').Status -eq 0) 'selected omissions still need app evidence'
+    Edit-State '- [x] Simplified' '- [ ] Simplified'
+    Assert-Waiver ((Invoke-FixtureGate 'git commit -m approved').Status -eq 2) 'unrequested simplification stays required'
+    Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver 'review,e2e,simplification').Status -eq 0) 'developer may explicitly add simplification'
+    Assert-Waiver ((Invoke-FixtureGate 'git commit -m approved').Status -eq 0) 'explicit added omission releases its gate'
+
+    New-WaiverFixture extension-stop
+    foreach ($n in 1..4) { Write-Fixture "extra$n.txt" "completed development`n" }
+    & git -C $script:project add -A
+    & git -C $script:project commit -qm 'completed development across five files'
+    Freeze-Fixture
+    $stopPath = Join-Path $repo 'hooks/check-state-updated.ps1'
+    Assert-Waiver ((Invoke-FixtureGate '' $stopPath).Status -eq 2) 'without explicit decision changelog blocks Stop'
+    Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver all).Status -eq 0) 'all-scope records current completed multi-file change'
+    Assert-Waiver ((Invoke-FixtureGate '' $stopPath).Status -eq 0) 'explicit changelog omission permits Stop'
+    $stopped = Invoke-FixtureGate '' $stopPath
+    Assert-Waiver ($stopped.Status -eq 0 -and -not $stopped.Text.Contains('FORGE_FINAL_EVIDENCE_STALE')) 'explicit continuation omission stops without stale-evidence loop'
+
+    foreach ($specification in @('verify-app:unit-tests','e2e:ui-qa')) {
+        $kind, $omission = $specification.Split(':')
+        New-WaiverFixture "focused-$kind"
+        Write-CleanReviewFixture code-spec; Write-CleanReviewFixture code-quality
+        Edit-State '- [ ] Code review loop' '- [x] Code review loop'
+        Write-Fixture ".forge/local/evidence/$kind.report" "VERDICT: PASS`nRemaining checks executed successfully in this controlled fixture.`nHUMAN_WAIVED_CHECKS: $omission`n"
+        Push-Location $script:project
+        try {
+            $partial = Invoke-VerificationReceipt -ReceiptMode write -ReceiptKind $kind -CandidatePath '.forge/local/evidence/candidate.receipt' -CommandText 'controlled remaining checks' -ProfileName focused -ReportPath ".forge/local/evidence/$kind.report" -ReceiptResult PASS -ReceiptExitStatus 0 -OutputPath ".forge/local/evidence/$kind.receipt"
+        } finally { Pop-Location }
+        Assert-Waiver ($partial.Status -eq 0) 'remaining subset report can be recorded truthfully'
+        Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver $specification).Status -eq 0) 'developer can omit a named subcheck'
+        Assert-Waiver ((Invoke-WorkflowFixture check-workflow-waiver).Status -eq 0) 'remaining aggregate still needs its actual scoped report'
+        Assert-Waiver ((Invoke-FixtureGate 'git commit -m approved').Status -eq 0) 'only requested subcheck is waived'
+        Assert-Waiver ((Invoke-FixtureReceipt check).Status -eq 2) 'subset PASS is never full certification'
+        Write-Fixture ".forge/local/evidence/$kind.report" "VERDICT: PASS`nchanged report`nHUMAN_WAIVED_CHECKS: wrong-check`n"
+        Assert-Waiver ((Invoke-WorkflowFixture check-workflow-waiver).Status -eq 2) 'unrequested omission or changed report cannot pass'
+    }
+    New-WaiverFixture extension-evidence
+    Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver all).Status -eq 0) 'evidence fixture records explicit decision'
+    $built = Invoke-FixtureGate '' (Join-Path $repo 'hooks/build-evidence.ps1') @('-Diagnostic')
+    Assert-Waiver ($built.Status -eq 0 -and $built.Text.Contains('"workflow_waiver":{"valid":true')) 'Goal evidence separately records human decision'
+    Assert-Waiver ($built.Text.Contains('"unwaived_evidence_ready":true') -and $built.Text.Contains('"all_receipts_same_candidate":false')) 'Goal waiver readiness never fabricates full certification'
+
 }
 finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host "test-human-review-waiver.ps1: $script:passes passed, $script:failures failed"

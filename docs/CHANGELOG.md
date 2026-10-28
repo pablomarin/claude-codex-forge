@@ -4,26 +4,24 @@ All notable changes to claude-codex-forge.
 
 ## 6.5.2 — 2026-10-27
 
-### Honor explicit human decisions to skip code re-review
+### Keep developer authority over remaining workflow steps
 
-Add a bounded human review waiver for any explicitly approved change, including
-merge-conflict resolution with code, package or test changes from the base branch.
-The agent records the actual instruction and conversation provenance in a local
-candidate-bound sidecar after fresh app and applicable E2E verification. Normal
-Git commit preserves merge parents, and commit/push hooks validate the approved
-tree, parents, workflow identity and evidence before reporting human-waived review.
-The agent can finish authorized work without asking the human to commit manually.
-Fresh verification can also renew a waiver for an already committed approved HEAD
-after expiry, manual commit or a hook rewrite. That route permits push/PR only,
-binds the exact existing commit and rejects later children, including same-tree
-commits. Keep commit command syntax printable ASCII; Unicode messages can use
-`-F` with an ASCII file path.
+Keep Forge's strict defaults while honoring an explicit developer decision to skip
+any named remaining step or all remaining steps for a completed change, including
+after review fixes. Add a candidate-bound workflow waiver for review, app checks,
+E2E, simplification, plan review, convergence and Stop changelog/continuation gates.
+Individual app/E2E subchecks use scoped reports for the checks that actually ran;
+unwaived evidence still needs to pass. Preserve prior findings, reports, unchecked
+boxes and counters. Skipped work never becomes a fabricated PASS or full certification.
 
-Keep the waiver separate from clean review receipts and full certification. Prior
-review evidence and counters stay intact; changed candidates or evidence invalidate
-the waiver. Other checklist gates, convergence adjudication, external-action
-authorization and native controls remain in force. Add Bash/PowerShell regression
-coverage and clarify the shared workflow and finish-branch guidance.
+The agent records the actual instruction and provenance, commits normally with
+ordered merge parents intact, and executes already-authorized actions without a
+manual human terminal handoff. Support renewal at the exact existing committed
+HEAD; reject later edits/children and stale scope. Keep configuration/candidate
+integrity, repository hooks, separate external-action authority, native controls
+and Goal budgets intact. Stop and Goal evidence distinguish human-waived work.
+Retain the original review-only waiver for compatibility. Add Bash/PowerShell and
+installed CLI regression coverage for explicit E2E, individual and all-step skips.
 
 ## 6.5.1 — 2026-10-24
 

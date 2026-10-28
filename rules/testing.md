@@ -1,5 +1,10 @@
 # Testing
 
+These are the disciplined defaults. After development or review fixes, an actual developer may
+explicitly omit a named remaining check through the [workflow waiver](workflow.md#explicit-human-workflow-waiver).
+Preserve actual results and report omissions; individual app/E2E subchecks require scoped
+remaining-check reports. The agent never infers its own exception or converts skipped work to PASS.
+
 ## Meaningful RED and test expectations
 
 Before adding a test, name the supported behavior or realistic defect it protects. Derive

@@ -154,6 +154,7 @@ EOF
     freeze && verification verify-app && verification e2e "$e2e"
 }
 
+if [ "${FORGE_WAIVER_EXTENSION_ONLY:-0}" != 1 ]; then
 for MAIN in claude codex; do
     for mode in code merge; do
         start_test "$MAIN main: explicit decision covers $mode and exact normal commit/push"
@@ -399,5 +400,216 @@ except subprocess.TimeoutExpired:
 raise SystemExit(0 if result.returncode == 2 else 1)
 PY_ARGS
 assert_equals "$?" 0 'missing decision argument fails promptly instead of looping'
+
+fi
+
+record_workflow() {
+    (cd "$P" && bash "$VR" record-workflow-waiver --state .forge/local/state.md --skip "$1" \
+        --decision "${2:-Skip the explicitly named remaining checks for this completed change.}" \
+        --provenance "$PROVENANCE") > "$S/record-workflow.log" 2>&1
+}
+check_workflow() {
+    (cd "$P" && bash "$VR" check-workflow-waiver --state .forge/local/state.md) > "$S/workflow-waiver.log" 2>&1
+}
+stop_gate() {
+    (cd "$P" && printf '{"host":"codex"}' | bash "$REPO_ROOT/hooks/check-state-updated.sh") > "$S/stop.log" 2>&1
+}
+kv() { awk -F= -v key="$2" '$1==key{sub(/^[^=]*=/, ""); print; exit}' "$1"; }
+review_fixture() {
+    local role="$1" engine="$2" fallback="$3" candidate="$P/.forge/local/evidence/candidate.receipt"
+    local report="$P/.forge/local/reviews/$role.report" reason=none
+    [ "$fallback" = false ] || reason=preferred-engine-unavailable
+    printf 'schema_version=1\nverdict=CLEAN\nmax_severity=NONE\nblocked_class=none\n' > "$report"
+    cat > "$P/.forge/local/reviews/$role.receipt" <<EOF
+schema_version=1
+invocation_id=$role-$MAIN-$fallback
+timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+main_host=$MAIN
+requested_engine=$OTHER
+actual_engine=$engine
+fallback=$fallback
+fallback_reason=$reason
+role=$role
+profile=review
+review_iteration=1
+fresh_process=true
+artifact_kind=git-working-tree
+artifact_hash=$(kv "$candidate" candidate_id)
+worktree_identity=$(kv "$candidate" worktree_identity)
+git_head=$(kv "$candidate" git_head)
+workflow_base_sha=$BASE
+output_path=$report
+output_hash=$(hash_file "$report")
+process_exit_status=0
+semantic_verdict=CLEAN
+max_severity=NONE
+findings_digest=$(printf '' | shasum -a 256 | awk '{print $1}')
+result_schema_version=1
+blocked_class=none
+EOF
+}
+for MAIN in claude codex; do
+    OTHER=claude
+    start_test "$MAIN: developer can skip E2E alone while other evidence stays required"
+    fixture "extension-e2e-$MAIN" || fail 'fixture failed'
+    review_fixture code-spec claude false; review_fixture code-quality claude false
+    replace_state '- [ ] Code review loop' '- [x] Code review loop'
+    replace_state '- [x] E2E verified' '- [ ] E2E verified'
+    rm "$P/.forge/local/evidence/e2e.receipt" "$P/.forge/local/evidence/e2e.report"
+    record_workflow e2e; assert_equals "$?" 0 'explicit E2E skip needs no E2E receipt'
+    check_workflow; assert_equals "$?" 0 'E2E-only exemption validates other evidence'
+    assert_contains "$S/workflow-waiver.log" 'WAIVED_GATES:e2e' 'only requested scope is recorded'
+    gate 'git commit -m approved'; assert_equals "$?" 0 'unchecked explicitly waived E2E does not block commit'
+    check; assert_equals "$?" 2 'skipped E2E never becomes full certification'
+    verification verify-app FAIL 1
+    check_workflow; assert_equals "$?" 2 'unwaived failed app check still blocks'
+    verification verify-app
+    record_workflow e2e
+    printf 'changed review\n' >> "$P/.forge/local/reviews/code-quality.report"
+    check_workflow; assert_equals "$?" 2 'unwaived review receipt mutation still blocks'
+
+    start_test "$MAIN: skip all after review repairs preserves normal merge hooks and exact scope"
+    fixture "extension-all-$MAIN" merge || fail 'fixture failed'
+    for stem in 'Simplified' 'Verified (tests/lint/types)' 'E2E verified'; do replace_state "- [x] $stem" "- [ ] $stem"; done
+    replace_state '| First certified iteration | none |' '| First certified iteration | 1 |'
+    replace_state '| Review iteration | 1 |' '| Review iteration | 5 |'
+    replace_state '## /goal session' $'- [x] Plan review loop — FAIL\n## /goal session'
+    rm "$P/.forge/local/evidence/verify-app.receipt" "$P/.forge/local/evidence/e2e.receipt"
+    state_hash=$(hash_file "$P/.forge/local/state.md")
+    old_review=$(hash_file "$P/.forge/local/reviews/code-quality.receipt")
+    parents="$(git -C "$P" rev-parse HEAD) $(git -C "$P" rev-parse MERGE_HEAD)"
+    record_workflow all; assert_equals "$?" 0 'all remaining checks may be explicitly waived without results'
+    check_workflow; assert_equals "$?" 0 'all-scope approval is valid for exact completed tree'
+    assert_hash_equals "$P/.forge/local/state.md" "$state_hash" 'exemption preserves all unchecked boxes and counters'
+    assert_hash_equals "$P/.forge/local/reviews/code-quality.receipt" "$old_review" 'exemption preserves historical findings'
+    if command -v pwsh >/dev/null 2>&1; then
+        ps_waiver check-workflow-waiver; assert_equals "$?" 0 'PowerShell reads Bash workflow waiver'
+        ps_waiver record-workflow-waiver -Skip all -Decision "$DECISION" -Provenance "$PROVENANCE"
+        assert_equals "$?" 0 'PowerShell records interoperable workflow exemption'
+        check_workflow; assert_equals "$?" 0 'Bash reads PowerShell workflow waiver'
+    fi
+    printf '#!/bin/sh\n: > "$(git rev-parse --git-path extension-hook-ran)"\n' > "$P/.git/hooks/pre-commit"
+    chmod +x "$P/.git/hooks/pre-commit"
+    gate 'git commit --no-edit'; assert_equals "$?" 0 'all skips release checklist, old plan and convergence checks'
+    (cd "$P" && git commit --no-edit) > "$S/extension-commit.log" 2>&1
+    assert_equals "$?" 0 'ordinary merge commits without disabling hooks'
+    assert_file_exists "$P/.git/extension-hook-ran" 'repository hook executes'
+    assert_equals "$(git -C "$P" rev-list --parents -n 1 HEAD | cut -d' ' -f2-)" "$parents" 'all skips preserve both ordered merge parents'
+    gate 'git push origin fix/review-waiver'; assert_equals "$?" 0 'exact committed candidate can reach authorized push'
+    check; assert_equals "$?" 2 'all skips never claim full certification'
+    gate 'git commit -m another'; assert_equals "$?" 2 'all skips cannot authorize another commit'
+    gate 'git commit -n -m approved'; assert_equals "$?" 2 'all skips do not disable repository hooks'
+    gate 'git push origin x && git commit -m y'; assert_equals "$?" 2 'all skips retain separate command boundaries'
+    printf 'new development\n' >> "$P/app.txt"
+    check_workflow; assert_equals "$?" 2 'subsequent development invalidates all-scope decision'
+done
+
+MAIN=codex
+for scopes in '' unknown 'review,review' 'all,e2e' 'e2e,'; do
+    fixture "extension-invalid-${scopes//[^a-z]/x}" || fail 'fixture failed'
+    record_workflow "$scopes"; assert_equals "$?" 2 'empty, duplicate, mixed-all or unknown scopes are rejected'
+done
+start_test 'Goal evidence keeps developer decisions separate from certification'
+fixture extension-evidence || fail 'fixture failed'
+record_workflow all
+(cd "$P" && printf '{"host":"codex"}' | bash "$REPO_ROOT/hooks/build-evidence.sh" --diagnostic) > "$S/evidence.log" 2>&1
+assert_contains "$S/evidence.log" '"workflow_waiver":{"valid":true' 'Goal evidence distinguishes actual human decision'
+assert_contains "$S/evidence.log" '"unwaived_evidence_ready":true' 'Goal evidence reports unwaived evidence separately'
+assert_contains "$S/evidence.log" '"all_receipts_same_candidate":false' 'waiver never fabricates full certification'
+
+for guard in convergence plan-review; do
+    fixture "narrow-$guard" || fail 'fixture failed'
+    if [ "$guard" = convergence ]; then
+        replace_state '| First certified iteration | none |' '| First certified iteration | 1 |'
+        replace_state '| Review iteration | 1 |' '| Review iteration | 5 |'
+    else replace_state '## /goal session' $'- [x] Plan review loop — FAIL\n## /goal session'; fi
+    record_workflow review,e2e; assert_equals "$?" 0 'narrow decision records without skipping other process gates'
+    gate 'git commit -m approved'; assert_equals "$?" 2 "unwaived $guard remains required"
+    record_workflow "review,e2e,$guard"; assert_equals "$?" 0 "developer may explicitly omit $guard"
+    gate 'git commit -m approved'; assert_equals "$?" 0 "only the named $guard omission releases its gate"
+done
+
+start_test 'selected skips do not silently skip other process gates'
+fixture extension-selected || fail 'fixture failed'
+rm "$P/.forge/local/evidence/e2e.receipt"
+record_workflow review,e2e; assert_equals "$?" 0 'selected review/E2E exemptions still use fresh app evidence'
+replace_state '- [x] Simplified' '- [ ] Simplified'
+gate 'git commit -m approved'; assert_equals "$?" 2 'unrequested simplification remains required'
+record_workflow review,e2e,simplification
+assert_equals "$?" 0 'developer can explicitly add simplification'
+gate 'git commit -m approved'; assert_equals "$?" 0 'only explicit additional skip clears simplification'
+verification verify-app FAIL 1
+record_workflow review,e2e,simplification; assert_equals "$?" 0 'decision is recordable before unwaived evidence is ready'
+check_workflow; assert_equals "$?" 2 'named skips cannot hide unwaived app failure'
+
+start_test 'malformed workflow decision cannot fall back to older review-only approval'
+fixture extension-malformed || fail 'fixture failed'
+record_waiver
+record_workflow all
+assert_equals "$?" 0 'new decision can supersede older review-only approval'
+replace_field "$P/.forge/local/evidence/candidate.receipt.workflow-waiver" waived_gates unknown
+check_workflow; assert_equals "$?" 2 'malformed new decision fails closed'
+gate 'git commit -m approved'; assert_equals "$?" 2 'older review waiver cannot mask malformed newer workflow decision'
+
+start_test 'workflow decisions require actual decision and provenance'
+fixture extension-provenance || fail 'fixture failed'
+(cd "$P" && bash "$VR" record-workflow-waiver --skip all --decision "$DECISION" --provenance '') > "$S/missing-provenance.log" 2>&1
+assert_equals "$?" 2 'all-scope still requires human provenance'
+
+start_test 'explicit all skips respect separately authorized external actions'
+fixture extension-authority || fail 'fixture failed'
+replace_state '<uuid-v4-lowercase>' '11111111-1111-4111-8111-111111111111'
+record_workflow all
+assert_equals "$?" 0 'all-scope decision can bind an active objective'
+git -C "$P" commit -qm approved
+gate 'gh pr create --title approved --body approved'; assert_equals "$?" 2 'all development skips do not create external-action authority'
+
+start_test 'Stop honors named changelog and continuation decisions without a retry loop'
+fixture extension-stop || fail 'fixture failed'
+for n in 1 2 3 4; do printf 'completed change\n' > "$P/extra$n.txt"; done
+git -C "$P" add -A
+git -C "$P" commit -qm 'completed development across five files'
+freeze
+stop_gate; assert_equals "$?" 2 'without a decision missing changelog still blocks Stop'
+record_workflow all
+assert_equals "$?" 0 'all-scope decision binds multi-file completed development'
+stop_gate; assert_equals "$?" 0 'explicit changelog skip permits Stop'
+stop_gate; assert_equals "$?" 0 'explicit continuation skip prevents another forced turn'
+assert_not_contains "$S/stop.log" FORGE_FINAL_EVIDENCE_STALE 'Stop reports accepted omissions without demanding fabricated evidence'
+printf 'later change\n' >> "$P/app.txt"
+check_workflow; assert_equals "$?" 2 'Stop exemption cannot apply to later development'
+
+
+MAIN=codex; OTHER=claude
+for spec in verify-app:unit-tests e2e:ui-qa; do
+    kind=${spec%%:*}; omitted=${spec#*:}
+    fixture "focused-${kind}" || fail 'fixture failed'
+    review_fixture code-spec claude false; review_fixture code-quality claude false
+    replace_state '- [ ] Code review loop' '- [x] Code review loop'
+    printf 'VERDICT: PASS\nRemaining checks executed successfully in this controlled fixture.\nHUMAN_WAIVED_CHECKS: %s\n' "$omitted" > "$P/.forge/local/evidence/$kind.report"
+    (cd "$P" && bash "$VR" write --kind "$kind" --candidate .forge/local/evidence/candidate.receipt \
+        --command 'controlled remaining-checks run' --profile focused --report ".forge/local/evidence/$kind.report" \
+        --result PASS --exit-status 0 --output ".forge/local/evidence/$kind.receipt") > "$S/focused-write.log" 2>&1
+    assert_equals "$?" 0 'actual scoped report can be recorded without fabricating omitted execution'
+    record_workflow "$spec"; assert_equals "$?" 0 'developer subcheck decision is recorded precisely'
+    check_workflow; assert_equals "$?" 0 'remaining gate requires actual fresh matching scoped report'
+    gate 'git commit -m approved'; assert_equals "$?" 0 'precise subcheck omission permits completed remaining checks'
+    check; assert_equals "$?" 2 'scoped verification never claims full certification'
+    printf 'HUMAN_WAIVED_CHECKS: wrong-check\n' >> "$P/.forge/local/evidence/$kind.report"
+    check_workflow; assert_equals "$?" 2 'unrequested or malformed omissions cannot pass'
+done
+fixture stop-only-context || fail 'fixture failed'
+for n in 1 2 3 4; do printf 'completed change\n' > "$P/extra$n.txt"; done
+git -C "$P" add -A; git -C "$P" commit -qm 'completed multi-file work'
+freeze
+record_workflow changelog; assert_equals "$?" 0 'Stop-only decision does not wait for final review evidence'
+(cd "$P" && bash "$VR" check-workflow-waiver --boundary stop --state .forge/local/state.md) > "$S/stop-check.log" 2>&1
+assert_equals "$?" 0 'Stop validates the exact decision without shipping evidence'
+stop_gate; assert_equals "$?" 0 'named changelog omission releases changelog only'
+stop_gate; assert_equals "$?" 2 'unwaived continuation remains disciplined'
+gate 'git commit -m approved'; assert_equals "$?" 2 'Stop-only decision cannot ship missing independent review'
+record_workflow changelog,continuation
+assert_equals "$?" 0 'developer can explicitly add continuation omission'
+stop_gate; assert_equals "$?" 0 'both named Stop omissions are honored'
 
 report 'test-human-review-waiver.sh'

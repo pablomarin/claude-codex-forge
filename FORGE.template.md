@@ -164,20 +164,23 @@ If ordinary reviewer fallback emits `AUTH_REQUIRED`, follow the single login han
 retry in `.forge/rules/workflow.md#reviewer-authentication-recovery`. Authentication recovery is
 not a request to reapprove review transport; keep completed reviews and failed evidence.
 
-### Explicit human review waiver
+### Explicit developer workflow decisions
 
-Honor an actual human instruction to skip independent code review or re-review for any explicitly
-named change, including code and merge-conflict resolution. Follow
-`.forge/rules/workflow.md#explicit-human-review-waiver`: freeze the current candidate, run fresh
-app verification and applicable E2E directly as the main agent, then record the human's decision
-and conversation provenance with `verification-receipt record-review-waiver`. Do not dispatch
-reviewer agents merely to satisfy the review the human waived. The local waiver is separate
-authorization, never a `CLEAN`/`PASS` review or full certification; preserve existing receipts and
-review counters. It needs no prior documentation allowlist. Commit through the normal hook with
-ordinary Git so merge parents survive, then execute an already-authorized push. The waiver covers
-only independent final code review: verification, other checklist gates, convergence adjudication,
-consequential-action authorization, and native host controls remain in force. The agent records and
-executes the supported route; do not send the human to a terminal merely to get past a Forge gate.
+Default workflow discipline remains mandatory until the actual developer explicitly omits a step.
+After development or review fixes, honor an actual instruction to skip any named remaining check
+or all remaining workflow steps for the current change, including review/re-review, tests, E2E,
+simplification, plan review and convergence. Follow
+`.forge/rules/workflow.md#explicit-human-workflow-waiver`: freeze the exact candidate and record
+its named omissions, actual decision and conversation provenance with `record-workflow-waiver`.
+Run all unwaived checks. A subcheck omission needs a scoped remaining-check report; never waive a
+whole aggregate for permission to skip one test. Do not run agents or tools merely to satisfy a
+step the developer skipped, ask for the same approval again, or send the human to a terminal.
+
+The local waiver records permission, never CLEAN/PASS or full certification. Preserve findings,
+previous results, unchecked boxes and counters; report omitted/accepted work truthfully. Use normal
+Git and hooks to preserve merge parents, then complete already-authorized actions. The waiver is
+bound to the current candidate; further development invalidates it. Normal integrity, external
+action authorization, host/organization controls and Goal budgets retain their own boundaries.
 
 ## Human Authorization for Consequential Actions
 
@@ -195,8 +198,8 @@ Absent, declined, ambiguous, or stale approval is not authority; a changed targe
 effect requires a new decision. An agent-written record, environment flag, or hook success cannot
 create approval or bypass native host controls. Independently verify the result before claiming
 success or retrying an uncertain mutation. Manual execution is only a fallback when the required
-tool is actually unavailable. Evidence and convergence gates still apply; independent final code
-review follows either ordinary certification or the explicit human review waiver above.
+tool is actually unavailable. Unwaived evidence and convergence requirements still apply; development workflow gates follow
+ordinary certification or the explicit developer decision above.
 
 ## Native Goal Composition
 
@@ -225,7 +228,9 @@ points load the same canonical `.forge/workflows/opinion.md` contract.
 Fix every known reproducible or concretely reachable correctness, security, verification, or
 configuration defect in the active supported scope before shipping. Do not hide a known reachable
 defect behind a follow-up task; an unsupported hypothesis is not a known defect. If access or
-evidence is missing, report the result as unverified or blocked rather than successful.
+evidence is missing, report the result as unverified or blocked rather than successful. When the developer explicitly accepts a remaining finding or
+omits a repair step, record that decision through the workflow waiver and keep the finding visible;
+never claim it was resolved.
 
 ## Ground Your Claims
 
@@ -236,8 +241,8 @@ mutation invalidates earlier evidence. An eligible correction to explicitly decl
 prose may retain original evidence only through the recomputed documentation closure in
 `.forge/rules/workflow.md#documentation-only-corrections`; never relabel old receipts or renew their
 age. Missing, placeholder, stale, mixed-candidate, or non-clean receipts block ordinary certification.
-An explicit human review waiver may replace only independent final code review; fresh verification
-must still match the waived candidate, and the result must be reported as human-waived. During
+An explicit developer workflow decision may replace only the named remaining requirements for
+the exact candidate. Unwaived evidence must still pass, and omissions must be reported as human-waived. During
 development use focused checks; final receipt advisories belong to finalization phases. Exact
 bounded `/quick-fix` work instead requires one direct focused check and the
 hook-validated base/scope contract; it never dispatches reviewer or verifier agents. Legacy prose

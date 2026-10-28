@@ -43,10 +43,11 @@ when it is unavailable.
 
 Claude Code uses `/opinion`; Codex uses `$opinion` for the same canonical opinion workflow.
 
-An explicit instruction to skip final code review or re-review can cover any named approved change.
-Forge records your decision, requires fresh app and applicable E2E verification, and lets the agent
-finish the authorized commit and push through the normal gates, including merge-conflict cleanup.
-The result is labeled human-waived review; see the [waiver workflow](rules/workflow.md#explicit-human-review-waiver).
+Forge is disciplined by default, with the developer in control. After development or review fixes,
+you can explicitly skip a named check—such as E2E, unit tests or re-review—or all remaining workflow
+steps for the current change. Forge records your decision, runs the unwaived checks and lets the
+agent finish authorized work. Omissions stay visible rather than becoming fabricated passes.
+See the [developer workflow decision](rules/workflow.md#explicit-human-workflow-waiver).
 
 ## Why Forge instead of vanilla Claude Code or Codex?
 
