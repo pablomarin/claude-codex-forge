@@ -1,4 +1,4 @@
-# Disposable fixtures exercise the native helper and hook; no live-host qualification is claimed.
+﻿# Disposable fixtures exercise the native helper and hook; no live-host qualification is claimed.
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('forge-review-waiver-' + [Guid]::NewGuid().ToString('N'))
