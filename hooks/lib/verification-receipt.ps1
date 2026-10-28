@@ -73,7 +73,9 @@ function Test-Fresh([string]$Timestamp) {
     return $age -ge -300 -and $age -le $maximum
 }
 function Get-ReportVerdict([string]$Path, [string]$ReceiptKind) {
-    $first = ([IO.File]::ReadLines($Path) | Select-Object -First 1).TrimEnd("`r")
+    $reader = [IO.File]::OpenText($Path)
+    try { $first = $reader.ReadLine().TrimEnd("`r") }
+    finally { $reader.Dispose() }
     if ($first -notmatch '^VERDICT: ([A-Z/]+)$') { throw 'report must begin with a canonical VERDICT header' }
     $verdict = $matches[1]
     if ($ReceiptKind -eq 'verify-app' -and $verdict -notin @('PASS','FAIL','BLOCKED')) { throw 'invalid verify-app report verdict' }

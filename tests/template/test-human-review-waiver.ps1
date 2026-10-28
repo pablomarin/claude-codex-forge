@@ -37,6 +37,9 @@ function Invoke-FixtureReceipt([string]$Action, [string]$HumanDecision = $decisi
 }
 function Invoke-FixtureGate([string]$CommandText, [string]$HookPath = (Join-Path $repo 'hooks/check-workflow-gates.ps1'), [string[]]$HookArguments = @()) {
     $payload = @{ cwd = $script:project; host = $script:mainHost; tool_input = @{ command = $CommandText } } | ConvertTo-Json -Compress
+    # Windows PowerShell 5.1 pipes native stdin as ASCII by default. JSON escapes
+    # preserve the exact command through that transport without changing host encodings.
+    $payload = [regex]::Replace($payload, '[^\x00-\x7f]', { param($character) '\u{0:x4}' -f [int][char]$character.Value })
     $out = Join-Path $scratch 'gate.out'; $err = Join-Path $scratch 'gate.err'
     # powershell.exe 5.1 turns native stderr into ErrorRecords, so capture each stream to a file.
     $savedPreference = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
@@ -132,6 +135,18 @@ function New-WaiverFixture([string]$Name, [string]$MainHost = 'codex', [bool]$Me
     Write-VerifierFixture e2e $E2e
 }
 try {
+    [IO.Directory]::CreateDirectory($scratch) | Out-Null
+    foreach ($verdict in @('PASS','FAIL','N/A','INVALID')) {
+        $handleReport = Join-Path $scratch ("report-handle-" + $verdict.Replace('/','-') + '.report')
+        [IO.File]::WriteAllText($handleReport, "VERDICT: $verdict`nControlled report body.`n", $utf8)
+        try { $null = Get-ReportVerdict $handleReport e2e } catch { if ($verdict -cne 'INVALID') { throw } }
+        $handle = $null
+        try {
+            $handle = [IO.File]::Open($handleReport, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            Assert-Waiver $true "report verdict $verdict releases its reader before returning"
+        } catch { Assert-Waiver $false "report verdict $verdict releases its reader before returning" }
+        finally { if ($handle) { $handle.Dispose() } }
+    }
     if ($env:FORGE_WAIVER_EXTENSION_ONLY -ne '1') {
     foreach ($mainHost in @('claude','codex')) {
         foreach ($merge in @($false,$true)) {
@@ -222,6 +237,16 @@ try {
     foreach ($commandText in @('git commit --no-verify -m approved','git commit -n -m approved','git -c core.hooksPath=/tmp commit -m approved','git -C . commit -m approved','FORGE_TEST=x git commit -m approved','git commit --amend --no-edit','git commit --only app.txt','git commit --include app.txt','git commit -a -m approved','git commit --all -m approved','git commit -p','git commit app.txt','git commit -- app.txt','git commit --message="$(git status)"','git commit -m @message','git commit -m --% -m -n',"git commit -m 'a$([char]0x2019) --no-verify $([char]0x2018)b'","git commit -m approved`necho done")) {
         Assert-Waiver ((Invoke-FixtureGate $commandText).Status -eq 2) "unapproved command semantics cannot consume waiver: $commandText"
     }
+    $savedPipelineEncoding = $OutputEncoding
+    try {
+        $OutputEncoding = [Text.Encoding]::ASCII
+        $unicodeCommand = "git commit -m 'a$([char]0x2019) --no-verify $([char]0x2018)b'"
+        $captureHook = Join-Path $scratch 'capture-command.ps1'
+        [IO.File]::WriteAllText($captureHook, '$inputData = [Console]::In.ReadToEnd() | ConvertFrom-Json; [IO.File]::WriteAllText((Join-Path $PSScriptRoot "transport-command.txt"), $inputData.tool_input.command)', $utf8)
+        $null = Invoke-FixtureGate $unicodeCommand $captureHook
+        Assert-Waiver ([IO.File]::ReadAllText((Join-Path $scratch 'transport-command.txt')) -ceq $unicodeCommand) 'ASCII native pipeline delivers the exact Unicode command'
+        Assert-Waiver ((Invoke-FixtureGate $unicodeCommand).Status -eq 2) 'ASCII native pipeline preserves the Unicode command rejection'
+    } finally { $OutputEncoding = $savedPipelineEncoding }
     foreach ($merge in @($false,$true)) {
         New-WaiverFixture "committed-renewal-$merge" codex $merge
         Assert-Waiver ((Invoke-FixtureReceipt record-review-waiver).Status -eq 0) 'initial decision records before expiry'

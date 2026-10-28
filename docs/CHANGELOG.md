@@ -22,6 +22,8 @@ integrity, repository hooks, separate external-action authority, native controls
 and Goal budgets intact. Stop and Goal evidence distinguish human-waived work.
 Retain the original review-only waiver for compatibility. Add Bash/PowerShell and
 installed CLI regression coverage for explicit E2E, individual and all-step skips.
+Close PowerShell report readers deterministically so reports can be replaced
+immediately; preserve Unicode commands in native Windows test transport.
 
 ## 6.5.1 — 2026-10-24
 
