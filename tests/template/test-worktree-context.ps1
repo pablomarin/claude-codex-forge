@@ -22,6 +22,14 @@ function Check([bool]$Condition, [string]$Message) {
         if ($script:lastInvocation) { Write-Host ('DIAGNOSTIC ' + ($script:lastInvocation | ConvertTo-Json -Compress)) }
     }
 }
+function Get-ExplicitInputOffset([byte[]]$Bytes, [byte[]]$NativePreamble) {
+    # Process.Start may already have emitted this UTF-8 BOM through AutoFlush.
+    # Keep exactly one prefix instead of adding the fixture's explicit copy too.
+    if ($NativePreamble.Length -eq 3 -and $Bytes.Length -ge 3 -and
+        ([BitConverter]::ToString($NativePreamble)) -ceq 'EF-BB-BF' -and
+        $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) { return 3 }
+    return 0
+}
 function Invoke-Script([string]$Root, [string]$Script, [string[]]$Arguments = @(), [string]$InputText = '') {
     $info = New-Object Diagnostics.ProcessStartInfo
     $info.FileName = $runtime
@@ -43,7 +51,9 @@ function Invoke-Script([string]$Root, [string]$Script, [string[]]$Arguments = @(
     $stderr = $process.StandardError.ReadToEndAsync()
     # Native hosts send UTF-8 bytes independently of the child's console page.
     $inputBytes = $utf8.GetBytes($InputText)
-    $process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)
+    $process.StandardInput.Flush()
+    $inputOffset = Get-ExplicitInputOffset $inputBytes ($process.StandardInput.Encoding.GetPreamble())
+    $process.StandardInput.BaseStream.Write($inputBytes, $inputOffset, $inputBytes.Length - $inputOffset)
     $process.StandardInput.Close()
     $process.WaitForExit()
     $result = [PSCustomObject]@{ Rc = $process.ExitCode; Out = $stdout.Result; Err = $stderr.Result }
@@ -117,6 +127,17 @@ function Snapshot([string]$Root) {
 }
 
 try {
+    # .NET Framework Process.Start uses a BOM-bearing StreamWriter and enables
+    # AutoFlush before the fixture writes raw bytes. Model that exact behavior.
+    $wire = New-Object IO.MemoryStream
+    $writer = [IO.StreamWriter]::new($wire, [Text.UTF8Encoding]::new($true), 1024, $true)
+    $writer.AutoFlush = $true
+    $explicitBytes = $utf8.GetBytes(([string][char]0xFEFF) + '{"probe":"wire"}')
+    $wireOffset = Get-ExplicitInputOffset $explicitBytes ($writer.Encoding.GetPreamble())
+    $wire.Write($explicitBytes, $wireOffset, $explicitBytes.Length - $wireOffset)
+    $writer.Dispose()
+    Check (([BitConverter]::ToString($wire.ToArray())) -ceq ([BitConverter]::ToString($explicitBytes))) 'fixture sends exactly one BOM when the native writer already emitted its preamble'
+    $wire.Dispose()
     $null = [IO.Directory]::CreateDirectory($primary)
     & git -C $primary init -q --initial-branch=main
     & git -C $primary config user.name ForgeTest

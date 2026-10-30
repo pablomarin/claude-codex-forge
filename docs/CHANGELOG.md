@@ -22,6 +22,7 @@ Preserve source-mode development without pretending unregistered hooks were obse
 Read UTF-8 host input, including native pipe BOMs, directly from stdin bytes on
 PowerShell without changing the host console code page, use native filesystem paths
 for UNC startup context, and make unexpected probe-helper failures block safely.
+Preserve Unicode event values across native PowerShell pipes with ASCII JSON escapes.
 The probe detects the mismatch when run; it does not infer arbitrary command targets
 or close the existing routing gap if the required workflow step is skipped.
 

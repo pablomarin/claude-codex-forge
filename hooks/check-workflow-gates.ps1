@@ -32,7 +32,7 @@ function Exit-ForgeAllow { if ($data.host -eq "codex") { Write-Output "{}" }; ex
 
 # A fixed harmless probe intentionally denies even on MATCH so its observation
 # is visible to the caller. No config fingerprint or workflow state is touched.
-# Pass the original native event unchanged; never substitute a tool directory.
+# Preserve the original event values; never substitute a tool directory.
 $probeFamily = '(?:bash (?:\.forge/)?hooks/lib/host-context\.sh probe\b|(?:powershell\.exe|pwsh) -NoProfile -ExecutionPolicy Bypass -File (?:\.forge/)?hooks/lib/host-context\.ps1 -Mode probe\b)'
 $probeAttempt = $false
 try {
@@ -50,7 +50,10 @@ if ($probeAttempt) {
     }
     $contextRuntime = (Get-Process -Id $PID).Path
     $OutputEncoding = New-Object Text.UTF8Encoding($false)
-    $jsonInput | & $contextRuntime -NoProfile -ExecutionPolicy Bypass -File $contextHelper -Mode probe-event
+    # ASCII JSON escapes preserve Unicode values even when Windows PowerShell
+    # transcodes a native pipe through the console's non-UTF-8 encoding.
+    $contextInput = [regex]::Replace($jsonInput, '[^\x00-\x7f]', { param($character) '\u{0:x4}' -f [int][char]$character.Value })
+    $contextInput | & $contextRuntime -NoProfile -ExecutionPolicy Bypass -File $contextHelper -Mode probe-event
     if ($LASTEXITCODE -ne 0) { exit 2 }
 }
 
