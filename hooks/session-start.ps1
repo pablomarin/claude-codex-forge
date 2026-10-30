@@ -5,9 +5,9 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 # Read stdin JSON to get the session source ('startup'|'resume'|'clear'|'compact').
 # Native hosts and Git use UTF-8 independently of the Windows console code page.
-[Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
-$inputJson = [Console]::In.ReadToEnd()
+$inputReader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false), $true, 4096, $true)
+try { $inputJson = $inputReader.ReadToEnd() } finally { $inputReader.Dispose() }
 $source = ""
 try {
     $data = $inputJson | ConvertFrom-Json

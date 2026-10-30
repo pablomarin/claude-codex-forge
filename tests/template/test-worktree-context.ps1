@@ -17,7 +17,10 @@ $env:GIT_OPTIONAL_LOCKS = '0'
 
 function Check([bool]$Condition, [string]$Message) {
     if ($Condition) { $script:passes++; Write-Host "PASS $Message" }
-    else { $script:failures++; Write-Host "FAIL $Message" }
+    else {
+        $script:failures++; Write-Host "FAIL $Message"
+        if ($script:lastInvocation) { Write-Host ('DIAGNOSTIC ' + ($script:lastInvocation | ConvertTo-Json -Compress)) }
+    }
 }
 function Invoke-Script([string]$Root, [string]$Script, [string[]]$Arguments = @(), [string]$InputText = '') {
     $info = New-Object Diagnostics.ProcessStartInfo
@@ -44,6 +47,7 @@ function Invoke-Script([string]$Root, [string]$Script, [string[]]$Arguments = @(
     $process.StandardInput.Close()
     $process.WaitForExit()
     $result = [PSCustomObject]@{ Rc = $process.ExitCode; Out = $stdout.Result; Err = $stderr.Result }
+    $script:lastInvocation = $result
     $process.Dispose()
     return $result
 }
@@ -155,9 +159,24 @@ try {
 
     $gate = Join-Path $primary '.forge/hooks/check-workflow-gates.ps1'
     $forcedInputRunner = Join-Path $scratch 'force-console-input.ps1'
-    Write-File $forcedInputRunner "param([string]`$Target)`n[Console]::InputEncoding = [Text.Encoding]::GetEncoding(28591)`n& `$Target`nexit `$LASTEXITCODE`n"
-    $result = Invoke-Script $linked $forcedInputRunner @($gate) (Event 'codex' $linked $command)
+    $encodingResult = Join-Path $scratch 'input-encoding.txt'
+    Write-File $forcedInputRunner "param([string]`$Target, [string]`$EncodingResult, [int]`$CodePage = 28591)`n[Console]::InputEncoding = [Text.Encoding]::GetEncoding(`$CodePage)`ntry { & `$Target } finally { [IO.File]::WriteAllText(`$EncodingResult, [string][Console]::InputEncoding.CodePage) }`nexit `$LASTEXITCODE`n"
+    $result = Invoke-Script $linked $forcedInputRunner @($gate, $encodingResult) (Event 'codex' $linked $command)
     Check ($result.Rc -eq 2 -and $result.Err -like '*FORGE_NATIVE_CONTEXT: MATCH*') 'gate decodes raw UTF-8 before a non-UTF-8 console page can corrupt Unicode cwd'
+    Check ([IO.File]::ReadAllText($encodingResult) -eq '28591') 'UTF-8 hook input does not mutate the host console input code page'
+    $result = Invoke-Script $linked $gate @() (Event 'codex' $linked 'git commit -m approved && git push origin HEAD')
+    Check ($result.Rc -eq 2 -and $result.Err -like '*compound ship command blocked*') 'ordinary ASCII shipping input still reaches the workflow gate'
+    $bom = [string][char]0xFEFF
+    $result = Invoke-Script $linked $forcedInputRunner @($gate, $encodingResult, '65001') ($bom + (Event 'codex' $linked $command))
+    Check ($result.Rc -eq 2 -and $result.Err -like '*FORGE_NATIVE_CONTEXT: MATCH*') 'BOM-prefixed native input at code page 65001 reaches the aligned probe'
+    Check ([IO.File]::ReadAllText($encodingResult) -eq '65001') 'BOM handling preserves the UTF-8 console input code page'
+    $result = Invoke-Script $linked $gate @() ($bom + (Event 'codex' $linked 'git commit -m approved && git push origin HEAD'))
+    Check ($result.Rc -eq 2 -and $result.Err -like '*compound ship command blocked*') 'BOM-prefixed ordinary shipping input cannot bypass enforcement'
+    $result = Invoke-Script $linked (Join-Path $primary '.forge/hooks/lib/host-context.ps1') @('-Mode', 'probe-event') ($bom + (Event 'codex' $linked $command))
+    Check ($result.Rc -eq 2 -and $result.Err -like '*FORGE_NATIVE_CONTEXT: MATCH*') 'probe-event child accepts the native pipe UTF-8 BOM'
+    $startupInput = @{ cwd = $linked; source = 'clear' } | ConvertTo-Json -Compress
+    $result = Invoke-Script $primary (Join-Path $repo 'hooks/session-start.ps1') @() ($bom + $startupInput)
+    Check ($result.Rc -eq 0 -and $result.Out -like '*Current branch: fix/context-linked*') 'SessionStart consumes BOM-prefixed native event input'
     $result = Invoke-Script $primary $gate @() (Event 'codex' $alias $command)
     Check ($result.Rc -eq 2 -and $result.Err -like '*FORGE_NATIVE_CONTEXT: MATCH*') 'alias event resolves to its physical linked worktree'
     $result = Invoke-Script $primary (Join-Path $linked '.forge/hooks/lib/host-context.ps1') @('-Mode', 'prepare-context', '-Worktree', $alias)

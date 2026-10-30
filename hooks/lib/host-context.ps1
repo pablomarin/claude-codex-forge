@@ -136,8 +136,8 @@ try {
         exit 0
     }
     if ($Mode -eq 'probe-event') {
-        [Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
-        $raw = [Console]::In.ReadToEnd()
+        $inputReader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false), $true, 4096, $true)
+        try { $raw = $inputReader.ReadToEnd() } finally { $inputReader.Dispose() }
         # This operation only diagnoses the fixed probe. It never rewrites cwd,
         # executes the command, or grants permission to another operation.
         $family = '(?:bash (?:\.forge/)?hooks/lib/host-context\.sh probe\b|(?:powershell\.exe|pwsh) -NoProfile -ExecutionPolicy Bypass -File (?:\.forge/)?hooks/lib/host-context\.ps1 -Mode probe\b)'

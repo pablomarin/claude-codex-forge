@@ -24,8 +24,10 @@
 # Requirements: PowerShell 5.1+
 
 # Read hook input from stdin
-[Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
-$jsonInput = [Console]::In.ReadToEnd()
+# Decode the redirected bytes without changing the shared Windows console code
+# page or replacing a host-managed Console.In reader.
+$inputReader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false), $true, 4096, $true)
+try { $jsonInput = $inputReader.ReadToEnd() } finally { $inputReader.Dispose() }
 function Exit-ForgeAllow { if ($data.host -eq "codex") { Write-Output "{}" }; exit 0 }
 
 # A fixed harmless probe intentionally denies even on MATCH so its observation

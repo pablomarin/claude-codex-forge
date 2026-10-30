@@ -19,8 +19,9 @@ including Bash commands judged by Windows PowerShell hooks. Report event-root br
 and Git common directory at SessionStart. Replace unconditional tool-directory
 continuation guidance; add Bash/PowerShell, mixed-shell and startup regressions.
 Preserve source-mode development without pretending unregistered hooks were observed.
-Keep UTF-8 host input intact on PowerShell, use native filesystem paths for UNC startup
-context, and make unexpected probe-helper failures block safely.
+Read UTF-8 host input, including native pipe BOMs, directly from stdin bytes on
+PowerShell without changing the host console code page, use native filesystem paths
+for UNC startup context, and make unexpected probe-helper failures block safely.
 The probe detects the mismatch when run; it does not infer arbitrary command targets
 or close the existing routing gap if the required workflow step is skipped.
 
