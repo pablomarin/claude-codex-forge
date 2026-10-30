@@ -45,6 +45,25 @@ not add tracked `.claude/`, `.codex/`, `.agents/`, or generated `.forge/` policy
 downstream materialization is verified in disposable projects by the setup, layout, and parity test
 suites.
 
+### Source-mode native context
+
+This source checkout intentionally has no generated native-hook installation. When native
+hooks are not registered here, source activation and resume may proceed after verifying the
+intended physical process root, Git common directory, branch, immutable base and canonical
+state, including the source `host-context` helper's `check-process` command. Record native
+alignment as **UNVERIFIED — source mode without installed hooks**. Reopening the same source
+checkout does not create a native observation, and a manual hook payload cannot certify it.
+
+Before source commit, push or PR creation, retain the direct source gate, candidate evidence and human authorization
+checks from `rules/workflow.md`, with process and input cwd at the intended physical root.
+These checks remain local verification, not native certification. Actual native hook denials
+remain binding. If native hooks are registered in the source checkout, use the normal native
+probe; this exception does not bypass a configured hook or a trust restriction.
+
+Qualify installed native behavior in disposable projects created by the official installer.
+Installed projects with missing or disabled hooks do not qualify for this source-only exception;
+their activation/resume/shipping still requires the native probe and normal setup/trust recovery.
+
 ## Repository map
 
 | Area | Purpose |

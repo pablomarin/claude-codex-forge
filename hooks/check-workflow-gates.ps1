@@ -24,8 +24,33 @@
 # Requirements: PowerShell 5.1+
 
 # Read hook input from stdin
+[Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
 $jsonInput = [Console]::In.ReadToEnd()
 function Exit-ForgeAllow { if ($data.host -eq "codex") { Write-Output "{}" }; exit 0 }
+
+# A fixed harmless probe intentionally denies even on MATCH so its observation
+# is visible to the caller. No config fingerprint or workflow state is touched.
+# Pass the original native event unchanged; never substitute a tool directory.
+$probeFamily = '(?:bash (?:\.forge/)?hooks/lib/host-context\.sh probe\b|(?:powershell\.exe|pwsh) -NoProfile -ExecutionPolicy Bypass -File (?:\.forge/)?hooks/lib/host-context\.ps1 -Mode probe\b)'
+$probeAttempt = $false
+try {
+    $probeCommand = ($jsonInput | ConvertFrom-Json).tool_input.command
+    $probeAttempt = $probeCommand -is [string] -and $probeCommand -cmatch ('\A' + $probeFamily)
+} catch {
+    $probeAttempt = $jsonInput -cmatch ('"command"\s*:\s*"' + $probeFamily)
+}
+if ($probeAttempt) {
+    $contextHelper = Join-Path $PSScriptRoot 'lib/host-context.ps1'
+    if (-not (Test-Path -LiteralPath $contextHelper -PathType Leaf) -or
+        ((Get-Item -LiteralPath $contextHelper -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        [Console]::Error.WriteLine('FORGE_NATIVE_CONTEXT: MISMATCH; canonical context helper is unavailable.')
+        exit 2
+    }
+    $contextRuntime = (Get-Process -Id $PID).Path
+    $OutputEncoding = New-Object Text.UTF8Encoding($false)
+    $jsonInput | & $contextRuntime -NoProfile -ExecutionPolicy Bypass -File $contextHelper -Mode probe-event
+    if ($LASTEXITCODE -ne 0) { exit 2 }
+}
 
 # Parse JSON input
 try {

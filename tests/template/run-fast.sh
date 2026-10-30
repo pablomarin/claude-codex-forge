@@ -20,6 +20,7 @@ SUITES=(
     "$REPO_ROOT/tests/template/test-docs-closure.sh"
     "$REPO_ROOT/tests/template/test-human-review-waiver.sh"
     "$REPO_ROOT/tests/template/test-worktree-lifecycle.sh"
+    "$REPO_ROOT/tests/template/test-worktree-context.sh"
     "$REPO_ROOT/tests/template/test-workflow-state.sh"
     "$REPO_ROOT/tests/template/test-merge-settings.sh"
     "$REPO_ROOT/tests/template/test-bash-safety.sh"

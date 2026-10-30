@@ -2272,14 +2272,14 @@ for workflow in "$REPO_ROOT/commands/new-feature.md" "$REPO_ROOT/commands/fix-bu
         "$(basename "$workflow") forbids stale private plan copies"
     assert_contains "$workflow" 'file-only artifact' \
         "$(basename "$workflow") rejects incomplete plan-review context"
-    assert_contains "$workflow" 'A session opened in the primary checkout may continue the linked worktree' \
-        "$(basename "$workflow") allows primary-checkout sessions to continue linked worktrees"
+    assert_contains "$workflow" 'native session/worktree probe' \
+        "$(basename "$workflow") validates native alignment before task work"
     assert_contains "$workflow" 'No per-worktree Forge receipt' \
         "$(basename "$workflow") requires no worktree receipt ceremony"
     assert_not_contains "$workflow" 'whose workspace is the task worktree before commit, push, or PR creation' \
         "$(basename "$workflow") does not require a workspace switch before shipping"
-    assert_contains "$workflow" 'Continue in the current session by default' \
-        "$(basename "$workflow") continues the current chat unless the developer chooses to switch"
+    assert_contains "$workflow" 'Continue in the current session when the native probe matches' \
+        "$(basename "$workflow") conditions current-chat continuation on actual native alignment"
     assert_contains "$workflow" 'normal receipt-validating promotion' \
         "$(basename "$workflow") permits normal promotion from the current chat"
     assert_contains "$workflow" '../rules/workflow.md#shipping-from-the-current-session' \
@@ -2296,9 +2296,22 @@ done
 # Contract: The installed workflow rule owns the exact task shipping preflight.
 # ---------------------------------------------------------------------------
 start_test "current-session shipping requires exact task preflight and native authority"
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" 'Source-mode native context' \
+    'source development has an explicit native-context policy without generated hooks'
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" 'UNVERIFIED' \
+    'source-mode checks do not manufacture native certification'
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" 'Installed projects with missing or disabled hooks do not qualify' \
+    'source exception cannot weaken installed-project native checks'
+assert_contains "$REPO_ROOT/CONTRIBUTING.md" 'source gate, candidate evidence and human authorization' \
+    'source shipping retains existing evidence and authority checks'
 SHIPPING_RULE="$REPO_ROOT/rules/workflow.md"
 for token in \
-    'Continue in the current session by default' \
+    'Continue in the current session when the native probe matches' \
+    'prepare-context --worktree' \
+    'FORGE_NATIVE_CONTEXT: MATCH' \
+    'FORGE_PROCESS_CONTEXT: MATCH' \
+    'UNVERIFIED' \
+    'existing worktree' \
     'normal receipt-validating promotion' \
     'verified physical task-worktree root' \
     'workflow-state.sh show' \
@@ -2768,8 +2781,6 @@ for active_doc in \
         "$(basename "$active_doc") has no obsolete protected-receipt blocker"
     assert_not_contains "$active_doc" 'protected main host context is required' \
         "$(basename "$active_doc") has no obsolete protected-context blocker"
-    assert_not_contains "$active_doc" 'reopen the host in the worktree' \
-        "$(basename "$active_doc") has no worktree reopen remediation"
     assert_not_contains "$active_doc" 'SessionStart hook creates and UserPromptSubmit refreshes the protected host receipt' \
         "$(basename "$active_doc") has no receipt-minting contract"
 done

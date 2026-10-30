@@ -9,3 +9,9 @@
 Planning and implementation continue in the workflow's existing isolated worktree.
 Do not create another worktree for the same task when a native tool or optional integration
 offers to do so. Forge owns these workflow phases; no Superpowers plugin is required.
+
+After create/adopt/select and before activation or resumed task work, run the
+[native session/worktree probe](workflow.md#native-sessionworktree-probe). Both the native event
+and tool process must identify the intended physical checkout. Rebind the current host to the
+existing worktree when supported; otherwise open that checkout in a native session and resume.
+Changing only a tool's working directory does not prove native alignment.

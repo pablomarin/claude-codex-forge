@@ -2,6 +2,28 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.5.3 — 2026-10-29
+
+### Detect native session and task worktree mismatches early
+
+Add a stateless worktree probe through the existing Claude and Codex workflow gates.
+Its intentional diagnostic denial identifies the native event checkout; a separate
+process check identifies the tool checkout. Require both before task activation or
+resume and before shipping. Missing native observation remains UNVERIFIED. Recover
+through supported attachment or a session at the existing worktree while preserving
+still-valid evidence and approval. Keep hook registrations, trust and shipping
+authority unchanged.
+
+Match physical roots with shell-safe encoded paths and strict single-command parsing,
+including Bash commands judged by Windows PowerShell hooks. Report event-root branch
+and Git common directory at SessionStart. Replace unconditional tool-directory
+continuation guidance; add Bash/PowerShell, mixed-shell and startup regressions.
+Preserve source-mode development without pretending unregistered hooks were observed.
+Keep UTF-8 host input intact on PowerShell, use native filesystem paths for UNC startup
+context, and make unexpected probe-helper failures block safely.
+The probe detects the mismatch when run; it does not infer arbitrary command targets
+or close the existing routing gap if the required workflow step is skipped.
+
 ## 6.5.2 — 2026-10-27
 
 ### Keep developer authority over remaining workflow steps

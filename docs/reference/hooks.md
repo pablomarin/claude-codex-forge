@@ -7,10 +7,10 @@ their native events into the same policy.
 
 | Hook | Trigger | What happens |
 | --- | --- | --- |
-| `SessionStart` | New/resumed host session, clear, or compaction | Runs the stable host-context compatibility no-op, then injects branch, state, and drift context; remote fetch remains source-gated |
+| `SessionStart` | New/resumed host session, clear, or compaction | Runs the stable host-context compatibility no-op, then reports event worktree/common directory/branch, state and drift context; native task alignment stays UNVERIFIED until probed |
 | `UserPromptSubmit` | Before each user prompt | Runs the same stable host-context compatibility no-op; it creates no worktree or session authority |
 | `Stop` | Main host finishes a turn | Builds candidate evidence and reminds the host to keep an unfinished workflow's `.forge/local/state.md` current |
-| `PreToolUse` | Before a shell command | Audits commands, blocks dangerous patterns, enforces workflow evidence, and checks protected external-mutation authority |
+| `PreToolUse` | Before a shell command | Audits commands, blocks dangerous patterns, returns native worktree probe diagnostics, enforces workflow evidence, and checks protected external-mutation authority |
 | `PostToolUse` | After supported file writes | Runs the configured formatter |
 | `PreCompact` | Before context compression | Ensures the volatile memory directory exists and logs a diagnostic; it does not claim to inject a save instruction into model context |
 | `SubagentStop` | Reviewer/producer finishes | Validates structured, candidate-bound review output |
@@ -43,12 +43,21 @@ the correct worktree only when the host supplies that worktree in the event `cwd
 Codex hook `cwd` can remain the session directory while `exec_command` runs in a different
 `workdir`; its Bash hook payload omits that per-call directory. Forge cannot recover an omitted
 directory safely. Selecting only a tool working directory does not change the hook context.
-Continue in the current session by default and follow
+Run the [native session/worktree probe](../../rules/workflow.md#native-sessionworktree-probe)
+after worktree selection and before activation/resume, after a host switch, and immediately
+before shipping. The exact harmless probe intentionally receives an exit-2 MATCH/MISMATCH
+diagnostic from the real workflow gate. A separate process check must also match. If the probe
+process runs or the native diagnostic is missing, alignment is UNVERIFIED; process output and
+manually constructed JSON cannot certify native routing. The probe stores no receipt.
+Recover mismatches by rebinding to the existing worktree through supported host controls, or
+opening a session there when rebinding is unavailable. Then follow
 [Shipping from the current session](../../rules/workflow.md#shipping-from-the-current-session)
 before direct commit, push or PR creation. That exact-task local preflight does not change native event routing,
 authenticate a native event or grant shipping authority. Keep normal native hooks and authorization,
-report a native context mismatch, and stop on any real denial. A Forge refresh repairs its parsers
-but does not repair this upstream payload loss. See
+report a native context mismatch, and stop on any real denial. The intentional probe MATCH denial
+is a diagnostic result, never permission to rerun the denied command. Skipping the required
+probe leaves the event-cwd routing limitation in place, including inactive-primary cases;
+this change does not recover omitted per-command directories. See
 [Codex issue #33986](https://github.com/openai/codex/issues/33986).
 
 ## Goal Evidence Output

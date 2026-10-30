@@ -413,6 +413,71 @@ fi
 # Forge version discovery is repository-local. SessionStart has no machine
 # version dependency, and the runtime verifier reports the exact project pin.
 # ===========================================================================
+start_test "SessionStart reports native event worktree when process cwd differs"
+CONTEXT_FIXTURE=$(scratch_dir session-event-context)
+make_behind_repo "$CONTEXT_FIXTURE" 0
+git -C "$CONTEXT_FIXTURE/repo" worktree add -q -b task-context "$CONTEXT_FIXTURE/linked"
+mkdir -p "$CONTEXT_FIXTURE/linked/nested"
+CONTEXT_ROOT=$(cd "$CONTEXT_FIXTURE/linked" && pwd -P)
+CONTEXT_COMMON=$(cd "$CONTEXT_FIXTURE/repo/.git" && pwd -P)
+prepare_hook_repo "$CONTEXT_FIXTURE/repo"
+for context_engine in bash pwsh; do
+    command -v "$context_engine" >/dev/null 2>&1 || continue
+    if [ "$context_engine" = pwsh ]; then
+        prepare_hook_repo_ps "$CONTEXT_FIXTURE/repo"
+        context_args=(-NoProfile -File ./.hooks/session-start.ps1)
+    else
+        context_args=(./.hooks/session-start.sh)
+    fi
+    CONTEXT_OUT="$CONTEXT_FIXTURE/$context_engine-context.out"
+    jq -n --arg cwd "$CONTEXT_ROOT/nested" '{source:"compact",cwd:$cwd}' \
+        | (cd "$CONTEXT_FIXTURE/repo" && "$context_engine" "${context_args[@]}") > "$CONTEXT_OUT"
+    assert_contains "$CONTEXT_OUT" 'Current branch: task-context' "$context_engine: branch belongs to native event root"
+    assert_contains "$CONTEXT_OUT" "Native event worktree: $CONTEXT_ROOT" "$context_engine: physical event root is visible"
+    assert_contains "$CONTEXT_OUT" "Git common directory: $CONTEXT_COMMON" "$context_engine: common directory identity is visible"
+    assert_contains "$CONTEXT_OUT" 'FORGE_NATIVE_CONTEXT: UNVERIFIED' "$context_engine: startup context does not certify intended task alignment"
+    jq -n --arg cwd "$S3/repo" '{source:"startup",cwd:$cwd}' \
+        | (cd "$CONTEXT_FIXTURE/repo" && "$context_engine" "${context_args[@]}") > "$CONTEXT_OUT"
+    assert_contains "$CONTEXT_OUT" '3 commits behind origin' "$context_engine: drift checks use the event repository rather than the up-to-date process repository"
+    printf '{"source":"compact"}' \
+        | (cd "$CONTEXT_FIXTURE/repo" && "$context_engine" "${context_args[@]}") > "$CONTEXT_OUT"
+    assert_contains "$CONTEXT_OUT" 'Native event worktree: unknown' "$context_engine: missing event cwd is not inferred from process cwd"
+    if [ "$context_engine" = pwsh ]; then
+        # UNC Resolve-Path results expose a provider-qualified Path and a native
+        # ProviderPath. Model that documented shape without requiring an SMB server.
+        cat > "$CONTEXT_FIXTURE/provider-path.ps1" <<'PS'
+param([string]$HookPath)
+function Resolve-Path {
+    param([string]$LiteralPath)
+    $resolved = Microsoft.PowerShell.Management\Resolve-Path -LiteralPath $LiteralPath
+    [pscustomobject]@{ Path = "Microsoft.PowerShell.Core\FileSystem::$($resolved.ProviderPath)"; ProviderPath = $resolved.ProviderPath }
+}
+& $HookPath
+PS
+        jq -n --arg cwd "$CONTEXT_ROOT" '{source:"compact",cwd:$cwd}' \
+            | (cd "$CONTEXT_FIXTURE/repo" && pwsh -NoProfile -File "$CONTEXT_FIXTURE/provider-path.ps1" \
+                -HookPath "$CONTEXT_FIXTURE/repo/.hooks/session-start.ps1") > "$CONTEXT_OUT"
+        assert_contains "$CONTEXT_OUT" 'Current branch: task-context' 'pwsh: provider-qualified path retains the event branch'
+        assert_contains "$CONTEXT_OUT" "Git common directory: $CONTEXT_COMMON" 'pwsh: native Git receives the filesystem path'
+        CONTEXT_UNICODE="$CONTEXT_FIXTURE/unicode-$(printf '\303\251')"
+        git -C "$CONTEXT_FIXTURE/repo" worktree add -q -b context-unicode "$CONTEXT_UNICODE"
+        CONTEXT_UNICODE_ROOT=$(cd "$CONTEXT_UNICODE" && pwd -P)
+        cat > "$CONTEXT_FIXTURE/console-encoding.ps1" <<'PS'
+param([string]$HookPath)
+[Console]::InputEncoding = [Text.Encoding]::GetEncoding(28591)
+[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(28591)
+& $HookPath
+PS
+        # Pipe actual UTF-8 bytes while the child starts in a different console
+        # code page, reproducing native Windows decoding without a Windows host.
+        jq -n --arg cwd "$CONTEXT_UNICODE_ROOT" '{source:"compact",cwd:$cwd}' \
+            | (cd "$CONTEXT_FIXTURE/repo" && pwsh -NoProfile -File "$CONTEXT_FIXTURE/console-encoding.ps1" \
+                -HookPath "$CONTEXT_FIXTURE/repo/.hooks/session-start.ps1") > "$CONTEXT_OUT"
+        assert_contains "$CONTEXT_OUT" 'Current branch: context-unicode' 'pwsh: UTF-8 event and Git output survive a different console code page'
+        assert_contains "$CONTEXT_OUT" "Native event worktree: $CONTEXT_UNICODE_ROOT" 'pwsh: Unicode event root remains intact'
+    fi
+done
+
 start_test "SessionStart contains no Claude-specific or machine Forge version lookup"
 assert_not_contains "$REPO_ROOT/hooks/session-start.sh" '.claude/.forge-version' \
     "bash SessionStart does not read the retired version stamp"

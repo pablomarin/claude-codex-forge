@@ -46,25 +46,28 @@ Copying clean evidence to another worktree does not satisfy its gates.
 
 ## Switch Hosts Mid-Feature
 
-Open either host in the repository and select the linked worktree as the tool working directory
-for local edits, reviews, verification, approval recording and normal receipt-validating promotion.
-Continue in the current session by default; switch only if the developer chooses to.
+Open either host at the existing linked worktree, or use its supported attachment/rebind action.
+Before resuming task work, run the
+[native session/worktree probe](../../rules/workflow.md#native-sessionworktree-probe).
+Continue in the current session when the native probe matches and its separate process check
+passes. Selecting only the tool working directory does not establish the native hook context.
 
-For example, a session that starts in the primary checkout can select the worktree for its tools:
+For example, start a CLI session at the existing checkout:
 
 ```bash
-cd /project
+cd /project/.worktrees/auth
 codex
-> Get into /project/.worktrees/auth and continue from .forge/local/state.md.
+> Verify native worktree alignment and continue from .forge/local/state.md.
 ```
 
 The new host reads `.forge/local/state.md`, continues at the next incomplete checkpoint, and keeps
 still-valid artifact-bound evidence. It does not repeat planning merely because the host changed.
 The current host is main for the next action; reviewer selection is recomputed for that action.
-Opening the client directly at the linked worktree remains optional. Before direct commit, push
-or PR creation, follow the installed
+If a session reports primary while the task is linked, rebind to that existing worktree where the
+host supports it; otherwise open a session there. Keep the same task, branch and still-valid
+evidence. Before direct commit, push or PR creation, repeat the native probe and follow the installed
 [Shipping from the current session](../../rules/workflow.md#shipping-from-the-current-session)
-procedure. It requires verified task state and identity, matching process and input cwd, and a
+procedure. It requires an observed native MATCH diagnostic, verified task state and identity, matching process and input cwd, and a
 successful exact-command local gate preflight. Keep native hooks and human authorization; report
 native context mismatches and stop on real denials. Local verification does not certify a native
 event or grant shipping authority. Revalidate the candidate, HEAD and approval before execution;
@@ -95,8 +98,9 @@ missing/stale registration or wrong-common-directory event keeps Codex `RUNTIME_
 - In Claude Desktop, turn on **worktree** before the first new-feature or bug-fix prompt. In other
   supported hosts, start from the primary checkout and use native isolation or let the portable
   helper create the worktree.
-- A current or later Codex or Claude Code session may continue task work by setting tool cwd to
-  that worktree; no copied identity or per-worktree trust step is needed. For direct shipping, use
+- A current or later Codex or Claude Code session may continue task work after the native probe
+  and process check match that worktree. No copied identity or per-worktree trust step is needed.
+  Recover mismatches using the host's supported existing-worktree binding. For direct shipping, use
   the [canonical preflight](../../rules/workflow.md#shipping-from-the-current-session).
 - Do not create nested worktrees.
 - Use paths relative to the active worktree.

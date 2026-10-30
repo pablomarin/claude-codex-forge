@@ -85,8 +85,10 @@ Before activation, read only the Forge instructions and bounded state, then perf
 checks of the actual host, physical worktree, current branch, intended base, and installed harness.
 Do not investigate the app, run tests, explore source, or begin implementation before activation.
 
-If the matching task is already active in this physical worktree, checkpoint the displayed host,
-phase, and exact next step, then resume that step in the same directory.
+After selecting the intended physical worktree, complete the
+[native session/worktree probe](#native-sessionworktree-probe) before activation or resumed task
+work, including after create/adopt and any host/session switch. If the matching task is already
+active there, checkpoint the displayed host, phase and exact next step, then resume that step.
 Quick-fix never creates a worktree: confirm its current branch is non-protected, then activate there.
 Only `/new-feature` and `/fix-bug` require worktree creation when they are not already isolated. A prepared native worktree
 is existing isolation: never create another worktree for a same-directory handoff. For those two
@@ -194,14 +196,51 @@ Developer state, review receipts, verification receipts, and local memories live
 `.forge/local/`; project-owned durable memory lives under `.forge/memory/`. Use the active host's
 file capabilities for local evidence. Never infer a clean gate from a successful process exit.
 
+## Native Session/Worktree Probe
+
+Selecting a tool working directory does not establish the native hook directory. After selecting,
+creating or adopting a worktree, and after a host/session switch, verify both before task work:
+
+1. Run `bash .forge/hooks/lib/host-context.sh prepare-context --worktree <absolute-task-root>`.
+   PowerShell: `host-context.ps1 -Mode prepare-context -Worktree <absolute-task-root>`.
+   In the Forge source checkout only, use `hooks/lib/host-context.sh` or `.ps1` when the
+   installed helper is absent; follow its `CONTRIBUTING.md` source-mode native-context exception
+   when that source checkout intentionally has no registered hooks. This never exempts an
+   installed project with missing/disabled hooks. Preparation prints two exact commands with the physical root
+   encoded as hex. It checks no native event and grants no authority.
+2. Execute the first printed command, `probe`, as one standalone call through the normal native
+   shell tool, with its process working directory set to the intended root. Do not wrap it in
+   `cd`, environment prefixes, pipelines or compound commands. The existing workflow hook
+   intentionally denies this harmless diagnostic command with exit 2. Require the actual native
+   tool response to contain `FORGE_NATIVE_CONTEXT: MATCH` and the expected root. This particular
+   MATCH denial is the expected result; do not retry or bypass the denied probe command.
+3. Execute the separately printed `check-process` command through the same normal tool at that
+   root. Require exit 0 and `FORGE_PROCESS_CONTEXT: MATCH`. This verifies only process context.
+   A probe process that actually runs reports `UNVERIFIED`: the native hook was not observed.
+   Missing native output, untrusted/disabled hooks, malformed metadata or either mismatch leaves
+   alignment UNVERIFIED and blocks task work. Synthetic hook JSON and manual hook invocation
+   exercise fixtures only; they cannot stand in for this native observation.
+4. On mismatch, use the host's supported attachment/rebind action for the **existing worktree**,
+   then repeat both commands. If the host cannot change session cwd (for example, a CLI session
+   that remains rooted in primary), open a session at that existing checkout and resume the exact
+   next step. Report actual and expected roots and the required native action. Do not create
+   another worktree, copy receipts/state, edit trust stores or reconstruct workflow evidence.
+
+SessionStart reports its event root, Git common directory and branch as context; it does not know
+the intended task and therefore reports UNVERIFIED until the probe runs. The probe stores no
+receipt, lock or session authority. Use only normal host trust/setup when hooks are unavailable.
+Skipping this required workflow step leaves the existing event-cwd routing limitation in place;
+Forge does not infer every shell command's target from its text. In particular, inactive primary
+state can still allow a command aimed elsewhere if the required native probe is skipped.
+
 ## Shipping from the Current Session
 
-Continue in the current session by default. A primary-checkout session may use the task worktree
-for local edits, reviews, verification, approval recording and normal receipt-validating promotion.
-Switch sessions only if the developer chooses to. Promotion validates task receipts; it does not
-prove that a later native shipping event used that task's context.
+Continue in the current session when the native probe matches. Use that verified task context for
+local edits, reviews, verification, approval recording and normal receipt-validating promotion.
+Promotion validates task receipts; it does not prove a later native event used the same context.
 
-Before direct `git commit`, `git push` or `gh pr create`, perform this explicit local preflight:
+Immediately before direct `git commit`, `git push` or `gh pr create`, repeat the native probe and
+process check above, then perform this explicit local preflight:
 
 1. Set the tool process working directory to the verified physical task-worktree root. Run that
    worktree's `.forge/hooks/lib/workflow-state.sh show` (PowerShell: `workflow-state.ps1 show`).
@@ -224,13 +263,14 @@ Before direct `git commit`, `git push` or `gh pr create`, perform this explicit 
    unchanged candidate, HEAD and approval. Any mutation invalidates the corresponding evidence;
    follow the existing refreeze, review, verification and authorization rules before proceeding.
 
-This is local verification, not a native event. It does not grant shipping authority or certify
+The explicit JSON preflight is local verification, not a native event. It does not grant shipping authority or certify
 native authentication. Keep normal native hooks enabled and preserve existing human authorization
 requirements. Report any native-session context mismatch: the host's event `cwd` may differ from
 the tool working directory. Stop on any real denial; never bypass a host or hook restriction.
 Existing standing review approval and still-current exact-scope shipping approval remain valid.
-Do not ask another workspace-choice question or repeat a valid approval solely because the current
-session opened in the primary checkout.
+Do not ask another workspace-choice question or repeat a valid approval solely for a context-only
+recovery. Rebind to the already-selected task worktree where supported; if a user action is required,
+explain the exact native limitation and preserve the next step and still-valid evidence.
 
 ## Plan, Review, and Evidence
 
