@@ -14,16 +14,27 @@ else
         | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/')
 fi
 
-BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
-CONTEXT="Current branch: $BRANCH"
-
 # Codex has no ConfigChange event. Both hosts validate the Forge-managed hook
 # fingerprint at SessionStart; the event is advisory, while ship gates block.
 PROJECT_ROOT=""
-if command -v jq >/dev/null 2>&1; then PROJECT_ROOT=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null || true); fi
+if command -v jq >/dev/null 2>&1; then PROJECT_ROOT=$(printf '%s' "$INPUT" | jq -r '.cwd | select(type == "string")' 2>/dev/null || true); fi
+EVENT_ROOT="$PROJECT_ROOT"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-.}"
 TOP=$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel 2>/dev/null || true)
-[ -n "$TOP" ] && PROJECT_ROOT="$TOP"
+[ -n "$TOP" ] && PROJECT_ROOT=$(cd "$TOP" && pwd -P)
+case "$EVENT_ROOT" in
+    /*|[A-Za-z]:[\\/]*) [ -n "$TOP" ] && EVENT_ROOT="$PROJECT_ROOT" || EVENT_ROOT="unknown" ;;
+    *) EVENT_ROOT="unknown" ;;
+esac
+COMMON=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null || true)
+if [ -n "$COMMON" ]; then
+    case "$COMMON" in /*|[A-Za-z]:[\\/]*) ;; *) COMMON="$PROJECT_ROOT/$COMMON" ;; esac
+    COMMON=$(cd "$COMMON" 2>/dev/null && pwd -P) || COMMON="unknown"
+else
+    COMMON="unknown"
+fi
+BRANCH=$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null || echo "unknown")
+CONTEXT="Current branch: $BRANCH; Native event worktree: $EVENT_ROOT; Git common directory: $COMMON; FORGE_NATIVE_CONTEXT: UNVERIFIED — run the native session/worktree probe for the intended task before continuing"
 CONFIG_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/check-config-change.sh"
 if [ -f "$CONFIG_CHECK" ]; then
     if ! printf '{}' | bash "$CONFIG_CHECK" --verify-boundary "$PROJECT_ROOT" >/dev/null 2>&1; then
@@ -70,7 +81,7 @@ if [[ "$SOURCE" == "startup" || "$SOURCE" == "resume" ]]; then
     HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
     LIB="$HOOK_DIR/lib/default-branch.sh"
     if [[ -f "$LIB" ]]; then
-        DEFAULT=$(bash "$LIB" 2>/dev/null) || DEFAULT=""
+        DEFAULT=$(cd "$PROJECT_ROOT" && bash "$LIB" 2>/dev/null) || DEFAULT=""
     else
         DEFAULT=""
     fi
@@ -90,13 +101,13 @@ if [[ "$SOURCE" == "startup" || "$SOURCE" == "resume" ]]; then
         elif command -v timeout &>/dev/null; then TIMEOUT_CMD="timeout 5"
         fi
 
-        if $TIMEOUT_CMD git fetch origin --quiet 2>/dev/null; then
+        if $TIMEOUT_CMD git -C "$PROJECT_ROOT" fetch origin --quiet 2>/dev/null; then
             # Verify BOTH refs exist before rev-list — without this, a missing local
             # <default> branch (e.g., shallow/single-branch clone) makes rev-list exit
             # 128 with empty stdout, silently masking a real config problem as "0 behind".
-            if git rev-parse --verify "$DEFAULT" >/dev/null 2>&1 \
-               && git rev-parse --verify "origin/$DEFAULT" >/dev/null 2>&1; then
-                BEHIND=$(git rev-list --count "$DEFAULT..origin/$DEFAULT" 2>/dev/null) || BEHIND=""
+            if git -C "$PROJECT_ROOT" rev-parse --verify "$DEFAULT" >/dev/null 2>&1 \
+               && git -C "$PROJECT_ROOT" rev-parse --verify "origin/$DEFAULT" >/dev/null 2>&1; then
+                BEHIND=$(git -C "$PROJECT_ROOT" rev-list --count "$DEFAULT..origin/$DEFAULT" 2>/dev/null) || BEHIND=""
                 if [[ -n "$BEHIND" && "$BEHIND" =~ ^[0-9]+$ && "$BEHIND" -gt 0 ]]; then
                     CONTEXT="$CONTEXT (default branch '$DEFAULT' is $BEHIND commits behind origin — pull before starting work)"
                 fi

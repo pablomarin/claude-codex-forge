@@ -28,11 +28,36 @@
 #
 # Requirements: jq (recommended, grep fallback)
 
-INPUT=$(cat)
+# Bash strings cannot retain NUL. Keep invalid raw JSON invalid rather than
+# silently deleting its NUL and turning a malformed probe into a matching one.
+INPUT=$(LC_ALL=C tr '\000' '\001')
 forge_allow() {
     printf '%s' "$INPUT" | grep -qE '"host"[[:space:]]*:[[:space:]]*"codex"' && printf '{}\n'
     exit 0
 }
+
+# A native context probe is an intentional diagnostic denial, even on MATCH.
+# Inspect the exact JSON before shell command decoding can erase control bytes.
+# This reserved-family check does not infer a shipping target or change routing.
+case "$INPUT" in
+    *host-context.sh*probe*|*host-context.ps1*probe*)
+        CONTEXT_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/host-context.sh"
+        if [ ! -f "$CONTEXT_HELPER" ]; then
+            echo 'FORGE_NATIVE_CONTEXT: MISMATCH context probe helper is unavailable' >&2
+            exit 2
+        fi
+        printf '%s' "$INPUT" | bash "$CONTEXT_HELPER" probe-event
+        CONTEXT_STATUS=$?
+        if [ "$CONTEXT_STATUS" -ne 0 ]; then
+            # Native hosts treat exit 2 as blocking; a crashed validator must not
+            # skip shipping checks through a nonblocking error status.
+            if [ "$CONTEXT_STATUS" -ne 2 ]; then
+                echo "FORGE_NATIVE_CONTEXT: MISMATCH context validation failed (helper exit $CONTEXT_STATUS)" >&2
+            fi
+            exit 2
+        fi
+        ;;
+esac
 
 # --- Parse command ---
 COMMAND_DECODED_EXACTLY=false

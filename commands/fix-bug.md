@@ -11,7 +11,9 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
 1. Read `.forge/instructions.md` and `.forge/rules/`, resolve the active host, then run
    `.forge/hooks/lib/workflow-state.sh show` (PowerShell: the `.ps1` twin). If canonical state is
    absent or invalid, stop and use the setup/migration path; never reconstruct it ad hoc.
-2. If this worktree already has the matching workflow active, use `workflow-state.sh checkpoint`
+2. If this worktree already has the matching workflow active, complete the
+   [native session/worktree probe](../rules/workflow.md#native-sessionworktree-probe) before
+   resuming, then use `workflow-state.sh checkpoint`
    with the displayed phase and exact next step to record `Last active host`, then resume that exact
    next unchecked durable step. If it is inactive, continue only through the deterministic
    worktree/base preflight below. Forge provides no edit lock: concurrent sessions are allowed, including simultaneous editing;
@@ -32,14 +34,16 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
    Only in the Forge source checkout, when the installed path is absent, use the tracked
    `hooks/lib/worktree-lifecycle.sh` or `.ps1`. Native creation or adoption is optional only
    under the shared startup boundary; never create a second worktree for the same-directory handoff.
-4. Continue in the current session by default; switch only if the developer chooses to.
-   A session opened in the primary checkout may continue the linked worktree by using it as the
-   working directory for local edits, reviews, verification, approval recording and
-   normal receipt-validating promotion. Before direct commit, push or PR creation, follow
+4. Run the [native session/worktree probe](../rules/workflow.md#native-sessionworktree-probe)
+   after selecting or adopting the target and before activation or resumed task work.
+   Continue in the current session when the native probe matches. Use that context for local
+   edits, reviews, verification, approval recording and normal receipt-validating promotion.
+   Recover a mismatch through the host's supported attachment/rebind to the existing worktree,
+   or open that checkout in a native session if rebind is unavailable. Before direct shipping, follow
    [Shipping from the current session](../rules/workflow.md#shipping-from-the-current-session).
    Shipping hooks use the host's event `cwd`; selecting only the
    tool working directory does not change that hook context. The procedure verifies the exact
-   task locally while preserving native hooks and authorization. The installed adapter declares
+   task through native observation and local checks while preserving hooks and authorization. The installed adapter declares
    the current host for reviewer routing. No per-worktree Forge receipt, copied session identity,
    or hook-trust bypass is required.
 5. The helper seeds only `## State` (with `### Now` cleared), `## Open Questions`, and `## Blockers`

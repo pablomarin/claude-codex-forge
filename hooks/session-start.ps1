@@ -4,30 +4,35 @@
 $ErrorActionPreference = 'SilentlyContinue'
 
 # Read stdin JSON to get the session source ('startup'|'resume'|'clear'|'compact').
-$inputJson = [Console]::In.ReadToEnd()
+# Native hosts and Git use UTF-8 independently of the Windows console code page.
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+$inputReader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false), $true, 4096, $true)
+try { $inputJson = $inputReader.ReadToEnd() } finally { $inputReader.Dispose() }
 $source = ""
 try {
     $data = $inputJson | ConvertFrom-Json
     if ($data.source) { $source = $data.source }
 } catch { $source = "" }
 
-try {
-    $branch = git branch --show-current 2>$null
-    if (-not $branch) { $branch = "unknown" }
-} catch {
-    $branch = "unknown"
-}
-
-$context = "Current branch: $branch"
-
 # Both hosts validate managed config at SessionStart. This event is advisory;
 # the ship boundary performs the same check and blocks.
 $projectRoot = ""
-if ($data -and $data.cwd) { $projectRoot = [string]$data.cwd }
+if ($data -and $data.cwd -is [string]) { $projectRoot = $data.cwd }
+$eventRoot = $projectRoot
 if (-not $projectRoot) { $projectRoot = $env:CLAUDE_PROJECT_DIR }
 if (-not $projectRoot) { $projectRoot = (Get-Location).Path }
 $top = git -C $projectRoot rev-parse --show-toplevel 2>$null
-if ($LASTEXITCODE -eq 0 -and $top) { $projectRoot = $top }
+if ($LASTEXITCODE -eq 0 -and $top) { $projectRoot = (Resolve-Path -LiteralPath $top).ProviderPath }
+if ($eventRoot -and [IO.Path]::IsPathRooted($eventRoot) -and $top) { $eventRoot = $projectRoot }
+else { $eventRoot = 'unknown' }
+$common = git -C $projectRoot rev-parse --git-common-dir 2>$null
+if ($LASTEXITCODE -eq 0 -and $common) {
+    if (-not [IO.Path]::IsPathRooted($common)) { $common = Join-Path $projectRoot $common }
+    $common = (Resolve-Path -LiteralPath $common).ProviderPath
+} else { $common = 'unknown' }
+$branch = git -C $projectRoot branch --show-current 2>$null
+if (-not $branch) { $branch = 'unknown' }
+$context = "Current branch: $branch; Native event worktree: $eventRoot; Git common directory: $common; FORGE_NATIVE_CONTEXT: UNVERIFIED - run the native session/worktree probe for the intended task before continuing"
 $configCheck = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "check-config-change.ps1"
 if (Test-Path -LiteralPath $configCheck) {
     $null = '{}' | & $configCheck -Mode boundary -Root $projectRoot 2>$null
@@ -86,7 +91,8 @@ if ($source -eq "startup" -or $source -eq "resume") {
     $default = ""
     if (Test-Path $libPath) {
         . $libPath
-        $detected = Get-DefaultBranch
+        Push-Location -LiteralPath $projectRoot
+        try { $detected = Get-DefaultBranch } finally { Pop-Location }
         if ($detected) { $default = $detected }
     }
 
@@ -102,7 +108,7 @@ if ($source -eq "startup" -or $source -eq "resume") {
         # home directory (PS 5.1) or the parent's $PWD only if -WorkingDirectory is
         # passed (PS 6+). For 5.1 compatibility we capture $PWD outside and
         # Set-Location inside the job block so git runs in the actual repo.
-        $cwd = (Get-Location).Path
+        $cwd = $projectRoot
         # Job emits the inner $LASTEXITCODE on the success stream so the parent
         # can distinguish "fetch succeeded" from "fetch failed but completed in <5s".
         # Without this gate, a fast-failing fetch (auth error, broken remote, host
@@ -120,12 +126,12 @@ if ($source -eq "startup" -or $source -eq "resume") {
         if ($completed -and $jobExit -eq 0) {
             # Verify BOTH refs exist before rev-list — guards against exit-128 silently
             # reporting 0 behind when local <default> is missing.
-            $null = git rev-parse --verify "$default" 2>$null
+            $null = git -C $projectRoot rev-parse --verify "$default" 2>$null
             $localOk = ($LASTEXITCODE -eq 0)
-            $null = git rev-parse --verify "origin/$default" 2>$null
+            $null = git -C $projectRoot rev-parse --verify "origin/$default" 2>$null
             $remoteOk = ($LASTEXITCODE -eq 0)
             if ($localOk -and $remoteOk) {
-                $behind = git rev-list --count "$default..origin/$default" 2>$null
+                $behind = git -C $projectRoot rev-list --count "$default..origin/$default" 2>$null
                 if ($behind -and $behind -match '^\d+$' -and [int]$behind -gt 0) {
                     $context = "$context (default branch '$default' is $behind commits behind origin — pull before starting work)"
                 }
