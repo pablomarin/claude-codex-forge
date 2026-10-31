@@ -201,7 +201,7 @@ try {
             Assert-True (Test-Path -LiteralPath (Join-Path $target 'playwright.config.ts')) 'public tech/Playwright options forwarded'
             Assert-True ((Read-Text (Join-Path $target 'app.txt')).Contains('dirty application')) 'app bytes preserved'
         }
-        $projectLines = @((Read-Text $log) -split "`r?`n" | Where-Object { $_.Contains('Claude Code Setup for: ' + $literalProject) })
+        $projectLines = @((Read-Text $log) -split "`r?`n" | Where-Object { $_.Trim() -ceq ('Claude Code Setup for: ' + $literalProject) })
         Assert-True ($projectLines.Count -eq 3) 'literal project value with spaces and quotes reaches each checkout'
         Assert-True (((& git -C $primary for-each-ref '--format=%(refname) %(objectname)' refs/heads) -join "`n") -eq $branches) 'all branches and HEADs preserved'
         foreach ($target in $roots) {
