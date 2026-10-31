@@ -228,7 +228,7 @@ public static class ForgeDelayedBranchGit {
                 Assert-Check ($result.Status -eq 0) "$mainHost successful exact branch activates quick-fix"
                 Assert-Check ((Invoke-Stop $root $root $mainHost).Status -eq 0) "$mainHost native branch fixture first registered Stop"
                 $result = Invoke-Stop $root $root $mainHost
-                Assert-Check ($result.Status -eq 2 -and $result.Err.Contains('/quick-fix stop-smoke')) "$mainHost native branch fixture registered continuation preserves status 2"
+                Assert-Check ($result.Status -eq 0 -and -not $result.Err.Contains('WORKFLOW:')) "$mainHost native branch fixture repeated Stop stays quiet"
             } else {
                 Assert-Check ($result.Status -ne 0 -and $result.Err.Contains('requires branch quick-fix/stop-smoke')) "$mainHost $($probe[0]) native branch blocks activation"
             }
@@ -297,11 +297,22 @@ function Invoke-VerificationReceipt {
         Assert-NoGoalOutput $result $mainHost "$mainHost CRLF active inline/check-state"
         Assert-NonGoalBuilder $root $root $mainHost "$mainHost CRLF active"
         $result = Invoke-Stop $root $root $mainHost
-        Assert-Check ($result.Status -eq 2) "$mainHost unchanged active checkpoint continues"
-        Assert-Check ($result.Err.Contains('/new-feature stop-smoke')) "$mainHost active workflow label"
+        Assert-Check ($result.Status -eq 0) "$mainHost unchanged active checkpoint allows conversational Stop"
+        Assert-Check (-not $result.Err.Contains('WORKFLOW:')) "$mainHost unchanged state does not force workflow feedback"
         Assert-NoGoalOutput $result $mainHost "$mainHost CRLF unchanged active check-state"
         $result = Invoke-Stop $root $root $mainHost $true
         Assert-Check ($result.Status -eq 0 -and -not $result.Err.Contains('WORKFLOW:')) "$mainHost continuation-loop guard"
+        foreach ($file in @('one', 'two', 'three', 'four')) { [IO.File]::WriteAllText((Join-Path $root $file), "before`n", $utf8) }
+        & git -C $root add one two three four
+        & git -C $root commit -qm fixture
+        foreach ($change in @('committed', 'unstaged', 'staged')) {
+            if ($change -ne 'committed') {
+                foreach ($file in @('one', 'two', 'three', 'four')) { [IO.File]::AppendAllText((Join-Path $root $file), "$change`n", $utf8) }
+                if ($change -eq 'staged') { & git -C $root add one two three four }
+            }
+            $result = Invoke-Stop $root $root $mainHost
+            Assert-Check ($result.Status -eq 0 -and -not $result.Err.Contains('CHANGELOG')) "$mainHost $change multi-file implementation defers changelog to finalization"
+        }
         Complete-Fixture $root $mainHost
         Set-CrlfState $root
         foreach ($delivery in 1..2) {
@@ -310,12 +321,12 @@ function Invoke-VerificationReceipt {
             Assert-NoGoalOutput $result $mainHost "$mainHost CRLF completed Stop $delivery inline/check-state"
             Assert-NonGoalBuilder $root $root $mainHost "$mainHost CRLF completed Stop $delivery"
         }
-        foreach ($file in @('one', 'two', 'three', 'four')) { [IO.File]::WriteAllText((Join-Path $root $file), "before`n", $utf8) }
-        & git -C $root add one two three four
-        & git -C $root commit -qm fixture
         $result = Invoke-Stop $root $root $mainHost
-        Assert-Check ($result.Status -eq 2 -and $result.Err.Contains('Update docs/CHANGELOG.md')) "$mainHost completed changelog gate"
-        [IO.File]::AppendAllText((Join-Path $root 'docs\CHANGELOG.md'), "updated`n", $utf8)
+        Assert-Check ($result.Status -eq 0 -and -not $result.Err.Contains('CHANGELOG')) "$mainHost multi-file work does not require changelog at Stop"
+        [IO.Directory]::CreateDirectory((Join-Path $root 'app\docs')) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'app\docs\CHANGELOG.md'), "# Application changes`n", $utf8)
+        $result = Invoke-Stop $root $root $mainHost
+        Assert-Check ($result.Status -eq 0 -and -not $result.Err.Contains('CHANGELOG')) "$mainHost nested customer history leaves Stop quiet"
         $payload = @{ cwd = $root; host = $mainHost; tool_name = 'Bash'; tool_input = @{ command = 'git push origin HEAD' } } | ConvertTo-Json -Compress
         if ($mainHost -eq 'codex') {
             $result = Invoke-RegisteredCodex $root 'PreToolUse' 'check-workflow-gates.ps1' $payload
@@ -345,7 +356,7 @@ function Invoke-VerificationReceipt {
         Assert-NoGoalOutput $result $mainHost "$mainHost linked first inline/check-state"
         Assert-NonGoalBuilder $primary $nested $mainHost "$mainHost linked first"
         $result = Invoke-Stop $primary $nested $mainHost
-        Assert-Check ($result.Status -eq 2 -and $result.Err.Contains('/new-feature linked-smoke')) "$mainHost linked active feature continuation"
+        Assert-Check ($result.Status -eq 0 -and -not $result.Err.Contains('WORKFLOW:')) "$mainHost linked active feature stops quietly"
         Assert-Check (-not $result.Err.Contains('/quick-fix')) "$mainHost primary label absent from linked feedback"
         Assert-NoGoalOutput $result $mainHost "$mainHost linked active check-state"
         Assert-Check (Test-Path (Join-Path $linked '.forge\local\forge-goal-last-fingerprint')) "$mainHost feature fingerprint belongs to event worktree"
@@ -356,7 +367,7 @@ function Invoke-VerificationReceipt {
         Assert-Quiet $result "$mainHost primary completed quick-fix"
         Assert-NoGoalOutput $result $mainHost "$mainHost primary completed quick-fix inline/check-state"
         Assert-NonGoalBuilder $primary $primary $mainHost "$mainHost primary completed quick-fix"
-        Assert-Check (Test-Path (Join-Path $linked '.forge\local\state-last-stop.sha256')) "$mainHost checkpoint sidecar belongs to linked worktree"
+        Assert-Check (-not (Test-Path (Join-Path $linked '.forge\local\state-last-stop.sha256'))) "$mainHost ordinary Stop needs no checkpoint sidecar"
         Complete-Fixture $linked $mainHost
         $result = Invoke-Stop $primary $nested $mainHost
         Assert-Quiet $result "$mainHost linked completion"

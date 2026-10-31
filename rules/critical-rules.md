@@ -7,7 +7,7 @@
 - **INDEPENDENT DESIGN REVIEW** — A fresh plan reviewer must challenge the plan before implementation. Council is exceptional, not a substitute for routine plan review.
 - **STRUCTURED REVIEW** — Final code review requires separate clean spec and quality receipts over one frozen candidate.
 - **E2E USER JOURNEYS** — Use `verify-e2e` for user-facing behavior. Arrange and verify only through sanctioned user interfaces; see `.forge/rules/testing.md`.
-- **UPDATE STATE** — Keep `.forge/local/state.md` and applicable changelog material current.
+- **UPDATE STATE** — Keep `.forge/local/state.md` current at durable progress boundaries. Update release history only through [changelog finalization](workflow.md#changelog-finalization).
 - **NO SILENT DEFERRAL** — Fix known reachable correctness, security, evidence, or configuration defects in active scope before shipping.
 - **KISS AND YAGNI** — Build the smallest correct solution required by current evidence and acceptance criteria. Do not add speculative abstractions, compatibility layers, hardening, or edge-case machinery without a concrete supported need.
 - **RESOURCE DISCIPLINE** — Use the smallest correct solution and the one-broad/one-repair/one-closure budget. Do not chase perfection or speculative rare cases; never waive reachable security, data loss, supported correctness, or explicit acceptance criteria.

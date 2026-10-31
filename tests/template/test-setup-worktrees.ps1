@@ -172,7 +172,9 @@ foreach ($hostName in @('claude','codex')) {
 }
 $env:PATH = $fixtureBin + [IO.Path]::PathSeparator + $env:PATH
 try {
-    $literalProject = 'Shared ' + [char]0x2019 + 'project' + [char]0x2019
+    # This assertion reads native console text, which may use an OEM code page
+    # on Windows 5.1. Unicode transport has its own UTF-8-controlled suite.
+    $literalProject = "Shared 'project'"
     foreach ($main in @('claude','codex')) {
         $base = New-Fixture $main
         $roots = @($primary, $link, $sibling)
@@ -195,10 +197,12 @@ try {
             Assert-True ((Read-Text (Join-Path $target '.forge/local/memory/notes.md')) -eq 'local memory') 'local memory preserved'
             Assert-True ((Read-Text (Join-Path $target '.forge/memory/notes.md')) -eq 'durable memory') 'durable memory preserved'
             Assert-True ((Read-Text (Join-Path $target 'AGENTS.md')).Contains('user instructions')) 'project instructions preserved'
-            Assert-True ((Read-Text (Join-Path $target 'docs/CHANGELOG.md')).Contains($literalProject)) 'literal typographic project value forwarded'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $target 'docs/CHANGELOG.md'))) 'install does not invent a customer changelog'
             Assert-True (Test-Path -LiteralPath (Join-Path $target 'playwright.config.ts')) 'public tech/Playwright options forwarded'
             Assert-True ((Read-Text (Join-Path $target 'app.txt')).Contains('dirty application')) 'app bytes preserved'
         }
+        $projectLines = @((Read-Text $log) -split "`r?`n" | Where-Object { $_.Contains('Claude Code Setup for: ' + $literalProject) })
+        Assert-True ($projectLines.Count -eq 3) 'literal project value with spaces and quotes reaches each checkout'
         Assert-True (((& git -C $primary for-each-ref '--format=%(refname) %(objectname)' refs/heads) -join "`n") -eq $branches) 'all branches and HEADs preserved'
         foreach ($target in $roots) {
             Write-Text (Join-Path $target '.claude/settings.json') '{"userEntry":"keep","sandbox":{"enabled":true,"allowUnsandboxedCommands":false}}'

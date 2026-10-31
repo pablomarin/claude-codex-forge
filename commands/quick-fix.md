@@ -24,7 +24,8 @@ step. It is the canonical activation, resume, isolation, and setup-failure contr
    the state and restart it as `/fix-bug` or `/new-feature`; do not stretch the quick-fix boundary.
 4. Run the focused check directly in the main session. Quick-fix dispatches no `code-spec`,
    `code-quality`, `verify-app`, or `verify-e2e` role and creates no candidate-bound final receipt set.
-5. Apply this repository's release policy. In the Forge source repository, every merged change set
+5. At finalization, apply [changelog finalization](../rules/workflow.md#changelog-finalization)
+   and this repository's release policy. In the Forge source repository, every merged change set
    bumps exact `MAJOR.MINOR.PATCH`, records every change in `docs/CHANGELOG.md`, and adds README
    release prose only for material changes. Downstream repositories follow their own policy; never
    invent or rewrite a downstream `.forge/version` as part of application work.

@@ -413,7 +413,7 @@ try {
     & git -C $script:project commit -qm 'completed development across five files'
     Freeze-Fixture
     $stopPath = Join-Path $repo 'hooks/check-state-updated.ps1'
-    Assert-Waiver ((Invoke-FixtureGate '' $stopPath).Status -eq 2) 'without explicit decision changelog blocks Stop'
+    Assert-Waiver ((Invoke-FixtureGate '' $stopPath).Status -eq 0) 'missing changelog does not block conversational Stop'
     Assert-Waiver ((Invoke-WorkflowFixture record-workflow-waiver all).Status -eq 0) 'all-scope records current completed multi-file change'
     Assert-Waiver ((Invoke-FixtureGate '' $stopPath).Status -eq 0) 'explicit changelog omission permits Stop'
     $stopped = Invoke-FixtureGate '' $stopPath

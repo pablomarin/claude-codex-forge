@@ -210,9 +210,10 @@ developer instruction to skip named remaining steps or all remaining workflow st
 [explicit human workflow waiver](../rules/workflow.md#explicit-human-workflow-waiver). Run only
 unwaived checks, record actual omissions and preserve evidence/counters, then commit normally.
 
-1. Finish implementation/TDD and update solution/changelog material.
+1. Finish implementation/TDD and update solution documentation.
 2. After preliminary E2E, graduate committed use cases and generate/run tracked specs.
-3. Run the Forge-owned simplification phase and apply justified changes.
+3. Run the Forge-owned simplification phase and apply justified changes, then consolidate the
+   completed change set under [changelog finalization](../rules/workflow.md#changelog-finalization).
 4. Force-stage only explicitly approved ignored artifacts, then `git add -A`.
 5. Freeze the staged-clean candidate.
 6. At finalization, invoke `.forge/hooks/lib/workflow-state.sh checkpoint --host <claude|codex>
@@ -259,8 +260,8 @@ unsupported claimed-current edge is P1.
 
 ## 7. State, Memory, and PR
 
-Use `workflow-state.sh checkpoint` for workflow control, update checklist/narrative content,
-changelog, and project memory with verified facts, and finish with `workflow-state.sh checkpoint
+Use `workflow-state.sh checkpoint` for workflow control, update checklist/narrative content
+and project memory with verified facts, and finish with `workflow-state.sh checkpoint
 --host <claude|codex> --phase complete --next-step none`. Show the exact PR
 mutation and obtain explicit human authorization if not already granted for that exact scope. The
 agent records the actual decision bound to the active nonce/candidate, then executes the authorized

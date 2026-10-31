@@ -564,17 +564,17 @@ assert_equals "$?" 0 'all-scope decision can bind an active objective'
 git -C "$P" commit -qm approved
 gate 'gh pr create --title approved --body approved'; assert_equals "$?" 2 'all development skips do not create external-action authority'
 
-start_test 'Stop honors named changelog and continuation decisions without a retry loop'
+start_test 'Stop stays quiet without a decision and accepts legacy omission scopes'
 fixture extension-stop || fail 'fixture failed'
 for n in 1 2 3 4; do printf 'completed change\n' > "$P/extra$n.txt"; done
 git -C "$P" add -A
 git -C "$P" commit -qm 'completed development across five files'
 freeze
-stop_gate; assert_equals "$?" 2 'without a decision missing changelog still blocks Stop'
+stop_gate; assert_equals "$?" 0 'missing changelog does not block conversational Stop'
 record_workflow all
 assert_equals "$?" 0 'all-scope decision binds multi-file completed development'
-stop_gate; assert_equals "$?" 0 'explicit changelog skip permits Stop'
-stop_gate; assert_equals "$?" 0 'explicit continuation skip prevents another forced turn'
+stop_gate; assert_equals "$?" 0 'existing all-scope decision remains readable at Stop'
+stop_gate; assert_equals "$?" 0 'repeated Stop remains allowed with existing decision'
 assert_not_contains "$S/stop.log" FORGE_FINAL_EVIDENCE_STALE 'Stop reports accepted omissions without demanding fabricated evidence'
 printf 'later change\n' >> "$P/app.txt"
 check_workflow; assert_equals "$?" 2 'Stop exemption cannot apply to later development'
@@ -605,8 +605,8 @@ freeze
 record_workflow changelog; assert_equals "$?" 0 'Stop-only decision does not wait for final review evidence'
 (cd "$P" && bash "$VR" check-workflow-waiver --boundary stop --state .forge/local/state.md) > "$S/stop-check.log" 2>&1
 assert_equals "$?" 0 'Stop validates the exact decision without shipping evidence'
-stop_gate; assert_equals "$?" 0 'named changelog omission releases changelog only'
-stop_gate; assert_equals "$?" 2 'unwaived continuation remains disciplined'
+stop_gate; assert_equals "$?" 0 'legacy changelog omission remains readable'
+stop_gate; assert_equals "$?" 0 'ordinary Stop requires no continuation omission'
 gate 'git commit -m approved'; assert_equals "$?" 2 'Stop-only decision cannot ship missing independent review'
 record_workflow changelog,continuation
 assert_equals "$?" 0 'developer can explicitly add continuation omission'

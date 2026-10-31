@@ -165,14 +165,14 @@ The currently active host is responsible for advancing this file. Inspect contro
 `workflow-state.sh rebind`; start it with `workflow-state.sh activate`; and advance it with
 `workflow-state.sh checkpoint` (use the `.ps1` twin on Windows). Only those bounded helpers may
 update identity, workflow, receipt-path, or review-iteration control rows. Use native file tools
-only for checklist and narrative content. The Stop hook reminds Claude or Codex of the active
-workflow; the ship hook gates commit/push/PR on the checklist.
+only for checklist and narrative content. Ordinary Stop events do not require a changed checkpoint
+or another reply. The ship hook independently gates commit/push/PR on workflow evidence.
 
 **On task completion:**
 
-1. Add to Done (keep last 2-3; older history goes to `docs/CHANGELOG.md`)
+1. Add verified progress to Done (keep the last 2-3; retain useful older notes under `.forge/local/`).
 2. Move top of Next → Now
-3. Add to CHANGELOG.md if significant
+3. Follow `.forge/rules/workflow.md#changelog-finalization` only when finalizing the complete change set.
 
 **On new feature start (`/new-feature` or `/fix-bug` Pre-Flight step 3):**
 

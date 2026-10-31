@@ -3080,6 +3080,18 @@ assert_contains "$REPO_ROOT/hooks/build-evidence.sh" '"quick_fix_direct"' \
 assert_contains "$REPO_ROOT/hooks/build-evidence.ps1" '"quick_fix_direct"' \
     "PowerShell evidence exposes direct quick-fix mode"
 
+start_test "release history belongs to finalization, not conversational progress"
+assert_not_contains "$REPO_ROOT/state.template.md" 'older history goes to `docs/CHANGELOG.md`' \
+    "local progress is not archived into a root release history"
+assert_not_contains "$REPO_ROOT/state.template.md" 'Add to CHANGELOG.md if significant' \
+    "task completion does not demand changelog writes"
+assert_not_contains "$REPO_ROOT/state.template.md" 'The Stop hook reminds' \
+    "installed state does not promise removed forced reminders"
+assert_contains "$REPO_ROOT/rules/workflow.md" '## Changelog finalization' \
+    "canonical workflow defines the finalization boundary"
+assert_contains "$REPO_ROOT/tests/template/run-all.sh" 'test-changelog-ownership.sh' \
+    "CI registers the Bash customer-history regression"
+
 start_test "source repository release policy is discoverable and exact"
 assert_contains "$REPO_ROOT/CONTRIBUTING.md" '`docs/agent-context.md`' \
     "contributor guide discovers source agent context"

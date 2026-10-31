@@ -509,22 +509,16 @@ rc=$(run_hook_sh "$S14" 'git commit -m x' "$(checklist_e2e_checked_no_na "$HEAD1
 assert_equals "$rc" "2" "trunk mode skips legacy freshness only, not strict receipts"
 
 # ===========================================================================
-# Test 15: check-state-updated.sh master-default repo — CHANGELOG gate fires
-# correctly when default branch is "master" (not "main").
-#
-# Regression guard for the pre-migration hook (hardcoded `main`):
-#   - Pre-migration: `git merge-base main HEAD` → empty (no main branch)
-#     → BRANCH_BASE falls back to HEAD~10 → wrong baseline → count wrong
-#   - Post-migration: default-branch.sh detects "master" → correct
-#     merge-base → BRANCH_CHANGED >= 4 → CHANGELOG gate fires (exit 2)
+# Test 15: multi-file work on a master-default repository does not make
+# an ordinary conversation Stop depend on changelog edits.
 # ===========================================================================
-start_test "check-state-updated.sh: master-default repo → CHANGELOG gate fires (exit 2)"
+start_test "check-state-updated.sh: master-default multi-file work stops quietly"
 
 HOOK_STATE="$REPO_ROOT/hooks/check-state-updated.sh"
 
 # Build a scratch repo with master as the default branch, no main branch.
 # Feature branch has 4 committed files in subdirs → BRANCH_CHANGED = 4 > 3.
-# No CHANGELOG entry anywhere → gate fires.
+# No changelog entry is required to answer the next question.
 S15=$(scratch_dir state-master-default)
 (
     cd "$S15" || exit 1
@@ -568,23 +562,13 @@ CONT
 # Run check-state-updated.sh from the scratch repo.
 # stdin: '{"stop_hook_active":false}' (mirrors real Stop hook input).
 rc15=$(printf '{"stop_hook_active":false}' | (cd "$S15" && bash "$HOOK_STATE") 2>"$S15/.state-stderr"; echo "$?")
-assert_equals "$rc15" "2" "CHANGELOG gate fires on master-default repo (exit 2)"
-assert_contains "$S15/.state-stderr" "CHANGELOG" \
-    "stderr mentions CHANGELOG threshold"
-assert_contains "$S15/.state-stderr" "on branch vs master" \
-    "stderr wording reflects branch-vs-default-branch (not 'this session')"
+assert_equals "$rc15" "0" "master-default multi-file work allows Stop"
+assert_not_contains "$S15/.state-stderr" "CHANGELOG" "Stop does not demand changelog edits"
 
 # ===========================================================================
-# Test 15b: check-state-updated.sh — CHANGELOG gate downgrades to advisory
-# (exit 0) when an OPEN PR already exists for the branch.
-#
-# Surfaced 2026-05-18 during /forge-goal v1.0 soak in a downstream project:
-# the per-turn exit-2 nag during CI wait label-prefixed the build-evidence
-# STDERR dump as "Stop hook error", flooding the transcript every Stop.
-# Once the PR is open the human reviewer carries the signal — gate becomes
-# advisory.
+# Test 15b: an open PR does not add per-turn changelog feedback or API probes.
 # ===========================================================================
-start_test "check-state-updated.sh: open PR → CHANGELOG gate downgrades to advisory (exit 0)"
+start_test "check-state-updated.sh: multi-file Stop stays quiet without querying PR state"
 
 S15B=$(scratch_dir state-pr-open-advisory)
 (
@@ -630,6 +614,7 @@ cat > "$GH_STUB_DIR/gh" <<'STUB'
 #!/usr/bin/env bash
 # Stub matches the exact subcommand the hook uses.
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+    touch .gh-was-called
     echo "OPEN"
     exit 0
 fi
@@ -638,9 +623,9 @@ STUB
 chmod +x "$GH_STUB_DIR/gh"
 
 rc15b=$(printf '{"stop_hook_active":false}' | (cd "$S15B" && PATH="$GH_STUB_DIR:$PATH" bash "$HOOK_STATE") 2>"$S15B/.state-stderr"; echo "$?")
-assert_equals "$rc15b" "0" "open PR → exit 0 (advisory, not blocking)"
-assert_contains "$S15B/.state-stderr" "CHANGELOG" \
-    "stderr still mentions CHANGELOG so the human sees the advisory"
+assert_equals "$rc15b" "0" "multi-file Stop allows response to end"
+assert_not_contains "$S15B/.state-stderr" "CHANGELOG" "no changelog advisory during conversation"
+assert_file_missing "$S15B/.gh-was-called" "multi-file Stop does not query GitHub"
 
 # ===========================================================================
 # Test 15c: regression guard — gh pr view probe MUST NOT fire on clean Stops.
@@ -732,10 +717,10 @@ fi
 assert_equals "$rc_hc" "0" "hook exits 0 (does NOT gate even with CONTINUITY.md present)"
 
 # ===========================================================================
-# Stop-hook checkpoint test: an active workflow must visibly continue once so
-# the model can reread/update canonical state before the response ends.
+# Stop-hook checkpoint test: unchanged active state must not force another
+# model turn after a question or a pause awaiting the developer.
 # ===========================================================================
-start_test "Stop hook gives active workflow one model-visible checkpoint turn"
+start_test "Stop hook allows unchanged active workflow to end its reply"
 
 S_AD=$(scratch_dir stop-advisory)
 (
@@ -760,17 +745,8 @@ assert_equals "$rc_ad_first" "0" "a newly changed state checkpoint stops without
 out_ad=$(cd "$S_AD" && printf '{"stop_hook_active":false}' | bash "$REPO_ROOT/hooks/check-state-updated.sh" 2>&1)
 rc_ad=$?
 
-if echo "$out_ad" | grep -qE "WORKFLOW:.*Phase:.*Next:"; then
-    pass "checkpoint continuation names workflow phase and next step"
-else
-    fail "checkpoint continuation missing (got: $out_ad)"
-fi
-if echo "$out_ad" | grep -qF ".forge/hooks/lib/workflow-state.sh show"; then
-    pass "checkpoint continuation names the bounded state reader"
-else
-    fail "checkpoint continuation does not name the bounded state reader (got: $out_ad)"
-fi
-assert_equals "$rc_ad" "2" "first active-workflow Stop continues the model"
+assert_equals "$out_ad" "" "unchanged checkpoint emits no conversational feedback"
+assert_equals "$rc_ad" "0" "active-workflow Stop does not continue the model"
 out_ad_repeat=$(cd "$S_AD" && printf '{"stop_hook_active":true}' | bash "$REPO_ROOT/hooks/check-state-updated.sh" 2>&1)
 rc_ad_repeat=$?
 assert_equals "$rc_ad_repeat" "0" "stop_hook_active prevents a continuation loop"
@@ -782,7 +758,7 @@ fi
 printf '\n- refreshed checkpoint\n' >> "$S_AD/.forge/local/state.md"
 out_ad_changed=$(cd "$S_AD" && printf '{"stop_hook_active":false}' | bash "$REPO_ROOT/hooks/check-state-updated.sh" 2>&1)
 rc_ad_changed=$?
-assert_equals "$rc_ad_changed" "0" "a state update clears the stale-checkpoint continuation"
+assert_equals "$rc_ad_changed" "0" "a meaningful state update still allows Stop"
 
 # ===========================================================================
 # Regression: stray Workflow-shaped tables in state.md must NOT poison the

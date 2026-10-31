@@ -2,6 +2,26 @@
 
 All notable changes to claude-codex-forge.
 
+## 6.5.4 — 2026-10-30
+
+### Keep conversational replies quiet and finalize release history once
+
+Remove unchanged-checkpoint continuation and the changed-file changelog threshold from the
+Claude/Codex Stop hooks in Bash and PowerShell. Ordinary questions, feedback pauses and small
+editing turns can finish without another forced reply, root changelog demand or GitHub PR lookup.
+Preserve canonical state validation, active Goal accounting and budgets, finalization evidence
+advisories, and independent shipping checks.
+
+Consolidate one changelog entry per completed change set after implementation and simplification,
+before final candidate freeze and merge. Correct the canonical workflows and installed state
+template, including obsolete per-task instructions retained in older local state. Keep progress
+notes local and respect each project's chosen release history.
+
+Stop installers from creating an extra root customer changelog. Preserve existing root and nested
+histories on install, upgrade and full refresh. Add mirrored regression coverage for repeated
+Stops and customer-history ownership, register the Bash installer suite in CI, and update native
+PowerShell suite discovery expectations. Existing customer histories are not deleted or combined.
+
 ## 6.5.3 — 2026-10-29
 
 ### Detect native session and task worktree mismatches early
