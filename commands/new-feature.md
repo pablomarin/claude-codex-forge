@@ -202,10 +202,11 @@ developer instruction to skip named remaining steps or all remaining workflow st
 unwaived checks, record actual omissions and preserve evidence/counters, then commit normally.
 
 1. Finish implementation and TDD.
-2. Create/update solution documentation and `docs/CHANGELOG.md` when applicable.
+2. Create/update solution documentation.
 3. After the preliminary feature E2E pass, graduate the committed use cases and generate/run any
    tracked specs.
-4. Run the Forge-owned simplification phase and apply justified changes.
+4. Run the Forge-owned simplification phase and apply justified changes, then consolidate the
+   completed change set under [changelog finalization](../rules/workflow.md#changelog-finalization).
 5. Force-stage only the workflow's explicit approved ignored artifacts, then run `git add -A`.
 6. Freeze a staged-clean candidate with `candidate-fingerprint`; record its receipt under
    `.forge/local/evidence/<task-id>/`.

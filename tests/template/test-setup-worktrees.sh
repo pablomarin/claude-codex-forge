@@ -84,10 +84,12 @@ for main in claude codex; do
         assert_contains "$root/.forge/local/memory/notes.md" 'local memory' "local memory preserved"
         assert_contains "$root/.forge/memory/notes.md" 'durable memory' "durable memory preserved"
         assert_contains "$root/AGENTS.md" 'user instructions' "project instructions preserved"
-        assert_contains "$root/docs/CHANGELOG.md" 'Shared café project' "public project argument forwarded"
+        assert_file_missing "$root/docs/CHANGELOG.md" "install does not invent a customer changelog"
         assert_file_exists "$root/playwright.config.ts" "public Playwright and tech options forwarded"
         assert_contains "$root/app.txt" 'dirty application' "app edit preserved"
     done
+    assert_equals "$(grep -c 'Claude Code Setup for:.*Shared café project' "$TMP/$main-install.log")" 3 \
+        "public project argument reaches each checkout"
     assert_equals "$(git -C "$PRIMARY" for-each-ref --format='%(refname) %(objectname)' refs/heads)" "$branches_before" "branches and HEADs preserved"
     assert_equals "$(git -C "$PRIMARY" rev-parse HEAD)" "$head_before" "primary HEAD preserved"
     for root in "${roots[@]}"; do

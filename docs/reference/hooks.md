@@ -9,7 +9,7 @@ their native events into the same policy.
 | --- | --- | --- |
 | `SessionStart` | New/resumed host session, clear, or compaction | Runs the stable host-context compatibility no-op, then reports event worktree/common directory/branch, state and drift context; native task alignment stays UNVERIFIED until probed |
 | `UserPromptSubmit` | Before each user prompt | Runs the same stable host-context compatibility no-op; it creates no worktree or session authority |
-| `Stop` | Main host finishes a turn | Builds candidate evidence and reminds the host to keep an unfinished workflow's `.forge/local/state.md` current |
+| `Stop` | Main host finishes a turn | Builds candidate evidence, validates canonical state and accounts for active Goals; ordinary replies can finish without checkpoint or changelog edits |
 | `PreToolUse` | Before a shell command | Audits commands, blocks dangerous patterns, returns native worktree probe diagnostics, enforces workflow evidence, and checks protected external-mutation authority |
 | `PostToolUse` | After supported file writes | Runs the configured formatter |
 | `PreCompact` | Before context compression | Ensures the volatile memory directory exists and logs a diagnostic; it does not claim to inject a save instruction into model context |
@@ -17,7 +17,7 @@ their native events into the same policy.
 | `ConfigChange` | Claude Code configuration changes | Audits changes and may block managed deny-rule removal in strict mode |
 
 Stop's final-receipt advisory runs only in explicit finalization phases. Diagnosis, planning,
-implementation, repair and preliminary E2E keep their state/Goal/continuation behavior without
+implementation, repair and preliminary E2E keep their state validation and Goal accounting without
 premature stale-final-evidence warnings. The advisory itself never dispatches reviews or tests.
 
 ## Host Routing
@@ -71,17 +71,19 @@ For explicit inspection outside Goal, run `build-evidence.sh --diagnostic` or
 
 ## Workflow Gates
 
-`check-state-updated.{sh,ps1}` excludes workflows with `Phase: complete` from stale-receipt
-advisories and unchanged-checkpoint continuations. Their recorded command and historical receipts
-remain intact. An unfinished workflow still receives the checkpoint reminder, and the
-`stop_hook_active` guard prevents recursive continuation. Completion does not bypass canonical
-state validation, native Goal accounting, changelog enforcement, or shipping receipt checks.
-This behavior is shared by Claude Code and Codex. A completed primary-checkout quick-fix no longer
-interrupts a linked feature session with that historical workflow reminder; hook context still
-comes from the event `cwd`, under the routing limitations above.
+`check-state-updated.{sh,ps1}` allows repeated ordinary Stops even when workflow state is unchanged
+or many files have changed. It does not force a continuation turn, demand changelog edits, create a
+checkpoint-hash sidecar, or look up an open PR. Changelog work belongs to
+[finalization](../../rules/workflow.md#changelog-finalization), using the project's chosen history.
+Installers preserve existing customer changelogs and do not create an additional root history.
+
+Canonical state validation, active Goal accounting and budgets, finalization-only receipt advisories,
+and independent shipping checks remain. `Phase: complete` suppresses historical receipt advisories.
+This behavior is shared by Claude Code and Codex; linked-worktree context still comes from the event
+`cwd`, under the routing limitations above. Existing checkpoint-hash sidecars are unused and harmless.
 
 Codex Windows registrations end their PowerShell `-Command` wrapper with `exit $LASTEXITCODE`
-so the host receives the router's exact status, including exit 2 for continuation or blocking.
+so the host receives the router's exact status, including exit 2 for a blocking guard.
 Without explicit propagation, PowerShell maps a nonzero nested result to exit 1. See
 [Microsoft's exit-code documentation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1).
 

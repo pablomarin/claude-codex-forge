@@ -1,35 +1,10 @@
 #!/bin/bash
-# .claude/hooks/check-state-updated.sh
-# This hook runs when Claude is about to stop responding.
-#
-# THREE CONCERNS — only ONE blocks:
-#
-#   1. state.md missing breadcrumb (advisory, stderr only, exit 0).
-#      Fires only when legacy CONTINUITY.md is present (signals upgraded
-#      install that still needs full-refresh reconciliation). Suppressed otherwise to
-#      avoid spamming every Stop event.
-#
-#   2. Workflow checkpoint (v6 only).
-#      An unchanged canonical state hash continues the model once with the
-#      current command/phase/next step; changed state stops normally.
-#
-#   3. CHANGELOG threshold gate (BLOCKS via exit 2).
-#      If 4+ files changed on branch (committed + uncommitted) but
-#      docs/CHANGELOG.md was never modified, hook blocks the stop with
-#      a stderr message. This is the ONLY blocking concern.
-#
-# Uses exit code 2 + stderr to block (avoids JSON stdout parsing issues
-# caused by shell profile echo statements polluting stdout).
-#
-# Requirements: git
-# Optional: jq (recommended for robust JSON parsing, falls back to grep)
+# Shared Stop checks for Claude Code and Codex.
+# Preserve canonical state validation, Goal accounting and final-evidence
+# advisories. Ordinary replies never require a state edit or changelog update;
+# those belong to durable workflow checkpoints and finalization respectively.
+# Blocking integrity failures use exit 2 with stderr diagnostics.
 
-# Note: NOT using `set -e` here. Arithmetic expansions like `$((0 + 0))` (which fire
-# whenever both BRANCH_CHANGED and UNCOMMITTED_FILES are 0 — i.e., a clean session)
-# return exit status 1, which would silently exit the entire hook with status 1
-# under set -e. Every external command below that can fail is already guarded with
-# `2>/dev/null` and an explicit `|| fallback`, so set -e was redundant defense
-# but produced a real silent-failure under normal clean-session conditions.
 INPUT=$(cat)
 forge_allow() {
     printf '%s' "$INPUT" | grep -qE '"host"[[:space:]]*:[[:space:]]*"codex"' && printf '{}\n'
@@ -91,17 +66,6 @@ fi
 STATE_LOCAL_DIR=".forge/local"
 case "$STATE_MD" in */.claude/local/state.md) STATE_LOCAL_DIR=".claude/local" ;; esac
 
-_forge_hash_text() {
-    if command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'
-    else sha256sum | awk '{print $1}'
-    fi
-}
-_forge_hash_file() {
-    if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
-    else sha256sum "$1" | awk '{print $1}'
-    fi
-}
-
 # Stop is self-sufficient: if the evidence side channel is absent or older than
 # canonical state, build it now. Atomic publication in build-evidence prevents a
 # concurrent Codex Stop from exposing a partial fingerprint.
@@ -142,7 +106,6 @@ if [ "$_WORKFLOW_HAS_WAIVER" = true ] && [ "$STATE_LOCAL_DIR" = .forge/local ] &
         echo "FORGE_WORKFLOW_WAIVED: $_WORKFLOW_WAIVED_GATES; unwaived shipping checks remain required." >&2
     fi
 fi
-_workflow_stop_skipped() { case ",$_WORKFLOW_WAIVED_GATES," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 
 # Receipt-v2 Stop advisory belongs to finalization. Development checkpoints do
 # not need final receipts; avoid repeated checks and stale warnings while the
@@ -305,41 +268,6 @@ _forge_goal_stuck_check
 
 [ "$STOP_HOOK_ACTIVE" = "true" ] && forge_allow
 
-# All git commands run in current directory (Claude cd's into worktrees)
-# Only count tracked modifications (staged + unstaged), NOT untracked files (??)
-UNCOMMITTED=$(git status --porcelain 2>/dev/null | grep -v '^??' | wc -l | tr -d ' ')
-
-# Files modified (uncommitted)
-CHANGELOG_MODIFIED=$(git status --porcelain docs/CHANGELOG.md 2>/dev/null | wc -l | tr -d ' ')
-
-# Total files changed on branch (committed + uncommitted) vs default branch
-# Resolve the repo's default branch via the shared helper. The helper lives
-# alongside this hook at .claude/hooks/lib/default-branch.sh in installed
-# downstream repos, and at hooks/lib/default-branch.sh in this template.
-HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-# Helper-bail breadcrumb (stderr): if the helper exits non-zero, surface that the
-# fallback fired so the user/log has at least one signal. Without this, a master-default
-# repo whose helper bailed would silently use "main" → wrong BRANCH_BASE → spurious
-# CHANGELOG/CONTINUITY threshold gating, with no clue why.
-DEFAULT_BRANCH=$(bash "$HOOK_DIR/lib/default-branch.sh" 2>/dev/null) \
-    || { DEFAULT_BRANCH="main"; echo "⚠ check-state-updated: default-branch helper bailed; assuming 'main'" >&2; }
-# Merge-base fallback chain: prefer local <default> if it exists; else use
-# origin/<default> (single-branch clones may have only the remote-tracking ref);
-# else degrade to HEAD~10 (last-resort window for branch-change counting).
-if git rev-parse --verify "$DEFAULT_BRANCH" >/dev/null 2>&1; then
-    BRANCH_BASE=$(git merge-base "$DEFAULT_BRANCH" HEAD 2>/dev/null || echo "HEAD~10")
-elif git rev-parse --verify "origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
-    BRANCH_BASE=$(git merge-base "origin/$DEFAULT_BRANCH" HEAD 2>/dev/null || echo "HEAD~10")
-else
-    BRANCH_BASE="HEAD~10"
-fi
-BRANCH_CHANGED=$(git diff --name-only "$BRANCH_BASE" HEAD 2>/dev/null | wc -l | tr -d ' ')
-UNCOMMITTED_FILES=$(git diff --name-only 2>/dev/null | wc -l | tr -d ' ')
-TOTAL_CHANGED=$((BRANCH_CHANGED + UNCOMMITTED_FILES))
-
-# Check if CHANGELOG was updated anywhere on branch
-CHANGELOG_IN_BRANCH=$(git diff --name-only "$BRANCH_BASE" HEAD 2>/dev/null | grep -c "CHANGELOG.md" || true)
-
 # --- Workflow state tracking ---
 # State file is gitignored. Emit breadcrumb only when a legacy CONTINUITY.md
 # is present (signals user upgraded but hasn't migrated yet) — avoids spamming
@@ -347,90 +275,6 @@ CHANGELOG_IN_BRANCH=$(git diff --name-only "$BRANCH_BASE" HEAD 2>/dev/null | gre
 if [ ! -f "$STATE_MD" ] && [ -f "CONTINUITY.md" ]; then
     echo "ℹ check-state-updated: Forge state.md not found, but CONTINUITY.md exists." >&2
     echo "  Run setup -f --dry-run, resolve every reported blocker, then run setup -f." >&2
-    # Continue to CHANGELOG check — gates are independent.
-fi
-
-# If .claude/local/state.md has an active workflow, extract phase/next-step for advisory reminder.
-#
-# IMPORTANT: scope the extraction to ONLY the `## Workflow` section. Migrated
-# content carried forward from an older Forge state source (for example old "### Done"
-# entries that mention prior workflow scaffolds) can leave stray `| Command |`
-# lines elsewhere in the file. A whole-file grep would match every one of them
-# and `xargs` would join them with spaces — yielding garbage like
-# "WORKFLOW: none /lifecycle | Phase: n/a shipping". Scope first, then match.
-WORKFLOW_REMINDER=""
-if [ -f "$STATE_MD" ]; then
-    WORKFLOW_BLOCK=$(tr -d '\r' < "$STATE_MD" | awk '/^## Workflow$/{flag=1;next} flag && /^## /{flag=0} flag' 2>/dev/null)
-    WORKFLOW_CMD=$(echo "$WORKFLOW_BLOCK" | grep -E '\|\s*Command\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
-    WORKFLOW_PHASE=$(echo "$WORKFLOW_BLOCK" | grep -E '\|\s*Phase\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
-    if [ "$WORKFLOW_PHASE" != "complete" ] && [ -n "$WORKFLOW_CMD" ] && [ "$WORKFLOW_CMD" != "none" ] && [ "$WORKFLOW_CMD" != "—" ] && [ "$WORKFLOW_CMD" != "-" ]; then
-        WORKFLOW_NEXT=$(echo "$WORKFLOW_BLOCK" | grep -E '\|\s*Next step\s*\|' | head -1 | awk -F'|' '{print $3}' | xargs)
-        WORKFLOW_REMINDER="WORKFLOW: $WORKFLOW_CMD | Phase: $WORKFLOW_PHASE | Next: $WORKFLOW_NEXT"
-    fi
-fi
-
-ISSUES=""
-
-# Block: 3+ files changed on branch but CHANGELOG.md never updated.
-# "files changed on branch vs $DEFAULT_BRANCH" — count is committed + uncommitted
-# diff vs the merge-base, NOT files-this-turn.
-if ! _workflow_stop_skipped changelog && [ "$TOTAL_CHANGED" -gt 3 ] && [ "$CHANGELOG_IN_BRANCH" -eq 0 ] && [ "$CHANGELOG_MODIFIED" -eq 0 ]; then
-    ISSUES="${ISSUES:+$ISSUES }Update docs/CHANGELOG.md ($TOTAL_CHANGED files changed on branch vs $DEFAULT_BRANCH)."
-fi
-
-# Block using exit code 2 + stderr (robust — immune to shell profile stdout pollution)
-if [ -n "$ISSUES" ]; then
-    # Prepend workflow reminder if active (so model always sees current phase)
-    [ -n "$WORKFLOW_REMINDER" ] && ISSUES="[$WORKFLOW_REMINDER] $ISSUES"
-    echo "$ISSUES" >&2
-
-    # Detect open PR for current branch. Once a PR is open, the CHANGELOG gate
-    # downgrades from blocking (exit 2) to advisory (exit 0): the human reviewer
-    # carries the signal, and per-turn blocking during CI wait is just noise.
-    # gh availability and network are best-effort; on failure, default to "no
-    # open PR" so the original blocking behavior is preserved.
-    # Probe only runs when ISSUES is non-empty — clean stops pay no gh-API cost.
-    PR_OPEN=false
-    if command -v gh >/dev/null 2>&1; then
-        PR_STATE=$(gh pr view --json state -q .state 2>/dev/null || echo "")
-        [ "$PR_STATE" = "OPEN" ] && PR_OPEN=true
-    fi
-
-    if [ "$PR_OPEN" = "true" ]; then
-        # Advisory only — PR already open. Exit 0 so the message is informational
-        # and the build-evidence STDERR dump is not labeled "Stop hook error".
-        forge_allow
-    fi
-    exit 2
-fi
-
-# A changed v6 state checkpoint stops normally. If the exact state hash remains
-# unchanged across normal Stops, give the model one visible continuation turn.
-# This avoids paying an extra model turn when the workflow already checkpointed.
-if [ -n "$WORKFLOW_REMINDER" ] && ! _workflow_stop_skipped continuation; then
-    if [ "$STATE_LOCAL_DIR" != .forge/local ]; then
-        echo "$WORKFLOW_REMINDER" >&2
-        forge_allow
-    fi
-    STATE_STOP_HASH=$(_forge_hash_file "$STATE_MD") || {
-        echo "FORGE_STATE_INVALID: could not hash canonical state checkpoint" >&2
-        exit 2
-    }
-    STATE_STOP_FILE="$STATE_LOCAL_DIR/state-last-stop.sha256"
-    if [ -L "$STATE_STOP_FILE" ] || { [ -e "$STATE_STOP_FILE" ] && [ ! -f "$STATE_STOP_FILE" ]; }; then
-        echo "FORGE_STATE_INVALID: invalid state checkpoint sidecar" >&2
-        exit 2
-    fi
-    STATE_STOP_PREVIOUS=$(tr -d '[:space:]' < "$STATE_STOP_FILE" 2>/dev/null || true)
-    if [ "$STATE_STOP_PREVIOUS" != "$STATE_STOP_HASH" ]; then
-        STATE_STOP_TMP=$(mktemp "$STATE_LOCAL_DIR/.state-last-stop.XXXXXX") || exit 2
-        printf '%s\n' "$STATE_STOP_HASH" > "$STATE_STOP_TMP" \
-            && mv -f "$STATE_STOP_TMP" "$STATE_STOP_FILE" \
-            || { rm -f "$STATE_STOP_TMP"; echo "FORGE_STATE_INVALID: could not publish state checkpoint sidecar" >&2; exit 2; }
-        forge_allow
-    fi
-    echo "$WORKFLOW_REMINDER. Run .forge/hooks/lib/workflow-state.sh show before continuing; use workflow-state.sh checkpoint for its exact next step and record any durable learning in the appropriate Forge memory layer before stopping." >&2
-    exit 2
 fi
 
 # All good, allow stop

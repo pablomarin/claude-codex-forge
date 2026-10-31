@@ -388,6 +388,29 @@ Only a human may decide the breaker adjudication. After their explicit decision,
 counted loop preserves its count as `Code review loop (<N> iterations) — N/A:`; migrated workflows
 use candidate-bound structured receipts instead.
 
+## Changelog finalization
+
+Consolidate one release-history entry for the completed change set at finalization, after
+implementation, preliminary verification and simplification, before freezing the final candidate
+and before merge. Update that same entry if a later repair changes the delivered behavior; do not
+append entries for each message, small edit, task checkpoint, review iteration or intermediate commit.
+Questions and pauses for developer feedback need neither changelog edits nor changelog status replies.
+
+Follow the project's release policy and chosen changelog path. Customer histories are project-owned;
+do not create a root `docs/CHANGELOG.md` merely because Forge is installed, duplicate Forge's own
+release notes into a customer project, or delete/merge existing histories without authorization.
+If the project maintains several histories, update only the one relevant to the completed change.
+Forge installation and upgrades preserve those files and do not scaffold another changelog.
+
+Keep progress, checkpoints and durable local notes under `.forge/local/`. Older saved state
+templates may instruct per-task changelog writes or moving Done history into a root changelog;
+this finalization policy supersedes that wording without discarding existing notes.
+The Stop hook does not enforce changelog updates or force another turn for unchanged state.
+Shipping evidence and authorization remain independent requirements.
+
+The quick-fix scope exception still covers only exact `README.md` and `docs/CHANGELOG.md` paths.
+A nested project changelog counts toward its three-path budget; use the full workflow if needed.
+
 ## Finalization Order
 
 ### Final-review repair
@@ -398,10 +421,11 @@ then make the minimal fix and observe GREEN. Earlier passing tests, a reviewer's
 description, and post-edit checks do not substitute for that pre-edit RED.
 Then restage/refreeze and rerun the affected final gates; never relabel old receipts.
 
-1. Implement with TDD; update solution and changelog material.
+1. Implement with TDD and update solution documentation.
 2. Design E2E use cases and run a preliminary feature E2E pass while fixes are allowed.
 3. Graduate committed use cases and generate/run any tracked specs.
-4. Simplify using the Forge-owned workflow phase and apply changes.
+4. Simplify using the Forge-owned workflow phase and apply changes, then complete
+   [changelog finalization](#changelog-finalization).
 5. Force-stage only the workflow's explicitly approved ignored artifacts, then `git add -A`.
 6. Freeze the staged-clean candidate.
 7. Run final review, `verify-app`, and the complete feature/regression E2E matrix read-only against
@@ -477,9 +501,10 @@ omission or approved change is genuinely unclear.
 
 Stop checks use `check-workflow-waiver --boundary stop` (PowerShell `-ReceiptBoundary stop` through
 its function API, CLI `-Boundary stop`) to validate the decision and candidate without demanding
-shipping evidence. Only explicit `changelog`/`continuation` omissions release those Stop gates;
-other omissions never silently clear them. Stop reports the accepted omissions and reminds the
-agent that unwaived shipping checks remain required. Complete the workflow checkpoint and report
+shipping evidence. Legacy `changelog`/`continuation` scope spellings remain readable, but ordinary
+Stop events no longer have either gate and need no waiver. A `changelog` omission still records an
+explicit decision to skip release-history finalization. Stop reports accepted omissions and reminds
+the agent that unwaived shipping checks remain required. Complete the workflow checkpoint and report
 actual outcomes normally. Native Goal may record `complete` from valid candidate-bound human-waived
 evidence plus successful unwaived requirements and all authorized actions. `build-evidence` exposes
 `workflow_waiver` separately; never claim review/E2E certification or `all_gates_green` for omissions.

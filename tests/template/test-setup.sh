@@ -243,8 +243,8 @@ run_setup "$S8" "$LOG8a" -p "UpgradeTest" -t fullstack --with-playwright
 assert_equals "$?" "0" "initial install exits 0"
 assert_file_exists "$S8/.claude/commands/new-feature.md" \
     "initial install populated .claude/commands"
-assert_file_exists "$S8/docs/CHANGELOG.md" \
-    "initial install created docs/CHANGELOG.md"
+assert_file_missing "$S8/docs/CHANGELOG.md" \
+    "initial install leaves customer changelog creation to the project"
 
 # First-install soft-tip regression guard: LOG8a is the initial-install
 # log from above. CLAUDE.md/CONTINUITY.md did not exist before that run, so

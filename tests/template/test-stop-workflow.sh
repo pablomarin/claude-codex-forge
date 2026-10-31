@@ -168,24 +168,36 @@ EOF_RECEIPT_PROBE
     assert_no_goal_output "$root" "$host" 'CRLF active inline/check-state'
     non_goal_builder "$root" "$root" "$host" 'CRLF active'
     run_stop "$root" "$root" "$host"
-    assert_equals "$?" 2 'unchanged active checkpoint continues'
-    assert_contains "$root/stop.err" '/new-feature stop-smoke' 'active continuation names its workflow'
-    assert_no_goal_output "$root" "$host" 'CRLF unchanged active check-state' 2
+    assert_equals "$?" 0 'unchanged active checkpoint allows conversational Stop'
+    assert_not_contains "$root/stop.err" 'WORKFLOW:' 'unchanged state does not force workflow feedback'
+    assert_no_goal_output "$root" "$host" 'CRLF unchanged active check-state'
     run_stop "$root" "$root" "$host" true
     assert_equals "$?" 0 'continuation-loop guard remains effective'
     assert_not_contains "$root/stop.err" 'WORKFLOW:' 'guard prevents another continuation'
+    for file in one two three four; do printf 'before\n' > "$root/$file"; done
+    git -C "$root" add one two three four
+    git -C "$root" commit -qm fixture
+    for change in committed unstaged staged; do
+        if [ "$change" != committed ]; then
+            for file in one two three four; do printf '%s\n' "$change" >> "$root/$file"; done
+            [ "$change" != staged ] || git -C "$root" add one two three four
+        fi
+        run_stop "$root" "$root" "$host"
+        assert_equals "$?" 0 "$change multi-file implementation allows ordinary Stop"
+        assert_not_contains "$root/stop.err" 'CHANGELOG' "$change work defers changelog to finalization"
+    done
     complete "$root" "$host"
     crlf_state "$root"
     quiet_stop "$root" "$host" "CRLF completed first Stop"
     quiet_stop "$root" "$host" "CRLF completed repeated Stop"
-    # No open PR: keep this fixture deterministic and prevent network probes.
-    for file in one two three four; do printf 'before\n' > "$root/$file"; done
-    git -C "$root" add one two three four
-    git -C "$root" commit -qm fixture
     run_stop "$root" "$root" "$host"
-    assert_equals "$?" 2 'completed workflow retains changelog gate'
-    assert_contains "$root/stop.err" 'Update docs/CHANGELOG.md' 'changelog failure remains visible'
-    printf 'updated\n' >> "$root/docs/CHANGELOG.md"
+    assert_equals "$?" 0 'multi-file work does not require changelog at Stop'
+    assert_not_contains "$root/stop.err" 'CHANGELOG' 'Stop does not demand root changelog'
+    mkdir -p "$root/app/docs"
+    printf '# Application changes\n' > "$root/app/docs/CHANGELOG.md"
+    run_stop "$root" "$root" "$host"
+    assert_equals "$?" 0 'nested application changelog does not trigger root changelog demand'
+    assert_not_contains "$root/stop.err" 'CHANGELOG' 'nested customer history leaves Stop quiet'
     payload=$(printf '{"cwd":"%s","host":"%s","tool_name":"Bash","tool_input":{"command":"git push origin HEAD"}}' "$root" "$host")
     gate_command=$(python3 - "$root" "$host" <<'PY_GATE'
 import json, pathlib, sys
@@ -219,10 +231,10 @@ PY_GATE
     assert_no_goal_output "$primary" "$host" 'linked first inline/check-state'
     non_goal_builder "$primary" "$linked/nested" "$host" 'linked first'
     run_stop "$primary" "$linked/nested" "$host"
-    assert_equals "$?" 2 'linked active feature continues independently'
-    assert_contains "$primary/stop.err" '/new-feature linked-smoke' 'event worktree feature is named'
+    assert_equals "$?" 0 'linked active feature stops quietly'
+    assert_not_contains "$primary/stop.err" 'WORKFLOW:' 'linked unchanged state does not demand another turn'
     assert_not_contains "$primary/stop.err" '/quick-fix' 'primary quick-fix is absent from linked feedback'
-    assert_no_goal_output "$primary" "$host" 'linked active check-state' 2
+    assert_no_goal_output "$primary" "$host" 'linked active check-state'
     assert_file_exists "$linked/.forge/local/forge-goal-last-fingerprint" 'feature fingerprint is published in the event worktree'
     primary_leak=false
     for path in "$primary"/.forge/local/forge-goal-last-fingerprint* "$primary"/.forge/local/.state-last-stop.*; do
@@ -231,7 +243,7 @@ PY_GATE
     assert_equals "$primary_leak" false 'linked native I/O leaves no primary fingerprint or temp file'
     assert_hash_equals "$primary/.forge/local/state.md" "$primary_hash" 'linked Stop preserves primary state'
     quiet_stop "$primary" "$host" 'primary completed quick-fix'
-    assert_file_exists "$linked/.forge/local/state-last-stop.sha256" 'checkpoint sidecar is worktree local'
+    assert_file_missing "$linked/.forge/local/state-last-stop.sha256" 'ordinary Stop needs no checkpoint sidecar'
     complete "$linked" "$host"
     run_stop "$primary" "$linked/nested" "$host"
     assert_equals "$?" 0 'linked completed feature stops normally'

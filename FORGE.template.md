@@ -62,6 +62,9 @@ For Forge source development, the local gate is `tests/template/run-fast.sh`, no
   Coordinate overlapping writes; if any session mutates the candidate, candidate-bound evidence becomes stale.
 - Keep developer state, receipts, and local memories under `.forge/local/`; never overwrite them
   during setup. Keep project-owned durable memory under `.forge/memory/`.
+- Keep conversational progress in local state at meaningful boundaries. Follow
+  `.forge/rules/workflow.md#changelog-finalization` for the single consolidated release-history
+  update at finalization; ordinary replies do not require changelog edits or status messages.
 
 ## Memory Management
 

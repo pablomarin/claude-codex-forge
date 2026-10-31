@@ -4,6 +4,11 @@ Every merged change set or pull request MUST bump the Forge release to a new exa
 
 One merged change set receives one version bump; intermediate commits within that change set do not each require another bump.
 
+Consolidate the version bump and changelog entry at finalization, after implementation and
+simplification and before final candidate freeze and merge. Do not update release history per
+message or checkpoint. Forge's single canonical source changelog is `docs/CHANGELOG.md`;
+customer project changelogs are separate, project-owned histories.
+
 The first release heading in `docs/CHANGELOG.md` is the source of truth for the current Forge version, and all source/materialized release boundaries MUST publish that exact three-component value.
 
 `docs/CHANGELOG.md` MUST record every released change, including small fixes, internal workflow changes, compatibility changes, and documentation-only changes.

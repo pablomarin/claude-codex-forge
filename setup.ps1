@@ -1184,49 +1184,8 @@ if ($WithPlaywright) {
 
 Write-Host ""
 
-# Create CHANGELOG only if it doesn't exist — NEVER overwrite on -Upgrade.
-# docs\CHANGELOG.md is user content (each project's own release history). Same
-# policy as CLAUDE.md and CONTINUITY.md: templates initialize the file on first
-# install and never touch it afterward.
-if (-not (Test-Path "docs\CHANGELOG.md")) {
-    Write-Color "Creating docs\CHANGELOG.md..." "Yellow"
-
-    $changelogLines = @(
-        "# Changelog",
-        "",
-        "All notable changes to $Project will be documented in this file.",
-        "",
-        "## [Unreleased]",
-        "",
-        "### Added",
-        "- Initial project setup with Claude Code configuration",
-        "",
-        "### Changed",
-        "",
-        "### Fixed",
-        "",
-        "### Removed",
-        "",
-        "---",
-        "",
-        "## Format",
-        "",
-        "Each entry should include:",
-        "- Date (YYYY-MM-DD)",
-        "- Brief description",
-        "- Related issue/PR if applicable"
-    )
-
-    $changelogLines | Out-File -FilePath "docs\CHANGELOG.md" -Encoding UTF8
-    Write-Host "  " -NoNewline
-    Write-Color "+" "Green"
-    Write-Host " Created docs\CHANGELOG.md"
-}
-else {
-    Write-Host "  " -NoNewline
-    Write-Color "o" "Blue"
-    Write-Host " docs\CHANGELOG.md already exists"
-}
+# Customer changelogs belong to the project. Installation neither creates a
+# release history nor changes an existing one; Forge's own history stays in source.
 
 # The v6 marker materializer owns only the bounded Forge block. Text outside
 # that block is user-owned bytes and is never subject to project-name rewriting.
